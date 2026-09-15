@@ -12,7 +12,7 @@ public enum DiagnosticCode: String, Codable, Sendable {
     case help_failed, immutable_membership, inaccessible_directory, input_failed, integration_unavailable
     case interrupt_failed, invalid, invalid_argument, invalid_arguments, invalid_delivery_state
     case invalid_frame, invalid_handoff, invalid_input, invalid_record, invalid_settings, invalid_snapshot
-    case launch_file, launch_handoff_timeout, launch_pending, ledger_bind, ledger_open, ledger_query
+    case launch_cancelled, launch_file, launch_handoff_timeout, launch_pending, stop_pending, ledger_bind, ledger_open, ledger_query
     case ledger_read, ledger_schema, ledger_write, login_environment_unavailable, managed_argument
     case message_expired, missing_directory, missing_executable, missing_folder, missing_group
     case missing_helper, missing_message, missing_preset, missing_project, missing_session, missing_set

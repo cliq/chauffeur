@@ -10,14 +10,19 @@ public struct CommandResult: Sendable {
 }
 public enum ProcessRunner {
     public static func run(_ executable: String, _ arguments: [String], directory: String? = nil, environment: [String: String]? = nil, timeout: TimeInterval = 15, outputLimit: Int = 4 * 1024 * 1024, keepOutputTail: Bool = false) async throws -> CommandResult {
-        try await withCheckedThrowingContinuation { continuation in
-            DispatchQueue.global(qos: .userInitiated).async {
-                do { continuation.resume(returning: try runSync(executable, arguments, directory: directory, environment: environment, timeout: timeout, outputLimit: outputLimit, keepOutputTail: keepOutputTail)) }
-                catch { continuation.resume(throwing: error) }
+        let cancellation = CommandCancellation()
+        return try await withTaskCancellationHandler {
+            try Task.checkCancellation()
+            return try await withCheckedThrowingContinuation { continuation in
+                DispatchQueue.global(qos: .userInitiated).async {
+                    do { continuation.resume(returning: try runSync(executable, arguments, directory: directory, environment: environment, timeout: timeout, outputLimit: outputLimit, keepOutputTail: keepOutputTail, cancellation: cancellation)) }
+                    catch { continuation.resume(throwing: error) }
+                }
             }
-        }
+        } onCancel: { cancellation.cancel() }
     }
-    private static func runSync(_ executable: String, _ arguments: [String], directory: String?, environment: [String: String]?, timeout: TimeInterval, outputLimit: Int, keepOutputTail: Bool) throws -> CommandResult {
+    private static func runSync(_ executable: String, _ arguments: [String], directory: String?, environment: [String: String]?, timeout: TimeInterval, outputLimit: Int, keepOutputTail: Bool, cancellation: CommandCancellation) throws -> CommandResult {
+        if cancellation.isCancelled { throw CancellationError() }
         let process = Process()
         process.executableURL = URL(fileURLWithPath: executable); process.arguments = arguments
         if let directory { process.currentDirectoryURL = URL(fileURLWithPath: directory) }
@@ -31,7 +36,7 @@ public enum ProcessRunner {
         readers.enter(); DispatchQueue.global().async { outputReader.read(output.fileHandleForReading); readers.leave() }
         readers.enter(); DispatchQueue.global().async { errorReader.read(errors.fileHandleForReading); readers.leave() }
         let deadline = Date().addingTimeInterval(timeout)
-        while process.isRunning && Date() < deadline { Thread.sleep(forTimeInterval: 0.01) }
+        while process.isRunning && !cancellation.isCancelled && Date() < deadline { Thread.sleep(forTimeInterval: 0.01) }
         if process.isRunning {
             process.terminate()
             let stopDeadline = Date().addingTimeInterval(1)
@@ -41,15 +46,26 @@ public enum ProcessRunner {
             // Helpers may have descendants holding a pipe. Closing our read
             // descriptors makes their lifetimes independent from this timeout.
             try? output.fileHandleForReading.close(); try? errors.fileHandleForReading.close()
+            if cancellation.isCancelled { throw CancellationError() }
             throw ChauffeurError("command_timeout", "Command exceeded its time limit", path: executable)
         }
         process.waitUntilExit()
+        if cancellation.isCancelled {
+            try? output.fileHandleForReading.close(); try? errors.fileHandleForReading.close()
+            throw CancellationError()
+        }
         guard readers.wait(timeout: .now() + 1) == .success else {
             try? output.fileHandleForReading.close(); try? errors.fileHandleForReading.close()
             throw ChauffeurError("command_pipe", "Command left an output pipe open", path: executable)
         }
         return CommandResult(status: process.terminationStatus, output: outputReader.text, error: errorReader.text, outputTruncated: outputReader.truncated)
     }
+}
+private final class CommandCancellation: @unchecked Sendable {
+    private let lock = NSLock()
+    private var cancelled = false
+    var isCancelled: Bool { lock.lock(); defer { lock.unlock() }; return cancelled }
+    func cancel() { lock.lock(); cancelled = true; lock.unlock() }
 }
 private final class BoundedReader: @unchecked Sendable {
     private let lock = NSLock()

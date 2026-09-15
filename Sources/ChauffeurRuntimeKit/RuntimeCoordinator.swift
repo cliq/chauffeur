@@ -13,7 +13,11 @@ public actor RuntimeCoordinator {
     private let baseEnvironment: [String: String]
     private var sessions: [UUID: Session] = [:]
     private var launching = Set<UUID>()
+    private var launchTasks: [UUID: Task<Session, Error>] = [:]
+    private var stopRequests = Set<UUID>()
+    private var stopGenerations: [UUID: UInt64] = [:]
     private var stopping = Set<UUID>()
+    private var reconciliation: Task<Void, Error>?
     private var checkoutClaims = CheckoutClaims()
     private var endpoint: String?
     private var settings = RetentionSettings()
@@ -213,6 +217,13 @@ public actor RuntimeCoordinator {
         catch { record(ChauffeurError("retention_failed", "History cleanup could not finish")) }
     }
     public func reconcile(startup: Bool = false) async throws {
+        if let reconciliation { try await reconciliation.value; return }
+        let task = Task { try await self.performReconcile(startup: startup) }
+        reconciliation = task
+        defer { reconciliation = nil }
+        try await task.value
+    }
+    private func performReconcile(startup: Bool) async throws {
         // Reload human-edited metadata even while every UI is closed.
         let metadata = await store.reload()
         if metadata.errors != metadataErrors {
@@ -220,30 +231,33 @@ public actor RuntimeCoordinator {
             var entry = RuntimeLogEntry(.metadataInvalid, runtimeID: id); entry.count = metadata.errors.count
             logs?.append(entry)
         }
+        let observed = Array(sessions.values)
         let inventory = try await terminals.inventory()
-        for var session in Array(sessions.values) where !launching.contains(session.id) {
+        for var session in observed where !launching.contains(session.id) && sessions[session.id] == session {
             let pane = inventory.first { $0.sessionName == session.id.uuidString }
             let sameOwner = pane != nil && (session.processID == nil || session.processID == pane?.processID) && (session.terminalIdentity == nil || session.terminalIdentity == pane?.paneID)
             if let pane, sameOwner {
                 if pane.dead && session.state.isLive {
-                    session.state = stopping.contains(session.id) ? .interrupted : (pane.exitStatus == 0 ? .exited : .failed)
-                    session.error = pane.exitStatus == 0 ? nil : "CLI exited with status \(pane.exitStatus.map(String.init) ?? "unknown")"
+                    let stopped = stopping.remove(session.id) != nil
+                    session.state = stopped ? .interrupted : (pane.exitStatus == 0 ? .exited : .failed)
+                    session.error = stopped || pane.exitStatus == 0 ? nil : "CLI exited with status \(pane.exitStatus.map(String.init) ?? "unknown")"
                     session.exitStatus = pane.exitStatus
-                    session.failureCode = pane.exitStatus == 0 ? nil : "cli_exit"
+                    session.failureCode = stopped || pane.exitStatus == 0 ? nil : "cli_exit"
                     try await ledger.revoke(sessionID: session.id)
                     stopping.remove(session.id)
                 } else if !pane.dead && startup {
                     session.state = .activityUnknown; session.runtimeID = id; session.processID = pane.processID; session.terminalIdentity = pane.paneID
                 }
             } else if session.state.isLive {
-                session.state = .interrupted; session.error = "Terminal ownership was lost. Resume a recorded conversation explicitly"
-                session.failureCode = "terminal_ownership_lost"
+                let stopped = stopping.remove(session.id) != nil
+                session.state = .interrupted; session.error = stopped ? nil : "Terminal ownership was lost. Resume a recorded conversation explicitly"
+                session.failureCode = stopped ? nil : "terminal_ownership_lost"
                 try await ledger.revoke(sessionID: session.id)
             }
             if sessions[session.id] != session { session.updatedAt = Date(); try await persist(session) }
         }
         let pending = try await ledger.allMessages().filter { [.queued, .received].contains($0.state) }
-        for var session in Array(sessions.values) {
+        for var session in Array(sessions.values) where !launching.contains(session.id) {
             let count = pending.filter { $0.recipientID == session.id }.count
             if session.pendingMessages != count { session.pendingMessages = count; try await persist(session) }
         }
@@ -311,9 +325,20 @@ public actor RuntimeCoordinator {
         case "interrupt": try await terminals.interrupt(sessionID: params.uuid("sessionID")); return .object(["sent": .bool(true)])
         case "stop":
             let sessionID = try params.uuid("sessionID")
-            guard sessions[sessionID] != nil else { throw ChauffeurError("missing_session", "Session not found") }
+            guard sessions[sessionID] != nil || launchTasks[sessionID] != nil else { throw ChauffeurError("missing_session", "Session not found") }
+            guard stopRequests.insert(sessionID).inserted else { throw ChauffeurError("stop_pending", "Stop is already in progress") }
+            defer {
+                stopRequests.remove(sessionID)
+                if sessions[sessionID]?.state.isLive != true { stopping.remove(sessionID) }
+            }
+            stopGenerations[sessionID, default: 0] += 1
             stopping.insert(sessionID)
+            let launch = launchTasks[sessionID]
+            launch?.cancel()
             try await ledger.revoke(sessionID: sessionID)
+            // Wait for startup's cleanup before acknowledging Stop. A resume
+            // cannot enter while either reservation is held.
+            if let launch { _ = await launch.result }
             try await terminals.stop(sessionID: sessionID, force: params["force"].bool ?? false)
             try await reconcile()
             return .object(["requested": .bool(true)])
@@ -384,8 +409,17 @@ public actor RuntimeCoordinator {
             return existing
         }
         guard !launching.contains(sessionID) else { throw ChauffeurError("launch_pending", "Launch is still in progress. Retry with the same request ID") }
-        launching.insert(sessionID); defer { launching.remove(sessionID) }
+        guard !stopRequests.contains(sessionID) else { throw ChauffeurError("stop_pending", "Stop is still in progress") }
+        launching.insert(sessionID)
+        let task = Task { try await self.performLaunch(request, child: child, sessionID: sessionID, fingerprint: fingerprint) }
+        launchTasks[sessionID] = task
+        defer { launching.remove(sessionID); launchTasks.removeValue(forKey: sessionID) }
+        return try await task.value
+    }
+    private func performLaunch(_ request: LaunchRequest, child: Delegation?, sessionID: UUID, fingerprint: String) async throws -> Session {
+        try Task.checkCancellation()
         let snapshot = await store.reload()
+        try Task.checkCancellation()
         guard let project = snapshot.projects.first(where: { $0.value.id == request.projectID })?.value, !project.archived else { throw ChauffeurError("missing_project", "Select an active project") }
         guard project.groups.contains(where: { $0.id == request.groupID && !$0.archived }) else { throw ChauffeurError("missing_group", "Select an active group in this project") }
         guard let set = snapshot.presetSets.first(where: { $0.value.id == project.presetSetID })?.value, !set.archived,
@@ -412,20 +446,23 @@ public actor RuntimeCoordinator {
         session.launchRequestFingerprint = fingerprint
         session.parentID = child?.parentID; session.delegationID = child?.id; session.runtimeID = id
         if preset.kind == .claude { session.nativeConversationID = session.id.uuidString }
-        try await persist(session)
         do {
+            try await persist(session)
+            try Task.checkCancellation()
             try preset.validate()
             session.launch.workingDirectory = try Paths.directory(workingDirectory)
             var identities: [UUID] = []
             var primaryIdentity: UUID?
             for (index, path) in ([session.launch.workingDirectory] + additionalPaths).enumerated() {
                 if let identity = try? await worktrees.identity(at: path) { identities.append(identity); if index == 0 { primaryIdentity = identity } }
+                try Task.checkCancellation()
             }
             try checkoutClaims.setGitIdentities(sessionID, identities: identities, primary: primaryIdentity)
             session.launch.gitWorktreeIdentities = identities
             if let selectedWorktree {
                 let repositoryID = try await worktrees.repositoryID(at: session.launch.workingDirectory)
                 let identity = try await worktrees.identity(at: session.launch.workingDirectory)
+                try Task.checkCancellation()
                 guard repositoryID == selectedWorktree.repositoryID, selectedWorktree.gitIdentity == nil || identity == selectedWorktree.gitIdentity else {
                     throw ChauffeurError("worktree_unavailable", "The selected checkout was replaced. Refresh the Git inventory and select its current record", path: session.launch.workingDirectory)
                 }
@@ -438,9 +475,11 @@ public actor RuntimeCoordinator {
             }
             guard sharing.isEmpty || request.allowSharedCheckout else { throw ChauffeurError("shared_checkout", "Checkout is already used by: \(sharing.map(\.title).joined(separator: ", ")). Explicitly choose to share it", path: workingDirectory) }
             let token = try await ledger.issueGrant(sessionID: session.id)
+            try Task.checkCancellation()
             var environment = try LaunchPolicy.environment(base: baseEnvironment, preset: preset, sessionID: session.id, token: token)
             environment["CHAUFFEUR_SOCKET"] = root.appendingPathComponent("runtime/runtime.sock").path
             let capabilities = try await CLIAdapter.capabilities(executable: session.launch.executablePath, kind: preset.kind, environment: environment)
+            try Task.checkCancellation()
             session.launch.executableVersion = capabilities.version
             if !additionalPaths.isEmpty && !capabilities.additionalDirectories { throw ChauffeurError("unsupported_directories", "This CLI does not support additional directories") }
             if request.coordinationEnabled && (!capabilities.coordination || endpoint == nil) { throw ChauffeurError("integration_unavailable", capabilities.limitation ?? "MCP service is unavailable. Retry or explicitly select basic terminal mode") }
@@ -449,32 +488,46 @@ public actor RuntimeCoordinator {
             try FileManager.default.createDirectory(at: integration, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
             let arguments = try CLIAdapter.arguments(session: session, endpoint: endpoint ?? "", ctlPath: ctlPath, integrationDirectory: integration, coordination: request.coordinationEnabled, resume: false)
             try await persist(session)
+            try Task.checkCancellation()
             let pane = try await terminals.spawn(session: session, payload: ExecPayload(executable: session.launch.executablePath, arguments: arguments, environment: environment, directory: session.launch.workingDirectory), scrollback: settings.scrollbackLines)
+            try Task.checkCancellation()
             session.processID = pane.processID; session.terminalIdentity = pane.paneID; session.state = .activityUnknown
             try await persist(session)
+            try Task.checkCancellation()
             return session
         } catch {
-            session.state = .failed; session.error = (error as? ChauffeurError)?.errorDescription ?? "Launch failed. Verify the executable and configuration directory"
-            session.failureCode = DiagnosticCode.redacting((error as? ChauffeurError)?.code).rawValue
-            try await ledger.revoke(sessionID: session.id); try await persist(session)
-            throw error
+            throw try await finishFailedStartup(session, error: error)
         }
     }
     private func resume(_ sessionID: UUID) async throws -> Session {
+        let generation = stopGenerations[sessionID, default: 0]
         try await reconcile()
-        guard var session = sessions[sessionID], !session.state.isLive else { throw ChauffeurError("already_live", "Reattach the live session instead of resuming") }
+        guard generation == stopGenerations[sessionID, default: 0], !stopRequests.contains(sessionID) else { throw ChauffeurError("stop_pending", "Stop is still in progress. Resume after it finishes") }
+        guard let session = sessions[sessionID], !session.state.isLive else { throw ChauffeurError("already_live", "Reattach the live session instead of resuming") }
         guard session.nativeConversationID != nil else { throw ChauffeurError("resume_unavailable", "No native conversation ID is available. Create a new session explicitly") }
         guard !launching.contains(sessionID) else { throw ChauffeurError("launch_pending", "Resume is already in progress") }
-        launching.insert(sessionID); defer { launching.remove(sessionID) }
+        launching.insert(sessionID); stopping.remove(sessionID)
+        let task = Task { try await self.performResume(session) }
+        launchTasks[sessionID] = task
+        defer { launching.remove(sessionID); launchTasks.removeValue(forKey: sessionID) }
+        return try await task.value
+    }
+    private func performResume(_ recorded: Session) async throws -> Session {
+        var session = recorded
+        let sessionID = session.id
+        try Task.checkCancellation()
         try checkoutClaims.beginLaunch(sessionID, paths: [session.launch.workingDirectory] + session.launch.additionalPaths, worktreeID: session.worktreeID)
         do { try checkoutClaims.setGitIdentities(sessionID, identities: session.launch.gitWorktreeIdentities ?? []) }
         catch { checkoutClaims.endLaunch(sessionID); throw error }
         defer { checkoutClaims.endLaunch(sessionID) }
-        try await terminals.stop(sessionID: sessionID, force: true)
-        _ = try Paths.directory(session.launch.configurationPath); _ = try Paths.directory(session.launch.workingDirectory)
-        session.state = .starting; session.error = nil; session.failureCode = nil; session.exitStatus = nil; session.runtimeID = id; try await persist(session)
         do {
+            try await terminals.stop(sessionID: sessionID, force: true)
+            try Task.checkCancellation()
+            _ = try Paths.directory(session.launch.configurationPath); _ = try Paths.directory(session.launch.workingDirectory)
+            session.state = .starting; session.error = nil; session.failureCode = nil; session.exitStatus = nil; session.runtimeID = id; try await persist(session)
+            try Task.checkCancellation()
             let token = try await ledger.issueGrant(sessionID: sessionID)
+            try Task.checkCancellation()
             var preset = session.launch.preset; preset.configurationDirectory = session.launch.configurationPath
             var environment = try LaunchPolicy.environment(base: baseEnvironment, preset: preset, sessionID: sessionID, token: token)
             environment["CHAUFFEUR_SOCKET"] = root.appendingPathComponent("runtime/runtime.sock").path
@@ -482,13 +535,28 @@ public actor RuntimeCoordinator {
             try FileManager.default.createDirectory(at: integration, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
             let arguments = try CLIAdapter.arguments(session: session, endpoint: endpoint ?? "", ctlPath: ctlPath, integrationDirectory: integration, coordination: session.launch.preset.integration != .unavailable, resume: true)
             let pane = try await terminals.spawn(session: session, payload: ExecPayload(executable: session.launch.executablePath, arguments: arguments, environment: environment, directory: session.launch.workingDirectory), scrollback: settings.scrollbackLines)
+            try Task.checkCancellation()
             session.processID = pane.processID; session.terminalIdentity = pane.paneID; session.state = .activityUnknown
-            try await persist(session); return session
+            try await persist(session)
+            try Task.checkCancellation()
+            return session
         } catch {
-            session.state = .failed; session.error = (error as? ChauffeurError)?.errorDescription ?? "Resume failed"
-            session.failureCode = DiagnosticCode.redacting((error as? ChauffeurError)?.code).rawValue
-            try await ledger.revoke(sessionID: session.id); try await persist(session); throw error
+            throw try await finishFailedStartup(session, error: error)
         }
+    }
+    private func finishFailedStartup(_ recorded: Session, error: Error) async throws -> Error {
+        var session = recorded
+        let failure: Error = error is CancellationError || Task.isCancelled
+            ? ChauffeurError("launch_cancelled", "Session startup was stopped") : error
+        // This task deliberately does not inherit cancellation: cleanup must
+        // finish before the launch reservation can be released.
+        try await Task { try await self.terminals.stop(sessionID: session.id, force: true) }.value
+        session.state = (failure as? ChauffeurError)?.code == "launch_cancelled" ? .interrupted : .failed
+        session.error = (failure as? ChauffeurError)?.errorDescription ?? "Session startup failed"
+        session.failureCode = DiagnosticCode.redacting((failure as? ChauffeurError)?.code).rawValue
+        session.processID = nil; session.terminalIdentity = nil; session.updatedAt = Date()
+        try await ledger.revoke(sessionID: session.id); try await persist(session)
+        return failure
     }
     private func event(_ params: JSONValue) async throws -> JSONValue {
         let sessionID = try params.uuid("sessionID"), token = try params.requiredString("token")

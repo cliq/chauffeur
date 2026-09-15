@@ -17,6 +17,7 @@ public actor TmuxHost {
     private let runtimeDirectory: URL
     private let ctlPath: String
     private var attachments: [UUID: (UUID, PTYAttachment)] = [:]
+    private var spawning = Set<UUID>()
     private let environment: [String: String]
     public init(runtimeDirectory: URL, ctlPath: String, environment: [String: String]) throws {
         self.runtimeDirectory = runtimeDirectory; self.ctlPath = ctlPath
@@ -28,18 +29,25 @@ public actor TmuxHost {
         try await ProcessRunner.run(executable, ["-S", socketPath, "-f", "/dev/null"] + arguments, environment: environment)
     }
     public func inventory() async throws -> [PaneIdentity] {
-        let result = try await command(["list-panes", "-a", "-F", "#{session_name}\t#{pane_id}\t#{pane_pid}\t#{pane_dead}\t#{pane_dead_status}"])
+        // tmux replaces control characters such as tabs under the C locale.
+        // All these generated identity/status fields have a printable delimiter.
+        let result = try await command(["list-panes", "-a", "-F", "#{session_name}|#{pane_id}|#{pane_pid}|#{pane_dead}|#{pane_dead_status}"])
         if result.status != 0 {
             if result.error.contains("no server running") || result.error.contains("no sessions") || result.error.contains("no current target") || result.error.contains("No such file") || result.error.contains("Connection refused") { return [] }
             throw ChauffeurError("terminal_inventory", "Cannot inspect terminal service")
         }
-        return result.output.split(separator: "\n").compactMap { line in
-            let fields = line.split(separator: "\t", omittingEmptySubsequences: false).map(String.init)
-            guard fields.count == 5, let pid = Int32(fields[2]) else { return nil }
+        return try result.output.split(separator: "\n").map { line in
+            let fields = line.split(separator: "|", omittingEmptySubsequences: false).map(String.init)
+            guard fields.count == 5, let pid = Int32(fields[2]), ["0", "1"].contains(fields[3]), fields[4].isEmpty || Int32(fields[4]) != nil else {
+                throw ChauffeurError("terminal_inventory", "Terminal service returned an unreadable inventory")
+            }
             return PaneIdentity(sessionName: fields[0], paneID: fields[1], processID: pid, dead: fields[3] == "1", exitStatus: Int32(fields[4]))
         }
     }
     public func spawn(session: Session, payload: ExecPayload, scrollback: Int) async throws -> PaneIdentity {
+        try Task.checkCancellation()
+        guard spawning.insert(session.id).inserted else { throw ChauffeurError("launch_pending", "Terminal creation is already in progress") }
+        defer { spawning.remove(session.id) }
         let name = session.id.uuidString
         guard !(try await inventory()).contains(where: { $0.sessionName == name }) else { throw ChauffeurError("already_running", "Session already has a terminal. Reattach instead") }
         let config = runtimeDirectory.appendingPathComponent("tmux.conf")
@@ -51,13 +59,27 @@ public actor TmuxHost {
         defer { try? FileManager.default.removeItem(at: payloadPath) }
         // history-limit is read when a pane is created. Set it before new-session
         // even when the server already exists and does not reread its config.
-        let result = try await ProcessRunner.run(executable, ["-S", socketPath, "-f", config.path, "start-server", ";", "set-option", "-g", "history-limit", String(scrollback), ";", "new-session", "-d", "-s", name, "-x", "100", "-y", "30", "-c", payload.directory, ctlPath, "internal-exec", payloadPath.path], environment: environment)
-        guard result.status == 0 else { throw ChauffeurError("terminal_launch", "tmux could not start the session", path: payload.directory) }
-        let handoffDeadline = ContinuousClock.now.advanced(by: .seconds(5))
-        while FileManager.default.fileExists(atPath: payloadPath.path) && ContinuousClock.now < handoffDeadline { try await Task.sleep(for: .milliseconds(20)) }
-        guard !FileManager.default.fileExists(atPath: payloadPath.path) else { throw ChauffeurError("launch_handoff_timeout", "Terminal helper did not consume its launch configuration") }
-        guard let pane = try await inventory().first(where: { $0.sessionName == name }) else { throw ChauffeurError("terminal_launch", "Launched terminal could not be found") }
-        return pane
+        try Task.checkCancellation()
+        do {
+            // Do not cancel the tmux client halfway through submitting creation:
+            // the server could still have its command queued. Await its reply,
+            // then honour cancellation and remove the terminal before returning.
+            let creation = Task { try await ProcessRunner.run(executable, ["-S", socketPath, "-f", config.path, "start-server", ";", "set-option", "-g", "history-limit", String(scrollback), ";", "new-session", "-d", "-s", name, "-x", "100", "-y", "30", "-c", payload.directory, ctlPath, "internal-exec", payloadPath.path], environment: environment) }
+            let result = try await creation.value
+            try Task.checkCancellation()
+            guard result.status == 0 else { throw ChauffeurError("terminal_launch", "tmux could not start the session", path: payload.directory) }
+            let handoffDeadline = ContinuousClock.now.advanced(by: .seconds(5))
+            while FileManager.default.fileExists(atPath: payloadPath.path) && ContinuousClock.now < handoffDeadline { try await Task.sleep(for: .milliseconds(20)) }
+            guard !FileManager.default.fileExists(atPath: payloadPath.path) else { throw ChauffeurError("launch_handoff_timeout", "Terminal helper did not consume its launch configuration") }
+            guard let pane = try await inventory().first(where: { $0.sessionName == name }) else { throw ChauffeurError("terminal_launch", "Launched terminal could not be found") }
+            try Task.checkCancellation()
+            return pane
+        } catch {
+            // Cleanup must run even when the creating task was cancelled. Keep
+            // the reservation until this finishes so it cannot target a resume.
+            try await Task { try await self.stop(sessionID: session.id, force: true) }.value
+            throw error
+        }
     }
     public func attach(sessionID: UUID, owner: UUID, connection: SocketConnection, cols: Int, rows: Int) async throws {
         guard attachments[sessionID] == nil else { throw ChauffeurError("already_attached", "This terminal is attached in another view. Close that view before attaching") }
@@ -80,8 +102,8 @@ public actor TmuxHost {
     }
     public func capture(sessionID: UUID, lines: Int) async throws -> TerminalSnapshot {
         let name = sessionID.uuidString
-        let metadata = try await command(["display-message", "-p", "-t", name, "#{pane_id}\t#{pane_pid}\t#{pane_width}\t#{pane_height}\t#{alternate_on}\t#{history_size}"])
-        let fields = metadata.output.trimmingCharacters(in: .newlines).split(separator: "\t").map(String.init)
+        let metadata = try await command(["display-message", "-p", "-t", name, "#{pane_id}|#{pane_pid}|#{pane_width}|#{pane_height}|#{alternate_on}|#{history_size}"])
+        let fields = metadata.output.trimmingCharacters(in: .newlines).split(separator: "|").map(String.init)
         guard metadata.status == 0, fields.count == 6, let pid = Int32(fields[1]), let columns = Int(fields[2]), let rows = Int(fields[3]), let historySize = Int(fields[5]) else { throw ChauffeurError("snapshot_unavailable", "Terminal history is unavailable") }
         var history = "", truncated = historySize > lines
         if historySize > 0 {

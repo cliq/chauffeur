@@ -22,10 +22,19 @@ unverified real-CLI or native behavior; deferred workload checks remain unverifi
   line/byte budgets, and survive terminal/runtime loss. Native history is
   read-only and searchable; completed-message cleanup preserves queued/received
   messages. See [retention and recovery](terminal-history.md).
-- Forty-one Swift tests: canonical paths/discovery, folder routing/launcher installation and relocation repair, per-child environment, argument validation and quoting,
+- Forty-six Swift tests: canonical paths/discovery, folder routing/launcher installation and relocation repair, per-child environment, argument validation and quoting,
   atomic file replacement/conflicts/corrupt files, durable group-scoped messages,
   grant revocation, retry keys, bounded single-level delegation, and safe Git
   worktree creation/removal.
+- [Startup cancellation](service-recovery.md#stopping-a-session-during-startup)
+  now cancels CLI inspection and terminal creation, waits for cleanup, and
+  excludes concurrent resume until Stop finishes. Deterministic fixtures cover
+  both launch and resume cancellation, pending tmux creation, later successful resume, no stale Stop
+  classification, and terminal/payload cleanup after handoff timeout. They
+  reproduced the former pending-launch bug before the fix. Printable tmux
+  metadata delimiters fix inventory and history capture with a minimal/C-locale
+  environment; malformed output is reported instead of treated as no sessions.
+  Runtime and worktree socket regression fixtures pass with these changes.
 - Native fixture windows verify the full-height Presets layout, warm orange
   accents in light/dark appearance, and project folder lists with persistent
   scrollbars, counts, and bounded heights. Repository worktrees appear in the
@@ -102,7 +111,7 @@ unverified real-CLI or native behavior; deferred workload checks remain unverifi
 | 1.1 Records/store | Implemented and tested, including external reload/conflict errors | Complete reference-integrity checks; targeted file watcher (current one-second reload also runs with no UI); empty-set UI acceptance |
 | 1.2 Runtime skeleton | Lock, peer-checked Unix socket, version handshake, health helper, verified bundled LaunchAgent registration/recovery; bounded structured logs with typed redaction | Remaining live-service release acceptance |
 | 1.3–1.7 Presets/projects/groups/welcome/windows | Native editors, cancellable discovery, relink/archive, welcome and project windows implemented | Remaining editor/window interaction checks; final four-Spaces workload is in V2 |
-| 1.8 Basic launch | Real Codex/Claude launch, filtered environment, private exec handoff, terminal input/resize/stop; Claude native account/process configuration checks | Full native account/status checks, distinct-Claude-account check, complete preflight |
+| 1.8 Basic launch | Real Codex/Claude launch, filtered environment, private exec handoff, terminal input/resize/stop; cancellable launch/resume with terminal cleanup; Claude native account/process configuration checks | Full native account/status checks, distinct-Claude-account check, complete preflight |
 | 1.9 Session details | Native details show the immutable launch snapshot and lifecycle/coordination records | Real-session interaction acceptance |
 | 2.1 Screen/history | tmux live state; bounded persisted snapshots, disk cleanup, native history/search | Real CLI native attach/search/copy/link verification and sustained rotation |
 | 2.2 Reconnect | Positive pane/process reconciliation; real Codex/Claude explicit native-ID resume and MCP reconnect | Remaining service-failure edge cases and full native acceptance |

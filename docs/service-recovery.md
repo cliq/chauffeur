@@ -29,6 +29,24 @@ processes; it does not replay tasks. Missing terminal ownership is recorded as
 ended session with a recorded native conversation ID. See
 [terminal history](terminal-history.md) for retained output and its limits.
 
+### Stopping a session during startup
+
+**Stop Session** also cancels an in-progress launch or resume. It terminates a
+pending CLI inspection, waits for terminal-creation cleanup, revokes the session
+credential, and records the stopped attempt as **Interrupted**. A retry of the
+same launch request returns that record. Starting again requires an explicit
+new session or a supported native conversation resume.
+
+Resume is unavailable while Stop is in progress. A stop request for the old execution does
+not carry over to a later resumed process. Failed terminal handoffs remove their
+temporary launch payload and terminal before releasing the launch reservation.
+Stopping an already-running process still uses graceful termination, with the
+existing Force Stop action available if it does not exit.
+
+Terminal inventory and saved-screen metadata use printable separators so they
+work with a minimal login environment and the C locale. Unreadable inventory
+produces a service error; it is not interpreted as proof that all agents exited.
+
 Keep the app bundle at its registered path while its service is in use. Use
 `CHAUFFEUR_SIGN_IDENTITY` with an existing certificate for persistent service
 builds. The launch constraint requires that signing team and helper identifier.
@@ -58,8 +76,22 @@ running. The socket lives at
 
 Startup failures before socket availability also write an error code to the
 macOS system log under subsystem `dev.chauffeur.runtime`, category `startup`.
-They exclude command output, paths and configuration values. Structured log
-files and a redacted diagnostics export remain separate implementation work.
+They exclude command output, paths and configuration values. See
+[diagnostics](diagnostics.md) for structured logs and the redacted export.
+
+## Startup cancellation regression checks
+
+`LaunchCancellationTests` runs fixture executables and a private tmux server.
+It pauses CLI version inspection, tmux creation, and terminal handoff, then stops both a new
+launch and a resume. It checks probe termination, credential revocation, removal
+of terminal/payload files, request retry identity, later explicit resume, normal
+exit classification, and saved-screen capture without locale variables. It also
+checks handoff timeout cleanup and rejects malformed terminal inventory.
+No provider account or real conversation is involved.
+
+The same runtime changes pass `Prototypes/runtime_smoke.py` and
+`Prototypes/worktree_smoke.py`, covering regular launches, terminal reattachment,
+service restart, retained history, and launch/removal reservations.
 
 ## Service acceptance probe
 
