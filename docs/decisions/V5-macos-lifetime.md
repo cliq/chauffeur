@@ -118,14 +118,15 @@ the addressed project/session. All ten fixture agent PIDs remain unchanged.
 The actual service probe launches the bundled notification app with Chauffeur's
 UI closed. It reads native authorization (`notDetermined`) over the private IPC
 connection and exits while notifications are disabled, without requesting access.
-This proves the helper can run and communicate; actual notification delivery and
-click handling still require macOS permission and native acceptance.
+This proves the helper can run and communicate. The user subsequently enabled
+notifications, and the helper reports `authorized`, enabled, and connected.
+Actual notification delivery and click handling still require native acceptance.
 
 ## Remaining gate evidence
 
 - Run XCUITest, native keyboard/copy/paste/find/link and accessibility interactions.
 - Place four windows on separate Spaces; confirm focus, frames and restoration.
-- Validate sleep/wake, remaining service-loss cases, native notification permission,
+- Validate sleep/wake, remaining service-loss cases,
   banner delivery/clicks with the UI closed, and enabled-helper recovery/update.
 - Repeat lifetime scenarios with both real CLIs and their intended accounts.
 

@@ -294,8 +294,10 @@ struct AppSnapshot: Decodable, Sendable {
 }
 
 @MainActor enum FilePanels {
-    static func directory(title: String = "Choose an existing folder") -> String? {
+    static func directory(title: String = "Choose an existing folder", startingAt directory: URL? = nil, showsHiddenFiles: Bool = false) -> String? {
         let panel = NSOpenPanel(); panel.title = title; panel.canChooseFiles = false; panel.canChooseDirectories = true
+        if let directory { panel.directoryURL = directory }
+        panel.showsHiddenFiles = showsHiddenFiles
         panel.canCreateDirectories = false; panel.allowsMultipleSelection = false
         return panel.runModal() == .OK ? panel.url?.path : nil
     }

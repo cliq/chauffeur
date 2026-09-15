@@ -48,6 +48,8 @@ import ChauffeurCore
             }
         }
         Settings { SettingsView().modifier(AppAlerts()).environmentObject(model) }
+            .defaultSize(width: 830, height: 550)
+            .windowResizability(.contentMinSize)
         Window("Chauffeur Help", id: "help") {
             VStack(alignment: .leading, spacing: 18) {
                 Text("Your agents keep running").font(.title)
@@ -80,7 +82,7 @@ struct AppAlerts: ViewModifier {
     @EnvironmentObject private var model: AppModel
     @Environment(\.openWindow) private var openWindow
     func body(content: Content) -> some View {
-        content.onAppear {
+        content.tint(Color("AccentColor")).accentColor(Color("AccentColor")).onAppear {
             model.openProjectWindow = { id in openWindow(id: "project", value: id) }
             model.openWelcomeWindow = { openWindow(id: "welcome") }
             model.processPendingRoute()

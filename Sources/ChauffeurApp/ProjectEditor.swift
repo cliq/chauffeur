@@ -33,48 +33,96 @@ struct ProjectEditor: View {
             HStack {
                 Button("Choose Parent Folder…") { chooseParent() }.disabled(discovering)
                 Button("Add Folder…") { if let path = FilePanels.directory() { add(ProjectFolder(path: path)) } }
-                if project == nil { Button("Start Empty") { folders = []; candidates = []; discoveryFolder = nil } }
+                if project == nil {
+                    Button("Start Empty") { folders = []; candidates = []; selected = []; discoveryFolder = nil; discoveryErrors = [] }
+                        .disabled(discovering)
+                }
             }
             if discovering {
                 HStack { ProgressView().controlSize(.small); Text("Finding repositories…"); Spacer(); Button("Cancel Discovery") { discoveryTask?.cancel() } }
             }
+            folderList
             if !candidates.isEmpty {
-                Text("Select repositories to register").font(.subheadline)
-                List(candidates) { candidate in
-                    Toggle(isOn: Binding(get: { selected.contains(candidate.id) }, set: { if $0 { selected.insert(candidate.id) } else { selected.remove(candidate.id) } })) {
-                        VStack(alignment: .leading) { Text(candidate.name); Text(candidate.selectedPath).font(.caption).foregroundStyle(.secondary) }
-                    }
-                }.frame(height: 140)
-                Button("Add Selected Repositories") {
-                    for candidate in candidates where selected.contains(candidate.id) { add(candidate) }
-                    candidates = []; selected = []
-                }.disabled(selected.isEmpty)
-            }
-            List {
-                ForEach(folders.filter(\.registered)) { folder in
-                    HStack {
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text(folder.name)
-                            Text(folder.selectedPath).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
-                            if !FileManager.default.isReadableFile(atPath: folder.canonicalPath) { Text("Missing or inaccessible").font(.caption).foregroundStyle(.orange) }
-                        }
-                        Spacer()
-                        Button("Relink…") {
-                            if let path = FilePanels.directory(), let index = folders.firstIndex(where: { $0.id == folder.id }) {
-                                folders[index].selectedPath = path; folders[index].canonicalPath = Paths.canonical(path); folders[index].availability = .available
-                            }
-                        }
-                        Button("Remove", role: .destructive) { if let index = folders.firstIndex(where: { $0.id == folder.id }) { folders[index].registered = false } }
-                    }.padding(.vertical, 3)
+                HStack {
+                    Text("\(selected.count) of \(candidates.count) selected").font(.caption).foregroundStyle(.secondary)
+                    Spacer()
+                    Button("Add Selected Repositories") {
+                        for candidate in candidates where selected.contains(candidate.id) { add(candidate) }
+                        candidates = []; selected = []
+                    }.disabled(selected.isEmpty)
                 }
-            }.frame(minHeight: 100, maxHeight: 200)
+            }
             Text("Folder registration preserves repositories and worktrees on disk. Running sessions retain their launch paths and presets.").font(.caption).foregroundStyle(.secondary)
             if !discoveryErrors.isEmpty { Text(discoveryErrors.map { $0.errorDescription ?? $0.message }.joined(separator: "\n")).font(.caption).foregroundStyle(.orange).lineLimit(4) }
             if let failure { Text(failure).foregroundStyle(.red).font(.callout) }
             HStack { Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction); Spacer(); Button(saving ? "Saving…" : "Save Project") { save() }.buttonStyle(.borderedProminent).keyboardShortcut(.defaultAction).disabled(saving || name.trimmingCharacters(in: .whitespaces).isEmpty || setID == nil || discovering) }
-        }.padding(24).frame(width: 680)
+        }.padding(24).frame(width: 720)
             .onAppear { name = project?.name ?? ""; setID = project?.presetSetID ?? model.presetSets.first(where: { !$0.archived })?.id; folders = project?.folders ?? []; discoveryFolder = project?.discoveryFolder; version = model.snapshot.store.projects.first { $0.value.id == project?.id }?.version }
             .onDisappear { discoveryTask?.cancel() }
+    }
+    private var registeredFolders: [ProjectFolder] { folders.filter(\.registered) }
+    private var folderListHeight: CGFloat {
+        let sections = (candidates.isEmpty ? 0 : 1) + (registeredFolders.isEmpty ? 0 : 1)
+        return min(300, max(120, CGFloat(candidates.count + registeredFolders.count) * 62 + CGFloat(sections) * 32))
+    }
+    private var folderList: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 0) {
+                if candidates.isEmpty && registeredFolders.isEmpty {
+                    VStack(spacing: 8) {
+                        Image(systemName: "folder").font(.title2).foregroundStyle(.secondary)
+                        Text("No folders added").fontWeight(.medium)
+                        Text("Choose a parent folder to find repositories, add a folder, or save an empty project.")
+                            .font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.center)
+                    }.frame(maxWidth: .infinity).padding(20)
+                }
+                if !candidates.isEmpty {
+                    folderHeading("Repositories found", count: candidates.count)
+                    ForEach(candidates) { candidate in
+                        Toggle(isOn: Binding(get: { selected.contains(candidate.id) }, set: { if $0 { selected.insert(candidate.id) } else { selected.remove(candidate.id) } })) {
+                            folderLabel(candidate)
+                        }.toggleStyle(.checkbox).padding(10)
+                        Divider().padding(.leading, 10)
+                    }
+                }
+                if !registeredFolders.isEmpty {
+                    folderHeading("Project folders", count: registeredFolders.count)
+                    ForEach(registeredFolders) { folder in
+                        HStack(spacing: 12) {
+                            VStack(alignment: .leading, spacing: 3) {
+                                folderLabel(folder).textSelection(.enabled)
+                                if !FileManager.default.isReadableFile(atPath: folder.canonicalPath) { Text("Missing or inaccessible").font(.caption).foregroundStyle(.orange) }
+                            }.frame(maxWidth: .infinity, alignment: .leading)
+                            Button("Relink…") {
+                                if let path = FilePanels.directory(), let index = folders.firstIndex(where: { $0.id == folder.id }) {
+                                    folders[index].selectedPath = path; folders[index].canonicalPath = Paths.canonical(path); folders[index].availability = .available
+                                }
+                            }
+                            Button("Remove", role: .destructive) { if let index = folders.firstIndex(where: { $0.id == folder.id }) { folders[index].registered = false } }
+                        }.padding(10)
+                        Divider().padding(.leading, 10)
+                    }
+                }
+            }.frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.trailing, NSScroller.scrollerWidth(for: .regular, scrollerStyle: .legacy))
+                .background(PersistentScrollbars())
+        }.scrollIndicators(.visible)
+            .frame(height: folderListHeight)
+            .background(Color(nsColor: .textBackgroundColor))
+            .clipShape(RoundedRectangle(cornerRadius: 6))
+            .overlay(RoundedRectangle(cornerRadius: 6).stroke(.quaternary))
+    }
+    private func folderHeading(_ title: String, count: Int) -> some View {
+        HStack { Text(title).fontWeight(.medium); Spacer(); Text("\(count)").monospacedDigit().foregroundStyle(.secondary) }
+            .font(.caption).padding(.horizontal, 10).padding(.vertical, 8)
+            .background(.quaternary.opacity(0.4))
+    }
+    private func folderLabel(_ folder: ProjectFolder) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(folder.name).lineLimit(1)
+            Text(folder.selectedPath).font(.caption).foregroundStyle(.secondary)
+                .lineLimit(1).truncationMode(.middle).help(folder.selectedPath)
+        }.frame(maxWidth: .infinity, alignment: .leading)
     }
     private func add(_ folder: ProjectFolder) {
         if let index = folders.firstIndex(where: { $0.canonicalPath == folder.canonicalPath }) { folders[index].registered = true }

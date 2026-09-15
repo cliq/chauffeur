@@ -51,7 +51,8 @@ their membership against its current store before opening a window.
   without requesting access. It requires an empty default store with notifications
   disabled and removes its test service registration afterward.
 
-Actual permission authorization, banner delivery, notification clicks with the
-main UI quit, Focus behavior, and enabled-helper recovery/update remain native
-acceptance gates. The development Mac currently reports `notDetermined`; the
-direct URL tests establish navigation behavior, not Notification Center delivery.
+The user enabled notifications on the development Mac; the native helper now
+reports `authorized`, enabled, and connected. Banner delivery, notification clicks
+with the main UI quit, Focus behavior, and enabled-helper recovery/update remain
+native acceptance gates. Direct URL tests establish navigation behavior, not
+Notification Center delivery.

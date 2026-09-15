@@ -131,6 +131,7 @@ Goal: quit and reopen without losing sessions; worktrees; attention (PRD stage 2
 8. **Sleep/wake and service loss** — reconcile on wake, detect stopped runtime, show recovery actions (F4.9, §6).
 9. **Appearance setting** — add a Settings choice between **System**, **Light**, and **Dark** appearance; persist the selection and apply it across app windows and terminal views.
 10. **Terminal project launcher** — install a launcher in `/usr/local/bin/` that opens the Chauffeur project containing the selected folder.
+11. **Quick session on a new worktree** — create a worktree and start a session from its repository in the sidebar in one flow.
 
 Exit check: F3, F4, F5, and F6 acceptance scenarios pass for both CLIs, including force-quitting only the UI.
 
@@ -156,6 +157,7 @@ Exit check: F7 acceptance, including cross-group probing with guessed IDs, retri
 4. Diagnostics export: executable, version, configuration path, working directory, runtime state, recent errors; no credentials or configuration file contents.
 5. Setup and recovery notes in `docs/` covering runtime restart, interrupted sessions, and worktree cleanup.
 6. Run the PRD §9 end-to-end checklist, including ten concurrent sessions with recorded hardware and timings, then three workdays of daily use with a failure log.
+7. **Complete app manual** — after the app work is finished, write a manual covering every feature and how to use it, and publish it through the Artifact Colab MCP.
 
 ## 9. Cross-cutting engineering rules
 

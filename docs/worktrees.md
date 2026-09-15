@@ -1,6 +1,12 @@
 # Worktrees and cleanup
 
-Open **Worktrees…** in a project window, choose a repository, and either register
+Expand a repository in the sidebar to see its other Git worktrees, including
+external checkouts. Each row shows its branch and directory name; hover for the
+full path. Select a worktree to open its repository's manager, or use its context
+menu to reveal it in Finder. Missing registered worktrees stay visible with their
+availability status. The repository row itself represents its registered checkout.
+
+Open **Manage Worktrees…** in a project window, choose a repository, and either register
 an existing Git worktree or create one with a branch and base ref. Creation shows
 the destination under Chauffeur's managed storage. The resolved base commit is
 recorded separately from the branch's current state. A failed agent launch

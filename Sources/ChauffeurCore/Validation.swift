@@ -91,10 +91,11 @@ public enum LaunchPolicy {
             ? ["-m", "--model", "-p", "--profile", "-s", "--sandbox", "-a", "--ask-for-approval", "--enable", "--disable", "--local-provider", "-i", "--image"]
             : ["--model", "--effort", "--permission-mode", "--agent", "--agents", "--append-system-prompt", "--system-prompt", "--allowedTools", "--allowed-tools", "--disallowedTools", "--disallowed-tools", "--tools", "--name", "-n", "--fallback-model"]
         let flags: Set<String> = kind == .codex
-            ? ["--search", "--no-alt-screen", "--oss", "--strict-config", "--approve-for-me", "--dangerously-bypass-approvals-and-sandbox"]
+            ? ["--search", "--no-alt-screen", "--oss", "--strict-config", "--approve-for-me", "--dangerously-bypass-approvals-and-sandbox", "--yolo"]
             : ["--verbose", "--chrome", "--no-chrome", "--ide", "--disable-slash-commands", "--dangerously-skip-permissions", "--allow-dangerously-skip-permissions"]
         var index = 0
         while index < arguments.count {
+            try Validation.require(!arguments[index].hasPrefix("—") && !arguments[index].hasPrefix("–"), "Replace the typographic dash at the start of an option with two hyphens (--)")
             let parts = arguments[index].split(separator: "=", maxSplits: 1, omittingEmptySubsequences: false)
             let key = String(parts[0])
             if takesValue.contains(key) {

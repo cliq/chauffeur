@@ -20,10 +20,18 @@ the PRD's real-CLI, native-window, and daily-use acceptance scenarios.
   line/byte budgets, and survive terminal/runtime loss. Native history is
   read-only and searchable; completed-message cleanup preserves queued/received
   messages. See [retention and recovery](terminal-history.md).
-- Thirty-two Swift tests: canonical paths/discovery, per-child environment, argument validation,
+- Thirty-five Swift tests: canonical paths/discovery, per-child environment, argument validation and quoting,
   atomic file replacement/conflicts/corrupt files, durable group-scoped messages,
   grant revocation, retry keys, bounded single-level delegation, and safe Git
   worktree creation/removal.
+- Native fixture windows verify the full-height Presets layout, warm orange
+  accents in light/dark appearance, and project folder lists with persistent
+  scrollbars, counts, and bounded heights. Repository worktrees appear in the
+  sidebar. The preset editor accepts space/newline-separated arguments with
+  quoting, preserves literal hyphens, and recognizes Codex's `--yolo` alias.
+  A native directory panel check confirms home as its initial location with
+  hidden folders visible. Visual evidence is under `.local/ui-preview/` and
+  `.local/settings-preview/`; these previews use an isolated socket and app ID.
 - Bundled coordination skill with explicit per-profile install/update/remove
   controls, ownership/conflict checks, private files, and stale-review rejection.
   Native Codex and Claude metadata fixtures prove profile-specific discovery and
@@ -67,7 +75,8 @@ the PRD's real-CLI, native-window, and daily-use acceptance scenarios.
 - Optional [session notifications](notifications.md) with a durable, coalesced outbox,
   signed accessory app, opt-in controls, and strict project/session navigation.
   Launch Services warm/cold URL routing and helper startup with the UI closed
-  pass; Notification Center authorization/delivery/click acceptance remains open.
+  pass; the user enabled notifications and the native helper reports authorized.
+  Delivery/click acceptance remains open.
 
 ## Stage audit
 
@@ -84,16 +93,18 @@ the PRD's real-CLI, native-window, and daily-use acceptance scenarios.
 | 2.3–2.4 Quit/tabs/split | Native tabs/split, window-state writes, quit/stop-all and keyboard commands implemented | OS keyboard and real-CLI/Spaces acceptance; direct normal/force-quit fixture implemented |
 | 2.5 Worktrees | Create/list/safe-remove; periodic external inventory; identity-based moves/replacements; pending launch/removal and metadata-write reservations; Git/socket regression fixture | Real-CLI removal and native control acceptance; whole-repository relocation; recovery/resume after external checkout replacement |
 | 2.6 Multiple repos | Explicit additional folder selection in launch API; primary main checkout excluded | Real CLI access test (shared-checkout warning and explicit additional-folder UI implemented) |
-| 2.7 Status/attention | Lifecycle records, real Codex/Claude completion IDs, permission attention hooks, unread/pending counts; optional durable notifications; native warm/cold URL routing and background helper startup | Actual OS notification authorization, delivery/click, enabled-helper recovery/update, and remaining native attention signals |
+| 2.7 Status/attention | Lifecycle records, real Codex/Claude completion IDs, permission attention hooks, unread/pending counts; optional durable notifications; native warm/cold URL routing and background helper startup; user enabled and authorized notifications | Actual OS delivery/click, enabled-helper recovery/update, and remaining native attention signals |
 | 2.8 Sleep/service loss | Runtime loop plus native wake reconnect, health/recovery actions; actual service termination/restart verified | Real sleep/wake and service lifecycle with live real sessions |
 | 2.9 Appearance setting | Todo — requested by user | Settings selection for System, Light, or Dark; persistence and consistent app/terminal appearance |
 | 2.10 Terminal project launcher | Todo — requested by user | Install a launcher in `/usr/local/bin/`; open the project containing the selected folder |
+| 2.11 Quick session on a new worktree | Todo — requested by user | One flow from a repository in the sidebar to a new worktree and session |
 | 3.1–3.3 Credentials/MCP/mailboxes | Ledger/HTTP fixtures; real Codex/Claude shared-profile credentials and messages | Full HTTP/client compliance; remaining real tool cases and controlled existing-server preservation |
 | 3.4 Delegation | Durable reservation, launch path, worktree default, limits, depth check, result transaction | Bidirectional real-CLI acceptance, crash-window integration tests and failed-child visibility audit |
 | 3.5 Wake | Bounded inbox wait; no terminal message injection | Real idle/busy validation (pending-attention UI implemented) |
 | 3.6–3.7 Coordination UI/skill | Tool descriptions, message/delegation details, bundled skill, explicit install/update/remove controls; native metadata discovery/isolation/removal fixture | Native control interaction and real model use of guidance; full F7 acceptance |
 | 4.1–4.5 Packaging/compatibility/retention/diagnostics/docs | Developer ID local builds; actual registration/update; retention settings/cleanup; diagnostics export; terminal, diagnostics and service recovery guides | Full release acceptance; native save-dialog interaction; remaining recovery guide |
 | 4.6 Release checklist | Not run | Ten real sessions/four Spaces, timings/hardware record, all F1–F7 scenarios, three normal workdays and failure log |
+| 4.7 Complete app manual | Todo — requested by user, after app work | Document every feature and its usage; publish through Artifact Colab MCP |
 
 ## Next implementation order
 

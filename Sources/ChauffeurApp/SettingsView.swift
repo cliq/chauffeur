@@ -13,15 +13,18 @@ struct SettingsView: View {
     var body: some View {
         TabView {
             HSplitView {
-                VStack(alignment: .leading) {
+                VStack(alignment: .leading, spacing: 0) {
+                    Text("Preset Sets").font(.headline).padding(.horizontal, 12).padding(.vertical, 10)
                     List(selection: $selectedSet) {
                         ForEach(model.presetSets) { set in
                             HStack { Text(set.name); if set.archived { Text("Archived").font(.caption).foregroundStyle(.secondary) } }.tag(set.id)
                                 .contextMenu { Button("Edit Preset Set…") { editedSet = set } }
                         }
-                    }
+                    }.listStyle(.sidebar).frame(maxHeight: .infinity)
+                    Divider()
                     HStack { Button("Add Set…") { newSet = true }; if let selectedSet, let set = model.presetSets.first(where: { $0.id == selectedSet }) { Button("Edit…") { editedSet = set } } }.padding(12)
-                }.frame(minWidth: 190, idealWidth: 220)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }.frame(minWidth: 200, idealWidth: 220, maxWidth: 280, maxHeight: .infinity, alignment: .topLeading)
                 VStack(alignment: .leading, spacing: 14) {
                     if let selectedSet, let set = model.presetSets.first(where: { $0.id == selectedSet }) {
                         HStack { Text(set.name).font(.title2); Spacer(); Text("Revision \(set.revision)").foregroundStyle(.secondary) }
@@ -39,9 +42,11 @@ struct SettingsView: View {
                         Button("Add Preset…") { newPreset = true }.disabled(set.archived)
                     } else {
                         ContentUnavailableView("Choose a preset set", systemImage: "person.crop.rectangle.stack", description: Text("Create sets such as Personal or Client 1, then add Codex and Claude Code presets."))
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
                     }
-                }.padding(20).frame(minWidth: 450)
-            }.tabItem { Label("Presets", systemImage: "person.crop.rectangle.stack") }
+                }.padding(20).frame(minWidth: 450, maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            }.frame(maxWidth: .infinity, maxHeight: .infinity)
+                .tabItem { Label("Presets", systemImage: "person.crop.rectangle.stack") }
             Form {
                 Section("Background Service") {
                     ServiceHealthView()
@@ -63,7 +68,7 @@ struct SettingsView: View {
                     Text("Exports paths, versions, session state, and error codes. Offline exports use the last received state and include its timestamp.").font(.caption).foregroundStyle(.secondary)
                 }
             }.formStyle(.grouped).tabItem { Label("Runtime", systemImage: "gearshape.2") }
-        }.frame(width: 830, height: 550)
+        }.frame(minWidth: 740, idealWidth: 830, maxWidth: .infinity, minHeight: 480, idealHeight: 550, maxHeight: .infinity)
             .onAppear { selectedSet = selectedSet ?? model.presetSets.first?.id; retention = model.snapshot.settings }
             .sheet(isPresented: $newSet) { PresetSetEditor { id in selectedSet = id; newSet = false } }
             .sheet(item: $editedSet) { set in PresetSetEditor(presetSet: set) { id in selectedSet = id; editedSet = nil } }
@@ -131,23 +136,30 @@ struct PresetEditor: View {
                 Picker("Agent", selection: $kind) { Text("Codex").tag(CLIKind.codex); Text("Claude Code").tag(CLIKind.claude) }
                     .onChange(of: kind) { _, value in if executable == "codex" || executable == "claude" { executable = value == .codex ? "codex" : "claude" } }
                 HStack { TextField("Executable", text: $executable); Button("Choose…") { if let path = FilePanels.executable() { executable = path } } }
-                HStack { TextField("Existing configuration directory", text: $directory); Button("Choose…") { if let path = FilePanels.directory(title: "Choose an existing CLI configuration directory") { directory = path } } }
+                HStack {
+                    TextField("Existing configuration directory", text: $directory)
+                    Button("Choose…") {
+                        if let path = FilePanels.directory(title: "Choose an existing CLI configuration directory", startingAt: FileManager.default.homeDirectoryForCurrentUser, showsHiddenFiles: true) { directory = path }
+                    }
+                }
                 if preset != nil { Toggle("Archived", isOn: $archived) }
             }
-            Text("Launch arguments — one argument per line").font(.headline)
-            TextEditor(text: $arguments).font(.system(.body, design: .monospaced)).frame(height: 100).border(.separator)
-            Text("Example: put --model on one line and its value on the next. Working directory, configuration directory, MCP and resume fields are managed by Chauffeur.").font(.caption).foregroundStyle(.secondary)
+            Text("Launch arguments").font(.headline)
+            ArgumentEditor(text: $arguments).frame(height: 84)
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+                .overlay(RoundedRectangle(cornerRadius: 6).stroke(.separator, lineWidth: 1))
+            Text("Separate options with spaces or newlines. Quote values containing spaces, for example: --model \"model name\". Shell variables and commands are not expanded.").font(.caption).foregroundStyle(.secondary)
             if let failure { Text(failure).foregroundStyle(.red) }
             HStack {
                 Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction); Spacer()
                 Button("Save Preset") {
                     var value = preset ?? AgentPreset(setID: setID, name: name, kind: kind, executable: executable, configurationDirectory: directory)
                     value.name = name; value.kind = kind; value.executable = executable; value.configurationDirectory = (directory as NSString).expandingTildeInPath
-                    value.arguments = arguments.split(separator: "\n", omittingEmptySubsequences: true).map(String.init); value.archived = archived; value.integration = .unverified
-                    Task { do { try value.validate(); _ = try Paths.directory(value.configurationDirectory); try await model.save("savePreset", value, version: version); dismiss() } catch { failure = error.localizedDescription } }
+                    value.archived = archived; value.integration = .unverified
+                    Task { do { value.arguments = try ArgumentText.parse(arguments); try value.validate(); _ = try Paths.directory(value.configurationDirectory); try await model.save("savePreset", value, version: version); dismiss() } catch { failure = error.localizedDescription } }
                 }.keyboardShortcut(.defaultAction).disabled(name.trimmingCharacters(in: .whitespaces).isEmpty || directory.isEmpty)
             }
         }.padding(24).frame(width: 650)
-            .onAppear { name = preset?.name ?? ""; kind = preset?.kind ?? .codex; executable = preset?.executable ?? "codex"; directory = preset?.configurationDirectory ?? ""; arguments = preset?.arguments.joined(separator: "\n") ?? ""; archived = preset?.archived ?? false; version = model.snapshot.store.presets.first { $0.value.id == preset?.id }?.version }
+            .onAppear { name = preset?.name ?? ""; kind = preset?.kind ?? .codex; executable = preset?.executable ?? "codex"; directory = preset?.configurationDirectory ?? ""; arguments = ArgumentText.format(preset?.arguments ?? []); archived = preset?.archived ?? false; version = model.snapshot.store.presets.first { $0.value.id == preset?.id }?.version }
     }
 }
