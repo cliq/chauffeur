@@ -12,6 +12,30 @@ the destination under Chauffeur's managed storage. The resolved base commit is
 recorded separately from the branch's current state. A failed agent launch
 retains the checkout for another explicit launch.
 
+## Create a worktree and start an agent
+
+Expand a repository in the sidebar and choose **New Worktree & Session…**, or
+choose the same action from the repository's context menu. Select an agent preset
+and group, enter a new branch name and a base reference (initially `HEAD`), and
+review the destination. Add an optional initial task, then choose **Create &
+Launch**. The regular **New Session** sheet also offers **New worktree…** in its
+**Work in** menu.
+
+The sheet keeps its action buttons visible while the settings scroll. Creation
+and launch show progress and prevent duplicate submissions. If agent startup
+fails, the sheet selects the new worktree and keeps it available for another
+launch. Fix the reported problem, then use **Launch Session** for a fresh attempt.
+**Check Previous Attempt** recovers the original result after an uncertain response;
+an already recorded failed attempt opens that session without starting it again.
+
+Worktree creation requests carry a persistent retry ID. Repeated or concurrent
+requests with the same fields return the same recorded checkout, including after
+a runtime restart. Reusing the ID with different fields is rejected. A removed
+checkout is not recreated by a retry. If Git creates the checkout but saving its
+record fails, the error reports its retained path: refresh Git inventory in the
+manager and register that checkout. Git creation and metadata storage are separate
+operations; an abrupt runtime exit between them requires the same recovery.
+
 ## External changes
 
 The background service checks Git inventory when it starts, then waits five
@@ -85,7 +109,15 @@ inaccessible checkout records remain visible for recovery.
 
 - Swift tests exercise clean/dirty/untracked/active removal, independent file
   changes, branch preservation, collisions, moves, replacement at the same path,
-  newline paths, missing sources, and reservation interleavings.
+  newline paths, missing sources, and reservation interleavings. Creation retry
+  tests cover concurrent callers, runtime restart, conflicting fields, removed
+  records, legacy requests, and retained files after agent startup failure.
+- `python3 Prototypes/quick_session_smoke.py` opens the actual new-worktree sheet
+  through the repository action in an isolated signed Debug app. A temporary Git
+  repo and fixture agent verify invalid-branch recovery, retained worktree after
+  agent failure, fresh launch into the same checkout, literal task forwarding,
+  and selection of the launched session. Screenshots and its report are saved
+  in `.build/quick-session-artifacts/`.
 - `python3 Prototypes/worktree_smoke.py` runs an isolated runtime and real Git
   repositories. A fixture fsmonitor hook pauses Git status during removal; both
   primary and additional-directory launches must be rejected. This test failed

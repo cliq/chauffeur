@@ -22,7 +22,7 @@ unverified real-CLI or native behavior; deferred workload checks remain unverifi
   line/byte budgets, and survive terminal/runtime loss. Native history is
   read-only and searchable; completed-message cleanup preserves queued/received
   messages. See [retention and recovery](terminal-history.md).
-- Forty-six Swift tests: canonical paths/discovery, folder routing/launcher installation and relocation repair, per-child environment, argument validation and quoting,
+- Forty-nine Swift tests: canonical paths/discovery, folder routing/launcher installation and relocation repair, per-child environment, argument validation and quoting,
   atomic file replacement/conflicts/corrupt files, durable group-scoped messages,
   grant revocation, retry keys, bounded single-level delegation, and safe Git
   worktree creation/removal.
@@ -43,6 +43,13 @@ unverified real-CLI or native behavior; deferred workload checks remain unverifi
   A native directory panel check confirms home as its initial location with
   hidden folders visible. Visual evidence is under `.local/ui-preview/` and
   `.local/settings-preview/`; these previews use an isolated socket and app ID.
+- [New Worktree & Session](worktrees.md#create-a-worktree-and-start-an-agent)
+  creates a checkout and launches from one sidebar flow, with a scrollable sheet
+  and fixed actions. Durable creation retry IDs avoid duplicate checkouts across
+  concurrent requests and runtime restarts. A direct native Debug fixture checks
+  invalid-branch recovery, retained checkout after agent failure, a fresh launch
+  reusing it, literal initial-task forwarding, and session selection. Evidence:
+  `.build/quick-session-artifacts/`. The supplied Release remains unchanged.
 - [Appearance settings](appearance.md) offer System, Light, and Dark with saved
   app-wide selection. Four isolated native app launches verify persistence,
   window/terminal default colors, cursor contrast, newly created terminals, and
@@ -122,7 +129,7 @@ unverified real-CLI or native behavior; deferred workload checks remain unverifi
 | 2.8 Sleep/service loss | Runtime loop plus native wake reconnect, health/recovery actions; actual service termination/restart verified | Real sleep/wake and service lifecycle with live real sessions |
 | 2.9 Appearance setting | Implemented; System/Light/Dark, persistence, native window and terminal default-color checks pass | — |
 | 2.10 Terminal project launcher | Implemented Settings installer and folder routing; native cold/warm and Release startup checks pass; relocation repair and literal argument forwarding tested | Actual `/usr/local/bin/` installation requires macOS administrator authentication; ship the repair fix in the next Release build |
-| 2.11 Quick session on a new worktree | Todo — requested by user | One flow from a repository in the sidebar to a new worktree and session |
+| 2.11 Quick session on a new worktree | Implemented; concurrent/persisted retry tests and native sheet/fixture-agent launch pass | Ship in the next Release; real CLI/native acceptance remains tracked under 1.8 and 2.5 |
 | 4.1–4.5 Packaging/compatibility/retention/diagnostics/docs | Developer ID local builds; actual registration/update; retention settings/cleanup; diagnostics export; terminal, diagnostics and service recovery guides | Focused packaging/recovery acceptance; native save-dialog interaction; remaining recovery guide |
 | 4.7 Complete app manual | Todo — requested by user, after app work | Document every feature and its usage; publish through Artifact Colab MCP |
 

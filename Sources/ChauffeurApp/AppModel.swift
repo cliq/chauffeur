@@ -138,6 +138,7 @@ struct AppSnapshot: Decodable, Sendable {
         #if DEBUG
         NativeProbe.start(model: self)
         LauncherProbe.start(model: self)
+        QuickSessionProbe.start(model: self)
         #endif
         if ProcessInfo.processInfo.environment["CHAUFFEUR_SOCKET"] == nil { registerService() }
         #if DEBUG

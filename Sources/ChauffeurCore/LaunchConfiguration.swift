@@ -38,3 +38,15 @@ public struct LaunchRequest: Codable, Sendable {
         self.allowSharedCheckout = allowSharedCheckout; self.coordinationEnabled = coordinationEnabled; self.retryKey = retryKey
     }
 }
+
+public struct WorktreeCreationRequest: Codable, Equatable, Sendable {
+    public var projectID: UUID
+    public var folderID: UUID
+    public var branch: String
+    public var baseRef: String
+    public var retryKey: UUID?
+    public init(projectID: UUID, folderID: UUID, branch: String, baseRef: String, retryKey: UUID? = UUID()) {
+        self.projectID = projectID; self.folderID = folderID
+        self.branch = branch; self.baseRef = baseRef; self.retryKey = retryKey
+    }
+}

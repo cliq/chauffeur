@@ -27,6 +27,7 @@ public actor RuntimeCoordinator {
     private var repositoryInventories: [RepositoryInventory] = []
     private var worktreeScan: Task<Void, Never>?
     private var worktreeRecordWrites = Set<UUID>()
+    private var worktreeCreations: [UUID: (String, Task<Stored<Worktree>, Error>)] = [:]
     private var captures: [UUID: Task<TerminalSnapshot?, Error>] = [:]
     private var maintaining = false
     private var retentionSettingsPending = false
@@ -371,10 +372,7 @@ public actor RuntimeCoordinator {
             registered.gitIdentity = entry.gitIdentity
             return try .from(await saveWorktree(registered))
         case "createWorktree":
-            let snapshot = await store.current(), projectID = try params.uuid("projectID"), folderID = try params.uuid("folderID")
-            guard let folder = snapshot.projects.first(where: { $0.value.id == projectID })?.value.folders.first(where: { $0.id == folderID && $0.registered }) else { throw ChauffeurError("missing_folder", "Select an available project folder") }
-            let worktree = try await worktrees.create(projectID: projectID, folder: folder, branch: params.requiredString("branch"), baseRef: params.requiredString("baseRef"))
-            return try .from(await saveWorktree(worktree))
+            return try .from(await createWorktree(params.decode(WorktreeCreationRequest.self)))
         case "removeWorktree":
             let snapshot = await store.current(), worktreeID = try params.uuid("worktreeID")
             guard var stored = snapshot.worktrees.first(where: { $0.value.id == worktreeID }) else { throw ChauffeurError("missing_worktree", "Worktree not found") }
@@ -398,6 +396,31 @@ public actor RuntimeCoordinator {
         case "reconcile": try await reconcile(); return health()
         default: throw ChauffeurError("unknown_method", "Unknown runtime method")
         }
+    }
+    public func createWorktree(_ request: WorktreeCreationRequest) async throws -> Stored<Worktree> {
+        let fingerprint = JSONCoding.digest(try JSONCoding.encode(request))
+        guard let key = request.retryKey else { return try await performWorktreeCreation(request, fingerprint: nil) }
+        if let (pendingFingerprint, task) = worktreeCreations[key] {
+            guard fingerprint == pendingFingerprint else { throw ChauffeurError("retry_conflict", "Worktree request ID was already used with different fields") }
+            return try await task.value
+        }
+        let task = Task { try await self.performWorktreeCreation(request, fingerprint: fingerprint) }
+        worktreeCreations[key] = (fingerprint, task)
+        defer { worktreeCreations.removeValue(forKey: key) }
+        return try await task.value
+    }
+    private func performWorktreeCreation(_ request: WorktreeCreationRequest, fingerprint: String?) async throws -> Stored<Worktree> {
+        let snapshot = await store.reload()
+        if let key = request.retryKey, let existing = snapshot.worktrees.first(where: { $0.value.id == key }) {
+            guard existing.value.creationRequestFingerprint == fingerprint else { throw ChauffeurError("retry_conflict", "Worktree request ID was already used with different fields") }
+            return existing
+        }
+        guard let project = snapshot.projects.first(where: { $0.value.id == request.projectID && !$0.value.archived })?.value,
+              let folder = project.folders.first(where: { $0.id == request.folderID && $0.registered }) else { throw ChauffeurError("missing_folder", "Select an available folder in an active project") }
+        var worktree = try await worktrees.create(projectID: project.id, folder: folder, branch: request.branch, baseRef: request.baseRef)
+        if let key = request.retryKey { worktree.id = key; worktree.creationRequestFingerprint = fingerprint }
+        do { return try await saveWorktree(worktree) }
+        catch { throw ChauffeurError("worktree_registration", "The worktree was created but its record could not be saved. Refresh Git Inventory and register the retained checkout", path: worktree.path) }
     }
     public func launch(_ request: LaunchRequest, child: Delegation? = nil) async throws -> Session {
         // User retry UUID is also the durable session UUID. A retry after an IPC

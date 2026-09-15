@@ -4,6 +4,7 @@ import SwiftUI
 /// Plain text input for flags: macOS prose substitutions would corrupt argv.
 struct ArgumentEditor: NSViewRepresentable {
     @Binding var text: String
+    var accessibilityLabel = "Launch arguments"
     func makeCoordinator() -> Coordinator { Coordinator(text: $text) }
     func makeNSView(context: Context) -> NSScrollView {
         let scroll = NSScrollView()
@@ -28,7 +29,7 @@ struct ArgumentEditor: NSViewRepresentable {
         editor.textContainer?.widthTracksTextView = true
         editor.textContainer?.containerSize = NSSize(width: 0, height: CGFloat.greatestFiniteMagnitude)
         editor.string = text; editor.delegate = context.coordinator
-        editor.setAccessibilityLabel("Launch arguments")
+        editor.setAccessibilityLabel(accessibilityLabel)
         scroll.documentView = editor
         return scroll
     }

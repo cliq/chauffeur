@@ -175,6 +175,7 @@ public struct Worktree: Record, Equatable {
     public var branch: String
     public var baseCommit: String
     public var managed: Bool
+    public var creationRequestFingerprint: String?
     public var gitIdentity: UUID?
     public var availability: Availability = .available
     public var registered = true

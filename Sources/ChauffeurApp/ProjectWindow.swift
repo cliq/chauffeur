@@ -44,6 +44,7 @@ struct ProjectWindow: View {
     @StateObject private var layout: ProjectLayout
     let projectID: UUID
     @State private var launching = false
+    @State private var launchingInNewWorktree = false
     @State private var editingProject = false
     @State private var editingGroups = false
     @State private var managingWorktrees = false
@@ -74,7 +75,7 @@ struct ProjectWindow: View {
                 .navigationTitle(project.name)
                 .toolbar {
                     ToolbarItemGroup {
-                        Button { launching = true } label: { Label("New Session", systemImage: "plus") }.disabled(!model.online || project.archived)
+                        Button { showLaunch() } label: { Label("New Session", systemImage: "plus") }.disabled(!model.online || project.archived)
                         Button { layout.toggleSplit() } label: { Label("Split Terminal", systemImage: "rectangle.split.2x1") }.disabled(layout.state.tabs.count < 2 && layout.state.splitSessionID == nil)
                         Button { layout.detailsVisible.toggle() } label: { Label("Session Details", systemImage: "sidebar.right") }
                         Menu {
@@ -85,7 +86,7 @@ struct ProjectWindow: View {
                         } label: { Label("Project Actions", systemImage: "ellipsis.circle") }
                     }
                 }
-                .sheet(isPresented: $launching) { SessionLaunchView(project: project, initialGroupID: layout.state.selectedGroupID, initialFolderID: layout.selectedFolderID) { layout.select($0) } }
+                .sheet(isPresented: $launching) { SessionLaunchView(project: project, initialGroupID: layout.state.selectedGroupID, initialFolderID: layout.selectedFolderID, startsInNewWorktree: launchingInNewWorktree) { layout.select($0) } }
                 .sheet(isPresented: $editingProject) { ProjectEditor(project: project) { _ in editingProject = false } }
                 .sheet(isPresented: $editingGroups) { GroupsEditor(project: project) }
                 .sheet(isPresented: $managingWorktrees) { WorktreesView(project: project, initialFolderID: worktreeFolderID) }
@@ -114,7 +115,7 @@ struct ProjectWindow: View {
             .onReceive(NotificationCenter.default.publisher(for: .chauffeurCommand)) { notification in
                 guard layout.window?.isKeyWindow == true, let command = notification.object as? String else { return }
                 switch command {
-                case "new-session": launching = true
+                case "new-session": showLaunch()
                 case "split": layout.toggleSplit()
                 case "search-sessions": searchFocused = true
                 case "find": if let id = layout.state.selectedSessionID { layout.controllers[id]?.find() }
@@ -190,12 +191,16 @@ struct ProjectWindow: View {
                         Button("Reveal in Finder") { FilePanels.reveal(tree.path) }.disabled(tree.availability != .available)
                     }
             }
+            Button("New Worktree & Session…", systemImage: "plus") { showLaunch(folderID: folder.id, newWorktree: true) }
+                .buttonStyle(.plain).font(.caption).disabled(!model.online || project.archived || folder.availability != .available)
         } label: {
             Button { layout.selectedFolderID = folder.id } label: {
                 Label { Text(folder.name).foregroundStyle(layout.selectedFolderID == folder.id ? Color.accentColor : Color.primary) } icon: { Image(systemName: FileManager.default.isReadableFile(atPath: folder.canonicalPath) ? "folder" : "folder.badge.questionmark") }
             }.buttonStyle(.plain).help(folder.selectedPath)
                 .contextMenu {
-                    Button("New Session Here…") { layout.selectedFolderID = folder.id; launching = true }
+                    Button("New Session Here…") { showLaunch(folderID: folder.id) }
+                    Button("New Worktree & Session…") { showLaunch(folderID: folder.id, newWorktree: true) }
+                        .disabled(!model.online || project.archived || folder.availability != .available)
                     Button("Manage Worktrees…") { worktreeFolderID = folder.id; managingWorktrees = true }
                     Button("Relink / Edit Folder…") { editingProject = true }
                     Button("Reveal in Finder") { FilePanels.reveal(folder.selectedPath) }
@@ -254,7 +259,7 @@ struct ProjectWindow: View {
         } else {
             VStack(spacing: 16) {
                 ContentUnavailableView("Ready for a session", systemImage: "terminal", description: Text("Choose an existing session in the sidebar or launch an agent using this project's presets."))
-                Button("New Session…") { launching = true }.buttonStyle(.borderedProminent).disabled(!model.online || project?.archived == true)
+                Button("New Session…") { showLaunch() }.buttonStyle(.borderedProminent).disabled(!model.online || project?.archived == true)
             }.frame(maxWidth: .infinity, maxHeight: .infinity)
         }
     }
@@ -264,6 +269,7 @@ struct ProjectWindow: View {
         #if DEBUG
         NativeProbe.layouts[projectID] = layout
         NativeProbe.openProject = { id in openWindow(id: "project", value: id) }
+        if QuickSessionProbe.enabled { QuickSessionProbe.openSheet[projectID] = { folderID in showLaunch(folderID: folderID, newWorktree: true) } }
         #endif
         if let saved = model.snapshot.store.windows.first(where: { $0.value.id == projectID })?.value { layout.state = saved }
         model.beginWindowEditing(projectID)
@@ -298,6 +304,10 @@ struct ProjectWindow: View {
         NSApp.activate(ignoringOtherApps: true)
     }
     private func saveLayout() { if layout.loaded { model.saveWindow(layout.state) } }
+    private func showLaunch(folderID: UUID? = nil, newWorktree: Bool = false) {
+        if let folderID { layout.selectedFolderID = folderID }
+        launchingInNewWorktree = newWorktree; launching = true
+    }
     private func select(_ id: UUID) { layout.select(id); model.perform { _ = try await model.call("markRead", .object(["sessionID": .string(id.uuidString)])) } }
     private func cycle(_ offset: Int) {
         guard !layout.state.tabs.isEmpty else { return }
