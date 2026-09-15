@@ -2,7 +2,7 @@ import Foundation
 import ChauffeurCore
 
 public actor RuntimeCoordinator {
-    public let id = UUID()
+    public let id: UUID
     public let store: FileStore
     public let ledger: Ledger
     public let terminals: TmuxHost
@@ -17,12 +17,16 @@ public actor RuntimeCoordinator {
     private var endpoint: String?
     private var settings = RetentionSettings()
     private var recentErrors: [ChauffeurError] = []
+    private let logs: RuntimeLogStore?
+    private var metadataErrors: [ChauffeurError] = []
     private var captures: [UUID: Task<TerminalSnapshot?, Error>] = [:]
     private var maintaining = false
     private var retentionSettingsPending = false
     private var lastMessageCleanup = Date.distantPast
     private var snapshotStorage = SnapshotStorageStatus(budgetBytes: RetentionSettings().snapshotBudgetBytes)
-    public init(root: URL, ctlPath: String, environment: [String: String]) throws {
+    public init(root: URL, ctlPath: String, environment: [String: String], logs: RuntimeLogStore? = nil, id: UUID = UUID()) throws {
+        self.id = id
+        self.logs = logs ?? (try? RuntimeLogStore(root: RuntimeLogStore.directory(for: root)))
         self.root = root; self.ctlPath = ctlPath; self.baseEnvironment = environment
         store = try FileStore(root: root)
         ledger = try Ledger(path: root.appendingPathComponent("runtime/ledger.sqlite").path)
@@ -31,6 +35,7 @@ public actor RuntimeCoordinator {
         snapshots = try SnapshotStore(root: root.appendingPathComponent("runtime/snapshots"))
     }
     public func start() async throws {
+        logs?.append(RuntimeLogEntry(.runtimeStarting, runtimeID: id))
         let snapshot = await store.reload()
         // The ledger preserves accepted membership and orphaned live sessions
         // even if a project directory was removed while the service was running.
@@ -38,7 +43,7 @@ public actor RuntimeCoordinator {
         for item in recorded { sessions[item.id] = item }
         for record in snapshot.sessions {
             if let existing = sessions[record.value.id], existing.projectID != record.value.projectID || existing.groupID != record.value.groupID {
-                recentErrors.append(ChauffeurError("immutable_membership", "Session file changes its recorded membership; restore its original IDs", path: record.path))
+                self.record(ChauffeurError("immutable_membership", "Session file changes its recorded membership; restore its original IDs", path: record.path))
                 continue
             }
             sessions[record.value.id] = record.value
@@ -46,7 +51,7 @@ public actor RuntimeCoordinator {
         }
         if let data = try? Data(contentsOf: root.appendingPathComponent("settings.json")) {
             do { let loaded = try JSONCoding.decode(RetentionSettings.self, from: data); try loaded.validate(); settings = loaded }
-            catch { recentErrors.append(ChauffeurError("invalid_settings", "Cannot load retention settings", path: root.appendingPathComponent("settings.json").path)) }
+            catch { record(ChauffeurError("invalid_settings", "Cannot load retention settings", path: root.appendingPathComponent("settings.json").path)) }
         }
         try await reconcile(startup: true)
         await maintainHistory(applySettings: true)
@@ -56,7 +61,10 @@ public actor RuntimeCoordinator {
             try await ledger.updateDelegation(delegation)
         }
     }
-    public func setEndpoint(port: Int) { endpoint = "http://127.0.0.1:\(port)/mcp" }
+    public func setEndpoint(port: Int) {
+        endpoint = "http://127.0.0.1:\(port)/mcp"
+        logs?.append(RuntimeLogEntry(.runtimeReady, runtimeID: id))
+    }
     public func health() -> JSONValue {
         .object(["runtimeID": .string(id.uuidString), "version": .string(RuntimeVersion.current), "protocolVersion": .number(Double(WireProtocol.major)), "mcpEndpoint": endpoint.map(JSONValue.string) ?? .null, "liveSessions": .number(Double(sessions.values.filter { $0.state.isLive }.count)), "status": .string("running")])
     }
@@ -66,13 +74,31 @@ public actor RuntimeCoordinator {
     }
     private func persist(_ session: Session) async throws {
         try await ledger.register(session)
+        let previous = sessions[session.id]
+        if previous == nil || previous?.state != session.state || previous?.processID != session.processID || previous?.runtimeID != session.runtimeID || previous?.failureCode != session.failureCode {
+            var entry = RuntimeLogEntry(.sessionChanged, runtimeID: id)
+            entry.sessionID = session.id; entry.projectID = session.projectID; entry.groupID = session.groupID
+            entry.state = session.state; entry.processID = session.processID; entry.exitStatus = session.exitStatus
+            entry.code = session.failureCode.map { .redacting($0) }
+            logs?.append(entry)
+        }
         sessions[session.id] = session
         let snapshot = await store.current()
         guard snapshot.projects.contains(where: { $0.value.id == session.projectID }) else { return }
         do { try await store.save(session, expectedVersion: snapshot.sessions.first { $0.value.id == session.id }?.version) }
         catch let error as ChauffeurError { record(error) }
     }
-    public func record(_ error: ChauffeurError) { recentErrors.append(error); if recentErrors.count > 100 { recentErrors.removeFirst(recentErrors.count - 100) } }
+    public func record(_ error: ChauffeurError) {
+        recentErrors.append(error); if recentErrors.count > 100 { recentErrors.removeFirst(recentErrors.count - 100) }
+        var entry = RuntimeLogEntry(.operationFailed, runtimeID: id); entry.code = .redacting(error.code)
+        logs?.append(entry)
+    }
+    public func diagnostics() async -> DiagnosticsReport {
+        let snapshot = await store.reload()
+        let logReport = logs?.recent() ?? DiagnosticLogs(status: .unavailable)
+        let logErrors = logReport.status == .unavailable ? [ChauffeurError("log_unavailable", "Structured logs are unavailable")] : []
+        return DiagnosticsReport(sessions: Array(sessions.values), health: health(), errors: snapshot.errors + recentErrors + logErrors, observation: .live, observedAt: Date(), logs: logReport)
+    }
     private var liveSessionIDs: Set<UUID> { Set(sessions.values.filter { $0.state.isLive }.map(\.id)) }
     private func captureHistory(_ sessionID: UUID) async throws -> TerminalSnapshot? {
         if let pending = captures[sessionID] { return try await pending.value }
@@ -121,7 +147,12 @@ public actor RuntimeCoordinator {
     }
     public func reconcile(startup: Bool = false) async throws {
         // Reload human-edited metadata even while every UI is closed.
-        _ = await store.reload()
+        let metadata = await store.reload()
+        if metadata.errors != metadataErrors {
+            metadataErrors = metadata.errors
+            var entry = RuntimeLogEntry(.metadataInvalid, runtimeID: id); entry.count = metadata.errors.count
+            logs?.append(entry)
+        }
         let inventory = try await terminals.inventory()
         for var session in Array(sessions.values) where !launching.contains(session.id) {
             let pane = inventory.first { $0.sessionName == session.id.uuidString }
@@ -130,6 +161,8 @@ public actor RuntimeCoordinator {
                 if pane.dead && session.state.isLive {
                     session.state = stopping.contains(session.id) ? .interrupted : (pane.exitStatus == 0 ? .exited : .failed)
                     session.error = pane.exitStatus == 0 ? nil : "CLI exited with status \(pane.exitStatus.map(String.init) ?? "unknown")"
+                    session.exitStatus = pane.exitStatus
+                    session.failureCode = pane.exitStatus == 0 ? nil : "cli_exit"
                     try await ledger.revoke(sessionID: session.id)
                     stopping.remove(session.id)
                 } else if !pane.dead && startup {
@@ -137,6 +170,7 @@ public actor RuntimeCoordinator {
                 }
             } else if session.state.isLive {
                 session.state = .interrupted; session.error = "Terminal ownership was lost. Resume a recorded conversation explicitly"
+                session.failureCode = "terminal_ownership_lost"
                 try await ledger.revoke(sessionID: session.id)
             }
             if sessions[session.id] != session { session.updatedAt = Date(); try await persist(session) }
@@ -153,6 +187,7 @@ public actor RuntimeCoordinator {
         switch request.method {
         case "hello", "version", "status": return health()
         case "snapshot": return try await snapshot()
+        case "diagnostics": return try .from(await diagnostics())
         case "terminalSnapshot":
             let sessionID = try params.uuid("sessionID")
             guard sessions[sessionID] != nil else { throw ChauffeurError("missing_session", "Session not found") }
@@ -282,6 +317,7 @@ public actor RuntimeCoordinator {
             return session
         } catch {
             session.state = .failed; session.error = (error as? ChauffeurError)?.errorDescription ?? "Launch failed. Verify the executable and configuration directory"
+            session.failureCode = DiagnosticCode.redacting((error as? ChauffeurError)?.code).rawValue
             try await ledger.revoke(sessionID: session.id); try await persist(session)
             throw error
         }
@@ -294,7 +330,7 @@ public actor RuntimeCoordinator {
         launching.insert(sessionID); defer { launching.remove(sessionID) }
         try await terminals.stop(sessionID: sessionID, force: true)
         _ = try Paths.directory(session.launch.configurationPath); _ = try Paths.directory(session.launch.workingDirectory)
-        session.state = .starting; session.error = nil; session.runtimeID = id; try await persist(session)
+        session.state = .starting; session.error = nil; session.failureCode = nil; session.exitStatus = nil; session.runtimeID = id; try await persist(session)
         do {
             let token = try await ledger.issueGrant(sessionID: sessionID)
             var preset = session.launch.preset; preset.configurationDirectory = session.launch.configurationPath
@@ -308,6 +344,7 @@ public actor RuntimeCoordinator {
             try await persist(session); return session
         } catch {
             session.state = .failed; session.error = (error as? ChauffeurError)?.errorDescription ?? "Resume failed"
+            session.failureCode = DiagnosticCode.redacting((error as? ChauffeurError)?.code).rawValue
             try await ledger.revoke(sessionID: session.id); try await persist(session); throw error
         }
     }
@@ -334,6 +371,10 @@ public actor RuntimeCoordinator {
     public func callTool(token: String, name: String, arguments: JSONValue) async throws -> JSONValue {
         let caller = try await ledger.authenticate(token)
         try MCPTools.validate(name: name, arguments: arguments)
+        var entry = RuntimeLogEntry(.toolCalled, runtimeID: id)
+        entry.tool = DiagnosticTool(rawValue: name); entry.sessionID = caller.sessionID
+        entry.projectID = caller.scope.projectID; entry.groupID = caller.scope.groupID
+        logs?.append(entry)
         switch name {
         case "chauffeur_discover":
             let snapshot = await store.current()
@@ -384,6 +425,7 @@ public actor RuntimeCoordinator {
                 delegation.state = .running
             } catch {
                 delegation.state = .failed; delegation.error = (error as? ChauffeurError)?.errorDescription ?? "Delegation failed; any created worktree is retained"
+                record(error as? ChauffeurError ?? ChauffeurError("operation_failed", "Delegation failed"))
             }
             try await ledger.updateDelegation(delegation)
             return try .from(delegation)

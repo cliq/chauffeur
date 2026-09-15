@@ -6,6 +6,8 @@ import ChauffeurRuntimeKit
 
 @main struct ChauffeurRuntimeMain {
     static func main() async {
+        var logs: RuntimeLogStore?
+        let runtimeID = UUID()
         do {
             var args = Array(CommandLine.arguments.dropFirst())
             var root = Paths.applicationSupport
@@ -19,6 +21,7 @@ import ChauffeurRuntimeKit
                 default: throw ChauffeurError("usage", "Unknown runtime option")
                 }
             }
+            logs = try? RuntimeLogStore(root: RuntimeLogStore.directory(for: root))
             // launchd may supply the bundle-relative BundleProgram as argv[0].
             // Resolve the loaded executable, independently of that argument and cwd.
             var executableSize: UInt32 = 0
@@ -46,7 +49,7 @@ import ChauffeurRuntimeKit
             var searchPaths = (environment["PATH"] ?? "").split(separator: ":").map(String.init)
             for path in ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin", "/usr/sbin", "/sbin"] where !searchPaths.contains(path) { searchPaths.append(path) }
             environment["PATH"] = searchPaths.joined(separator: ":")
-            let runtime = try RuntimeCoordinator(root: root, ctlPath: ctl, environment: environment)
+            let runtime = try RuntimeCoordinator(root: root, ctlPath: ctl, environment: environment, logs: logs, id: runtimeID)
             if !loginEnvironmentLoaded { await runtime.record(ChauffeurError("login_environment_unavailable", "Could not load the login-shell environment. Using inherited environment and standard executable search paths; select full CLI paths if needed")) }
             let server = try IPCServer(root: root, runtime: runtime)
             try await runtime.start()
@@ -71,9 +74,11 @@ import ChauffeurRuntimeKit
         } catch {
             // Startup failures can happen before our socket or file store exists.
             // Keep the system log free of command output, paths, and user data.
-            let code = (error as? ChauffeurError)?.code ?? "startup_failed"
+            let code = DiagnosticCode.redacting((error as? ChauffeurError)?.code ?? "startup_failed").rawValue
+            var entry = RuntimeLogEntry(.startupFailed, runtimeID: runtimeID); entry.code = DiagnosticCode(rawValue: code)
+            logs?.append(entry)
             Logger(subsystem: "dev.chauffeur.runtime", category: "startup").error("Runtime startup failed: \(code, privacy: .public)")
-            let text = (error as? ChauffeurError)?.errorDescription ?? "Chauffeur runtime failed to start"
+            let text = "Chauffeur runtime failed to start [\(code)]"
             FileHandle.standardError.write(Data((text + "\n").utf8))
             exit(1)
         }

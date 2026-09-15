@@ -2,6 +2,7 @@ import AppKit
 import Combine
 import Foundation
 import ServiceManagement
+import UniformTypeIdentifiers
 import ChauffeurCore
 
 struct AppSnapshot: Decodable, Sendable {
@@ -22,6 +23,9 @@ struct AppSnapshot: Decodable, Sendable {
     @Published var serviceMessage = "Connecting to background service…"
     @Published private(set) var serviceRegistrationError: String?
     @Published private(set) var isRestartingService = false
+    @Published private(set) var isExportingDiagnostics = false
+    private(set) var snapshotReceivedAt: Date?
+    private var serviceDiagnosticError: NSError?
     private(set) var initialServiceStatus: Int?
     @Published var error: String?
     @Published var stopAllPresented = false
@@ -74,6 +78,7 @@ struct AppSnapshot: Decodable, Sendable {
                         if let failure = response.error { throw failure }
                         guard let result = response.result else { continue }
                         snapshot = try await Task.detached { try result.decode(AppSnapshot.self) }.value
+                        snapshotReceivedAt = Date()
                         online = true; serviceMessage = "Background service running · \(snapshot.sessions.filter { $0.state.isLive }.count) live sessions"
                     }
                 } catch {
@@ -99,7 +104,7 @@ struct AppSnapshot: Decodable, Sendable {
             // An embedded agent without a background-task record may report
             // notFound before its first registration. Let register validate it.
             if service.status == .notRegistered || service.status == .notFound { try service.register() }
-            serviceRegistrationError = nil
+            serviceRegistrationError = nil; serviceDiagnosticError = nil
             if service.status == .requiresApproval { serviceMessage = "Allow Chauffeur in System Settings → Login Items & Extensions" }
             else if service.status == .enabled && UserDefaults.standard.string(forKey: "registeredRuntimeBuild") != runtimeBuildFingerprint {
                 // SMAppService can retain a previous helper's launch constraint,
@@ -108,6 +113,7 @@ struct AppSnapshot: Decodable, Sendable {
             }
         } catch {
             serviceRegistrationError = "Background service could not register: \(error.localizedDescription)"
+            serviceDiagnosticError = error as NSError
             serviceMessage = serviceRegistrationError!
         }
     }
@@ -140,12 +146,13 @@ struct AppSnapshot: Decodable, Sendable {
         connection?.close(); online = false
         do {
             if service.status == .enabled { try await service.unregister() }
-            try service.register(); serviceRegistrationError = nil; reconnect()
+            try service.register(); serviceRegistrationError = nil; serviceDiagnosticError = nil; reconnect()
             if service.status == .enabled, let fingerprint = runtimeBuildFingerprint { UserDefaults.standard.set(fingerprint, forKey: "registeredRuntimeBuild") }
             // The subscription reconnects when startup finishes. An immediate
             // snapshot request would report a spurious error during shell setup.
         } catch {
             serviceRegistrationError = "Background service could not restart: \(error.localizedDescription)"
+            serviceDiagnosticError = error as NSError
             serviceMessage = serviceRegistrationError!
             throw error
         }
@@ -157,7 +164,43 @@ struct AppSnapshot: Decodable, Sendable {
     func refresh() async throws {
         let result = try await call("snapshot")
         snapshot = try await Task.detached { try result.decode(AppSnapshot.self) }.value
+        snapshotReceivedAt = Date()
         online = true
+    }
+    private var diagnosticApp: DiagnosticApp {
+        DiagnosticApp(version: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String, service: serviceStatus, error: serviceDiagnosticError)
+    }
+    func cachedDiagnostics() -> DiagnosticsReport {
+        var report = DiagnosticsReport(sessions: snapshot.sessions, health: snapshot.health, errors: snapshot.store.errors + snapshot.errors,
+            observation: snapshotReceivedAt == nil ? .unavailable : .cached, observedAt: snapshotReceivedAt)
+        report.app = diagnosticApp
+        return report
+    }
+    func makeDiagnostics() async -> DiagnosticsReport {
+        do {
+            var report = try await call("diagnostics").decode(DiagnosticsReport.self)
+            guard report.schemaVersion == 1 else { return cachedDiagnostics() }
+            report.app = diagnosticApp
+            return report
+        } catch { return cachedDiagnostics() }
+    }
+    func exportDiagnostics() {
+        guard !isExportingDiagnostics else { return }
+        let panel = NSSavePanel()
+        panel.title = "Export Diagnostics"; panel.nameFieldStringValue = "Chauffeur-diagnostics.json"
+        panel.allowedContentTypes = [.json]
+        panel.message = "Includes session paths, versions, state, and error codes. Paths can identify your user account and projects."
+        isExportingDiagnostics = true
+        panel.begin { [weak self] response in
+            guard let self else { return }
+            guard response == .OK, let destination = panel.url else { self.isExportingDiagnostics = false; return }
+            Task {
+                defer { self.isExportingDiagnostics = false }
+                let report = await self.makeDiagnostics()
+                do { try await Task.detached { try report.write(to: destination) }.value }
+                catch { self.error = error.localizedDescription }
+            }
+        }
     }
     func perform(_ operation: @escaping @MainActor () async throws -> Void) {
         Task {

@@ -16,6 +16,7 @@ import ChauffeurCore
                 print("""
                 chauffeurctl status [--socket PATH]
                 chauffeurctl snapshot [--socket PATH]
+                chauffeurctl diagnostics [--socket PATH]
                 chauffeurctl request METHOD [JSON | --file PATH] [--socket PATH]
                 chauffeurctl event --session UUID EVENT [provider-notify-json]
 
@@ -23,7 +24,7 @@ import ChauffeurCore
                 hook payloads are reduced to event and conversation IDs; never logged.
                 """)
                 return
-            case "status", "snapshot": request = IPCRequest(command)
+            case "status", "snapshot", "diagnostics": request = IPCRequest(command)
             case "request":
                 guard !args.isEmpty else { throw ChauffeurError("usage", "request requires a method") }
                 let method = args.removeFirst()

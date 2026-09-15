@@ -58,7 +58,11 @@ public final class IPCServer: @unchecked Sendable {
                 }
                 let response: IPCResponse
                 do { response = IPCResponse(id: request.id, result: try await runtime.handle(request)) }
-                catch { response = IPCResponse(id: request.id, error: error as? ChauffeurError ?? ChauffeurError("operation_failed", "Runtime operation failed")) }
+                catch {
+                    let failure = error as? ChauffeurError ?? ChauffeurError("operation_failed", "Runtime operation failed")
+                    await runtime.record(failure)
+                    response = IPCResponse(id: request.id, error: failure)
+                }
                 try await connection.sendAsync(response)
             }
         } catch { /* EOF or detached UI: agent ownership is unchanged. */ }

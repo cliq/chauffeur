@@ -36,6 +36,7 @@ public enum MCPServer {
                     let value = try await runtime.callTool(token: token, name: body["params"].requiredString("name"), arguments: body["params"]["arguments"] == .null ? .object([:]) : body["params"]["arguments"])
                     result = .object(["content": .array([.object(["type": .string("text"), "text": .string(String(decoding: try JSONCoding.encode(value), as: UTF8.self))])]), "isError": .bool(false)])
                 } catch {
+                    await runtime.record(error as? ChauffeurError ?? ChauffeurError("operation_failed", "Tool operation failed"))
                     let safe = (error as? ChauffeurError)?.message ?? "Tool operation failed"
                     result = .object(["content": .array([.object(["type": .string("text"), "text": .string(safe)])]), "isError": .bool(true)])
                 }

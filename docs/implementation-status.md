@@ -20,10 +20,15 @@ the PRD's real-CLI, native-window, and daily-use acceptance scenarios.
   line/byte budgets, and survive terminal/runtime loss. Native history is
   read-only and searchable; completed-message cleanup preserves queued/received
   messages. See [retention and recovery](terminal-history.md).
-- Fourteen Swift tests: canonical paths/discovery, per-child environment, argument validation,
+- Twenty Swift tests: canonical paths/discovery, per-child environment, argument validation,
   atomic file replacement/conflicts/corrupt files, durable group-scoped messages,
   grant revocation, retry keys, bounded single-level delegation, and safe Git
   worktree creation/removal.
+- Typed diagnostics export through Settings and `chauffeurctl`, with explicit
+  live/cached/unavailable observations. Private structured logs rotate within
+  2 MiB. Tests cover sensitive-field exclusion, hostile input, bounds, legacy
+  records, private exports, rotation, and unsafe-file preservation. See
+  [diagnostics and runtime logs](diagnostics.md).
 - `Prototypes/terminal_continuity.py`: detached output, native tmux redraw,
   Unicode, unsent input and resize with the same process.
 - `Prototypes/runtime_smoke.py`: actual socket and HTTP service, three fixture
@@ -48,7 +53,7 @@ the PRD's real-CLI, native-window, and daily-use acceptance scenarios.
 | --- | --- | --- |
 | Stage 0 V1–V5 | Decision documents; fixtures; real default-route Codex credential/stop evidence; actual LaunchAgent lifecycle | Full real CLI/profile gates; remaining macOS/Spaces gate |
 | 1.1 Records/store | Implemented and tested, including external reload/conflict errors | Complete reference-integrity checks; targeted file watcher (current one-second reload also runs with no UI); empty-set UI acceptance |
-| 1.2 Runtime skeleton | Lock, peer-checked Unix socket, version handshake, health helper, verified bundled LaunchAgent registration/recovery | Structured redacted log files (startup error codes reach the system log) |
+| 1.2 Runtime skeleton | Lock, peer-checked Unix socket, version handshake, health helper, verified bundled LaunchAgent registration/recovery; bounded structured logs with typed redaction | Remaining live-service release acceptance |
 | 1.3–1.7 Presets/projects/groups/welcome/windows | Native editors, cancellable discovery, relink/archive, welcome and project windows implemented | Full interaction and four-Spaces acceptance |
 | 1.8 Basic launch | Runtime/real Codex launch, filtered environment, private exec handoff, terminal input/resize/stop | Full native account/status checks, Claude launch, complete preflight |
 | 1.9 Session details | Native details show the immutable launch snapshot and lifecycle/coordination records | Real-session interaction acceptance |
@@ -63,7 +68,7 @@ the PRD's real-CLI, native-window, and daily-use acceptance scenarios.
 | 3.4 Delegation | Durable reservation, launch path, worktree default, limits, depth check, result transaction | Bidirectional real-CLI acceptance, crash-window integration tests and failed-child visibility audit |
 | 3.5 Wake | Bounded inbox wait; no terminal message injection | Real idle/busy validation (pending-attention UI implemented) |
 | 3.6–3.7 Coordination UI/skill | Tool descriptions and native message/delegation details implemented | Bundled skill and loading/install/removal routes |
-| 4.1–4.5 Packaging/compatibility/retention/diagnostics/docs | Developer ID local builds; actual registration/update; retention settings/cleanup; terminal and service recovery guides | Full release acceptance; diagnostics export; remaining recovery guide |
+| 4.1–4.5 Packaging/compatibility/retention/diagnostics/docs | Developer ID local builds; actual registration/update; retention settings/cleanup; diagnostics export; terminal, diagnostics and service recovery guides | Full release acceptance; native save-dialog interaction; remaining recovery guide |
 | 4.6 Release checklist | Not run | Ten real sessions/four Spaces, timings/hardware record, all F1–F7 scenarios, three normal workdays and failure log |
 
 ## Next implementation order

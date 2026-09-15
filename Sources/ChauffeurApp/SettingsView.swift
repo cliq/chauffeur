@@ -54,6 +54,10 @@ struct SettingsView: View {
                     Text("Saved terminal history: \(model.snapshot.snapshotStorage.files) files, \(ByteCountFormatter.string(fromByteCount: Int64(model.snapshot.snapshotStorage.bytes), countStyle: .file)).").font(.caption)
                     Text("History is captured every five seconds while the service is running. Older snapshots are removed to fit the disk budget, starting with ended sessions. Scrollback changes trim saved history immediately and apply to new live terminals. Queued and received messages and native CLI conversations are preserved.").font(.caption).foregroundStyle(.secondary)
                 }
+                Section("Diagnostics") {
+                    Button("Export Diagnostics…") { model.exportDiagnostics() }.disabled(model.isExportingDiagnostics)
+                    Text("Exports paths, versions, session state, and error codes. Offline exports use the last received state and include its timestamp.").font(.caption).foregroundStyle(.secondary)
+                }
             }.formStyle(.grouped).tabItem { Label("Runtime", systemImage: "gearshape.2") }
         }.frame(width: 830, height: 550)
             .onAppear { selectedSet = selectedSet ?? model.presetSets.first?.id; retention = model.snapshot.settings }

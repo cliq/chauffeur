@@ -105,6 +105,7 @@ integration; other versions offer explicit basic terminal mode. See
 ```sh
 .build/debug/ChauffeurRuntime
 .build/debug/chauffeurctl status
+.build/debug/chauffeurctl diagnostics
 .build/debug/chauffeurctl snapshot
 .build/debug/chauffeurctl help
 ```
@@ -114,6 +115,11 @@ Run the helper in another terminal when starting the runtime directly. Use
 `--socket /absolute/path/runtime/runtime.sock` on the helper to isolate development
 data. The default is `~/Library/Application Support/Chauffeur`; only one runtime
 can own it.
+
+Use **Settings → Runtime → Export Diagnostics…** for a private report, including
+cached state if the service is offline. Structured runtime logs rotate within a
+2 MiB budget. See [diagnostics and redaction](docs/diagnostics.md) for included
+fields, path privacy, storage locations, and limits.
 
 Chauffeur uses its own tmux socket. A runtime restart reconciles recorded
 pane/process identities; missing ownership becomes Interrupted. Metadata files

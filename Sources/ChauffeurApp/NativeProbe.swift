@@ -20,6 +20,15 @@ import ChauffeurCore
                     model.online && layouts.count == 4 && layouts.values.allSatisfy { $0.window?.isVisible == true }
                 }
                 guard model.snapshot.sessions.count == 10 else { throw ChauffeurError("native_probe", "Expected ten fixture sessions") }
+                let diagnostics = await model.makeDiagnostics()
+                let cached = model.cachedDiagnostics()
+                let unavailable = AppModel().cachedDiagnostics()
+                guard diagnostics.observation == .live, diagnostics.sessionCount == 10, diagnostics.logs.status == .available,
+                      cached.observation == .cached, cached.observedAt == model.snapshotReceivedAt,
+                      cached.logs.status == .notFetched, unavailable.observation == .unavailable else {
+                    throw ChauffeurError("native_probe", "Diagnostics did not distinguish live, cached, and unavailable state")
+                }
+                try diagnostics.write(to: root.appendingPathComponent("diagnostics-phase-\(phase).json"))
                 let ordered = layouts.values.sorted { model.project($0.state.id)!.name < model.project($1.state.id)!.name }
                 for layout in ordered {
                     let original = layout.state

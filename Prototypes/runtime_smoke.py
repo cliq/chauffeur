@@ -163,6 +163,25 @@ with tempfile.TemporaryDirectory(prefix="chauffeur-smoke-", dir="/tmp") as direc
         assert not error and message["state"] == "queued"
         assert tool(token_a, "chauffeur_send_message", message_args)[1]["id"] == message["id"]
         assert tool(token_other, "chauffeur_reply", {"messageID": message["id"], "body": "cross", "retryKey": "probe"})[0]
+        # Exercise the real socket/CLI export with live grants and message data.
+        # Neither raw snapshots nor raw log lines are acceptable diagnostics.
+        diagnostics = call("diagnostics")
+        assert diagnostics["observation"] == "live" and diagnostics["observedAt"]
+        assert diagnostics["runtimeState"] == "running" and diagnostics["mcpReady"]
+        assert diagnostics["sessionCount"] == 3 and diagnostics["logs"]["status"] == "available"
+        assert {item["configurationPath"] for item in diagnostics["sessions"]} == {str(config.resolve())}
+        assert {item["workingDirectory"] for item in diagnostics["sessions"]} == {str(checkout.resolve())}
+        assert any(item["code"] == "login_environment_unavailable" for item in diagnostics["issues"])
+        assert any(item["event"] == "toolCalled" and item.get("sessionID") == sessions[0]["id"] for item in diagnostics["logs"]["entries"])
+        cli_diagnostics = json.loads(subprocess.check_output([str(binary.parent / "chauffeurctl"), "diagnostics", "--socket", socket_path]))
+        assert cli_diagnostics["runtimeID"] == health["runtimeID"]
+        log_files = list((root / "runtime/logs").glob("*.jsonl"))
+        assert log_files and all(path.stat().st_mode & 0o777 == 0o600 for path in log_files)
+        exported = json.dumps(diagnostics) + json.dumps(cli_diagnostics) + "".join(path.read_text() for path in log_files)
+        for private in [token_a, token_b, token_other, message_args["body"], "fixture-must-be-removed", "Fixture 0", "Fake Codex", "Fixture set", "unsent fixture input"]:
+            assert private not in exported, "Private fixture data entered diagnostics"
+        forbidden = {"arguments", "environment", "initialTask", "messages", "body", "title", "nativeConversationID", "error", "preset"}
+        assert all(not forbidden.intersection(item) for item in diagnostics["sessions"])
         assert tool(token_other, "chauffeur_send_message", message_args)[0]
         connection = attach(sessions[0]["id"])
         import base64
@@ -214,6 +233,7 @@ with tempfile.TemporaryDirectory(prefix="chauffeur-smoke-", dir="/tmp") as direc
         call("reconcile")
         interrupted = call("snapshot")
         assert all(item["state"] == "interrupted" for item in interrupted["sessions"])
+        assert all(item.get("failureCode") == "terminal_ownership_lost" for item in call("diagnostics")["sessions"] if item["id"] != sessions[0]["id"])
         runtime.kill(); runtime.wait(timeout=5)
         runtime = start_runtime()
         wait_for(lambda: call("status"), lambda value: value.get("runtimeID") != new_health["runtimeID"] and value.get("mcpEndpoint"))
@@ -238,7 +258,26 @@ with tempfile.TemporaryDirectory(prefix="chauffeur-smoke-", dir="/tmp") as direc
             wait_for(pane_names, lambda value: extra["id"] not in value)
             archive = call("terminalSnapshot", {"sessionID": extra["id"]})
             assert "fixture-history-249" in archive["history"] + archive["screen"]
-        print(json.dumps({"runtimeFixture": "pass", "sessions": 3, "profileEnvironment": "isolated", "terminalReattachment": "pass", "runtimeRestart": "same tmux-owned processes and MCP port", "terminalHistory": "bounded normal history and active screen survive terminal and runtime loss", "mailboxPersistence": "pass", "groupProbes": "rejected", "retries": "same record IDs", "revocation": "pass", "realCLIValidation": "pending"}, indent=2))
+            diagnostic = next(item for item in call("diagnostics")["sessions"] if item["id"] == extra["id"])
+            assert diagnostic["state"] == "exited" and diagnostic["exitStatus"] == 0
+        # A broken log destination must be reported without stopping the service
+        # or modifying the file it points to.
+        active_log = root / "runtime/logs/runtime.jsonl"
+        active_log.rename(root / "retained-fixture-log.jsonl")
+        untouched = root / "unrelated-private-file"
+        untouched.write_text("private-untouched-content")
+        active_log.symlink_to(untouched)
+        with socket.socket(socket.AF_UNIX) as connection:
+            connection.settimeout(10); connection.connect(socket_path)
+            send_frame(connection, request("intentional-fixture-error"))
+            assert receive_frame(connection)["error"]["code"] == "unknown_method"
+        unavailable_logs = call("diagnostics")
+        assert unavailable_logs["logs"]["status"] == "unavailable"
+        assert any(issue["code"] == "log_unavailable" for issue in unavailable_logs["issues"])
+        assert call("status")["status"] == "running"
+        assert untouched.read_text() == "private-untouched-content"
+        assert "private-untouched-content" not in json.dumps(unavailable_logs)
+        print(json.dumps({"runtimeFixture": "pass", "sessions": 3, "profileEnvironment": "isolated", "terminalReattachment": "pass", "runtimeRestart": "same tmux-owned processes and MCP port", "terminalHistory": "bounded normal history and active screen survive terminal and runtime loss", "mailboxPersistence": "pass", "groupProbes": "rejected", "retries": "same record IDs", "revocation": "pass", "diagnostics": "redacted live socket and CLI reports; log failure preserves service", "realCLIValidation": "pending"}, indent=2))
     except Exception:
         log.flush()
         print((root / "runtime.log").read_text()[-4000:])

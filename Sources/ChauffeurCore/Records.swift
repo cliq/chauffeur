@@ -147,6 +147,8 @@ public struct Session: Record, Equatable {
     public var initialTask: String?
     public var launchRequestFingerprint: String?
     public var error: String?
+    public var failureCode: String?
+    public var exitStatus: Int32?
     public var unread = false
     public var pendingMessages = 0
     public var createdAt = Date()
