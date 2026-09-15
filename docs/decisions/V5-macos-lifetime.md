@@ -15,12 +15,57 @@ original file version so external edits cause an explicit conflict. Closing a ta
 or window detaches its terminal views. Normal quit flushes queued layout changes
 before termination and keeps project windows marked for reopening.
 
+## Actual LaunchAgent evidence
+
+`Prototypes/service_lifetime_smoke.py --use-default-service` passes against the
+Debug bundle and an empty default store on the recorded development Mac. It
+uses the actual `SMAppService` registration and default runtime socket. Normal
+application startup shows a window and connects; quitting the UI leaves the same
+runtime available. Terminating the registered helper with the UI closed causes
+launchd to start a new runtime on the recorded MCP endpoint. Reopening the UI
+reconnects to that runtime; the app's unregister/register restart path also
+starts a new one. Cleanup unregisters the test service. Private reports are in
+`.build/service-lifetime-artifacts/`.
+
+The Release app also starts its own bundled helper, confirmed using the running
+process's executable path, and leaves that helper available when the UI process
+exits. The service check then opens a Debug build signed with the same Developer
+ID certificate and verifies that launchd selects its helper. The builds have
+different executable fingerprints, exercising automatic registration refresh.
+Release evidence is under `.build/service-release-artifacts/`.
+
+This exposed and corrected several startup issues:
+
+- A previously unseen service can return `.notFound`; registration now handles
+  that as well as `.notRegistered`, and retains registration errors in the UI.
+- Runtime connection startup belongs to the application delegate, independent
+  of SwiftUI window restoration. The Welcome scene explicitly presents at launch.
+- launchd can pass a relative `BundleProgram` as `argv[0]`. The runtime resolves
+  its loaded executable before locating the sibling `chauffeurctl`.
+- Ad-hoc helper updates encountered launch-constraint failures. Certificate
+  builds bind the job to their signing team and helper identifier, using the
+  [documented SpawnConstraint mechanism](https://developer.apple.com/videos/play/wwdc2023/10266/).
+  Ad-hoc fixtures bind to the helper code hash. The app fingerprints both the
+  plist and executable and refreshes registration for an updated build.
+  Helpers are signed in a staging directory and atomically replaced, avoiding
+  in-place executable updates and their cached-signature problems. The final
+  build step seals and verifies the outer app even for a helper-only rebuild.
+- The login shell times out under launchd on this Mac. Startup now appends
+  missing Homebrew/system search paths and records an issue when it must use
+  the inherited environment. The runtime fixture also exercises this fallback.
+
+The service probe contains no CLI sessions and does not prove the remaining
+Spaces, sleep/wake, notification or real-session gates. See
+[service recovery](../service-recovery.md) for setup and development updates.
+
 ## Native fixture evidence
 
 `Scripts/build-app.sh` and `Scripts/build-app.sh Release` succeed.
 `codesign --verify --deep --strict` validates the local app and its embedded
-binaries; Release helpers are signed with hardened runtime enabled. This is local signing, not distribution
-signing/notarization.
+binaries. Release app/helpers are Developer ID signed with hardened runtime and
+timestamps; the app has not been notarized or published. The default script also
+supports ad-hoc signing for isolated fixtures. Xcode disables hardened runtime
+for the ad-hoc Debug app; the Release app retains it.
 
 `Prototypes/native_window_smoke.py` passes against the actual Debug app with an
 isolated runtime with four projects and ten fake CLI sessions. Its Debug-only
@@ -37,6 +82,13 @@ saves use throttled main-queue updates, including while sheets are active, and
 initial visible geometry is saved even before a move or resize. The probe
 checks saved geometry against the actual window across all three launches.
 
+A concurrent first-history request exposed a race: a caller could receive
+“no saved history” while another capture was still running. Requests now share
+the in-flight capture task. The runtime fixture reproduces the failure with
+eight simultaneous requests before the fix and verifies that all receive history
+afterward. Native probe failures now also report history loading status and
+capture byte counts.
+
 The probe drives native view methods directly. Its cached-view images can show
 terminal pixels but do not reliably capture every layer of a SwiftUI window.
 They do not establish OS keyboard, accessibility, notification, or Spaces behavior.
@@ -44,8 +96,8 @@ They do not establish OS keyboard, accessibility, notification, or Spaces behavi
 ## OS automation attempt
 
 The Xcode `ChauffeurAppUITests` target builds. Its runner requires hardened
-runtime disabled for the locally signed UI-test bundle; the app retains hardened
-runtime. The test runner then times out before test execution while enabling
+runtime disabled for the locally signed UI-test bundle. The Release app retains
+hardened runtime. The test runner then times out before test execution while enabling
 macOS Automation Mode. `automationmodetool` reports that user authentication is
 required; `DevToolsSecurity -status` reports Developer mode disabled. These system
 settings were left unchanged, and the user was asked to enable UI-testing access.
@@ -54,8 +106,6 @@ Automation Mode and Developer mode disabled; XCUITest has not yet run.
 
 ## Remaining gate evidence
 
-- Verify actual `SMAppService` registration and launchd restart from the app.
-  The direct fixture uses `CHAUFFEUR_SOCKET` and bypasses registration.
 - Run XCUITest, native keyboard/copy/paste/find/link and accessibility interactions.
 - Place four windows on separate Spaces; confirm focus, frames and restoration.
 - Validate sleep/wake, service loss, notifications, and notification routing when

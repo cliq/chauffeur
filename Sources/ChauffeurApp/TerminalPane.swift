@@ -103,6 +103,9 @@ import ChauffeurCore
     }
     func display(_ snapshot: TerminalSnapshot) {
         guard readOnly else { return }
+        #if DEBUG
+        trace("display history bytes=\(snapshot.history.utf8.count) screen bytes=\(snapshot.screen.utf8.count)")
+        #endif
         terminal.getTerminal().changeScrollback(snapshot.lineLimit + snapshot.rows)
         terminal.feed(text: "\u{1b}c" + snapshot.rendering)
     }
@@ -207,10 +210,11 @@ private struct TerminalHistoryView: View {
     }
     private func refresh() async {
         loading = true; failure = nil; defer { loading = false }
+        controller.status = "Loading saved terminal history…"
         do {
             let result = try await model.call("terminalSnapshot", .object(["sessionID": .string(session.id.uuidString)]))
             let saved = try await Task.detached { try result.decode(TerminalSnapshot.self) }.value
-            try saved.validate(); snapshot = saved; controller.display(saved)
-        } catch { failure = (error as? ChauffeurError)?.message ?? "Could not load saved terminal history" }
+            try saved.validate(); snapshot = saved; controller.display(saved); controller.status = nil
+        } catch { failure = (error as? ChauffeurError)?.message ?? "Could not load saved terminal history"; controller.status = failure }
     }
 }

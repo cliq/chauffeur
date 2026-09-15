@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """V1/V2/V3/V4 runtime fixture integration; no real CLI accounts or provider calls."""
 from datetime import datetime, timezone
+from concurrent.futures import ThreadPoolExecutor
 import http.client
 import json
 import os
@@ -66,9 +67,12 @@ with tempfile.TemporaryDirectory(prefix="chauffeur-smoke-", dir="/tmp") as direc
     log = open(root / "runtime.log", "w")
     runtime = None
     attachments = []
-    environment = dict(os.environ, OPENAI_API_KEY="fixture-must-be-removed")
+    # Exercise launchd's minimal PATH and an unavailable login shell too.
+    environment = dict(os.environ, OPENAI_API_KEY="fixture-must-be-removed", PATH="/usr/bin:/bin:/usr/sbin:/sbin", SHELL="/nonexistent-fixture-shell")
     def start_runtime():
-        return subprocess.Popen([str(binary), "--data-dir", str(root)], stdout=log, stderr=log, env=environment)
+        # SMAppService can use the bundle-relative BundleProgram as argv[0].
+        # The runtime must locate its sibling helper using its loaded executable.
+        return subprocess.Popen(["Contents/MacOS/ChauffeurRuntime", "--data-dir", str(root)], executable=str(binary), cwd="/", stdout=log, stderr=log, env=environment)
     def call(method, params=None):
         with socket.socket(socket.AF_UNIX) as connection:
             connection.settimeout(30)
@@ -169,7 +173,13 @@ with tempfile.TemporaryDirectory(prefix="chauffeur-smoke-", dir="/tmp") as direc
         reattached = attach(sessions[0]["id"])
         send_frame(reattached, request("resize", {"cols": 110, "rows": 35}))
         reattached.close(); attachments.remove(reattached)
-        saved_history = call("terminalSnapshot", {"sessionID": sessions[0]["id"]})
+        # Multiple views can request the first archive while periodic capture is
+        # also running. Every caller must receive the completed capture.
+        (root / "runtime/snapshots" / sessions[0]["id"] / "latest.json").unlink(missing_ok=True)
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            captures = list(pool.map(lambda _: call("terminalSnapshot", {"sessionID": sessions[0]["id"]}), range(8)))
+        assert all("fixture-history-249" in value["history"] for value in captures)
+        saved_history = captures[0]
         assert "fixture-history-000" in saved_history["history"]
         assert "fixture-history-249" in saved_history["history"]
         assert "Chauffeur fixture" in saved_history["screen"]
@@ -186,6 +196,7 @@ with tempfile.TemporaryDirectory(prefix="chauffeur-smoke-", dir="/tmp") as direc
         runtime = start_runtime()
         new_health = wait_for(lambda: call("status"), lambda value: value.get("runtimeID") != health["runtimeID"] and value.get("mcpEndpoint"))
         restored = call("snapshot")
+        assert any(issue["code"] == "login_environment_unavailable" for issue in restored["errors"])
         assert new_health["mcpEndpoint"] == health["mcpEndpoint"]
         assert {item["processID"] for item in restored["sessions"]} == {item["pid"] for item in credentials}
         assert all(item["state"] == "activityUnknown" for item in restored["sessions"])

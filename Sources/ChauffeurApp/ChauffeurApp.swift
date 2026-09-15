@@ -4,18 +4,19 @@ import ChauffeurCore
 
 @main struct ChauffeurApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
-    @StateObject private var model = AppModel()
+    private var model: AppModel { delegate.model }
     @Environment(\.openWindow) private var openWindow
     var body: some Scene {
         Window("Welcome to Chauffeur", id: "welcome") {
-            WelcomeView().modifier(AppAlerts()).environmentObject(model).task { delegate.model = model; model.start() }
+            WelcomeView().modifier(AppAlerts()).environmentObject(model)
         }
         .defaultSize(width: 820, height: 500)
         .windowResizability(.contentMinSize)
+        .defaultLaunchBehavior(.presented)
         .restorationBehavior(.disabled)
         WindowGroup("Project", id: "project", for: UUID.self) { $projectID in
             if let projectID {
-                ProjectWindow(projectID: projectID).modifier(AppAlerts()).environmentObject(model).task { delegate.model = model; model.start() }
+                ProjectWindow(projectID: projectID).modifier(AppAlerts()).environmentObject(model)
             }
         }
         .defaultSize(width: 1240, height: 820)
@@ -62,10 +63,10 @@ import ChauffeurCore
 }
 
 @MainActor final class AppDelegate: NSObject, NSApplicationDelegate {
-    weak var model: AppModel?
+    let model = AppModel()
+    func applicationDidFinishLaunching(_ notification: Notification) { model.start() }
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        guard let model else { return .terminateNow }
         model.isTerminating = true
         return .terminateNow
     }

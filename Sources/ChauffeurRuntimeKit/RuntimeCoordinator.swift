@@ -17,7 +17,7 @@ public actor RuntimeCoordinator {
     private var endpoint: String?
     private var settings = RetentionSettings()
     private var recentErrors: [ChauffeurError] = []
-    private var capturing = Set<UUID>()
+    private var captures: [UUID: Task<TerminalSnapshot?, Error>] = [:]
     private var maintaining = false
     private var retentionSettingsPending = false
     private var lastMessageCleanup = Date.distantPast
@@ -75,8 +75,17 @@ public actor RuntimeCoordinator {
     public func record(_ error: ChauffeurError) { recentErrors.append(error); if recentErrors.count > 100 { recentErrors.removeFirst(recentErrors.count - 100) } }
     private var liveSessionIDs: Set<UUID> { Set(sessions.values.filter { $0.state.isLive }.map(\.id)) }
     private func captureHistory(_ sessionID: UUID) async throws -> TerminalSnapshot? {
-        guard let session = sessions[sessionID], !launching.contains(sessionID), !capturing.contains(sessionID) else { return try await snapshots.read(sessionID) }
-        capturing.insert(sessionID); defer { capturing.remove(sessionID) }
+        if let pending = captures[sessionID] { return try await pending.value }
+        guard let session = sessions[sessionID], !launching.contains(sessionID) else { return try await snapshots.read(sessionID) }
+        // Share in-flight work so a history request cannot return an absent or
+        // stale archive while periodic capture is still producing its result.
+        let pending = Task<TerminalSnapshot?, Error> { try await self.captureAndSaveHistory(session) }
+        captures[sessionID] = pending
+        defer { captures.removeValue(forKey: sessionID) }
+        return try await pending.value
+    }
+    private func captureAndSaveHistory(_ session: Session) async throws -> TerminalSnapshot {
+        let sessionID = session.id
         let value = try await terminals.capture(sessionID: sessionID, lines: settings.scrollbackLines)
         guard session.processID == value.processID, session.terminalIdentity == value.terminalIdentity,
               sessions[sessionID]?.processID == value.processID, sessions[sessionID]?.terminalIdentity == value.terminalIdentity,
@@ -96,7 +105,7 @@ public actor RuntimeCoordinator {
             for pane in inventory {
                 guard let sessionID = UUID(uuidString: pane.sessionName), let session = sessions[sessionID],
                       session.processID == pane.processID, session.terminalIdentity == pane.paneID,
-                      !launching.contains(sessionID), !capturing.contains(sessionID) else { continue }
+                      !launching.contains(sessionID), captures[sessionID] == nil else { continue }
                 do {
                     if let saved = try await captureHistory(sessionID), pane.dead, sessions[sessionID]?.state.isLive == false { try await terminals.retireDead(saved) }
                 } catch let error as ChauffeurError { record(error) }

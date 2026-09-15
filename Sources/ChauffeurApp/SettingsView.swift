@@ -42,7 +42,7 @@ struct SettingsView: View {
             Form {
                 Section("Background Service") {
                     ServiceHealthView()
-                    HStack { Button("Restart Service") { model.restartService() }; Button("Login Items Settings…") { model.openServiceSettings() } }
+                    HStack { Button("Restart Service") { model.restartService() }.disabled(model.isRestartingService); Button("Login Items Settings…") { model.openServiceSettings() } }
                     Text("Agents remain running when Chauffeur's windows close. A runtime restart reconciles surviving terminal processes.").font(.caption).foregroundStyle(.secondary)
                 }
                 Section("Retention and Delegation") {

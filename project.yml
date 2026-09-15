@@ -43,6 +43,10 @@ targets:
       - name: Embed background runtime
         script: '"$SRCROOT/Scripts/embed-runtime.sh"'
         basedOnDependencyAnalysis: false
+        outputFiles:
+          - "$(TARGET_BUILD_DIR)/$(CONTENTS_FOLDER_PATH)/MacOS/ChauffeurRuntime"
+          - "$(TARGET_BUILD_DIR)/$(CONTENTS_FOLDER_PATH)/MacOS/chauffeurctl"
+          - "$(TARGET_BUILD_DIR)/$(CONTENTS_FOLDER_PATH)/Library/LaunchAgents/dev.chauffeur.runtime.plist"
   ChauffeurAppUITests:
     type: bundle.ui-testing
     platform: macOS

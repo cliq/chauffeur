@@ -1,5 +1,6 @@
 import Foundation
 import Darwin
+import OSLog
 import ChauffeurCore
 import ChauffeurRuntimeKit
 
@@ -18,19 +19,35 @@ import ChauffeurRuntimeKit
                 default: throw ChauffeurError("usage", "Unknown runtime option")
                 }
             }
-            let ctl = URL(fileURLWithPath: CommandLine.arguments[0]).standardizedFileURL.deletingLastPathComponent().appendingPathComponent("chauffeurctl").path
+            // launchd may supply the bundle-relative BundleProgram as argv[0].
+            // Resolve the loaded executable, independently of that argument and cwd.
+            var executableSize: UInt32 = 0
+            _NSGetExecutablePath(nil, &executableSize)
+            var executableBytes = [CChar](repeating: 0, count: Int(executableSize))
+            guard _NSGetExecutablePath(&executableBytes, &executableSize) == 0 else { throw ChauffeurError("missing_helper", "Cannot locate the running runtime executable") }
+            let executablePath = String(decoding: executableBytes.prefix { $0 != 0 }.map { UInt8(bitPattern: $0) }, as: UTF8.self)
+            let executable = URL(fileURLWithPath: executablePath).resolvingSymlinksInPath()
+            let ctl = executable.deletingLastPathComponent().appendingPathComponent("chauffeurctl").path
             guard FileManager.default.isExecutableFile(atPath: ctl) else { throw ChauffeurError("missing_helper", "Install chauffeurctl beside ChauffeurRuntime", path: ctl) }
             var environment = ProcessInfo.processInfo.environment
+            var loginEnvironmentLoaded = false
             // launchd has a minimal PATH. Query the user's login shell once;
             // per-child filtering still removes inherited profile/auth values.
             let shell = environment["SHELL"] ?? "/bin/zsh"
             if let login = try? await ProcessRunner.run(shell, ["-lic", "/usr/bin/env -0"], timeout: 10), login.status == 0 {
+                loginEnvironmentLoaded = true
                 for entry in login.output.split(separator: "\0") {
                     let pair = entry.split(separator: "=", maxSplits: 1, omittingEmptySubsequences: false)
                     if pair.count == 2, !pair[0].contains("\n") { environment[String(pair[0])] = String(pair[1]) }
                 }
             }
+            // launchd's PATH excludes common CLI installation directories. Keep
+            // the user's ordering, but remain usable if shell startup fails.
+            var searchPaths = (environment["PATH"] ?? "").split(separator: ":").map(String.init)
+            for path in ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin", "/usr/sbin", "/sbin"] where !searchPaths.contains(path) { searchPaths.append(path) }
+            environment["PATH"] = searchPaths.joined(separator: ":")
             let runtime = try RuntimeCoordinator(root: root, ctlPath: ctl, environment: environment)
+            if !loginEnvironmentLoaded { await runtime.record(ChauffeurError("login_environment_unavailable", "Could not load the login-shell environment. Using inherited environment and standard executable search paths; select full CLI paths if needed")) }
             let server = try IPCServer(root: root, runtime: runtime)
             try await runtime.start()
             server.start()
@@ -52,6 +69,10 @@ import ChauffeurRuntimeKit
             defer { _fixLifetime(server) }
             try await MCPServer.run(runtime: runtime, port: port ?? recordedPort ?? 0)
         } catch {
+            // Startup failures can happen before our socket or file store exists.
+            // Keep the system log free of command output, paths, and user data.
+            let code = (error as? ChauffeurError)?.code ?? "startup_failed"
+            Logger(subsystem: "dev.chauffeur.runtime", category: "startup").error("Runtime startup failed: \(code, privacy: .public)")
             let text = (error as? ChauffeurError)?.errorDescription ?? "Chauffeur runtime failed to start"
             FileHandle.standardError.write(Data((text + "\n").utf8))
             exit(1)

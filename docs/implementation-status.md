@@ -34,14 +34,21 @@ the PRD's real-CLI, native-window, and daily-use acceptance scenarios.
 - `Prototypes/real_codex_integration.py`: two private authenticated Codex profiles,
   three real sessions, six attributed messages with native approval, completion
   IDs, scoped peer stop, explicit resume and runtime/MCP reconnection.
+- `Prototypes/service_lifetime_smoke.py`: actual bundled LaunchAgent registration,
+  normal UI quit/relaunch, launchd recovery and app-driven service restart, using
+  an empty default store and cleaning up its registration. Relative executable
+  names and missing login-shell environments are covered by the runtime fixture.
+  Developer ID builds use a stable team/helper launch constraint; the Release
+  helper starts and a subsequent Debug build refreshes registration for its own
+  helper. Both bundles verify after embedding and signing.
 
 ## Stage audit
 
 | Plan items | Current state | Still required |
 | --- | --- | --- |
-| Stage 0 V1–V5 | Decision documents; fixtures; real default-route Codex credential/stop evidence | Full real CLI/profile gates; macOS/Spaces/LaunchAgent gate |
+| Stage 0 V1–V5 | Decision documents; fixtures; real default-route Codex credential/stop evidence; actual LaunchAgent lifecycle | Full real CLI/profile gates; remaining macOS/Spaces gate |
 | 1.1 Records/store | Implemented and tested, including external reload/conflict errors | Complete reference-integrity checks; targeted file watcher (current one-second reload also runs with no UI); empty-set UI acceptance |
-| 1.2 Runtime skeleton | Lock, peer-checked Unix socket, version handshake, health helper, background executable | Verify bundled LaunchAgent registration; structured redacted log files |
+| 1.2 Runtime skeleton | Lock, peer-checked Unix socket, version handshake, health helper, verified bundled LaunchAgent registration/recovery | Structured redacted log files (startup error codes reach the system log) |
 | 1.3–1.7 Presets/projects/groups/welcome/windows | Native editors, cancellable discovery, relink/archive, welcome and project windows implemented | Full interaction and four-Spaces acceptance |
 | 1.8 Basic launch | Runtime/real Codex launch, filtered environment, private exec handoff, terminal input/resize/stop | Full native account/status checks, Claude launch, complete preflight |
 | 1.9 Session details | Native details show the immutable launch snapshot and lifecycle/coordination records | Real-session interaction acceptance |
@@ -51,12 +58,12 @@ the PRD's real-CLI, native-window, and daily-use acceptance scenarios.
 | 2.5 Worktrees | Create/list/safe-remove implementation and Git integration test | Periodic external inventory reconciliation; launch/removal concurrency audit (UI and explicit external registration implemented) |
 | 2.6 Multiple repos | Explicit additional folder selection in launch API; primary main checkout excluded | Real CLI access test (shared-checkout warning and explicit additional-folder UI implemented) |
 | 2.7 Status/attention | Lifecycle records, real Codex completion IDs, unread/pending counts | Claude hooks; native attention signals; notifications and closed-UI routing |
-| 2.8 Sleep/service loss | Runtime loop plus native wake reconnect, health and recovery actions | Real sleep/wake and service registration/failure acceptance |
+| 2.8 Sleep/service loss | Runtime loop plus native wake reconnect, health/recovery actions; actual service termination/restart verified | Real sleep/wake and service lifecycle with live real sessions |
 | 3.1–3.3 Credentials/MCP/mailboxes | Ledger/HTTP fixtures; real Codex shared-profile credentials and messages | Full HTTP/client compliance; Claude shared-profile connections; remaining real tool cases |
 | 3.4 Delegation | Durable reservation, launch path, worktree default, limits, depth check, result transaction | Bidirectional real-CLI acceptance, crash-window integration tests and failed-child visibility audit |
 | 3.5 Wake | Bounded inbox wait; no terminal message injection | Real idle/busy validation (pending-attention UI implemented) |
 | 3.6–3.7 Coordination UI/skill | Tool descriptions and native message/delegation details implemented | Bundled skill and loading/install/removal routes |
-| 4.1–4.5 Packaging/compatibility/retention/diagnostics/docs | Locally signed builds; retention settings/cleanup and terminal recovery guide | Verify registration; release signing; diagnostics export; remaining recovery guide |
+| 4.1–4.5 Packaging/compatibility/retention/diagnostics/docs | Developer ID local builds; actual registration/update; retention settings/cleanup; terminal and service recovery guides | Full release acceptance; diagnostics export; remaining recovery guide |
 | 4.6 Release checklist | Not run | Ten real sessions/four Spaces, timings/hardware record, all F1–F7 scenarios, three normal workdays and failure log |
 
 ## Next implementation order

@@ -20,6 +20,9 @@ struct AppSnapshot: Decodable, Sendable {
     @Published var snapshot = AppSnapshot()
     @Published var online = false
     @Published var serviceMessage = "Connecting to background service…"
+    @Published private(set) var serviceRegistrationError: String?
+    @Published private(set) var isRestartingService = false
+    private(set) var initialServiceStatus: Int?
     @Published var error: String?
     @Published var stopAllPresented = false
     @Published var openProjects = Set<UUID>()
@@ -54,6 +57,9 @@ struct AppSnapshot: Decodable, Sendable {
         NativeProbe.start(model: self)
         #endif
         if ProcessInfo.processInfo.environment["CHAUFFEUR_SOCKET"] == nil { registerService() }
+        #if DEBUG
+        ServiceProbe.start(model: self)
+        #endif
         observation = Task { [weak self] in
             while !Task.isCancelled {
                 guard let self else { return }
@@ -74,7 +80,8 @@ struct AppSnapshot: Decodable, Sendable {
                     online = false
                     if ProcessInfo.processInfo.environment["CHAUFFEUR_SOCKET"] == nil && service.status == .requiresApproval {
                         serviceMessage = "Allow Chauffeur in System Settings → Login Items & Extensions"
-                    } else { serviceMessage = (error as? ChauffeurError)?.message ?? "Background service disconnected" }
+                    } else if let serviceRegistrationError { serviceMessage = serviceRegistrationError }
+                    else { serviceMessage = (error as? ChauffeurError)?.message ?? "Background service disconnected" }
                 }
                 try? await Task.sleep(for: .seconds(1))
             }
@@ -85,16 +92,62 @@ struct AppSnapshot: Decodable, Sendable {
         Task { _ = try? await call("reconcile") }
     }
     func registerService() {
+        guard ProcessInfo.processInfo.environment["CHAUFFEUR_SOCKET"] == nil else { reconnect(); return }
+        guard !isRestartingService else { return }
+        if initialServiceStatus == nil { initialServiceStatus = service.status.rawValue }
         do {
-            if service.status == .notRegistered { try service.register() }
+            // An embedded agent without a background-task record may report
+            // notFound before its first registration. Let register validate it.
+            if service.status == .notRegistered || service.status == .notFound { try service.register() }
+            serviceRegistrationError = nil
             if service.status == .requiresApproval { serviceMessage = "Allow Chauffeur in System Settings → Login Items & Extensions" }
-        } catch { serviceMessage = "Background service could not register: \(error.localizedDescription)" }
+            else if service.status == .enabled && UserDefaults.standard.string(forKey: "registeredRuntimeBuild") != runtimeBuildFingerprint {
+                // SMAppService can retain a previous helper's launch constraint,
+                // even after unregistering it. Refresh registration for new code.
+                restartService()
+            }
+        } catch {
+            serviceRegistrationError = "Background service could not register: \(error.localizedDescription)"
+            serviceMessage = serviceRegistrationError!
+        }
+    }
+    var serviceStatus: String {
+        if ProcessInfo.processInfo.environment["CHAUFFEUR_SOCKET"] != nil { return "customConnection" }
+        switch service.status {
+        case .notRegistered: return "notRegistered"
+        case .enabled: return "enabled"
+        case .requiresApproval: return "requiresApproval"
+        case .notFound: return "notFound"
+        @unknown default: return "unknown"
+        }
     }
     func restartService() {
-        perform {
-            guard ProcessInfo.processInfo.environment["CHAUFFEUR_SOCKET"] == nil else { self.reconnect(); return }
-            if self.service.status == .enabled { try await self.service.unregister() }
-            try self.service.register(); self.reconnect()
+        Task {
+            do { try await restartRegisteredService() }
+            catch { self.error = error.localizedDescription }
+        }
+    }
+    private var runtimeBuildFingerprint: String? {
+        let plist = Bundle.main.bundleURL.appendingPathComponent("Contents/Library/LaunchAgents/dev.chauffeur.runtime.plist")
+        let helper = Bundle.main.bundleURL.appendingPathComponent("Contents/MacOS/ChauffeurRuntime")
+        guard let configuration = try? Data(contentsOf: plist), let executable = try? Data(contentsOf: helper, options: .mappedIfSafe) else { return nil }
+        return JSONCoding.digest(configuration) + ":" + JSONCoding.digest(executable)
+    }
+    func restartRegisteredService() async throws {
+        guard ProcessInfo.processInfo.environment["CHAUFFEUR_SOCKET"] == nil else { reconnect(); return }
+        guard !isRestartingService else { return }
+        isRestartingService = true; defer { isRestartingService = false }
+        connection?.close(); online = false
+        do {
+            if service.status == .enabled { try await service.unregister() }
+            try service.register(); serviceRegistrationError = nil; reconnect()
+            if service.status == .enabled, let fingerprint = runtimeBuildFingerprint { UserDefaults.standard.set(fingerprint, forKey: "registeredRuntimeBuild") }
+            // The subscription reconnects when startup finishes. An immediate
+            // snapshot request would report a spurious error during shell setup.
+        } catch {
+            serviceRegistrationError = "Background service could not restart: \(error.localizedDescription)"
+            serviceMessage = serviceRegistrationError!
+            throw error
         }
     }
     func openServiceSettings() { SMAppService.openSystemSettingsLoginItems() }

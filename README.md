@@ -21,8 +21,18 @@ open build/Build/Products/Debug/Chauffeur.app
 
 The script generates the Xcode project, builds the native app, embeds its runtime
 and helper, and signs the bundle locally. Use `Scripts/build-app.sh Release` for
-an optimized local build. Developer ID signing and notarization are separate
-release work.
+an optimized local build. The default signature is ad hoc. For a persistent
+background service, select a certificate already available to `codesign`:
+
+```sh
+CHAUFFEUR_SIGN_IDENTITY="Developer ID Application: Your Certificate Name" \
+  Scripts/build-app.sh Release
+```
+
+Service update checks use the same certificate for Debug and Release builds.
+Ad-hoc builds remain useful for isolated fixture tests; changing ad-hoc helper
+signatures can trigger macOS launch-constraint failures. The build script verifies
+the complete signed bundle. It does not notarize or publish the app.
 
 The build explicitly allows the pinned SwiftTerm build plugin, which generates
 Swift version metadata from that checkout's Git revision. Its plugin and generator
@@ -31,7 +41,9 @@ are pinned in `Package.resolved` and `project.yml`.
 
 The app registers its bundled per-user LaunchAgent with `SMAppService`. If macOS
 requires approval, the service health line links to Login Items & Extensions.
-Registration and separate-Spaces acceptance are still under validation.
+See [service setup and recovery](docs/service-recovery.md) for startup issues,
+replacing a development build and the actual LaunchAgent acceptance probe.
+Separate-Spaces acceptance remains open.
 
 ## Verify
 
@@ -82,8 +94,9 @@ Closing a terminal tab, project window, or quitting the UI keeps agents running.
 Stop Session ends an execution. Resume Conversation uses its recorded native ID
 and original profile; it creates a new execution.
 
-Real-account isolation, Codex backend ownership, native hooks and MCP connections
-remain unverified. Matching a candidate CLI version enables experimental
+Real Codex checks cover two profiles, shared-profile credentials, native
+completion, messages and scoped process ownership. Claude and the remaining
+native account/tool cases are still pending. Matching a candidate CLI version enables experimental
 integration; other versions offer explicit basic terminal mode. See
 [compatibility](docs/compatibility.md) and [V3](docs/decisions/V3-mcp-and-status.md).
 
