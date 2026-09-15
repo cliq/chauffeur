@@ -28,6 +28,8 @@ public actor RuntimeCoordinator {
     private var worktreeScan: Task<Void, Never>?
     private var worktreeRecordWrites = Set<UUID>()
     private var worktreeCreations: [UUID: (String, Task<Stored<Worktree>, Error>)] = [:]
+    private struct WorktreeRegistration: Hashable { let projectID: UUID; let folderID: UUID; let path: String }
+    private var worktreeRegistrations: [WorktreeRegistration: Task<Stored<Worktree>, Error>] = [:]
     private var captures: [UUID: Task<TerminalSnapshot?, Error>] = [:]
     private var maintaining = false
     private var retentionSettingsPending = false
@@ -360,29 +362,18 @@ public actor RuntimeCoordinator {
             return try .from(await ledger.cancelMessage(messageID, caller: Caller(sessionID: message.senderID, scope: message.scope)))
         case "worktreeInventory": return try .from(await worktrees.inventory(at: params.requiredString("path")))
         case "refreshWorktrees": await reconcileWorktrees(); return try .from(repositoryInventories)
-        case "previewWorktree", "registerWorktree":
+        case "previewWorktree":
             let snapshot = await store.current(), projectID = try params.uuid("projectID"), folderID = try params.uuid("folderID")
             guard let folder = snapshot.projects.first(where: { $0.value.id == projectID })?.value.folders.first(where: { $0.id == folderID && $0.registered }) else { throw ChauffeurError("missing_folder", "Select a registered repository") }
             let repositoryID = try await worktrees.repositoryID(at: folder.canonicalPath)
-            if request.method == "previewWorktree" { return .object(["path": .string(await worktrees.destination(repositoryID: repositoryID, branch: try params.requiredString("branch")).path)]) }
-            let path = Paths.canonical(try params.requiredString("path"))
-            guard let entry = try await worktrees.inventory(at: folder.canonicalPath).first(where: { $0.path == path }), entry.availability == .available else { throw ChauffeurError("missing_worktree", "Path is not available in this repository's Git worktree inventory") }
-            var observation = RepositoryInventory(sourcePath: folder.canonicalPath, status: .available)
-            observation.repositoryID = repositoryID; observation.entries = [entry]
-            observation.legacyRepositoryID = try await worktrees.legacyRepositoryID(at: folder.canonicalPath)
-            if var existing = snapshot.worktrees.first(where: {
-                let record = $0.value
-                let sameCheckout = record.gitIdentity != nil && record.gitIdentity == entry.gitIdentity
-                let sameRepository = record.repositoryID == repositoryID || (record.repositoryIdentityVersion == nil && (sameCheckout || record.repositoryID == observation.legacyRepositoryID))
-                return record.projectID == projectID && record.folderID == folderID && sameRepository && (sameCheckout || (record.gitIdentity == nil && record.path == path))
-            }) {
-                existing.value = await worktrees.reconciled(existing.value, inventory: observation)
-                existing.value.registered = true
-                return try .from(await saveWorktree(existing.value, expectedVersion: existing.version))
-            }
-            var registered = Worktree(projectID: projectID, folderID: folderID, repositoryID: repositoryID, path: path, repositoryPath: folder.canonicalPath, branch: entry.branch, baseCommit: entry.commit, managed: false)
-            registered.gitIdentity = entry.gitIdentity
-            return try .from(await saveWorktree(registered))
+            return .object(["path": .string(await worktrees.destination(repositoryID: repositoryID, branch: try params.requiredString("branch")).path)])
+        case "registerWorktree":
+            let key = WorktreeRegistration(projectID: try params.uuid("projectID"), folderID: try params.uuid("folderID"), path: Paths.canonical(try params.requiredString("path")))
+            if let pending = worktreeRegistrations[key] { return try .from(await pending.value) }
+            let pending = Task { try await self.registerWorktree(key) }
+            worktreeRegistrations[key] = pending
+            defer { worktreeRegistrations.removeValue(forKey: key) }
+            return try .from(await pending.value)
         case "createWorktree":
             return try .from(await createWorktree(params.decode(WorktreeCreationRequest.self)))
         case "removeWorktree":
@@ -408,6 +399,28 @@ public actor RuntimeCoordinator {
         case "reconcile": try await reconcile(); return health()
         default: throw ChauffeurError("unknown_method", "Unknown runtime method")
         }
+    }
+    private func registerWorktree(_ key: WorktreeRegistration) async throws -> Stored<Worktree> {
+        let snapshot = await store.reload()
+        guard let folder = snapshot.projects.first(where: { $0.value.id == key.projectID })?.value.folders.first(where: { $0.id == key.folderID && $0.registered }) else { throw ChauffeurError("missing_folder", "Select a registered repository") }
+        let repositoryID = try await worktrees.repositoryID(at: folder.canonicalPath)
+        guard let entry = try await worktrees.inventory(at: folder.canonicalPath).first(where: { $0.path == key.path }), entry.availability == .available else { throw ChauffeurError("missing_worktree", "Path is not available in this repository's Git worktree inventory") }
+        var observation = RepositoryInventory(sourcePath: folder.canonicalPath, status: .available)
+        observation.repositoryID = repositoryID; observation.entries = [entry]
+        observation.legacyRepositoryID = try await worktrees.legacyRepositoryID(at: folder.canonicalPath)
+        if var existing = snapshot.worktrees.first(where: {
+            let record = $0.value
+            let sameCheckout = record.gitIdentity != nil && record.gitIdentity == entry.gitIdentity
+            let sameRepository = record.repositoryID == repositoryID || (record.repositoryIdentityVersion == nil && (sameCheckout || record.repositoryID == observation.legacyRepositoryID))
+            return record.projectID == key.projectID && record.folderID == key.folderID && sameRepository && (sameCheckout || (record.gitIdentity == nil && record.path == key.path))
+        }) {
+            existing.value = await worktrees.reconciled(existing.value, inventory: observation)
+            existing.value.registered = true
+            return try await saveWorktree(existing.value, expectedVersion: existing.version)
+        }
+        var registered = Worktree(projectID: key.projectID, folderID: key.folderID, repositoryID: repositoryID, path: key.path, repositoryPath: folder.canonicalPath, branch: entry.branch, baseCommit: entry.commit, managed: false)
+        registered.gitIdentity = entry.gitIdentity
+        return try await saveWorktree(registered)
     }
     public func createWorktree(_ request: WorktreeCreationRequest) async throws -> Stored<Worktree> {
         let fingerprint = JSONCoding.digest(try JSONCoding.encode(request))

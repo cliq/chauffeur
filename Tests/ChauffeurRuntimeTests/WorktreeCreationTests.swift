@@ -4,6 +4,25 @@ import ChauffeurCore
 @testable import ChauffeurRuntimeKit
 
 struct WorktreeCreationTests {
+    @Test func concurrentExternalRegistrationReturnsOneRecord() async throws {
+        let fixture = try await Fixture.make(); defer { fixture.cleanup() }
+        let external = fixture.root.appendingPathComponent("external")
+        let created = try await ProcessRunner.run("/usr/bin/git", ["-C", fixture.repo.path, "worktree", "add", "-b", "external", external.path, "HEAD"])
+        try #require(created.status == 0)
+        let params: JSONValue = .object(["projectID": .string(fixture.project.id.uuidString), "folderID": .string(fixture.project.folders[0].id.uuidString), "path": .string(external.path)])
+        let registrations = try await withThrowingTaskGroup(of: UUID.self) { group in
+            for _ in 0..<12 {
+                group.addTask { try await fixture.runtime.handle(IPCRequest("registerWorktree", params: params)).decode(Stored<Worktree>.self).value.id }
+            }
+            var values: [UUID] = []
+            for try await value in group { values.append(value) }
+            return values
+        }
+        #expect(Set(registrations).count == 1)
+        #expect(await fixture.runtime.store.current().worktrees.count == 1)
+        #expect(try await fixture.runtime.worktrees.inventory(at: fixture.repo.path).count == 2)
+    }
+
     @Test(arguments: [false, true]) func legacyRepositoryIdentityMigratesAfterRelinkingAMovedRepository(registerFirst: Bool) async throws {
         let fixture = try await Fixture.make(); defer { fixture.cleanup() }
         let stored = try await fixture.runtime.createWorktree(fixture.request)

@@ -22,7 +22,7 @@ unverified real-CLI or native behavior; deferred workload checks remain unverifi
   line/byte budgets, and survive terminal/runtime loss. Native history is
   read-only and searchable; completed-message cleanup preserves queued/received
   messages. See [retention and recovery](terminal-history.md).
-- Sixty-seven Swift tests: canonical paths/discovery, folder routing/launcher installation and relocation repair, per-child environment, argument validation and quoting,
+- Sixty-eight Swift tests: canonical paths/discovery, folder routing/launcher installation and relocation repair, per-child environment, argument validation and quoting,
   atomic file replacement/conflicts/corrupt files, durable group-scoped messages,
   grant revocation, retry keys, bounded single-level delegation, and safe Git
   worktree creation/removal.
@@ -50,6 +50,13 @@ unverified real-CLI or native behavior; deferred workload checks remain unverifi
   invalid-branch recovery, retained checkout after agent failure, a fresh launch
   reusing it, literal initial-task forwarding, and session selection. Evidence:
   `.build/quick-session-artifacts/`. The supplied Release remains unchanged.
+- Worktree-manager controls pass through actual macOS Accessibility actions and
+  targeted keyboard input in an isolated signed Debug app. Checks cover creation,
+  current destination preview, disabled controls while Git works, confirmation
+  cancellation, external unregister, and safe managed removal. Concurrent
+  registration now coalesces to one record; the regression reproduced twelve
+  records before the fix. Evidence: `.build/worktree-controls-artifacts/`.
+  These changes await the next Release build; XCUITest remains unrun.
 - [Metadata integrity and preset defaults](metadata-and-presets.md): child
   ownership checks, path-bearing reference diagnostics, archived history
   preservation, service-owned preset revision increments, and a remembered
@@ -153,7 +160,7 @@ unverified real-CLI or native behavior; deferred workload checks remain unverifi
 | 2.1 Screen/history | tmux live state; bounded persisted snapshots, disk cleanup, native history/search | Real CLI native attach/search/copy/link verification and sustained rotation |
 | 2.2 Reconnect | Positive pane/process reconciliation; real Codex/Claude explicit native-ID resume and MCP reconnect | Remaining service-failure edge cases and full native acceptance |
 | 2.3–2.4 Quit/tabs/split | Native tabs/split, window-state writes, quit/stop-all and keyboard commands implemented | OS keyboard and focused real-CLI acceptance; direct normal/force-quit fixture implemented; final Spaces workload is in V2 |
-| 2.5 Worktrees | Create/list/safe-remove; periodic external inventory; identity-based moves/replacements; pending launch/removal and metadata-write reservations; legacy migration fixtures and real Codex/Claude repository-relocation, replacement/resume, and removal checks | Native worktree-control interaction acceptance |
+| 2.5 Worktrees | Create/list/safe-remove; periodic external inventory; identity-based moves/replacements; pending launch/removal and metadata-write reservations; legacy migration fixtures and real Codex/Claude repository-relocation, replacement/resume, and removal checks; native manager controls and concurrent registration pass | Ship manager fixes in the next Release |
 | 2.6 Multiple repos | Explicit additional folder selection in launch API; primary main checkout excluded | Real CLI access test (shared-checkout warning and explicit additional-folder UI implemented) |
 | 2.7 Status/attention | Lifecycle records, real Codex/Claude completion IDs, permission attention hooks, unread/pending counts; optional durable notifications; native warm/cold URL routing and background helper startup; user enabled and authorized notifications | Actual OS delivery/click, enabled-helper recovery/update, and remaining native attention signals |
 | 2.8 Sleep/service loss | Runtime loop plus native wake reconnect, health/recovery actions; actual service termination/restart verified | Real sleep/wake and service lifecycle with live real sessions |

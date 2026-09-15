@@ -104,6 +104,17 @@ settings were left unchanged, and the user was asked to enable UI-testing access
 The user has said they will enable access. The latest check still reports both
 Automation Mode and Developer mode disabled; XCUITest has not yet run.
 
+General macOS Accessibility access is enabled for the development session. The
+separate `Prototypes/worktree_controls_smoke.py` harness uses it to type into the
+actual manager and press its buttons and confirmation dialogs in an isolated
+signed Debug app. `app_accessibility_probe.swift` checks the target text field's
+focus and sends keyboard events only to that fixture PID. It makes no permission
+changes. Creation, current destination preview, disabled fields/actions during
+Git work, confirmation cancellation, external unregister, dirty-removal refusal,
+and clean removal preserving the branch pass. Reports and window captures are
+in `.build/worktree-controls-artifacts/`. This establishes those native worktree
+interactions; it does not establish the remaining terminal or notification checks.
+
 ## Notification implementation and partial evidence
 
 The signed app now includes an accessory notification app, a durable opt-in
@@ -124,10 +135,12 @@ Actual notification delivery and click handling still require native acceptance.
 
 ## Remaining gate evidence
 
-- Run XCUITest, native keyboard/copy/paste/find/link and accessibility interactions.
-- Place four windows on separate Spaces; confirm focus, frames and restoration.
+- Run remaining native terminal keyboard/copy/paste/find/link and accessibility
+  interactions. XCUITest still requires the previously requested system access.
 - Validate sleep/wake, remaining service-loss cases,
   banner delivery/clicks with the UI closed, and enabled-helper recovery/update.
 - Repeat lifetime scenarios with both real CLIs and their intended accounts.
 
 The full V5 gate remains open.
+The four-window/four-Spaces workload is deferred to V2 and does not block the
+current goal.

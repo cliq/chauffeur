@@ -25,7 +25,10 @@ struct MetadataWatcherTests {
         try await wait { await store.refresh().presetSets.contains { $0.value.name == value.name } }
         try await quiet(store)
         let after = await store.ioCounts()
-        #expect(after.records - before.records == 1, "One changed file should not reload twelve records")
+        // One atomic replacement can deliver multiple FSEvents batches. Verify
+        // which records were read, independently of that OS delivery timing.
+        let reread = Set(after.recordsByPath.keys.filter { after.recordsByPath[$0] != before.recordsByPath[$0] })
+        #expect(reread == [changed.path], "Only the changed file should be reread")
         let cached = await store.current()
         #expect(cached.presetSets.count == 12 && cached.errors.isEmpty)
         #expect(cached.presetSets.first { $0.value.id == changed.value.id }?.version != changed.version)

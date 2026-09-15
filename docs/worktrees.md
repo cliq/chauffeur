@@ -12,6 +12,14 @@ the destination under Chauffeur's managed storage. The resolved base commit is
 recorded separately from the branch's current state. A failed agent launch
 retains the checkout for another explicit launch.
 
+The manager shows registered and other Git checkout counts above a bounded list
+with a persistent scrollbar. While Git is working, the repository picker, creation
+fields, list actions, and Done button are disabled. Failed operations leave the
+manager open with their error so you can correct the input and retry. Creation
+keeps its retry ID until success or a change to the requested repository, branch,
+or base ref. Concurrent registration requests for the same checkout return one
+record.
+
 ## Create a worktree and start an agent
 
 Expand a repository in the sidebar and choose **New Worktree & Session…**, or
@@ -144,6 +152,7 @@ inaccessible checkout records remain visible for recovery.
   newline paths, missing sources, and reservation interleavings. Creation retry
   tests cover concurrent callers, runtime restart, conflicting fields, removed
   records, legacy requests, and retained files after agent startup failure.
+  Twelve concurrent external registration requests produce one stored record.
 - Repository relocation tests move a real Git repository, repair its linked
   worktrees, relink the project, migrate legacy identities, reopen the runtime,
   and remove a clean managed checkout. Resume fixtures replace primary and
@@ -163,6 +172,14 @@ inaccessible checkout records remain visible for recovery.
   agent failure, fresh launch into the same checkout, literal task forwarding,
   and selection of the launched session. Screenshots and its report are saved
   in `.build/quick-session-artifacts/`.
+- `python3 Prototypes/worktree_controls_smoke.py` types into the manager and
+  presses its native controls through macOS Accessibility and keyboard events
+  targeted at the isolated app process. It verifies invalid-branch recovery,
+  the current destination preview, disabled controls during a paused Git checkout,
+  confirmation cancellation, external unregister preserving files, dirty managed
+  removal refusal, and clean removal preserving the branch. Reports and screenshots
+  are under `.build/worktree-controls-artifacts/`. It requires existing Accessibility
+  permission and does not change macOS permissions or use XCUITest.
 - `python3 Prototypes/worktree_smoke.py` runs an isolated runtime and real Git
   repositories. A fixture fsmonitor hook pauses Git status during removal; both
   primary and additional-directory launches must be rejected. This test failed
@@ -171,7 +188,7 @@ inaccessible checkout records remain visible for recovery.
   a UI or explicit refresh, verifies external unregister preserves files, and
   verifies a moved worktree used through a regular folder remains protected.
 
-Remaining end-to-end acceptance includes native worktree-control interactions.
+Native worktree-control interactions pass in the isolated signed Debug app.
 Whole-repository relocation and checkout-replacement recovery have both fixture
 and real-provider evidence; Claude 2.1.273 was tested in basic-terminal mode and
 its coordination/status compatibility remains unverified. Final multi-project

@@ -269,7 +269,10 @@ struct ProjectWindow: View {
         #if DEBUG
         NativeProbe.layouts[projectID] = layout
         NativeProbe.openProject = { id in openWindow(id: "project", value: id) }
-        if QuickSessionProbe.enabled { QuickSessionProbe.openSheet[projectID] = { folderID in showLaunch(folderID: folderID, newWorktree: true) } }
+        if QuickSessionProbe.enabled {
+            QuickSessionProbe.openSheet[projectID] = { folderID in showLaunch(folderID: folderID, newWorktree: true) }
+            QuickSessionProbe.openWorktrees[projectID] = { folderID in worktreeFolderID = folderID; managingWorktrees = true }
+        }
         #endif
         if let saved = model.snapshot.store.windows.first(where: { $0.value.id == projectID })?.value { layout.state = saved }
         model.beginWindowEditing(projectID)

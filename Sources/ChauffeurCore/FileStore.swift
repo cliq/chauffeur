@@ -43,7 +43,10 @@ public actor FileStore {
     private var directoryCache: [String: Result<[URL], ChauffeurError>] = [:]
     private var localChanges = Set<String>()
     // Internal counters allow tests to verify actual I/O, not just returned values.
-    struct ReadCounts: Equatable, Sendable { var records = 0; var directories = 0; var scans = 0 }
+    struct ReadCounts: Equatable, Sendable {
+        var records = 0; var directories = 0; var scans = 0
+        var recordsByPath: [String: Int] = [:]
+    }
     private var readCounts = ReadCounts()
     func ioCounts() -> ReadCounts { readCounts }
     public init(root: URL = Paths.applicationSupport) throws {
@@ -104,6 +107,7 @@ public actor FileStore {
     private func readRecord<T: Record>(_ type: T.Type, _ url: URL) throws -> Stored<T> {
         if let cached = recordCache[url.path] as? Result<Stored<T>, ChauffeurError> { return try cached.get() }
         readCounts.records += 1
+        readCounts.recordsByPath[url.path, default: 0] += 1
         let result: Result<Stored<T>, ChauffeurError>
         do {
             let values = try url.resourceValues(forKeys: [.isSymbolicLinkKey, .isRegularFileKey])
@@ -168,6 +172,7 @@ public actor FileStore {
         result.errors = errors
         snapshot = result
         recordCache = recordCache.filter { visitedRecords.contains($0.key) }
+        readCounts.recordsByPath = readCounts.recordsByPath.filter { visitedRecords.contains($0.key) }
         loaded = true
         return result
     }
