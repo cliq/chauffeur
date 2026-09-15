@@ -129,6 +129,8 @@ Goal: quit and reopen without losing sessions; worktrees; attention (PRD stage 2
 6. **Multi-repository access** — additional paths shown at launch, passed via `--add-dir` for Claude Code and the equivalent Codex mechanism verified in V3; no implicit main-checkout when the primary is a worktree (F5.6, F5.7). Shared-checkout warning listing existing sessions (F5.5).
 7. **Status model** — lifecycle states from the PRD table driven by process events plus `chauffeurctl event`; attention list per project; optional macOS notifications that open the right window (F6).
 8. **Sleep/wake and service loss** — reconcile on wake, detect stopped runtime, show recovery actions (F4.9, §6).
+9. **Appearance setting** — add a Settings choice between **System**, **Light**, and **Dark** appearance; persist the selection and apply it across app windows and terminal views.
+10. **Terminal project launcher** — install a launcher in `/usr/local/bin/` that opens the Chauffeur project containing the selected folder.
 
 Exit check: F3, F4, F5, and F6 acceptance scenarios pass for both CLIs, including force-quitting only the UI.
 

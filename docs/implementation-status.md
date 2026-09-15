@@ -86,6 +86,8 @@ the PRD's real-CLI, native-window, and daily-use acceptance scenarios.
 | 2.6 Multiple repos | Explicit additional folder selection in launch API; primary main checkout excluded | Real CLI access test (shared-checkout warning and explicit additional-folder UI implemented) |
 | 2.7 Status/attention | Lifecycle records, real Codex/Claude completion IDs, permission attention hooks, unread/pending counts; optional durable notifications; native warm/cold URL routing and background helper startup | Actual OS notification authorization, delivery/click, enabled-helper recovery/update, and remaining native attention signals |
 | 2.8 Sleep/service loss | Runtime loop plus native wake reconnect, health/recovery actions; actual service termination/restart verified | Real sleep/wake and service lifecycle with live real sessions |
+| 2.9 Appearance setting | Todo — requested by user | Settings selection for System, Light, or Dark; persistence and consistent app/terminal appearance |
+| 2.10 Terminal project launcher | Todo — requested by user | Install a launcher in `/usr/local/bin/`; open the project containing the selected folder |
 | 3.1–3.3 Credentials/MCP/mailboxes | Ledger/HTTP fixtures; real Codex/Claude shared-profile credentials and messages | Full HTTP/client compliance; remaining real tool cases and controlled existing-server preservation |
 | 3.4 Delegation | Durable reservation, launch path, worktree default, limits, depth check, result transaction | Bidirectional real-CLI acceptance, crash-window integration tests and failed-child visibility audit |
 | 3.5 Wake | Bounded inbox wait; no terminal message injection | Real idle/busy validation (pending-attention UI implemented) |
