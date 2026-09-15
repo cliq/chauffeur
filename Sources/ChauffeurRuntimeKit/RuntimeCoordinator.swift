@@ -517,6 +517,12 @@ public actor RuntimeCoordinator {
             session.processID = pane.processID; session.terminalIdentity = pane.paneID; session.state = .activityUnknown
             try await persist(session)
             try Task.checkCancellation()
+            if child == nil {
+                do { try await store.rememberPreset(preset.id, projectID: project.id, setID: set.id) }
+                catch let error as ChauffeurError { record(error) }
+                catch { record(ChauffeurError("preset_preference", "The session started, but its preset choice could not be saved")) }
+            }
+            try Task.checkCancellation()
             return session
         } catch {
             throw try await finishFailedStartup(session, error: error)

@@ -197,7 +197,11 @@ public struct WindowState: Record, Equatable {
     public var sidebarVisible = true
     public var wasOpen = false
     public init(projectID: UUID) { id = projectID }
-    public func validate() throws { try Validation.unique(tabs, field: "tab") }
+    public func validate() throws {
+        try Validation.unique(tabs, field: "tab")
+        if let selectedSessionID { try Validation.require(tabs.contains(selectedSessionID), "Selected session must be in the window's tabs") }
+        if let splitSessionID { try Validation.require(tabs.contains(splitSessionID) && splitSessionID != selectedSessionID, "Split session must be a different tab") }
+    }
 }
 
 public struct RetentionSettings: Codable, Equatable, Sendable {

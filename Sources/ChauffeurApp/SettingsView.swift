@@ -124,7 +124,6 @@ struct PresetSetEditor: View {
                 Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction); Spacer()
                 Button("Save") {
                     var value = presetSet ?? PresetSet(name: name); value.name = name; value.defaultPresetID = defaultID; value.archived = archived
-                    if presetSet != nil { value.revision += 1 }
                     Task { do { try await model.save("savePresetSet", value, version: version); completion(value.id); dismiss() } catch { failure = error.localizedDescription } }
                 }.keyboardShortcut(.defaultAction).disabled(name.trimmingCharacters(in: .whitespaces).isEmpty)
             }

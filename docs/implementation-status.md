@@ -22,7 +22,7 @@ unverified real-CLI or native behavior; deferred workload checks remain unverifi
   line/byte budgets, and survive terminal/runtime loss. Native history is
   read-only and searchable; completed-message cleanup preserves queued/received
   messages. See [retention and recovery](terminal-history.md).
-- Forty-nine Swift tests: canonical paths/discovery, folder routing/launcher installation and relocation repair, per-child environment, argument validation and quoting,
+- Fifty-five Swift tests: canonical paths/discovery, folder routing/launcher installation and relocation repair, per-child environment, argument validation and quoting,
   atomic file replacement/conflicts/corrupt files, durable group-scoped messages,
   grant revocation, retry keys, bounded single-level delegation, and safe Git
   worktree creation/removal.
@@ -50,6 +50,13 @@ unverified real-CLI or native behavior; deferred workload checks remain unverifi
   invalid-branch recovery, retained checkout after agent failure, a fresh launch
   reusing it, literal initial-task forwarding, and session selection. Evidence:
   `.build/quick-session-artifacts/`. The supplied Release remains unchanged.
+- [Metadata integrity and preset defaults](metadata-and-presets.md): child
+  ownership checks, path-bearing reference diagnostics, archived history
+  preservation, service-owned preset revision increments, and a remembered
+  successful user preset per project. Core tests cover external edits and stale
+  writers; native fixture checks cover last-used selection, empty-set launch
+  prevention, and unchanged running snapshots after preset edits. Runtime and
+  worktree socket regressions pass. Targeted file watching remains pending.
 - [Appearance settings](appearance.md) offer System, Light, and Dark with saved
   app-wide selection. Four isolated native app launches verify persistence,
   window/terminal default colors, cursor contrast, newly created terminals, and
@@ -115,7 +122,7 @@ unverified real-CLI or native behavior; deferred workload checks remain unverifi
 | Plan items | Current state | Still required |
 | --- | --- | --- |
 | Stage 0 V1–V5 | Decision documents; fixtures; real default-route Codex credential/stop evidence; actual LaunchAgent lifecycle | Remaining profile, terminal, status, and focused macOS checks; coordination and final Spaces workload are in V2 |
-| 1.1 Records/store | Implemented and tested, including external reload/conflict errors | Complete reference-integrity checks; targeted file watcher (current one-second reload also runs with no UI); empty-set UI acceptance |
+| 1.1 Records/store | Atomic writes, reference/ownership diagnostics, external-edit conflicts, preset revision tracking, last-used preference, and empty-set UI/runtime checks pass | Targeted file watcher (current one-second reload also runs with no UI) |
 | 1.2 Runtime skeleton | Lock, peer-checked Unix socket, version handshake, health helper, verified bundled LaunchAgent registration/recovery; bounded structured logs with typed redaction | Remaining live-service release acceptance |
 | 1.3–1.7 Presets/projects/groups/welcome/windows | Native editors, cancellable discovery, relink/archive, welcome and project windows implemented | Remaining editor/window interaction checks; final four-Spaces workload is in V2 |
 | 1.8 Basic launch | Real Codex/Claude launch, filtered environment, private exec handoff, terminal input/resize/stop; cancellable launch/resume with terminal cleanup; Claude native account/process configuration checks | Full native account/status checks, distinct-Claude-account check, complete preflight |

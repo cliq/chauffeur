@@ -21,6 +21,7 @@ import ChauffeurCore
                     if command["action"].string == "open", let project = command["projectID"].string.flatMap(UUID.init(uuidString:)), let folder = command["folderID"].string.flatMap(UUID.init(uuidString:)) {
                         openSheet[project]?(folder)
                     } else if command["action"].string == "quit" { model.quit(); return }
+                    else if command["action"].string == "refresh" { try? await model.refresh() }
                     else { sheetCommand?(command) }
                 }
                 let sheet = NativeProbe.layouts.values.compactMap { $0.window?.attachedSheet }.first

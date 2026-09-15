@@ -25,7 +25,13 @@ struct SessionLaunchView: View {
     @State private var shared = false
     @State private var coordination = true
     private var currentProject: Project { model.project(project.id) ?? project }
-    private var presets: [AgentPreset] { model.presets.filter { $0.setID == currentProject.presetSetID && !$0.archived } }
+    private var presetSet: PresetSet? { model.presetSets.first { $0.id == currentProject.presetSetID } }
+    private var presets: [AgentPreset] { presetSet?.archived == false ? model.presets.filter { $0.setID == currentProject.presetSetID && !$0.archived } : [] }
+    private var unavailablePresetsMessage: String {
+        guard let presetSet else { return "This project's preset set is missing. Choose an available set in Project Settings." }
+        if presetSet.archived { return "This preset set is archived. Reopen it in Settings → Presets or choose another set in Project Settings." }
+        return "This preset set has no active presets. Add one in Settings → Presets before launching."
+    }
     private var preset: AgentPreset? { presets.first { $0.id == presetID } }
     private var folder: ProjectFolder? { currentProject.folders.first { $0.id == folderID && $0.registered } }
     private var worktrees: [Worktree] {
@@ -52,7 +58,7 @@ struct SessionLaunchView: View {
         }
     }
     private var canLaunch: Bool {
-        !operation.isBusy && model.online && !currentProject.archived && preset != nil && folder != nil && groupID != nil
+        !operation.isBusy && model.online && !currentProject.archived && preset != nil && folder != nil && currentProject.groups.contains { $0.id == groupID && !$0.archived }
             && (sharing.isEmpty || shared) && (checkout != .newWorktree || (!branch.isEmpty && !baseRef.isEmpty))
             && (worktreeID == nil || worktrees.contains { $0.id == worktreeID && $0.availability == .available })
     }
@@ -147,6 +153,10 @@ struct SessionLaunchView: View {
                 Text("Choose a preset").tag(UUID?.none)
                 ForEach(presets) { preset in Text("\(preset.name) · \(preset.kind == .codex ? "Codex" : "Claude Code")").tag(Optional(preset.id)) }
             }
+            if presets.isEmpty {
+                Text(unavailablePresetsMessage)
+                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
             if let preset { LabeledContent("Configuration", value: preset.configurationDirectory).font(.caption).textSelection(.enabled) }
         }
     }
@@ -209,14 +219,16 @@ struct SessionLaunchView: View {
             case "configure":
                 if let value = command["branch"].string { branch = value }
                 if let value = command["task"].string { task = value }
+                if let value = command["presetID"].string.flatMap(UUID.init(uuidString:)) { presetID = value }
                 coordination = false
             case "launch": if canLaunch { launch(retry: false) }
             case "retry": if !operation.isBusy { launch(retry: true) }
+            case "cancel": if !operation.isBusy { dismiss() }
             default: break
             }
         }
         QuickSessionProbe.sheetState = {
-            .object(["branch": .string(branch), "destination": .string(destination), "busy": .bool(operation.isBusy), "canLaunch": .bool(canLaunch), "worktreeID": worktreeID.map { .string($0.uuidString) } ?? .null, "path": .string(primaryPath), "failure": operation.failure.map(JSONValue.string) ?? .null])
+            .object(["branch": .string(branch), "destination": .string(destination), "busy": .bool(operation.isBusy), "canLaunch": .bool(canLaunch), "presetID": presetID.map { .string($0.uuidString) } ?? .null, "worktreeID": worktreeID.map { .string($0.uuidString) } ?? .null, "path": .string(primaryPath), "failure": operation.failure.map(JSONValue.string) ?? .null])
         }
     }
     #endif

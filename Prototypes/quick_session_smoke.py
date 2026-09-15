@@ -66,7 +66,7 @@ with tempfile.TemporaryDirectory(prefix='chauffeur-quick-', dir='/tmp') as direc
             data.extend(part)
         return data
 
-    def call(method, params=None):
+    def call(method, params=None, expect_error=False):
         with socket.socket(socket.AF_UNIX) as connection:
             connection.settimeout(20); connection.connect(socket_path)
             data = json.dumps({'version': 1, 'id': uid(), 'method': method, 'params': params or {}}).encode()
@@ -74,6 +74,9 @@ with tempfile.TemporaryDirectory(prefix='chauffeur-quick-', dir='/tmp') as direc
             count, = struct.unpack('!I', exact(connection, 4))
             assert count <= 8 * 1024 * 1024
             response = json.loads(exact(connection, count))
+            if expect_error:
+                assert response.get('error'), 'Expected an error'
+                return response['error']
             assert not response.get('error'), response.get('error')
             return response.get('result')
 
@@ -119,13 +122,19 @@ else:
         now = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
         call('savePresetSet', {'record': {'id': set_id, 'name': 'Quick fixture', 'revision': 1, 'archived': False}})
         call('savePreset', {'record': {'id': preset_id, 'setID': set_id, 'name': 'Fixture agent', 'kind': 'claude', 'executable': str(fake), 'configurationDirectory': str(root), 'arguments': [], 'integration': 'unverified', 'archived': False}})
+        default_id = uid()
+        call('savePreset', {'record': {'id': default_id, 'setID': set_id, 'name': 'Default agent', 'kind': 'claude', 'executable': str(fake), 'configurationDirectory': str(root), 'arguments': [], 'integration': 'unverified', 'archived': False}})
+        preset_set = call('snapshot')['store']['presetSets'][0]
+        preset_set['value']['defaultPresetID'] = default_id
+        preset_set = call('savePresetSet', {'record': preset_set['value'], 'version': preset_set['version']})
         call('saveProject', {'record': {'id': project_id, 'name': 'Quick Session Fixture', 'presetSetID': set_id, 'folders': [{'id': folder_id, 'name': repo.name, 'selectedPath': str(repo), 'canonicalPath': str(repo), 'availability': 'available', 'registered': True}], 'groups': [{'id': uid(), 'name': 'Default', 'isDefault': True, 'archived': False, 'createdAt': now, 'updatedAt': now}], 'archived': False, 'createdAt': now, 'updatedAt': now, 'lastOpenedAt': now}})
         subprocess.run([str(binary_dir / 'chauffeur-launcher'), str(repo)], capture_output=True, check=True)
         ready = wait_for(lambda: (s if (s := state())['online'] and s['ready'] else None), 'project window ready')
         app_pid = ready['processID']
         command('open', projectID=project_id, folderID=folder_id)
         wait_for(lambda: state()['sheetWindow'] and state()['sheet'], 'new worktree sheet visible')
-        command('configure', branch='bad branch', task='Fixture initial task --literal')
+        assert state()['sheet']['presetID'] == default_id
+        command('configure', branch='bad branch', task='Fixture initial task --literal', presetID=preset_id)
         wait_for(lambda: state()['sheet']['canLaunch'], 'branch entered')
         command('launch')
         wait_for(lambda: state()['sheet']['failure'] and not state()['sheet']['busy'], 'invalid branch error')
@@ -140,6 +149,7 @@ else:
         trees = call('snapshot')['store']['worktrees']
         assert len(trees) == 1 and trees[0]['value']['id'] == tree_id
         assert Path(tree_path).is_dir()
+        assert call('snapshot')['store']['projects'][0]['value'].get('lastPresetID') is None
         (root / 'fail-version').unlink()
         command('launch')
         finished = wait_for(lambda: (s if (s := state())['sheet'] is None and s['selectedSession'] else None), 'session selected and sheet dismissed')
@@ -149,8 +159,37 @@ else:
         live = [s for s in snapshot['sessions'] if s['id'] == finished['selectedSession']]
         assert len(live) == 1 and live[0]['state'] == 'activityUnknown' and live[0]['worktreeID'] == tree_id
         assert len(snapshot['store']['worktrees']) == 1
+        assert snapshot['store']['projects'][0]['value']['lastPresetID'] == preset_id
+        assert live[0]['launch']['presetSetRevision'] == preset_set['value']['revision']
+        edited = next(p for p in snapshot['store']['presets'] if p['value']['id'] == preset_id)
+        edited['value']['arguments'] = ['--model', 'fixture-model']
+        call('savePreset', {'record': edited['value'], 'version': edited['version']})
+        updated = call('snapshot')
+        assert updated['store']['presetSets'][0]['value']['revision'] == preset_set['value']['revision'] + 1
+        retained = next(s for s in updated['sessions'] if s['id'] == live[0]['id'])
+        assert retained['launch'] == live[0]['launch']
+        command('open', projectID=project_id, folderID=folder_id)
+        wait_for(lambda: state()['sheet'] and state()['sheet']['presetID'] == preset_id, 'last-used preset selected instead of set default')
+        command('cancel')
+        wait_for(lambda: state()['sheet'] is None, 'sheet closed')
+        empty_id = uid()
+        call('savePresetSet', {'record': {'id': empty_id, 'name': 'Empty fixture set', 'revision': 1, 'archived': False}})
+        project = call('snapshot')['store']['projects'][0]
+        project['value']['presetSetID'] = empty_id
+        project = call('saveProject', {'record': project['value'], 'version': project['version']})
+        assert project['value'].get('lastPresetID') is None
+        command('refresh')
+        command('open', projectID=project_id, folderID=folder_id)
+        wait_for(lambda: state()['sheet'] and state()['sheet']['presetID'] is None, 'empty-set sheet')
+        command('configure', branch='task/empty-fixture')
+        wait_for(lambda: state()['sheet']['branch'] == 'task/empty-fixture', 'empty-set branch entered')
+        assert not state()['sheet']['canLaunch']
+        screenshot('empty-set')
+        missing = call('launch', {'projectID': project_id, 'groupID': project['value']['groups'][0]['id'], 'presetID': preset_id, 'folderID': folder_id, 'title': 'Cannot launch', 'additionalFolderIDs': [], 'allowSharedCheckout': False, 'coordinationEnabled': False, 'retryKey': uid()}, expect_error=True)
+        assert missing['code'] == 'missing_preset'
+        assert len(call('snapshot')['sessions']) == len(updated['sessions'])
         assert state()['error'] is None
-        summary = {'passed': True, 'nativeSheetOpenedFromRepository': True, 'invalidBranchDoesNotCreateCheckout': True, 'failedAgentRetainsWorktree': True, 'freshLaunchReusesSelectedWorktree': True, 'initialTaskPreserved': True, 'sessionSelectedAfterLaunch': True, 'worktreesCreated': 1}
+        summary = {'passed': True, 'nativeSheetOpenedFromRepository': True, 'invalidBranchDoesNotCreateCheckout': True, 'failedAgentRetainsWorktree': True, 'freshLaunchReusesSelectedWorktree': True, 'initialTaskPreserved': True, 'sessionSelectedAfterLaunch': True, 'worktreesCreated': 1, 'lastSuccessfulPresetSelected': True, 'failedLaunchDoesNotChangePreference': True, 'presetRevisionAdvanced': True, 'runningLaunchSnapshotUnchanged': True, 'emptySetSavedButCannotLaunch': True}
         (artifacts / 'summary.json').write_text(json.dumps(summary, indent=2))
         print(json.dumps(summary, indent=2))
     finally:
