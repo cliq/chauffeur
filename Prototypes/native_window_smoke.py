@@ -104,6 +104,10 @@ with tempfile.TemporaryDirectory(prefix="chauffeur-native-", dir="/tmp") as dire
             assert native.returncode == (-9 if phase == 2 else 0), native.returncode
             after = call("snapshot")
             (artifacts / f"window-states-phase-{phase}.json").write_text(json.dumps(after["store"]["windows"], indent=2))
+            assert all(item["value"].get("frame") for item in after["store"]["windows"]), "A project frame was not persisted"
+            first_project = min(after["store"]["projects"], key=lambda item: item["value"]["name"])["value"]["id"]
+            first_window = next(item["value"] for item in after["store"]["windows"] if item["value"]["id"] == first_project)
+            assert first_window["frame"] == report["frame"], "Saved frame differs from the native window"
             assert before["health"]["runtimeID"] == after["health"]["runtimeID"]
             assert {s["processID"] for s in before["sessions"]} == {s["processID"] for s in after["sessions"]}
             assert len([s for s in after["sessions"] if s["state"] == "activityUnknown"]) == 10

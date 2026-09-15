@@ -51,7 +51,8 @@ struct SettingsView: View {
                     TextField("Completed message history (days)", value: $retention.completedMessageDays, format: .number)
                     Stepper("Live delegated children per parent: \(retention.maxLiveChildren)", value: $retention.maxLiveChildren, in: 1...32)
                     Button("Save Settings") { model.perform { _ = try await model.call("saveSettings", try .from(retention)) } }
-                    Text("Queued messages and native CLI conversations are preserved. Snapshot disk cleanup is still under implementation.").font(.caption).foregroundStyle(.secondary)
+                    Text("Saved terminal history: \(model.snapshot.snapshotStorage.files) files, \(ByteCountFormatter.string(fromByteCount: Int64(model.snapshot.snapshotStorage.bytes), countStyle: .file)).").font(.caption)
+                    Text("History is captured every five seconds while the service is running. Older snapshots are removed to fit the disk budget, starting with ended sessions. Scrollback changes trim saved history immediately and apply to new live terminals. Queued and received messages and native CLI conversations are preserved.").font(.caption).foregroundStyle(.secondary)
                 }
             }.formStyle(.grouped).tabItem { Label("Runtime", systemImage: "gearshape.2") }
         }.frame(width: 830, height: 550)

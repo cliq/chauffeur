@@ -11,6 +11,7 @@ struct AppSnapshot: Decodable, Sendable {
     var delegations: [Delegation] = []
     var health: JSONValue = .null
     var settings = RetentionSettings()
+    var snapshotStorage = SnapshotStorageStatus(budgetBytes: RetentionSettings().snapshotBudgetBytes)
     var errors: [ChauffeurError] = []
     init() {}
 }

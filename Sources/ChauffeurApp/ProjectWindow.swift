@@ -264,10 +264,12 @@ struct WindowObserver: NSViewRepresentable {
                 self.restoreFrame(window)
             })
             for event in [NSWindow.didMoveNotification, NSWindow.didResizeNotification] {
-                observers.append(NotificationCenter.default.publisher(for: event, object: window).debounce(for: .milliseconds(250), scheduler: RunLoop.main).sink { [weak self, weak window] _ in
+                observers.append(NotificationCenter.default.publisher(for: event, object: window).throttle(for: .milliseconds(250), scheduler: DispatchQueue.main, latest: true).sink { [weak self, weak window] _ in
                     guard let self, let window else { return }
                     guard self.appliedFrame else { return }
-                    self.parent.layout.state.frame = NSStringFromRect(window.frame)
+                    let frame = NSStringFromRect(window.frame)
+                    guard self.parent.layout.state.frame != frame else { return }
+                    self.parent.layout.state.frame = frame
                     self.parent.layout.state.displayID = window.screen?.localizedName
                     self.parent.didChangeFrame()
                 })
@@ -283,6 +285,9 @@ struct WindowObserver: NSViewRepresentable {
                 let saved = NSRectFromString(frame)
                 if saved.width >= 880, saved.height >= 560, NSScreen.screens.contains(where: { $0.visibleFrame.intersects(saved) }) { window.setFrame(saved, display: true) }
             }
+            parent.layout.state.frame = NSStringFromRect(window.frame)
+            parent.layout.state.displayID = window.screen?.localizedName
+            parent.didChangeFrame()
         }
     }
 }

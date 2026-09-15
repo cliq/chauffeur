@@ -49,6 +49,12 @@ struct LedgerTests {
         #expect(try await ledger.pruneCompletedMessages(olderThan: Date().addingTimeInterval(1)) == 1)
         await #expect(throws: ChauffeurError.self) { try await ledger.send(caller: callerA, recipientID: b.id, body: "Context", references: ["/repo/file.swift"], retryKey: "stable") }
         #expect(try await ledger.allMessages().isEmpty)
+        let received = try await ledger.send(caller: callerA, recipientID: b.id, body: "Unacknowledged", retryKey: "received")
+        _ = try await ledger.inbox(caller: callerB)
+        let queued = try await ledger.send(caller: callerA, recipientID: b.id, body: "Undelivered", retryKey: "queued")
+        #expect(try await ledger.pruneCompletedMessages(olderThan: Date().addingTimeInterval(1)) == 0)
+        #expect(try await ledger.message(received.id, caller: callerA).state == .received)
+        #expect(try await ledger.message(queued.id, caller: callerA).state == .queued)
         try await ledger.revoke(sessionID: a.id)
         await #expect(throws: ChauffeurError.self) { try await ledger.authenticate(tokenA) }
         await #expect(throws: ChauffeurError.self) { try await ledger.authenticate("") }

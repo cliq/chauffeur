@@ -7,6 +7,7 @@ public actor RuntimeCoordinator {
     public let ledger: Ledger
     public let terminals: TmuxHost
     public let worktrees: WorktreeManager
+    public let snapshots: SnapshotStore
     public let root: URL
     private let ctlPath: String
     private let baseEnvironment: [String: String]
@@ -16,12 +17,18 @@ public actor RuntimeCoordinator {
     private var endpoint: String?
     private var settings = RetentionSettings()
     private var recentErrors: [ChauffeurError] = []
+    private var capturing = Set<UUID>()
+    private var maintaining = false
+    private var retentionSettingsPending = false
+    private var lastMessageCleanup = Date.distantPast
+    private var snapshotStorage = SnapshotStorageStatus(budgetBytes: RetentionSettings().snapshotBudgetBytes)
     public init(root: URL, ctlPath: String, environment: [String: String]) throws {
         self.root = root; self.ctlPath = ctlPath; self.baseEnvironment = environment
         store = try FileStore(root: root)
         ledger = try Ledger(path: root.appendingPathComponent("runtime/ledger.sqlite").path)
         terminals = try TmuxHost(runtimeDirectory: root.appendingPathComponent("runtime"), ctlPath: ctlPath, environment: environment)
         worktrees = WorktreeManager(root: root.appendingPathComponent("worktrees"))
+        snapshots = try SnapshotStore(root: root.appendingPathComponent("runtime/snapshots"))
     }
     public func start() async throws {
         let snapshot = await store.reload()
@@ -42,6 +49,7 @@ public actor RuntimeCoordinator {
             catch { recentErrors.append(ChauffeurError("invalid_settings", "Cannot load retention settings", path: root.appendingPathComponent("settings.json").path)) }
         }
         try await reconcile(startup: true)
+        await maintainHistory(applySettings: true)
         for var delegation in try await ledger.allDelegations() where [.reserved, .launching].contains(delegation.state) {
             if let child = sessions[delegation.childID], child.state.isLive { delegation.state = .running }
             else { delegation.state = .interrupted; delegation.error = "Runtime stopped during launch. Inspect the retained worktree and explicitly retry" }
@@ -54,7 +62,7 @@ public actor RuntimeCoordinator {
     }
     public func snapshot() async throws -> JSONValue {
         let snapshot = await store.reload()
-        return .object(["store": try .from(snapshot), "sessions": try .from(Array(sessions.values).sorted { $0.createdAt < $1.createdAt }), "messages": try .from(await ledger.allMessages()), "delegations": try .from(await ledger.allDelegations()), "health": health(), "settings": try .from(settings), "errors": try .from(recentErrors)])
+        return .object(["store": try .from(snapshot), "sessions": try .from(Array(sessions.values).sorted { $0.createdAt < $1.createdAt }), "messages": try .from(await ledger.allMessages()), "delegations": try .from(await ledger.allDelegations()), "health": health(), "settings": try .from(settings), "snapshotStorage": try .from(snapshotStorage), "errors": try .from(recentErrors)])
     }
     private func persist(_ session: Session) async throws {
         try await ledger.register(session)
@@ -65,6 +73,43 @@ public actor RuntimeCoordinator {
         catch let error as ChauffeurError { record(error) }
     }
     public func record(_ error: ChauffeurError) { recentErrors.append(error); if recentErrors.count > 100 { recentErrors.removeFirst(recentErrors.count - 100) } }
+    private var liveSessionIDs: Set<UUID> { Set(sessions.values.filter { $0.state.isLive }.map(\.id)) }
+    private func captureHistory(_ sessionID: UUID) async throws -> TerminalSnapshot? {
+        guard let session = sessions[sessionID], !launching.contains(sessionID), !capturing.contains(sessionID) else { return try await snapshots.read(sessionID) }
+        capturing.insert(sessionID); defer { capturing.remove(sessionID) }
+        let value = try await terminals.capture(sessionID: sessionID, lines: settings.scrollbackLines)
+        guard session.processID == value.processID, session.terminalIdentity == value.terminalIdentity,
+              sessions[sessionID]?.processID == value.processID, sessions[sessionID]?.terminalIdentity == value.terminalIdentity,
+              !launching.contains(sessionID) else { throw ChauffeurError("snapshot_unavailable", "Terminal ownership changed while saving history") }
+        let saved = try await snapshots.save(value, settings: settings, liveSessions: liveSessionIDs)
+        snapshotStorage = try await snapshots.status(budgetBytes: settings.snapshotBudgetBytes)
+        return saved
+    }
+    public func maintainHistory(applySettings: Bool = false) async {
+        if applySettings { retentionSettingsPending = true }
+        guard !maintaining else { return }
+        maintaining = true; defer { maintaining = false }
+        let applySettings = retentionSettingsPending
+        retentionSettingsPending = false
+        do {
+            let inventory = try await terminals.inventory()
+            for pane in inventory {
+                guard let sessionID = UUID(uuidString: pane.sessionName), let session = sessions[sessionID],
+                      session.processID == pane.processID, session.terminalIdentity == pane.paneID,
+                      !launching.contains(sessionID), !capturing.contains(sessionID) else { continue }
+                do {
+                    if let saved = try await captureHistory(sessionID), pane.dead, sessions[sessionID]?.state.isLive == false { try await terminals.retireDead(saved) }
+                } catch let error as ChauffeurError { record(error) }
+                catch { record(ChauffeurError("snapshot_failed", "Could not save terminal history")) }
+            }
+            snapshotStorage = try await (applySettings ? snapshots.applyRetention(settings: settings, liveSessions: liveSessionIDs) : snapshots.prune(settings: settings, liveSessions: liveSessionIDs))
+            if applySettings || Date().timeIntervalSince(lastMessageCleanup) >= 3600 {
+                _ = try await ledger.pruneCompletedMessages(olderThan: Date().addingTimeInterval(-Double(settings.completedMessageDays) * 86400))
+                lastMessageCleanup = Date()
+            }
+        } catch let error as ChauffeurError { record(error) }
+        catch { record(ChauffeurError("retention_failed", "History cleanup could not finish")) }
+    }
     public func reconcile(startup: Bool = false) async throws {
         // Reload human-edited metadata even while every UI is closed.
         _ = await store.reload()
@@ -99,6 +144,14 @@ public actor RuntimeCoordinator {
         switch request.method {
         case "hello", "version", "status": return health()
         case "snapshot": return try await snapshot()
+        case "terminalSnapshot":
+            let sessionID = try params.uuid("sessionID")
+            guard sessions[sessionID] != nil else { throw ChauffeurError("missing_session", "Session not found") }
+            // A disconnected or ended terminal can still expose its last archive.
+            do { if let value = try await captureHistory(sessionID) { return try .from(value) } }
+            catch let error as ChauffeurError where error.code == "snapshot_unavailable" || error.code == "terminal_inventory" { }
+            if let saved = try await snapshots.read(sessionID) { return try .from(saved) }
+            throw ChauffeurError("snapshot_unavailable", "No saved terminal history is available for this session")
         case "savePresetSet": return try .from(await store.save(params["record"].decode(PresetSet.self), expectedVersion: params["version"].string))
         case "savePreset": return try .from(await store.save(params["record"].decode(AgentPreset.self), expectedVersion: params["version"].string))
         case "saveProject": return try .from(await store.save(params["record"].decode(Project.self), expectedVersion: params["version"].string))
@@ -152,7 +205,10 @@ public actor RuntimeCoordinator {
         case "saveSettings":
             let value = try params.decode(RetentionSettings.self); try value.validate()
             try JSONCoding.encode(value).write(to: root.appendingPathComponent("settings.json"), options: .atomic)
-            settings = value; return try .from(value)
+            settings = value
+            // Cleanup errors remain visible through the normal runtime error list.
+            await maintainHistory(applySettings: true)
+            return try .from(value)
         case "reconcile": try await reconcile(); return health()
         default: throw ChauffeurError("unknown_method", "Unknown runtime method")
         }

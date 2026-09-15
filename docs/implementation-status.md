@@ -16,7 +16,11 @@ the PRD's real-CLI, native-window, and daily-use acceptance scenarios.
   Full native acceptance remains open; see V5 for current evidence.
 - A focused C regression proves PTY children reset inherited blocked signals and
   ignored handlers before exec; it failed before the signal-inheritance fix.
-- Tests: canonical paths/discovery, per-child environment, argument validation,
+- Versioned terminal captures persist normal history and active screens, enforce
+  line/byte budgets, and survive terminal/runtime loss. Native history is
+  read-only and searchable; completed-message cleanup preserves queued/received
+  messages. See [retention and recovery](terminal-history.md).
+- Fourteen Swift tests: canonical paths/discovery, per-child environment, argument validation,
   atomic file replacement/conflicts/corrupt files, durable group-scoped messages,
   grant revocation, retry keys, bounded single-level delegation, and safe Git
   worktree creation/removal.
@@ -38,7 +42,7 @@ the PRD's real-CLI, native-window, and daily-use acceptance scenarios.
 | 1.3–1.7 Presets/projects/groups/welcome/windows | Native editors, cancellable discovery, relink/archive, welcome and project windows implemented | Full interaction and four-Spaces acceptance |
 | 1.8 Basic launch | Runtime launch, fixture CLI, filtered environment, private exec handoff, terminal attachment/input/resize/stop | Real CLI account/status checks, complete preflight, Codex backend ownership |
 | 1.9 Session details | Native details show the immutable launch snapshot and lifecycle/coordination records | Real-session interaction acceptance |
-| 2.1 Screen/history | tmux maintains live screen/history; capture API exists | Persisted bounded history/snapshots, disk budgets/cleanup; native attach/search/copy/link verification |
+| 2.1 Screen/history | tmux live state; bounded persisted snapshots, disk cleanup, native history/search | Real CLI native attach/search/copy/link verification and sustained rotation |
 | 2.2 Reconnect | Positive pane/process reconciliation; explicit native-ID resume path | Real-provider resume and service-failure edge cases |
 | 2.3–2.4 Quit/tabs/split | Native tabs/split, window-state writes, quit/stop-all and keyboard commands implemented | OS keyboard and real-CLI/Spaces acceptance; direct normal/force-quit fixture implemented |
 | 2.5 Worktrees | Create/list/safe-remove implementation and Git integration test | Periodic external inventory reconciliation; launch/removal concurrency audit (UI and explicit external registration implemented) |
@@ -49,7 +53,7 @@ the PRD's real-CLI, native-window, and daily-use acceptance scenarios.
 | 3.4 Delegation | Durable reservation, launch path, worktree default, limits, depth check, result transaction | Bidirectional real-CLI acceptance, crash-window integration tests and failed-child visibility audit |
 | 3.5 Wake | Bounded inbox wait; no terminal message injection | Real idle/busy validation (pending-attention UI implemented) |
 | 3.6–3.7 Coordination UI/skill | Tool descriptions and native message/delegation details implemented | Bundled skill and loading/install/removal routes |
-| 4.1–4.5 Packaging/compatibility/retention/diagnostics/docs | Locally signed app builds; settings UI and build/setup guide exist | Verify registration; release signing; bounded snapshot cleanup; diagnostics export; complete recovery guide |
+| 4.1–4.5 Packaging/compatibility/retention/diagnostics/docs | Locally signed builds; retention settings/cleanup and terminal recovery guide | Verify registration; release signing; diagnostics export; remaining recovery guide |
 | 4.6 Release checklist | Not run | Ten real sessions/four Spaces, timings/hardware record, all F1–F7 scenarios, three normal workdays and failure log |
 
 ## Next implementation order

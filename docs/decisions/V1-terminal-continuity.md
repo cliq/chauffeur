@@ -36,4 +36,12 @@ into a newer view connection. See [V5](V5-macos-lifetime.md) for native probe sc
 
 ## Remaining gate evidence
 
-Both real CLIs must be exercised in the SwiftTerm view, including copy, paste, links, cursor/mouse modes, sustained scrollback rotation, UI force quit, and native prompts. The current capture API is a bounded text/ANSI export, not yet the persisted snapshot/retention system. These remain release gates; fixture success is not a claim that V1 is fully passed.
+Bounded versioned captures are now persisted, with global disk-budget cleanup,
+normal-history plus alternate-screen capture, and a native read-only search
+view. See [terminal history](../terminal-history.md) for the retention policy and
+fixture evidence.
+
+Both real CLIs must still be exercised in the SwiftTerm view, including copy,
+paste, links, cursor/mouse modes, sustained scrollback rotation, UI force quit,
+and native prompts. These remain release gates; fixture success is not a claim
+that V1 is fully passed.

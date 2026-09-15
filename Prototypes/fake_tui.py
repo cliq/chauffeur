@@ -25,6 +25,10 @@ def draw(*_):
 
 signal.signal(signal.SIGWINCH, draw)
 try:
+    # Normal-buffer history must survive an active alternate-screen application.
+    for line in range(250):
+        sys.stdout.write(f"fixture-history-{line:03d} 日本語 café\r\n")
+    sys.stdout.flush()
     while True:
         draw()
         ready, _, _ = select.select([0], [], [], 0.1)

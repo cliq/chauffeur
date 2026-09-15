@@ -31,7 +31,10 @@ import ChauffeurCore
                             return controller.connected && controller.terminal.window === layout.window && text.contains("Chauffeur fixture — 日本語 café")
                         }
                     }
-                    layout.state = original
+                    // Restore selection without overwriting geometry saved while
+                    // the real views were being laid out and resized.
+                    layout.state.selectedSessionID = original.selectedSessionID
+                    layout.state.splitSessionID = original.splitSessionID
                 }
                 let first = ordered[0]
                 let selected = first.state.selectedSessionID!
@@ -53,6 +56,18 @@ import ChauffeurCore
                     controller.attach(socketPath: model.socketPath)
                 }
                 try await wait("reattached unsent input") { controller.connected && screen(controller).contains("INPUT=native café 日本語") }
+                controller.find()
+                try await wait("searchable normal terminal history") {
+                    guard let history = controller.historyController else { return false }
+                    return history.terminal.window != nil && history.terminal.findNext("fixture-history-249")
+                }
+                let history = controller.historyController!
+                guard history.terminal.findNext("INPUT=native café 日本語") else { throw ChauffeurError("native_probe", "Active screen is missing from searchable history") }
+                history.terminal.insertText("history-must-not-send", replacementRange: NSRange(location: NSNotFound, length: 0))
+                try await Task.sleep(for: .milliseconds(200))
+                guard !screen(controller).contains("history-must-not-send") else { throw ChauffeurError("native_probe", "Read-only history sent terminal input") }
+                controller.historyPresented = false
+                try await wait("history view dismissed") { first.window?.attachedSheet == nil }
                 if phase == "1" {
                     openProject?(first.state.id); openProject?(first.state.id)
                     try await Task.sleep(for: .milliseconds(300))
@@ -76,10 +91,10 @@ import ChauffeurCore
                 }
                 try await Task.sleep(for: .milliseconds(400))
                 await model.finishPendingWindowWrites()
-                let result: JSONValue = .object(["passed": .bool(true), "phase": .string(phase), "windows": .number(4), "sessions": .number(10), "renderedTerminals": .number(10), "unsentInput": .string("preserved"), "split": .bool(first.state.splitSessionID != nil), "frame": .string(NSStringFromRect(first.window!.frame))])
+                let result: JSONValue = .object(["passed": .bool(true), "phase": .string(phase), "windows": .number(4), "sessions": .number(10), "renderedTerminals": .number(10), "unsentInput": .string("preserved"), "historySearch": .string("normal history and active screen found; read-only input ignored"), "split": .bool(first.state.splitSessionID != nil), "frame": .string(NSStringFromRect(first.window!.frame))])
                 try JSONCoding.encode(result).write(to: root.appendingPathComponent("native-phase-\(phase).json"), options: .atomic)
             } catch {
-                let result: JSONValue = .object(["passed": .bool(false), "error": .string(error.localizedDescription), "appError": model.error.map(JSONValue.string) ?? .null, "layouts": .number(Double(layouts.count)), "windows": .array(NSApp.windows.map { .string($0.title) }), "terminals": .array(layouts.values.flatMap { $0.controllers.values }.map { .object(["id": .string($0.sessionID.uuidString), "connected": .bool($0.connected), "size": .string("\($0.terminal.getTerminal().cols)x\($0.terminal.getTerminal().rows)"), "status": $0.status.map(JSONValue.string) ?? .null, "screen": .string(screen($0))]) })])
+                let result: JSONValue = .object(["passed": .bool(false), "error": .string(error.localizedDescription), "appError": model.error.map(JSONValue.string) ?? .null, "layouts": .number(Double(layouts.count)), "windows": .array(NSApp.windows.map { .string($0.title) }), "terminals": .array(layouts.values.flatMap { $0.controllers.values }.map { .object(["id": .string($0.sessionID.uuidString), "connected": .bool($0.connected), "size": .string("\($0.terminal.getTerminal().cols)x\($0.terminal.getTerminal().rows)"), "status": $0.status.map(JSONValue.string) ?? .null, "historyPresented": .bool($0.historyPresented), "historyAttached": .bool($0.historyController?.terminal.window != nil), "historyTail": $0.historyController.map { .string(String(screen($0).suffix(4000))) } ?? .null, "screen": .string(screen($0))]) })])
                 try? JSONCoding.encode(result).write(to: root.appendingPathComponent("native-phase-\(phase).json"), options: .atomic)
                 let traces = Dictionary(uniqueKeysWithValues: layouts.values.flatMap { $0.controllers.values }.map { ($0.sessionID.uuidString, $0.debugEvents) })
                 try? JSONCoding.encode(traces).write(to: root.appendingPathComponent("native-phase-\(phase)-trace.json"), options: .atomic)

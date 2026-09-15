@@ -49,12 +49,13 @@ public actor TmuxHost {
         let payloadPath = runtimeDirectory.appendingPathComponent("launch-\(session.id).json")
         guard FileManager.default.createFile(atPath: payloadPath.path, contents: try JSONCoding.encode(payload), attributes: [.posixPermissions: 0o600]) else { throw ChauffeurError("launch_file", "Cannot create private launch handoff") }
         defer { try? FileManager.default.removeItem(at: payloadPath) }
-        let result = try await ProcessRunner.run(executable, ["-S", socketPath, "-f", config.path, "new-session", "-d", "-s", name, "-x", "100", "-y", "30", "-c", payload.directory, ctlPath, "internal-exec", payloadPath.path], environment: environment)
+        // history-limit is read when a pane is created. Set it before new-session
+        // even when the server already exists and does not reread its config.
+        let result = try await ProcessRunner.run(executable, ["-S", socketPath, "-f", config.path, "start-server", ";", "set-option", "-g", "history-limit", String(scrollback), ";", "new-session", "-d", "-s", name, "-x", "100", "-y", "30", "-c", payload.directory, ctlPath, "internal-exec", payloadPath.path], environment: environment)
         guard result.status == 0 else { throw ChauffeurError("terminal_launch", "tmux could not start the session", path: payload.directory) }
         let handoffDeadline = ContinuousClock.now.advanced(by: .seconds(5))
         while FileManager.default.fileExists(atPath: payloadPath.path) && ContinuousClock.now < handoffDeadline { try await Task.sleep(for: .milliseconds(20)) }
         guard !FileManager.default.fileExists(atPath: payloadPath.path) else { throw ChauffeurError("launch_handoff_timeout", "Terminal helper did not consume its launch configuration") }
-        _ = try await command(["set-option", "-t", name, "history-limit", String(scrollback)])
         guard let pane = try await inventory().first(where: { $0.sessionName == name }) else { throw ChauffeurError("terminal_launch", "Launched terminal could not be found") }
         return pane
     }
@@ -77,10 +78,41 @@ public actor TmuxHost {
         guard let (actualOwner, attachment) = attachments[sessionID], actualOwner == owner else { return }
         attachment.close(); attachments.removeValue(forKey: sessionID)
     }
-    public func capture(sessionID: UUID, lines: Int) async throws -> Data {
-        let result = try await command(["capture-pane", "-p", "-e", "-S", "-\(lines)", "-t", sessionID.uuidString])
-        guard result.status == 0 else { throw ChauffeurError("snapshot_unavailable", "Terminal snapshot unavailable") }
-        return Data(result.output.utf8)
+    public func capture(sessionID: UUID, lines: Int) async throws -> TerminalSnapshot {
+        let name = sessionID.uuidString
+        let metadata = try await command(["display-message", "-p", "-t", name, "#{pane_id}\t#{pane_pid}\t#{pane_width}\t#{pane_height}\t#{alternate_on}\t#{history_size}"])
+        let fields = metadata.output.trimmingCharacters(in: .newlines).split(separator: "\t").map(String.init)
+        guard metadata.status == 0, fields.count == 6, let pid = Int32(fields[1]), let columns = Int(fields[2]), let rows = Int(fields[3]), let historySize = Int(fields[5]) else { throw ChauffeurError("snapshot_unavailable", "Terminal history is unavailable") }
+        var history = "", truncated = historySize > lines
+        if historySize > 0 {
+            let captured = try await capturePane(name, options: ["-S", "-\(min(lines, historySize))", "-E", "-1"])
+            history = captured.output; truncated = truncated || captured.outputTruncated
+        }
+        if fields[4] == "1" {
+            // In alternate-screen mode -a returns the saved normal screen;
+            // the default capture still returns the active application's screen.
+            let normal = try await capturePane(name, options: ["-a"])
+            history += normal.output; truncated = truncated || normal.outputTruncated
+        }
+        let screen = try await capturePane(name, options: ["-S", "0", "-E", String(rows - 1)])
+        guard let owner = try await inventory().first(where: { $0.sessionName == name }), owner.paneID == fields[0], owner.processID == pid else { throw ChauffeurError("snapshot_unavailable", "Terminal changed while its history was captured") }
+        return TerminalSnapshot(sessionID: sessionID, processID: pid, terminalIdentity: fields[0], columns: columns, rows: rows, lineLimit: lines, history: history, screen: screen.output, truncated: truncated || screen.outputTruncated)
+    }
+    private func capturePane(_ name: String, options: [String]) async throws -> CommandResult {
+        var result = try await ProcessRunner.run(executable, ["-S", socketPath, "capture-pane", "-p", "-e", "-t", name] + options, environment: environment, timeout: 3, outputLimit: TerminalSnapshot.maximumFileBytes, keepOutputTail: true)
+        guard result.status == 0 else { throw ChauffeurError("snapshot_unavailable", "Terminal history is unavailable") }
+        if result.outputTruncated {
+            // A bounded byte tail may start inside UTF-8 or an escape sequence.
+            result.output = result.output.firstIndex(of: "\n").map { String(result.output[result.output.index(after: $0)...]) } ?? ""
+        }
+        return result
+    }
+    public func retireDead(_ snapshot: TerminalSnapshot) async throws {
+        try snapshot.validate()
+        // tmux evaluates the owner and dead checks together, so a concurrent
+        // explicit resume can never have its replacement pane retired here.
+        let condition = "#{&&:#{pane_dead},#{&&:#{==:#{pane_id},\(snapshot.terminalIdentity)},#{==:#{pane_pid},\(snapshot.processID)}}}"
+        _ = try await command(["if-shell", "-F", "-t", snapshot.sessionID.uuidString, condition, "kill-session -t \(snapshot.sessionID.uuidString)"])
     }
     public func interrupt(sessionID: UUID) async throws {
         let result = try await command(["send-keys", "-t", sessionID.uuidString, "C-c"])

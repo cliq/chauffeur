@@ -91,3 +91,8 @@ Chauffeur uses its own tmux socket. A runtime restart reconciles recorded
 pane/process identities; missing ownership becomes Interrupted. Metadata files
 are human-readable JSON. External changes reload independently of the UI, and
 stale saves report a conflict with the affected path.
+
+Use **History and Search** or **Command-F** for retained terminal output, including
+ended sessions. Settings controls line, disk and completed-message limits. See
+[terminal history and recovery](docs/terminal-history.md) for defaults, cleanup
+and service-loss behaviour.

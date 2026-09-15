@@ -9,6 +9,9 @@ import ChauffeurCore
     let terminal = TerminalView(frame: NSRect(x: 0, y: 0, width: 900, height: 620))
     @Published var status: String?
     @Published var connected = false
+    @Published var historyPresented = false
+    private let readOnly: Bool
+    var historyController: TerminalController?
     private var connection: SocketConnection?
     private var reader: Task<Void, Never>?
     private var writer: Task<Void, Never>?
@@ -21,15 +24,16 @@ import ChauffeurCore
         if debugEvents.count > 40 { debugEvents.removeFirst(debugEvents.count - 40) }
     }
     #endif
-    init(sessionID: UUID, scrollback: Int) {
+    init(sessionID: UUID, scrollback: Int, readOnly: Bool = false) {
         self.sessionID = sessionID
+        self.readOnly = readOnly
         terminal.terminalDelegate = self
         terminal.font = .monospacedSystemFont(ofSize: 13, weight: .regular)
         terminal.getTerminal().changeScrollback(scrollback)
         terminal.setAccessibilityIdentifier("terminal-\(sessionID.uuidString)")
     }
     func attach(socketPath: String) {
-        guard reader == nil else { return }
+        guard !readOnly, reader == nil else { return }
         let current = UUID(); generation = current
         #if DEBUG
         trace("attach \(current)")
@@ -89,9 +93,22 @@ import ChauffeurCore
         connection?.close(); connection = nil; reader = nil; writer = nil; outgoing = nil; connected = false
     }
     func focus() { terminal.window?.makeFirstResponder(terminal) }
-    func find() { terminal.performTextFinderAction(findSender()) }
+    func find() {
+        if readOnly { terminal.performTextFinderAction(findSender()) }
+        else if historyPresented, let historyController { historyController.find() }
+        else {
+            historyController = TerminalController(sessionID: sessionID, scrollback: 10_000, readOnly: true)
+            historyPresented = true
+        }
+    }
+    func display(_ snapshot: TerminalSnapshot) {
+        guard readOnly else { return }
+        terminal.getTerminal().changeScrollback(snapshot.lineLimit + snapshot.rows)
+        terminal.feed(text: "\u{1b}c" + snapshot.rendering)
+    }
     private func findSender() -> NSMenuItem { let item = NSMenuItem(); item.tag = NSTextFinder.Action.showFindInterface.rawValue; return item }
     private func enqueue(_ request: IPCRequest) {
+        guard !readOnly else { return }
         let result = outgoing?.yield(request)
         #if DEBUG
         trace("queue \(request.method) \(request.params["cols"].int ?? 0)x\(request.params["rows"].int ?? 0): active=\(outgoing != nil)")
@@ -136,6 +153,7 @@ struct TerminalPane: View {
                 Text(session.title).fontWeight(.medium).lineLimit(1).help(session.title)
                 Spacer()
                 Text(session.state.label).font(.caption).foregroundStyle(session.needsAttention ? .orange : .secondary)
+                Button { controller.find() } label: { Label("History and Search", systemImage: "clock.arrow.circlepath") }.labelStyle(.iconOnly).help("View and search saved terminal history")
                 if !controller.connected && session.state.isLive {
                     Button("Reconnect") { controller.detach(); controller.attach(socketPath: model.socketPath) }
                 }
@@ -154,5 +172,45 @@ struct TerminalPane: View {
                 }.padding(32).frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }.background(Color(nsColor: .textBackgroundColor))
+            .sheet(isPresented: $controller.historyPresented, onDismiss: { if !controller.historyPresented { controller.historyController = nil } }) {
+                if let history = controller.historyController { TerminalHistoryView(session: session, controller: history).environmentObject(model) }
+            }
+    }
+}
+
+private struct TerminalHistoryView: View {
+    @EnvironmentObject private var model: AppModel
+    @Environment(\.dismiss) private var dismiss
+    let session: Session
+    @ObservedObject var controller: TerminalController
+    @State private var snapshot: TerminalSnapshot?
+    @State private var failure: String?
+    @State private var loading = true
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("Terminal History — \(session.title)").font(.headline)
+                Spacer()
+                Button("Refresh") { Task { await refresh() } }.disabled(loading)
+                Button("Find") { controller.find() }.disabled(snapshot == nil).keyboardShortcut("f", modifiers: .command)
+                Button("Done") { dismiss() }.keyboardShortcut(.cancelAction)
+            }
+            if let snapshot {
+                Text("Read-only capture from \(snapshot.capturedAt.formatted(date: .abbreviated, time: .standard)). \(snapshot.truncated ? "Older output was trimmed to the retention limits." : "")")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            if let failure { Text(failure).foregroundStyle(.orange) }
+            if loading { ProgressView().controlSize(.small) }
+            TerminalHost(controller: controller).frame(maxWidth: .infinity, maxHeight: .infinity)
+        }.padding().frame(minWidth: 720, idealWidth: 980, minHeight: 480, idealHeight: 680)
+            .task { await refresh(); if snapshot != nil { controller.find() } }
+    }
+    private func refresh() async {
+        loading = true; failure = nil; defer { loading = false }
+        do {
+            let result = try await model.call("terminalSnapshot", .object(["sessionID": .string(session.id.uuidString)]))
+            let saved = try await Task.detached { try result.decode(TerminalSnapshot.self) }.value
+            try saved.validate(); snapshot = saved; controller.display(saved)
+        } catch { failure = (error as? ChauffeurError)?.message ?? "Could not load saved terminal history" }
     }
 }

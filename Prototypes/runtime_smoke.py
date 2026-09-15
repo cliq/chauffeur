@@ -161,6 +161,19 @@ with tempfile.TemporaryDirectory(prefix="chauffeur-smoke-", dir="/tmp") as direc
         reattached = attach(sessions[0]["id"])
         send_frame(reattached, request("resize", {"cols": 110, "rows": 35}))
         reattached.close(); attachments.remove(reattached)
+        saved_history = call("terminalSnapshot", {"sessionID": sessions[0]["id"]})
+        assert "fixture-history-000" in saved_history["history"]
+        assert "fixture-history-249" in saved_history["history"]
+        assert "Chauffeur fixture" in saved_history["screen"]
+        assert "unsent fixture input" in saved_history["screen"]
+        settings = call("snapshot")["settings"]
+        settings["scrollbackLines"] = 100
+        settings["snapshotBudgetBytes"] = 1048576
+        call("saveSettings", settings)
+        trimmed = call("terminalSnapshot", {"sessionID": sessions[0]["id"]})
+        assert "fixture-history-000" not in trimmed["history"]
+        assert "fixture-history-249" in trimmed["history"]
+        assert len(trimmed["history"].splitlines()) <= 100 and trimmed["truncated"]
         runtime.kill(); runtime.wait(timeout=5)
         runtime = start_runtime()
         new_health = wait_for(lambda: call("status"), lambda value: value.get("runtimeID") != health["runtimeID"] and value.get("mcpEndpoint"))
@@ -168,15 +181,45 @@ with tempfile.TemporaryDirectory(prefix="chauffeur-smoke-", dir="/tmp") as direc
         assert new_health["mcpEndpoint"] == health["mcpEndpoint"]
         assert {item["processID"] for item in restored["sessions"]} == {item["pid"] for item in credentials}
         assert all(item["state"] == "activityUnknown" for item in restored["sessions"])
+        assert call("terminalSnapshot", {"sessionID": sessions[0]["id"]})["history"] == trimmed["history"]
         error, inbox = tool(token_b, "chauffeur_inbox")
         assert not error and inbox[0]["id"] == message["id"] and inbox[0]["state"] == "received"
         assert not tool(token_b, "chauffeur_inbox", {"acknowledge": [message["id"]]})[0]
         call("stop", {"sessionID": sessions[0]["id"], "force": True})
+        assert "unsent fixture input" in call("terminalSnapshot", {"sessionID": sessions[0]["id"]})["screen"]
         assert mcp(token_a, "ping")[0] == 401
         assert mcp(token_b, "ping")[0] == 200
-        for session in sessions[1:]:
-            call("stop", {"sessionID": session["id"], "force": True})
-        print(json.dumps({"runtimeFixture": "pass", "sessions": 3, "profileEnvironment": "isolated", "terminalReattachment": "pass", "runtimeRestart": "same tmux-owned processes and MCP port", "mailboxPersistence": "pass", "groupProbes": "rejected", "retries": "same record IDs", "revocation": "pass", "realCLIValidation": "pending"}, indent=2))
+        # Lose the terminal service entirely: no implicit replay, archive still readable.
+        call("terminalSnapshot", {"sessionID": sessions[1]["id"]})
+        subprocess.run([shutil.which("tmux"), "-S", str(root / "runtime/tmux.sock"), "kill-server"], check=True)
+        call("reconcile")
+        interrupted = call("snapshot")
+        assert all(item["state"] == "interrupted" for item in interrupted["sessions"])
+        runtime.kill(); runtime.wait(timeout=5)
+        runtime = start_runtime()
+        wait_for(lambda: call("status"), lambda value: value.get("runtimeID") != new_health["runtimeID"] and value.get("mcpEndpoint"))
+        assert "fixture-history-249" in call("terminalSnapshot", {"sessionID": sessions[1]["id"]})["history"]
+        retention_sessions = []
+        for limit in [100, 200]:
+            settings["scrollbackLines"] = limit
+            call("saveSettings", settings)
+            launch["retryKey"] = uid()
+            extra = call("launch", launch)
+            retention_sessions.append(extra)
+            pane_limit = subprocess.check_output([shutil.which("tmux"), "-S", str(root / "runtime/tmux.sock"), "display-message", "-p", "-t", extra["id"], "#{history_limit}"], text=True).strip()
+            assert int(pane_limit) == limit, pane_limit
+        # Changing the default does not resize existing live tmux buffers.
+        pane_limit = subprocess.check_output([shutil.which("tmux"), "-S", str(root / "runtime/tmux.sock"), "display-message", "-p", "-t", retention_sessions[0]["id"], "#{history_limit}"], text=True).strip()
+        assert int(pane_limit) == 100
+        for extra in retention_sessions:
+            call("interrupt", {"sessionID": extra["id"]})
+            wait_for(lambda: call("snapshot"), lambda value: next(item for item in value["sessions"] if item["id"] == extra["id"])["state"] == "exited")
+            def pane_names():
+                return subprocess.run([shutil.which("tmux"), "-S", str(root / "runtime/tmux.sock"), "list-sessions", "-F", "#{session_name}"], capture_output=True, text=True).stdout
+            wait_for(pane_names, lambda value: extra["id"] not in value)
+            archive = call("terminalSnapshot", {"sessionID": extra["id"]})
+            assert "fixture-history-249" in archive["history"] + archive["screen"]
+        print(json.dumps({"runtimeFixture": "pass", "sessions": 3, "profileEnvironment": "isolated", "terminalReattachment": "pass", "runtimeRestart": "same tmux-owned processes and MCP port", "terminalHistory": "bounded normal history and active screen survive terminal and runtime loss", "mailboxPersistence": "pass", "groupProbes": "rejected", "retries": "same record IDs", "revocation": "pass", "realCLIValidation": "pending"}, indent=2))
     except Exception:
         log.flush()
         print((root / "runtime.log").read_text()[-4000:])

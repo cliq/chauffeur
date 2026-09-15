@@ -25,10 +25,17 @@ signing/notarization.
 `Prototypes/native_window_smoke.py` passes against the actual Debug app with an
 isolated runtime with four projects and ten fake CLI sessions. Its Debug-only
 in-app probe exercises all ten SwiftTerm views, Unicode input, resize and
-reattachment with unsent input. It also opens an existing project twice, closes
+reattachment with unsent input. History search finds normal-buffer output and the
+active screen; typing in the history view does not reach the live terminal.
+It also opens an existing project twice, closes
 and reopens a project window, and checks normal quit plus forced UI termination
 across three app launches. The Python harness compares runtime/process identities
 and saved window state. Reports are under `.build/native-probe-artifacts/`.
+
+The history presentation owns one terminal controller until dismissal. Frame
+saves use throttled main-queue updates, including while sheets are active, and
+initial visible geometry is saved even before a move or resize. The probe
+checks saved geometry against the actual window across all three launches.
 
 The probe drives native view methods directly. Its cached-view images can show
 terminal pixels but do not reliably capture every layer of a SwiftUI window.
@@ -42,6 +49,8 @@ runtime. The test runner then times out before test execution while enabling
 macOS Automation Mode. `automationmodetool` reports that user authentication is
 required; `DevToolsSecurity -status` reports Developer mode disabled. These system
 settings were left unchanged, and the user was asked to enable UI-testing access.
+The user has said they will enable access. The latest check still reports both
+Automation Mode and Developer mode disabled; XCUITest has not yet run.
 
 ## Remaining gate evidence
 
