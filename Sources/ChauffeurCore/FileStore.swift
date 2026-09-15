@@ -35,29 +35,103 @@ public actor FileStore {
     public let root: URL
     private let manager = FileManager.default
     private var snapshot = StoreSnapshot()
+    private var watcher: MetadataWatcher?
+    private var watcherError: ChauffeurError?
+    private var lastWatcherRetry = ContinuousClock.now
+    private var loaded = false
+    private var recordCache: [String: Any] = [:]
+    private var directoryCache: [String: Result<[URL], ChauffeurError>] = [:]
+    private var localChanges = Set<String>()
+    // Internal counters allow tests to verify actual I/O, not just returned values.
+    struct ReadCounts: Equatable, Sendable { var records = 0; var directories = 0; var scans = 0 }
+    private var readCounts = ReadCounts()
+    func ioCounts() -> ReadCounts { readCounts }
     public init(root: URL = Paths.applicationSupport) throws {
         self.root = URL(fileURLWithPath: Paths.canonical(root.path))
         for directory in ["preset-sets", "projects", "runtime", "runtime/snapshots", "worktrees"] {
             try FileManager.default.createDirectory(at: root.appendingPathComponent(directory), withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
         }
+        // Begin observing before the initial scan; changes during that scan
+        // remain queued and will invalidate its cache on the next refresh.
+        do { watcher = try MetadataWatcher(root: self.root) }
+        catch { watcherError = error as? ChauffeurError }
     }
 
+    /// Explicit refresh for preflight and writes. Does not rely on event delivery
+    /// latency when deciding whether an externally edited reference is current.
     public func reload() -> StoreSnapshot {
+        let changes = watcher?.drain()
+        if changes?.restart == true { restartWatcher() }
+        recordCache.removeAll(); directoryCache.removeAll(); localChanges.removeAll()
+        return scan()
+    }
+
+    /// Ordinary runtime observations do no filesystem I/O while idle.
+    public func refresh() -> StoreSnapshot {
+        refresh(changes: watcher?.drain() ?? MetadataChanges())
+    }
+    func refresh(changes observed: MetadataChanges) -> StoreSnapshot {
+        var changes = observed
+        if changes.restart || (watcher == nil && ContinuousClock.now - lastWatcherRetry >= .seconds(5)) {
+            restartWatcher(); changes.rescan = true
+        }
+        changes.paths.formUnion(localChanges); localChanges.removeAll()
+        guard loaded && !changes.rescan else {
+            recordCache.removeAll(); directoryCache.removeAll()
+            return scan()
+        }
+        guard !changes.isEmpty else { return snapshot }
+        for path in changes.paths { invalidate(path) }
+        return scan()
+    }
+
+    private func restartWatcher() {
+        watcher = nil; lastWatcherRetry = .now
+        do { watcher = try MetadataWatcher(root: root); watcherError = nil }
+        catch { watcherError = error as? ChauffeurError }
+    }
+    private func invalidate(_ path: String) {
+        recordCache = recordCache.filter { $0.key != path && !$0.key.hasPrefix(path + "/") }
+        directoryCache = directoryCache.filter { $0.key != path && !$0.key.hasPrefix(path + "/") }
+        // A new child may have created several missing ancestors. Refresh their
+        // entry lists while keeping unrelated records and subtree lists cached.
+        var ancestor = URL(fileURLWithPath: path).deletingLastPathComponent()
+        while ancestor.path == root.path || ancestor.path.hasPrefix(root.path + "/") {
+            directoryCache.removeValue(forKey: ancestor.path)
+            ancestor.deleteLastPathComponent()
+        }
+    }
+    private func readRecord<T: Record>(_ type: T.Type, _ url: URL) throws -> Stored<T> {
+        if let cached = recordCache[url.path] as? Result<Stored<T>, ChauffeurError> { return try cached.get() }
+        readCounts.records += 1
+        let result: Result<Stored<T>, ChauffeurError>
+        do {
+            let values = try url.resourceValues(forKeys: [.isSymbolicLinkKey, .isRegularFileKey])
+            guard values.isSymbolicLink != true, values.isRegularFile == true else { throw ChauffeurError("invalid_record", "Record must be a regular file") }
+            let data = try Data(contentsOf: url)
+            let value = try JSONCoding.decode(type, from: data); try value.validate()
+            result = .success(Stored(value: value, path: url.path, version: JSONCoding.digest(data)))
+        } catch { result = .failure(ChauffeurError("invalid_record", "Cannot load \(type): \(Self.safeError(error))", path: url.path)) }
+        recordCache[url.path] = result
+        return try result.get()
+    }
+    private func scan() -> StoreSnapshot {
+        readCounts.scans += 1
         var result = StoreSnapshot()
         var errors: [ChauffeurError] = []
+        if let watcherError { errors.append(watcherError) }
+        var visitedRecords = Set<String>()
         @discardableResult func read<T: Record>(_ type: T.Type, _ url: URL, into records: inout [Stored<T>], check: (T) throws -> Void = { _ in }) -> T? {
+            visitedRecords.insert(url.path)
             do {
-                let values = try url.resourceValues(forKeys: [.isSymbolicLinkKey, .isRegularFileKey])
-                guard values.isSymbolicLink != true, values.isRegularFile == true else { throw ChauffeurError("invalid_record", "Record must be a regular file") }
-                let data = try Data(contentsOf: url)
-                let value = try JSONCoding.decode(type, from: data)
-                try value.validate()
+                let stored = try readRecord(type, url)
+                let value = stored.value
                 try check(value)
                 guard !records.contains(where: { $0.value.id == value.id }) else { throw ChauffeurError("duplicate_id", "Duplicate record UUID") }
-                records.append(Stored(value: value, path: url.path, version: JSONCoding.digest(data)))
+                records.append(stored)
                 return value
             } catch {
-                errors.append(ChauffeurError("invalid_record", "Cannot load \(type): \(Self.safeError(error))", path: url.path))
+                errors.append((error as? ChauffeurError).flatMap { $0.path == url.path ? $0 : nil } ?? ChauffeurError("invalid_record", "Cannot load \(type): \(Self.safeError(error))", path: url.path))
                 return nil
             }
         }
@@ -83,7 +157,7 @@ public actor FileStore {
                 }
             }
             let window = directory.appendingPathComponent("window-state.json")
-            if manager.fileExists(atPath: window.path) {
+            if children(directory, errors: &errors).contains(window) {
                 read(WindowState.self, window, into: &result.windows) { value in
                     try Validation.require(value.id == project?.id, "Window does not belong to its containing project")
                 }
@@ -93,6 +167,8 @@ public actor FileStore {
         result.projects.sort { $0.value.lastOpenedAt > $1.value.lastOpenedAt }
         result.errors = errors
         snapshot = result
+        recordCache = recordCache.filter { visitedRecords.contains($0.key) }
+        loaded = true
         return result
     }
 
@@ -216,6 +292,7 @@ public actor FileStore {
         let data = try JSONCoding.encode(value)
         try data.write(to: url, options: .atomic)
         try manager.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+        localChanges.insert(url.path)
         return Stored(value: value, path: url.path, version: JSONCoding.digest(data))
     }
     private func checkVersion(at url: URL, expectedVersion: String?) throws {
@@ -247,13 +324,20 @@ public actor FileStore {
         }
     }
     private func children(_ url: URL, errors: inout [ChauffeurError]) -> [URL] {
-        guard manager.fileExists(atPath: url.path) else { return [] }
+        if let cached = directoryCache[url.path] {
+            switch cached { case .success(let children): return children; case .failure(let error): errors.append(error); return [] }
+        }
+        readCounts.directories += 1
+        let result: Result<[URL], ChauffeurError>
         do {
+            guard manager.fileExists(atPath: url.path) else { directoryCache[url.path] = .success([]); return [] }
             let values = try url.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey])
             guard values.isDirectory == true && values.isSymbolicLink != true else { throw ChauffeurError("invalid_record", "Metadata directory must not be a symlink") }
-            return try manager.contentsOfDirectory(at: url, includingPropertiesForKeys: [.isDirectoryKey, .isRegularFileKey, .isSymbolicLinkKey], options: [.skipsHiddenFiles]).sorted { $0.path < $1.path }
+            result = .success(try manager.contentsOfDirectory(at: url, includingPropertiesForKeys: [.isDirectoryKey, .isRegularFileKey, .isSymbolicLinkKey], options: [.skipsHiddenFiles]).sorted { $0.path < $1.path })
         }
-        catch { errors.append(ChauffeurError("unreadable_directory", "Cannot read directory", path: url.path)); return [] }
+        catch { result = .failure(ChauffeurError("unreadable_directory", "Cannot read directory", path: url.path)) }
+        directoryCache[url.path] = result
+        switch result { case .success(let children): return children; case .failure(let error): errors.append(error); return [] }
     }
     private func directories(_ url: URL, errors: inout [ChauffeurError]) -> [URL] {
         children(url, errors: &errors).filter { child in

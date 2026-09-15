@@ -22,7 +22,7 @@ public enum DiagnosticCode: String, Codable, Sendable {
     case snapshot_budget, snapshot_failed, snapshot_path, snapshot_unavailable, snapshot_version
     case socket_failed, stop_failed, terminal_error, terminal_inventory, terminal_launch, unauthorized
     case unknown_event, unknown_method, unknown_terminal_command, unknown_tool, unmanaged_path
-    case unreadable_directory, unresolved_preset_set, unresolved_reference, preset_preference, unsupported_directories, usage, version_failed
+    case unreadable_directory, unresolved_preset_set, unresolved_reference, metadata_watcher, preset_preference, unsupported_directories, usage, version_failed
     case working_directory, worktree_busy, worktree_unavailable, worktree_registration
     case skill_bundle, skill_busy, skill_conflict, skill_unavailable
     case notification_helper, notification_unavailable

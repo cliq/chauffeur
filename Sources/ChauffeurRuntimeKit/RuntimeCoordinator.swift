@@ -93,7 +93,7 @@ public actor RuntimeCoordinator {
         .object(["runtimeID": .string(id.uuidString), "version": .string(RuntimeVersion.current), "protocolVersion": .number(Double(WireProtocol.major)), "mcpEndpoint": endpoint.map(JSONValue.string) ?? .null, "liveSessions": .number(Double(sessions.values.filter { $0.state.isLive }.count)), "status": .string("running")])
     }
     public func snapshot() async throws -> JSONValue {
-        let snapshot = await store.reload()
+        let snapshot = await store.refresh()
         return .object(["store": try .from(snapshot), "sessions": try .from(Array(sessions.values).sorted { $0.createdAt < $1.createdAt }), "messages": try .from(await ledger.allMessages()), "delegations": try .from(await ledger.allDelegations()), "health": health(), "settings": try .from(settings), "notifications": try .from(await notificationStatus()), "snapshotStorage": try .from(snapshotStorage), "errors": try .from(recentErrors), "repositoryInventories": try .from(repositoryInventories)])
     }
     public func reconcileWorktrees() async {
@@ -104,7 +104,7 @@ public actor RuntimeCoordinator {
         worktreeScan = nil
     }
     private func scanWorktrees() async {
-        let snapshot = await store.reload()
+        let snapshot = await store.refresh()
         let records = snapshot.worktrees.filter { $0.value.registered }
         var seenSources = Set<String>()
         let sources = (snapshot.projects.flatMap { $0.value.folders.filter(\.registered).map(\.canonicalPath) }.sorted()
@@ -166,7 +166,7 @@ public actor RuntimeCoordinator {
         logs?.append(entry)
     }
     public func diagnostics() async -> DiagnosticsReport {
-        let snapshot = await store.reload()
+        let snapshot = await store.refresh()
         let logReport = logs?.recent() ?? DiagnosticLogs(status: .unavailable)
         let logErrors = logReport.status == .unavailable ? [ChauffeurError("log_unavailable", "Structured logs are unavailable")] : []
         return DiagnosticsReport(sessions: Array(sessions.values), health: health(), errors: snapshot.errors + repositoryInventories.compactMap(\.error) + recentErrors + logErrors, observation: .live, observedAt: Date(), logs: logReport)
@@ -225,8 +225,9 @@ public actor RuntimeCoordinator {
         try await task.value
     }
     private func performReconcile(startup: Bool) async throws {
-        // Reload human-edited metadata even while every UI is closed.
-        let metadata = await store.reload()
+        // Consume file notifications even while every UI is closed. With no
+        // events this returns cached metadata without touching the filesystem.
+        let metadata = await store.refresh()
         if metadata.errors != metadataErrors {
             metadataErrors = metadata.errors
             var entry = RuntimeLogEntry(.metadataInvalid, runtimeID: id); entry.count = metadata.errors.count
@@ -282,7 +283,7 @@ public actor RuntimeCoordinator {
             notificationAuthorization = authorization; notificationHeartbeat = Date()
             let enabled = try await ledger.notificationsEnabled()
             if !enabled { notificationCleanupPending = false; return try .from(NotificationWork(enabled: false, deliveries: [])) }
-            let snapshot = await store.reload()
+            let snapshot = await store.refresh()
             var deliveries: [NotificationDelivery] = []
             for notice in try await ledger.pendingNotifications() {
                 guard let session = sessions[notice.route.sessionID], session.projectID == notice.route.projectID,

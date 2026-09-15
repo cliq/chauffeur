@@ -66,7 +66,35 @@ Deleting a session file can leave a session retained by the runtime ledger. A
 window may still open that runtime session; its missing file is reported as an
 unresolved disk reference. Fix the relevant metadata or restore it from backup.
 
-## Verification and remaining work
+## Filesystem notifications
+
+The runtime watches metadata while the app is closed. Its ordinary snapshot,
+notification, and reconciliation checks consume pending file events and reuse
+cached records and directory listings. An idle check does not read metadata from
+disk. Changes under runtime storage or managed Git checkouts do not invalidate
+the metadata cache.
+
+A changed file invalidates its cached record and the directory lists needed to
+discover additions, removals, or renames. Unchanged records remain cached. Atomic
+editor replacements, project directory moves, copied-in directories, corruption
+and later repair are handled by the same path. Runtime writes are visible on the
+next refresh without waiting for an OS event.
+
+Watching starts before the initial scan, so events arriving during a scan remain
+queued. Dropped/coalesced events request a full rescan; a moved or unmounted watch
+root also restarts the stream. These follow Apple's
+[FSEvents recovery guidance](https://developer.apple.com/library/archive/documentation/Darwin/Conceptual/FSEvents_ProgGuide/UsingtheFSEventsFramework/UsingtheFSEventsFramework.html).
+If notifications cannot start, the metadata issues list reports that condition
+and the store retries watching with a full scan every five seconds until it can
+resume. Event paths retain their canonical spelling, including `/private/var`
+and `/private/tmp` aliases.
+
+File notifications are asynchronous. Background reconciliation consumes them
+approximately once a second, while snapshot requests can consume them sooner.
+Saves and launch preflight still perform an immediate disk reload and version
+check; they do not rely on notification latency to reject stale writes.
+
+## Verification
 
 `MetadataIntegrityTests` covers misplaced records, dangling references, retained
 history, stale writes, default ownership, revisions, remembered choices, and
@@ -74,7 +102,14 @@ symlinked metadata directories. The native quick-session fixture also checks the
 default selection after a successful launch and the unchanged launch snapshot
 after a preset edit, plus the empty-set UI and runtime rejection.
 
-Targeted filesystem watching remains pending. The current runtime reloads
-metadata periodically, and writes and launch preflight refresh it before checking
-references. This is correct for the covered cases but still rereads unchanged
-files while idle.
+`MetadataWatcherTests` uses real macOS notifications and I/O counters to check
+idle cache reuse, one-file reloads, ignored runtime/Git activity, atomic file
+replacement, corruption repair, directory moves/additions/removals, and recovery
+after replacing the store root. An injected dropped-event condition verifies a
+complete rescan. A runtime test edits and moves project metadata with no UI or
+snapshot client attached, verifies that the background loop sees the changes,
+and confirms the agent retains its process ID throughout.
+
+The full Swift suite, signed Debug build, socket/runtime and worktree regression
+fixtures, and native session-sheet fixture pass with the watcher enabled. Logs
+are under `.build/metadata-watcher-*.log`; the supplied Release build is unchanged.

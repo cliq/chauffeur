@@ -5,6 +5,36 @@ import ChauffeurCore
 @testable import ChauffeurRuntimeKit
 
 struct LaunchCancellationTests {
+    @Test func backgroundMetadataWatchingPreservesAnAgentWhileItsProjectIsMoved() async throws {
+        let fixture = try await LaunchFixture.make(); defer { fixture.cleanup() }
+        let launched = try await fixture.runtime.launch(fixture.request)
+        let stored = try #require(await fixture.runtime.store.current().projects.first)
+        // Exercise the runtime's ordinary background loop without an app or a
+        // snapshot request that could refresh metadata on the caller's behalf.
+        let observing = Task {
+            while !Task.isCancelled {
+                try await fixture.runtime.reconcile()
+                try await Task.sleep(for: .milliseconds(100))
+            }
+        }
+        defer { observing.cancel() }
+        var changed = stored.value; changed.name = "Renamed outside the app"
+        try JSONCoding.encode(changed).write(to: URL(fileURLWithPath: stored.path), options: .atomic)
+        try await fixture.wait { await fixture.runtime.store.current().projects.first?.value.name == "Renamed outside the app" }
+        let directory = URL(fileURLWithPath: stored.path).deletingLastPathComponent()
+        let backup = fixture.path("moved-project")
+        try FileManager.default.moveItem(at: directory, to: backup)
+        try await fixture.wait { await fixture.runtime.store.current().projects.isEmpty }
+        let pane = try #require(await fixture.runtime.terminals.inventory().first)
+        #expect(!pane.dead && pane.processID == launched.processID)
+        #expect(try await fixture.session().state.isLive)
+        try FileManager.default.moveItem(at: backup, to: directory)
+        try await fixture.wait { await fixture.runtime.store.current().projects.first?.value.id == stored.value.id }
+        #expect(try await fixture.runtime.terminals.inventory().first?.processID == launched.processID)
+        observing.cancel(); _ = await observing.result
+        _ = try await fixture.stop()
+    }
+
     @Test func stopWaitsForSubmittedTerminalCreationBeforeAcknowledging() async throws {
         let fixture = try await LaunchFixture.make(gatedCreation: true); defer { fixture.cleanup() }
         try Data().write(to: fixture.path("block-creation"))
