@@ -5,18 +5,26 @@ if [[ "${CONFIGURATION:-Debug}" == Release ]]; then task_config=release; fi
 cd "$SRCROOT"
 /usr/bin/env swift build -c "$task_config" --product ChauffeurRuntime
 /usr/bin/env swift build -c "$task_config" --product chauffeurctl
+/usr/bin/env swift build -c "$task_config" --product chauffeur
 /usr/bin/env swift build -c "$task_config" --product ChauffeurNotifications
 task_binary_dir=$(/usr/bin/env swift build -c "$task_config" --show-bin-path)
 task_app_dir="$TARGET_BUILD_DIR/$CONTENTS_FOLDER_PATH"
 mkdir -p "$task_app_dir/MacOS" "$task_app_dir/Library/LaunchAgents"
 task_stage=$(mktemp -d "$task_app_dir/MacOS/.chauffeur-embed.XXXXXX")
 trap 'rm -rf "$task_stage"' EXIT
-for task_binary in ChauffeurRuntime chauffeurctl; do
+for task_binary in ChauffeurRuntime chauffeurctl chauffeur; do
+  task_embedded_name="$task_binary"
+  # Most macOS volumes are case-insensitive: chauffeur would replace Chauffeur.
+  if [[ "$task_binary" == chauffeur ]]; then task_embedded_name=chauffeur-launcher; fi
+  if [[ "$task_app_dir/MacOS/$task_embedded_name" -ef "$TARGET_BUILD_DIR/$EXECUTABLE_PATH" ]]; then
+    echo "error: Embedded executable $task_embedded_name collides with the app executable" >&2
+    exit 1
+  fi
   # Replace executable inodes atomically; do not overwrite a Mach-O that launchd
   # may have mapped or whose code signature the kernel has already cached.
   cp "$task_binary_dir/$task_binary" "$task_stage/$task_binary"
   /usr/bin/codesign --force --options runtime --sign "${CHAUFFEUR_SIGN_IDENTITY:-${EXPANDED_CODE_SIGN_IDENTITY:--}}" "$task_stage/$task_binary"
-  mv -f "$task_stage/$task_binary" "$task_app_dir/MacOS/$task_binary"
+  mv -f "$task_stage/$task_binary" "$task_app_dir/MacOS/$task_embedded_name"
 done
 task_notification_app="$task_stage/ChauffeurNotifications.app"
 mkdir -p "$task_notification_app/Contents/MacOS"

@@ -56,6 +56,7 @@ struct SettingsView: View {
                     Text("Agents remain running when Chauffeur's windows close. A runtime restart reconciles surviving terminal processes.").font(.caption).foregroundStyle(.secondary)
                 }
                 NotificationSettingsSection()
+                TerminalLauncherSettings()
                 Section("Retention and Delegation") {
                     TextField("Scrollback lines", value: $retention.scrollbackLines, format: .number)
                     TextField("Snapshot budget (bytes)", value: $retention.snapshotBudgetBytes, format: .number)

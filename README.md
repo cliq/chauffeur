@@ -51,6 +51,9 @@ Optional [session notifications](docs/notifications.md) run through an embedded
 background app and open the selected project/session, including a cold app launch.
 Enable them in Settings → Runtime; macOS notification permission is separate.
 
+The [terminal launcher](docs/terminal-launcher.md) opens a project from a folder:
+install it in Settings → Runtime, then run `chauffeur` or `chauffeur /path/to/folder`.
+
 ## Verify
 
 The Python integration fixtures require Python 3.11 or newer (including its
@@ -65,12 +68,17 @@ python3 Prototypes/terminal_continuity.py
 python3 Prototypes/runtime_smoke.py
 python3 Prototypes/worktree_smoke.py
 python3 Prototypes/native_window_smoke.py
+python3 Prototypes/folder_launcher_smoke.py
+python3 Prototypes/release_startup_smoke.py
 ```
 
 Fixtures use temporary data, private tmux servers, and fake CLI processes. The
 native probe uses the built Debug app and stores reports/images under
 `.build/native-probe-artifacts/`. Xcode also includes `ChauffeurAppUITests` for
 OS-driven UI testing, which requires macOS automation access.
+The launcher and Release startup checks use separately signed app copies and
+isolated runtimes; they require the development machine's Leonardo Lobato
+Developer ID certificate. The Release check verifies that the actual GUI opens.
 
 `python3 Prototypes/skill_installation.py` checks the real CLIs' skill metadata
 using fresh fixture profiles, with no inference prompt. See the

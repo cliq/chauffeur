@@ -55,9 +55,30 @@ struct WelcomeView: View {
         }.frame(minWidth: 780, minHeight: 460)
             .sheet(isPresented: $creatingProject) { ProjectEditor { id in creatingProject = false; open(id) } }
             .sheet(item: $editingProject) { project in ProjectEditor(project: project) { _ in editingProject = nil } }
+            .sheet(item: $model.folderSelection) { selection in
+                VStack(alignment: .leading, spacing: 16) {
+                    Text("Choose a Project").font(.title2)
+                    Text("This folder belongs to more than one project.")
+                    Text(selection.path).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+                    List(selection.matches) { match in
+                        if let project = model.project(match.projectID) {
+                            Button {
+                                model.chooseProjectForFolder(match)
+                                dismissWindow(id: "welcome")
+                            } label: {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(project.name + (project.archived ? " (Archived)" : ""))
+                                    Text(model.setName(project.presetSetID)).font(.caption).foregroundStyle(.secondary)
+                                }.frame(maxWidth: .infinity, alignment: .leading).padding(.vertical, 5).contentShape(Rectangle())
+                            }.buttonStyle(.plain)
+                        }
+                    }.frame(height: 200)
+                    Button("Cancel") { model.folderSelection = nil }.keyboardShortcut(.cancelAction)
+                }.padding(24).frame(width: 500)
+            }
             .onChange(of: model.online) { _, online in
                 guard online, !restored else { return }; restored = true
-                if model.pendingSessionRoute != nil { return }
+                if model.hasPendingNavigation || model.skipAutomaticWindowRestore { return }
                 let windows = model.snapshot.store.windows.filter { $0.value.wasOpen && model.project($0.value.id) != nil }
                 if !windows.isEmpty { for window in windows { openWindow(id: "project", value: window.value.id) }; dismissWindow(id: "welcome") }
             }

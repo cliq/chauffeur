@@ -22,7 +22,7 @@ unverified real-CLI or native behavior; deferred workload checks remain unverifi
   line/byte budgets, and survive terminal/runtime loss. Native history is
   read-only and searchable; completed-message cleanup preserves queued/received
   messages. See [retention and recovery](terminal-history.md).
-- Thirty-five Swift tests: canonical paths/discovery, per-child environment, argument validation and quoting,
+- Thirty-nine Swift tests: canonical paths/discovery, folder routing/launcher installation, per-child environment, argument validation and quoting,
   atomic file replacement/conflicts/corrupt files, durable group-scoped messages,
   grant revocation, retry keys, bounded single-level delegation, and safe Git
   worktree creation/removal.
@@ -38,6 +38,16 @@ unverified real-CLI or native behavior; deferred workload checks remain unverifi
   app-wide selection. Four isolated native app launches verify persistence,
   window/terminal default colors, cursor contrast, newly created terminals, and
   preservation of existing text in terminal and history buffers.
+- [Terminal folder routing](terminal-launcher.md) passes native cold/warm launch,
+  folder selection, shared-project choice, repeated-route and service-loss layout
+  recovery checks. Startup subscriptions wait for helper registration refresh;
+  writes that could not connect retain their queued window state.
+- Release startup now verifies an actual visible GUI window in an isolated copy.
+  Fixed a case-insensitive filename collision where embedding `chauffeur`
+  overwrote `Chauffeur`; the embedded launcher is now `chauffeur-launcher`, with
+  a build-time collision guard. Both Debug and Release have verified signatures
+  from Leonardo Lobato's Developer ID certificate. The Release startup capture
+  shows the Welcome screen connected to its isolated runtime without an alert.
 - Bundled coordination skill with explicit per-profile install/update/remove
   controls, ownership/conflict checks, private files, and stale-review rejection.
   Native Codex and Claude metadata fixtures prove profile-specific discovery and
@@ -102,7 +112,7 @@ unverified real-CLI or native behavior; deferred workload checks remain unverifi
 | 2.7 Status/attention | Lifecycle records, real Codex/Claude completion IDs, permission attention hooks, unread/pending counts; optional durable notifications; native warm/cold URL routing and background helper startup; user enabled and authorized notifications | Actual OS delivery/click, enabled-helper recovery/update, and remaining native attention signals |
 | 2.8 Sleep/service loss | Runtime loop plus native wake reconnect, health/recovery actions; actual service termination/restart verified | Real sleep/wake and service lifecycle with live real sessions |
 | 2.9 Appearance setting | Implemented; System/Light/Dark, persistence, native window and terminal default-color checks pass | — |
-| 2.10 Terminal project launcher | Todo — requested by user | Install a launcher in `/usr/local/bin/`; open the project containing the selected folder |
+| 2.10 Terminal project launcher | Implemented Settings installer and folder routing; native cold/warm and Release startup checks pass | Actual `/usr/local/bin/` installation requires macOS administrator authentication; repair after moving/deleting the prior app |
 | 2.11 Quick session on a new worktree | Todo — requested by user | One flow from a repository in the sidebar to a new worktree and session |
 | 4.1–4.5 Packaging/compatibility/retention/diagnostics/docs | Developer ID local builds; actual registration/update; retention settings/cleanup; diagnostics export; terminal, diagnostics and service recovery guides | Focused packaging/recovery acceptance; native save-dialog interaction; remaining recovery guide |
 | 4.7 Complete app manual | Todo — requested by user, after app work | Document every feature and its usage; publish through Artifact Colab MCP |

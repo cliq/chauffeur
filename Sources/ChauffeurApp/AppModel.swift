@@ -29,16 +29,33 @@ struct AppSnapshot: Decodable, Sendable {
     private let preferences: UserDefaults
     private func applyAppearance() { NSApplication.shared.appearance = appearance.nativeAppearance }
     struct Navigation: Equatable { var id = UUID(); let route: SessionRoute }
+    struct ProjectNavigation: Equatable { var id = UUID(); let match: ProjectFolderMatch }
+    struct FolderSelection: Identifiable { let id = UUID(); let path: String; let matches: [ProjectFolderMatch] }
     @Published var pendingSessionRoute: Navigation?
+    @Published var pendingProjectRoute: ProjectNavigation?
+    @Published var folderSelection: FolderSelection?
+    private var pendingFolderRoute: FolderRoute?
+    private(set) var skipAutomaticWindowRestore = false
+    var hasPendingNavigation: Bool { pendingSessionRoute != nil || pendingProjectRoute != nil || pendingFolderRoute != nil || folderSelection != nil }
     var openProjectWindow: ((UUID) -> Void)?
     var openWelcomeWindow: (() -> Void)?
     private var openedRouteID: UUID?
     func openSessionURL(_ url: URL) {
+        if let route = FolderRoute(url: url) {
+            skipAutomaticWindowRestore = true
+            pendingSessionRoute = nil; pendingProjectRoute = nil; folderSelection = nil
+            pendingFolderRoute = route
+            processPendingRoute()
+            return
+        }
         guard let route = SessionRoute(url: url) else { return }
+        skipAutomaticWindowRestore = true
+        pendingFolderRoute = nil; pendingProjectRoute = nil; folderSelection = nil
         pendingSessionRoute = Navigation(route: route)
         processPendingRoute()
     }
     func processPendingRoute() {
+        processFolderRoute()
         guard online, let navigation = pendingSessionRoute, let openProjectWindow else { return }
         guard project(navigation.route.projectID) != nil, session(navigation.route.sessionID)?.projectID == navigation.route.projectID else {
             error = "The notification's project or session is no longer available."
@@ -47,6 +64,32 @@ struct AppSnapshot: Decodable, Sendable {
         guard openedRouteID != navigation.id else { return }
         openedRouteID = navigation.id
         openProjectWindow(navigation.route.projectID)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+    private func processFolderRoute() {
+        guard online, let route = pendingFolderRoute, openProjectWindow != nil, openWelcomeWindow != nil else { return }
+        pendingFolderRoute = nil
+        do {
+            let path = try Paths.directory(route.path)
+            let matches = ProjectFolderResolver.matches(path: path, projects: projects, worktrees: snapshot.store.worktrees.map(\.value), inventories: snapshot.repositoryInventories ?? [])
+            if matches.count == 1 { chooseProjectForFolder(matches[0]) }
+            else if matches.isEmpty {
+                error = "No Chauffeur project contains this folder. Add it to a project in Project Settings.\n\(path)"
+                openWelcomeWindow?()
+            } else {
+                folderSelection = FolderSelection(path: path, matches: matches)
+                openWelcomeWindow?()
+            }
+            NSApp.activate(ignoringOtherApps: true)
+        } catch {
+            self.error = error.localizedDescription; openWelcomeWindow?()
+        }
+    }
+    func chooseProjectForFolder(_ match: ProjectFolderMatch) {
+        guard project(match.projectID) != nil else { folderSelection = nil; return }
+        folderSelection = nil
+        pendingProjectRoute = ProjectNavigation(match: match)
+        openProjectWindow?(match.projectID)
         NSApp.activate(ignoringOtherApps: true)
     }
     @Published var snapshot = AppSnapshot()
@@ -65,6 +108,7 @@ struct AppSnapshot: Decodable, Sendable {
     let socketPath: String
     private var observation: Task<Void, Never>?
     private var connection: SocketConnection?
+    private var connectionGeneration = 0
     private var pendingWindows: [UUID: WindowState] = [:]
     private var windowVersions: [UUID: String] = [:]
     private var windowConflicts = Set<UUID>()
@@ -93,6 +137,7 @@ struct AppSnapshot: Decodable, Sendable {
         guard observation == nil else { return }
         #if DEBUG
         NativeProbe.start(model: self)
+        LauncherProbe.start(model: self)
         #endif
         if ProcessInfo.processInfo.environment["CHAUFFEUR_SOCKET"] == nil { registerService() }
         #if DEBUG
@@ -101,6 +146,8 @@ struct AppSnapshot: Decodable, Sendable {
         observation = Task { [weak self] in
             while !Task.isCancelled {
                 guard let self else { return }
+                if isRestartingService { try? await Task.sleep(for: .milliseconds(100)); continue }
+                let generation = connectionGeneration
                 do {
                     let socket = try SocketConnection(path: socketPath)
                     connection = socket
@@ -111,12 +158,15 @@ struct AppSnapshot: Decodable, Sendable {
                         guard response.version == WireProtocol.major else { throw ChauffeurError("protocol_mismatch", "App and service versions differ. Restart the background service") }
                         if let failure = response.error { throw failure }
                         guard let result = response.result else { continue }
-                        snapshot = try await Task.detached { try result.decode(AppSnapshot.self) }.value
+                        let received = try await Task.detached { try result.decode(AppSnapshot.self) }.value
+                        guard generation == connectionGeneration, !isRestartingService else { break }
+                        snapshot = received
                         snapshotReceivedAt = Date()
                         online = true; serviceMessage = "Background service running · \(snapshot.sessions.filter { $0.state.isLive }.count) live sessions"
                         processPendingRoute()
                     }
                 } catch {
+                    guard generation == connectionGeneration else { continue }
                     online = false
                     if ProcessInfo.processInfo.environment["CHAUFFEUR_SOCKET"] == nil && service.status == .requiresApproval {
                         serviceMessage = "Allow Chauffeur in System Settings → Login Items & Extensions"
@@ -163,8 +213,9 @@ struct AppSnapshot: Decodable, Sendable {
         }
     }
     func restartService() {
+        guard beginServiceRestart() else { return }
         Task {
-            do { try await restartRegisteredService() }
+            do { try await completeServiceRestart() }
             catch { self.error = error.localizedDescription }
         }
     }
@@ -175,10 +226,20 @@ struct AppSnapshot: Decodable, Sendable {
         return JSONCoding.digest(configuration) + ":" + JSONCoding.digest(executable)
     }
     func restartRegisteredService() async throws {
-        guard ProcessInfo.processInfo.environment["CHAUFFEUR_SOCKET"] == nil else { reconnect(); return }
-        guard !isRestartingService else { return }
-        isRestartingService = true; defer { isRestartingService = false }
+        guard beginServiceRestart() else { return }
+        try await completeServiceRestart()
+    }
+    private func beginServiceRestart() -> Bool {
+        guard ProcessInfo.processInfo.environment["CHAUFFEUR_SOCKET"] == nil else { reconnect(); return false }
+        guard !isRestartingService else { return false }
+        // Set this synchronously, before startup can subscribe to the old helper.
+        isRestartingService = true
+        connectionGeneration += 1
         connection?.close(); online = false
+        return true
+    }
+    private func completeServiceRestart() async throws {
+        defer { isRestartingService = false }
         do {
             if service.status == .enabled { try await service.unregister() }
             try service.register(); serviceRegistrationError = nil; serviceDiagnosticError = nil; reconnect()
@@ -197,8 +258,11 @@ struct AppSnapshot: Decodable, Sendable {
         try await RuntimeClient.call(IPCRequest(method, params: params), socketPath: socketPath)
     }
     func refresh() async throws {
+        let generation = connectionGeneration
         let result = try await call("snapshot")
-        snapshot = try await Task.detached { try result.decode(AppSnapshot.self) }.value
+        let received = try await Task.detached { try result.decode(AppSnapshot.self) }.value
+        guard generation == connectionGeneration, !isRestartingService else { return }
+        snapshot = received
         snapshotReceivedAt = Date()
         online = true
         processPendingRoute()
@@ -264,13 +328,22 @@ struct AppSnapshot: Decodable, Sendable {
         guard windowWriter == nil else { return }
         windowWriter = Task {
             defer { windowWriter = nil }
-            while let id = pendingWindows.keys.first, let value = pendingWindows.removeValue(forKey: id) {
+            while let id = pendingWindows.keys.first {
+                if !online || isRestartingService { try? await Task.sleep(for: .milliseconds(100)); continue }
+                guard let value = pendingWindows.removeValue(forKey: id) else { continue }
                 do {
                     let response = try await call("saveWindow", .object(["record": try .from(value), "version": windowVersions[id].map(JSONValue.string) ?? .null]))
                     let stored = try response.decode(Stored<WindowState>.self)
                     windowVersions[id] = stored.version
                     snapshot.store.windows.removeAll { $0.value.id == id }; snapshot.store.windows.append(stored)
                 } catch {
+                    if (error as? ChauffeurError)?.code == "service_unavailable" {
+                        // No connection was opened, so the write was never sent.
+                        // Keep the newest queued layout and retry after reconnect.
+                        if pendingWindows[id] == nil { pendingWindows[id] = value }
+                        online = false; connection?.close()
+                        continue
+                    }
                     pendingWindows.removeValue(forKey: id); windowConflicts.insert(id)
                     self.error = "\(error.localizedDescription)\nClose and reopen this project window to reload its saved layout."
                     try? await refresh()

@@ -102,8 +102,9 @@ struct ProjectWindow: View {
                 layout.state.wasOpen = false; model.saveWindow(layout.state); model.openProjects.remove(projectID)
                 layout.loaded = false
             }))
-            .onAppear { restore(); consumeSessionRoute() }
+            .onAppear { restore(); consumeSessionRoute(); consumeProjectRoute() }
             .onChange(of: model.pendingSessionRoute) { _, _ in consumeSessionRoute() }
+            .onChange(of: model.pendingProjectRoute) { _, _ in consumeProjectRoute() }
             .onChange(of: model.online) { _, online in if online { restore(); layout.synchronizeTerminals(model: model) } }
             .onChange(of: layout.state) { _, _ in
                 guard layout.loaded else { return }
@@ -272,6 +273,17 @@ struct ProjectWindow: View {
         layout.state.wasOpen = true; model.projectOpened(projectID); saveLayout()
         layout.synchronizeTerminals(model: model)
         consumeSessionRoute()
+        consumeProjectRoute()
+    }
+    private func consumeProjectRoute() {
+        guard layout.loaded, model.online, let navigation = model.pendingProjectRoute,
+              navigation.match.projectID == projectID else { return }
+        layout.selectedFolderID = navigation.match.folderID
+        collapsedRepositories.remove(navigation.match.folderID)
+        layout.state.sidebarVisible = true
+        model.pendingProjectRoute = nil
+        layout.window?.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
     }
     private func consumeSessionRoute() {
         guard layout.loaded, model.online, let navigation = model.pendingSessionRoute,

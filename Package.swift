@@ -9,7 +9,8 @@ let package = Package(
         .library(name: "ChauffeurRuntimeKit", targets: ["ChauffeurRuntimeKit"]),
         .executable(name: "ChauffeurRuntime", targets: ["ChauffeurRuntime"]),
         .executable(name: "ChauffeurNotifications", targets: ["ChauffeurNotifications"]),
-        .executable(name: "chauffeurctl", targets: ["ChauffeurCtl"])
+        .executable(name: "chauffeurctl", targets: ["ChauffeurCtl"]),
+        .executable(name: "chauffeur", targets: ["ChauffeurLauncher"])
     ],
     dependencies: [
         .package(url: "https://github.com/migueldeicaza/SwiftTerm.git", exact: "1.20.0"),
@@ -23,6 +24,7 @@ let package = Package(
         .executableTarget(name: "ChauffeurRuntime", dependencies: ["ChauffeurRuntimeKit"]),
         .executableTarget(name: "ChauffeurNotifications", dependencies: ["ChauffeurCore"]),
         .executableTarget(name: "ChauffeurCtl", dependencies: ["ChauffeurCore", "CChauffeur"]),
+        .executableTarget(name: "ChauffeurLauncher", dependencies: ["ChauffeurCore"]),
         .testTarget(name: "ChauffeurCoreTests", dependencies: ["ChauffeurCore"]),
         .testTarget(name: "ChauffeurRuntimeTests", dependencies: ["ChauffeurRuntimeKit"])
     ]
