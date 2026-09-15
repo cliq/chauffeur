@@ -34,6 +34,10 @@ unverified real-CLI or native behavior; deferred workload checks remain unverifi
   A native directory panel check confirms home as its initial location with
   hidden folders visible. Visual evidence is under `.local/ui-preview/` and
   `.local/settings-preview/`; these previews use an isolated socket and app ID.
+- [Appearance settings](appearance.md) offer System, Light, and Dark with saved
+  app-wide selection. Four isolated native app launches verify persistence,
+  window/terminal default colors, cursor contrast, newly created terminals, and
+  preservation of existing text in terminal and history buffers.
 - Bundled coordination skill with explicit per-profile install/update/remove
   controls, ownership/conflict checks, private files, and stale-review rejection.
   Native Codex and Claude metadata fixtures prove profile-specific discovery and
@@ -97,7 +101,7 @@ unverified real-CLI or native behavior; deferred workload checks remain unverifi
 | 2.6 Multiple repos | Explicit additional folder selection in launch API; primary main checkout excluded | Real CLI access test (shared-checkout warning and explicit additional-folder UI implemented) |
 | 2.7 Status/attention | Lifecycle records, real Codex/Claude completion IDs, permission attention hooks, unread/pending counts; optional durable notifications; native warm/cold URL routing and background helper startup; user enabled and authorized notifications | Actual OS delivery/click, enabled-helper recovery/update, and remaining native attention signals |
 | 2.8 Sleep/service loss | Runtime loop plus native wake reconnect, health/recovery actions; actual service termination/restart verified | Real sleep/wake and service lifecycle with live real sessions |
-| 2.9 Appearance setting | Todo — requested by user | Settings selection for System, Light, or Dark; persistence and consistent app/terminal appearance |
+| 2.9 Appearance setting | Implemented; System/Light/Dark, persistence, native window and terminal default-color checks pass | — |
 | 2.10 Terminal project launcher | Todo — requested by user | Install a launcher in `/usr/local/bin/`; open the project containing the selected folder |
 | 2.11 Quick session on a new worktree | Todo — requested by user | One flow from a repository in the sidebar to a new worktree and session |
 | 4.1–4.5 Packaging/compatibility/retention/diagnostics/docs | Developer ID local builds; actual registration/update; retention settings/cleanup; diagnostics export; terminal, diagnostics and service recovery guides | Focused packaging/recovery acceptance; native save-dialog interaction; remaining recovery guide |

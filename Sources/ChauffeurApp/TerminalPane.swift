@@ -6,7 +6,7 @@ import ChauffeurCore
 @MainActor final class TerminalController: ObservableObject, @preconcurrency TerminalViewDelegate {
     let sessionID: UUID
     let owner = UUID()
-    let terminal = TerminalView(frame: NSRect(x: 0, y: 0, width: 900, height: 620))
+    let terminal = ThemedTerminalView(frame: NSRect(x: 0, y: 0, width: 900, height: 620))
     @Published var status: String?
     @Published var connected = false
     @Published var historyPresented = false
@@ -30,6 +30,7 @@ import ChauffeurCore
         terminal.terminalDelegate = self
         terminal.font = .monospacedSystemFont(ofSize: 13, weight: .regular)
         terminal.getTerminal().changeScrollback(scrollback)
+        terminal.applyAppearance()
         terminal.setAccessibilityIdentifier("terminal-\(sessionID.uuidString)")
     }
     func attach(socketPath: String) {

@@ -47,6 +47,8 @@ struct SettingsView: View {
                 }.padding(20).frame(minWidth: 450, maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             }.frame(maxWidth: .infinity, maxHeight: .infinity)
                 .tabItem { Label("Presets", systemImage: "person.crop.rectangle.stack") }
+            AppearanceSettingsView()
+                .tabItem { Label("Appearance", systemImage: "circle.lefthalf.filled") }
             Form {
                 Section("Background Service") {
                     ServiceHealthView()
@@ -75,6 +77,21 @@ struct SettingsView: View {
             .sheet(isPresented: $newPreset) { if let selectedSet { PresetEditor(setID: selectedSet) } }
             .sheet(item: $editedPreset) { preset in PresetEditor(setID: preset.setID, preset: preset) }
             .sheet(item: $skillPreset) { preset in CoordinationSkillView(preset: preset) }
+    }
+}
+
+struct AppearanceSettingsView: View {
+    @EnvironmentObject private var model: AppModel
+    var body: some View {
+        Form {
+            Section("Appearance") {
+                Picker("Theme", selection: $model.appearance) {
+                    ForEach(AppAppearance.allCases) { appearance in Text(appearance.label).tag(appearance) }
+                }.pickerStyle(.segmented).accessibilityIdentifier("appearance-choice")
+                Text("System follows your Mac’s appearance. Changes apply to all Chauffeur windows and terminal default colors.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+        }.formStyle(.grouped)
     }
 }
 

@@ -20,6 +20,14 @@ struct AppSnapshot: Decodable, Sendable {
 }
 
 @MainActor final class AppModel: ObservableObject {
+    @Published var appearance: AppAppearance {
+        didSet {
+            preferences.set(appearance.rawValue, forKey: AppAppearance.preferenceKey)
+            applyAppearance()
+        }
+    }
+    private let preferences: UserDefaults
+    private func applyAppearance() { NSApplication.shared.appearance = appearance.nativeAppearance }
     struct Navigation: Equatable { var id = UUID(); let route: SessionRoute }
     @Published var pendingSessionRoute: Navigation?
     var openProjectWindow: ((UUID) -> Void)?
@@ -64,11 +72,14 @@ struct AppSnapshot: Decodable, Sendable {
     private var wakeObserver: AnyCancellable?
     private let service = SMAppService.agent(plistName: "dev.chauffeur.runtime.plist")
 
-    init() {
+    init(preferences: UserDefaults = .standard) {
+        self.preferences = preferences
+        appearance = AppAppearance(rawValue: preferences.string(forKey: AppAppearance.preferenceKey) ?? "") ?? .system
         socketPath = ProcessInfo.processInfo.environment["CHAUFFEUR_SOCKET"] ?? Paths.applicationSupport.appendingPathComponent("runtime/runtime.sock").path
         wakeObserver = NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.didWakeNotification).sink { [weak self] _ in
             Task { @MainActor in self?.reconnect() }
         }
+        applyAppearance()
     }
     var projects: [Project] { snapshot.store.projects.map(\.value).sorted { $0.lastOpenedAt > $1.lastOpenedAt } }
     var presetSets: [PresetSet] { snapshot.store.presetSets.map(\.value) }
