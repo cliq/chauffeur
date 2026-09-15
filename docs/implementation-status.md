@@ -50,6 +50,12 @@ the PRD's real-CLI, native-window, and daily-use acceptance scenarios.
 - `Prototypes/real_codex_integration.py`: two private authenticated Codex profiles,
   three real sessions, six attributed messages with native approval, completion
   IDs, scoped peer stop, explicit resume and runtime/MCP reconnection.
+- `Prototypes/real_claude_integration.py`: three real Claude sessions across two
+  private profiles, native account screens and live configuration indicators,
+  inherited provider credentials absent, six attributed messages, permission
+  attention/completion hooks, scoped peer stop, explicit resume and runtime/MCP
+  reconnection. Both supplied profiles report the same account/organization;
+  distinct-Claude-account selection remains unverified.
 - `Prototypes/service_lifetime_smoke.py`: actual bundled LaunchAgent registration,
   normal UI quit/relaunch, launchd recovery and app-driven service restart, using
   an empty default store and cleaning up its registration. Relative executable
@@ -66,16 +72,16 @@ the PRD's real-CLI, native-window, and daily-use acceptance scenarios.
 | 1.1 Records/store | Implemented and tested, including external reload/conflict errors | Complete reference-integrity checks; targeted file watcher (current one-second reload also runs with no UI); empty-set UI acceptance |
 | 1.2 Runtime skeleton | Lock, peer-checked Unix socket, version handshake, health helper, verified bundled LaunchAgent registration/recovery; bounded structured logs with typed redaction | Remaining live-service release acceptance |
 | 1.3–1.7 Presets/projects/groups/welcome/windows | Native editors, cancellable discovery, relink/archive, welcome and project windows implemented | Full interaction and four-Spaces acceptance |
-| 1.8 Basic launch | Runtime/real Codex launch, filtered environment, private exec handoff, terminal input/resize/stop | Full native account/status checks, Claude launch, complete preflight |
+| 1.8 Basic launch | Real Codex/Claude launch, filtered environment, private exec handoff, terminal input/resize/stop; Claude native account/process configuration checks | Full native account/status checks, distinct-Claude-account check, complete preflight |
 | 1.9 Session details | Native details show the immutable launch snapshot and lifecycle/coordination records | Real-session interaction acceptance |
 | 2.1 Screen/history | tmux live state; bounded persisted snapshots, disk cleanup, native history/search | Real CLI native attach/search/copy/link verification and sustained rotation |
-| 2.2 Reconnect | Positive pane/process reconciliation; real Codex explicit native-ID resume and MCP reconnect | Claude resume and remaining service-failure edge cases |
+| 2.2 Reconnect | Positive pane/process reconciliation; real Codex/Claude explicit native-ID resume and MCP reconnect | Remaining service-failure edge cases and full native acceptance |
 | 2.3–2.4 Quit/tabs/split | Native tabs/split, window-state writes, quit/stop-all and keyboard commands implemented | OS keyboard and real-CLI/Spaces acceptance; direct normal/force-quit fixture implemented |
 | 2.5 Worktrees | Create/list/safe-remove; periodic external inventory; identity-based moves/replacements; pending launch/removal and metadata-write reservations; Git/socket regression fixture | Real-CLI removal and native control acceptance; whole-repository relocation; recovery/resume after external checkout replacement |
 | 2.6 Multiple repos | Explicit additional folder selection in launch API; primary main checkout excluded | Real CLI access test (shared-checkout warning and explicit additional-folder UI implemented) |
-| 2.7 Status/attention | Lifecycle records, real Codex completion IDs, unread/pending counts | Claude hooks; native attention signals; notifications and closed-UI routing |
+| 2.7 Status/attention | Lifecycle records, real Codex/Claude completion IDs, Claude permission attention hooks, unread/pending counts | Remaining native attention signals; notifications and closed-UI routing |
 | 2.8 Sleep/service loss | Runtime loop plus native wake reconnect, health/recovery actions; actual service termination/restart verified | Real sleep/wake and service lifecycle with live real sessions |
-| 3.1–3.3 Credentials/MCP/mailboxes | Ledger/HTTP fixtures; real Codex shared-profile credentials and messages | Full HTTP/client compliance; Claude shared-profile connections; remaining real tool cases |
+| 3.1–3.3 Credentials/MCP/mailboxes | Ledger/HTTP fixtures; real Codex/Claude shared-profile credentials and messages | Full HTTP/client compliance; remaining real tool cases and controlled existing-server preservation |
 | 3.4 Delegation | Durable reservation, launch path, worktree default, limits, depth check, result transaction | Bidirectional real-CLI acceptance, crash-window integration tests and failed-child visibility audit |
 | 3.5 Wake | Bounded inbox wait; no terminal message injection | Real idle/busy validation (pending-attention UI implemented) |
 | 3.6–3.7 Coordination UI/skill | Tool descriptions, message/delegation details, bundled skill, explicit install/update/remove controls; native metadata discovery/isolation/removal fixture | Native control interaction and real model use of guidance; full F7 acceptance |
@@ -84,7 +90,7 @@ the PRD's real-CLI, native-window, and daily-use acceptance scenarios.
 
 ## Next implementation order
 
-1. Complete Claude authenticated checks, cross-provider MCP cases, and remaining
+1. Complete cross-provider MCP cases, remaining account-selection checks, and
    foundation edge-case tests.
 2. Stabilize and verify native terminal/window lifetime, restore/focus, and the
    app interaction scenarios through direct probes and XCUITest.

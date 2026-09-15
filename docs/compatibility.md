@@ -12,7 +12,7 @@ not a completed real-provider support matrix.
 | SwiftTerm | 1.20.0 | Pinned; native terminal views implemented and exercised by the Debug probe |
 | Hummingbird | 2.26.0 | Actual loopback MCP requests exercised with fixture credentials |
 | Codex | 0.154.0 | Three real sessions/two profiles; authenticated messages, native approvals/completion, scoped stop, explicit resume and runtime reconnect pass |
-| Claude Code | 2.1.272 | Help/flags and isolated skill discovery/removal observed; both authorized clones report signed in; authenticated interactive/MCP validation pending |
+| Claude Code | 2.1.272 | Three real sessions/two profiles; native account/process configuration, authenticated messages, permission/completion hooks, scoped stop, explicit resume and runtime reconnect pass; both profiles report the same account |
 
 ## Capability behavior
 
@@ -27,7 +27,7 @@ prove approval or input status; these remain unknown when no supported event is
 available. Claude uses launch-scoped hooks, which may be affected by native trust
 or managed policy. Silence and output volume never set completion.
 
-The default Codex launch route has real credential and scoped-stop evidence.
+The default Codex and Claude launch routes have real credential and scoped-stop evidence.
 Full tool coverage and cross-provider acceptance remain open. See
 [V3](decisions/V3-mcp-and-status.md). Both baseline CLIs pass native metadata
 discovery/isolation/removal checks for the optional

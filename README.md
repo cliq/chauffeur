@@ -79,10 +79,14 @@ approval only to those exact tool calls:
 ```sh
 python3 Prototypes/real_codex_integration.py \
   --profile-a /path/to/private/codex-a --profile-b /path/to/private/codex-b
+python3 Prototypes/real_claude_integration.py \
+  --profile-a /path/to/private/claude-a --profile-b /path/to/private/claude-b
 ```
 
-Its redacted result and private failure artifacts are written under
-`.local/real-codex-artifacts/`. Do not include private terminal/history files in
+Redacted results and private failure artifacts are written under
+`.local/real-codex-artifacts/` and `.local/real-claude-artifacts/`. Claude's
+`--startup-only` option verifies native account displays and process configuration
+without an inference prompt. Do not include private terminal/history files in
 shared diagnostics. See [V3](docs/decisions/V3-mcp-and-status.md) for verified scope.
 
 ## Start using a development build
@@ -104,9 +108,10 @@ Closing a terminal tab, project window, or quitting the UI keeps agents running.
 Stop Session ends an execution. Resume Conversation uses its recorded native ID
 and original profile; it creates a new execution.
 
-Real Codex checks cover two profiles, shared-profile credentials, native
-completion, messages and scoped process ownership. Claude and the remaining
-native account/tool cases are still pending. Matching a candidate CLI version enables experimental
+Real Codex and Claude checks cover two profiles each, shared-profile credentials,
+native completion, messages and scoped process ownership. Both supplied Claude
+profiles use the same account; distinct-account selection and the remaining
+native account/tool cases are pending. Matching a candidate CLI version enables experimental
 integration; other versions offer explicit basic terminal mode. See
 [compatibility](docs/compatibility.md) and [V3](docs/decisions/V3-mcp-and-status.md).
 

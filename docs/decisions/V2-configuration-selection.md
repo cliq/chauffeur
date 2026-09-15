@@ -29,13 +29,34 @@ explicit resume and runtime restart checks. See [V3](V3-mcp-and-status.md).
 Claude's directory copies initially lacked their matching macOS Keychain
 credentials. After separate explicit authorization on 2026-09-15, those two
 records were copied into private `0600` credential files in the test clones.
-Both clones now report signed in; credential values were omitted from output.
+Both clones report signed in; credential values were omitted from output. During
+native use, Claude migrated profile A's fallback file into the Keychain entry
+associated with that clone's configuration path. The original profile's path
+and entry remain separate.
 The application itself does not copy credentials. Skill installation is a
 separate explicit action that changes only namespaced guidance files.
 See Claude's [credential storage documentation](https://code.claude.com/docs/en/authentication#credential-management)
 for its macOS Keychain and private-file fallback routes.
 
-Native account/usage display, authenticated Claude sessions and provider-specific
-settings remain acceptance gates. A directory label alone is not evidence of an
-authenticated account. The default Codex launch route now has real credential
-and scoped-stop evidence; alternate daemon/remote routes are not claimed.
+`Prototypes/real_claude_integration.py` launches three real Claude Code 2.1.272
+sessions across the two clones, with two sessions sharing one profile. Native
+`/status` shows the expected account, organization, and conversation ID in each
+terminal. The probe also reads fixed indicators from its own processes through
+Darwin `KERN_PROCARGS2`: the configuration directory matches the selected clone,
+and injected invalid `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, and
+`OPENAI_API_KEY` values are absent. Raw process environments are never written
+or returned by the probe.
+
+Both supplied Claude profiles currently report the same account and
+organization. This proves separate configuration-directory selection and
+matching native account displays; distinct-Claude-account selection remains
+unverified. Six real message operations, scoped stop, explicit resume and
+runtime reconnection also pass; see [V3](V3-mcp-and-status.md). Native usage
+displays, additional provider-specific settings, and broader UI acceptance
+remain open. Alternate daemon/remote routes are not claimed.
+
+A third authorized directory contained a file-based login and initially reported
+a different account. Its private configuration copy reported signed out after
+native startup, so the distinct-account probe stopped before sending any model
+task. That clone needs a fresh native sign-in before the account-separation case
+can proceed; the cause of its lost login has not been established.

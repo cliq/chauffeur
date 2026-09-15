@@ -1,6 +1,6 @@
 # V3 — MCP and lifecycle integration
 
-Status: real Codex messaging, permissions, completion, resume and restart checks
+Status: real Codex and Claude messaging, permissions, completion, resume and restart checks
 passed; full real-client/cross-provider gate remains open.
 
 ## Decision and implementation candidate
@@ -18,7 +18,7 @@ The current baseline-version detector enables a candidate integration path and r
 - [Claude hooks](https://code.claude.com/docs/en/hooks) and [MCP configuration](https://code.claude.com/docs/en/mcp).
 - [MCP Streamable HTTP transport](https://modelcontextprotocol.io/specification/2025-11-25/basic/transports).
 
-## Critical next validation
+## Real Codex evidence
 
 `Prototypes/real_codex_integration.py` exercises the actual runtime and Codex
 0.154.0 with two authorized private profile clones and three real sessions. The
@@ -47,13 +47,47 @@ evidence. This does not cover arbitrary native feature/configuration changes or
 explicit remote/shared-daemon workflows; `--remote` remains a conflicting managed
 argument. No user daemon is stopped by Chauffeur's session-stop implementation.
 
-Further evidence remains required for all tools, preserved pre-existing MCP
-servers, Claude hooks/resume, inbox acknowledgement, and cross-provider delegation.
+## Real Claude evidence
+
+`Prototypes/real_claude_integration.py` exercises Claude Code 2.1.272 through the
+actual runtime, native interactive CLI and HTTP MCP client. The two authorized
+clones retain their model settings and credentials; copied executable hooks,
+plugins, status commands and local MCP registrations were disabled in the test
+copies. The fixture uses native manual permission mode and disables built-in
+tools for its bounded MCP-only tasks.
+
+- Three sessions use two configuration directories. Native account screens and
+  live process indicators match the selected clones. Invalid inherited provider
+  credentials are absent. Both clones currently report the same account and
+  organization; see [V2](V2-configuration-selection.md) for the evidence limit.
+- Six `chauffeur_send_message` operations have the expected authenticated sender
+  and recipient. The probe verifies the displayed arguments and one-time Yes
+  selection before approving. It installs no persistent approval rule.
+- Permission prompts reach `Needs attention` through Chauffeur's lifecycle
+  hooks before approval. Completion hooks record `Turn finished` for each of
+  the three initial tasks, with the expected native conversation IDs.
+- Stopping one execution leaves its peer on the same profile usable. Explicit
+  resume keeps the native conversation ID, starts a new process and uses the
+  reissued Chauffeur credential successfully.
+- Runtime termination/restart preserves all three CLI processes and the MCP
+  endpoint. A surviving Claude client makes another successful message call.
+
+Claude's native status also listed other MCP connections, which the fixture did
+not invoke. The controlled existing-server preservation case remains open.
+The `--startup-only` option checks account displays and process configuration
+without an inference prompt. Reports omit account identifiers and credential
+values; terminal/history artifacts under `.local/real-claude-artifacts/` are
+private and may contain native account displays.
+
+## Remaining gate evidence
+
+Further evidence remains required for all tools, controlled pre-existing MCP
+server preservation, inbox acknowledgement, and cross-provider delegation.
 Codex approval/input status signals remain degraded until a trusted launch-scoped
 route is proved. Native approval interaction is verified, but no automatic idle
 wake is claimed. The integration remains labelled unverified until the full gate
-passes. Private detailed artifacts are under `.local/real-codex-artifacts/`;
-only the redacted summary is suitable for sharing.
+passes. Private detailed Codex artifacts are under `.local/real-codex-artifacts/`;
+only the redacted summaries are suitable for sharing.
 
 ## Skill loading
 
