@@ -16,6 +16,7 @@ else:
     descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     with os.fdopen(descriptor, "w") as handle:
         json.dump({"pid": os.getpid(), "sessionID": session_id,
+                   "arguments": sys.argv[1:],
                    "configurationPath": os.environ.get("CODEX_HOME") or os.environ.get("CLAUDE_CONFIG_DIR"),
                    "token": os.environ["CHAUFFEUR_SESSION_TOKEN"],
                    "inheritedAPIKey": "OPENAI_API_KEY" in os.environ or "ANTHROPIC_API_KEY" in os.environ}, handle)

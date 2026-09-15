@@ -29,9 +29,9 @@ public enum CLIAdapter {
             arguments += ["-C", session.launch.workingDirectory]
             for path in session.launch.additionalPaths { arguments += ["--add-dir", path] }
             if coordination {
-                arguments += ["-c", "mcp_servers.chauffeur.url=\(jsonString(endpoint))", "-c", "mcp_servers.chauffeur.bearer_token_env_var=\(jsonString("CHAUFFEUR_SESSION_TOKEN"))"]
+                arguments += ["-c", "mcp_servers.chauffeur.url=\(try tomlLiteral(endpoint))", "-c", "mcp_servers.chauffeur.bearer_token_env_var=\(try tomlLiteral("CHAUFFEUR_SESSION_TOKEN"))"]
                 let notify = [ctlPath, "event", "--session", session.id.uuidString, "turn-finished"]
-                arguments += ["-c", "notify=\(String(decoding: try JSONEncoder().encode(notify), as: UTF8.self))"]
+                arguments += ["-c", "notify=\(try tomlLiteral(notify))"]
             }
             if resume {
                 guard let id = session.nativeConversationID, UUID(uuidString: id) != nil else { throw ChauffeurError("resume_unavailable", "No native conversation ID was recorded") }
@@ -63,6 +63,11 @@ public enum CLIAdapter {
         }
         return arguments
     }
-    private static func jsonString(_ value: String) -> String { String(decoding: try! JSONEncoder().encode(value), as: UTF8.self) }
+    /// These string/array literals are passed to Codex's TOML parser. JSON's
+    /// optional escaped slash is invalid in a TOML basic string.
+    private static func tomlLiteral<T: Encodable>(_ value: T) throws -> String {
+        let encoder = JSONEncoder(); encoder.outputFormatting = .withoutEscapingSlashes
+        return String(decoding: try encoder.encode(value), as: UTF8.self)
+    }
     private static func shellQuote(_ value: String) -> String { "'" + value.replacingOccurrences(of: "'", with: "'\"'\"'") + "'" }
 }

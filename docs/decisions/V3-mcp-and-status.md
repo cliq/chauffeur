@@ -1,6 +1,7 @@
 # V3 — MCP and lifecycle integration
 
-Status: server and fixture adapters implemented; real-client gate open.
+Status: real Codex messaging, permissions, completion, resume and restart checks
+passed; full real-client/cross-provider gate remains open.
 
 ## Decision and implementation candidate
 
@@ -19,11 +20,40 @@ The current baseline-version detector enables a candidate integration path and r
 
 ## Critical next validation
 
-Codex 0.154.0 includes a shared local app-server daemon. Its generated `thread/start` schema accepts config overrides but does not establish per-thread process environment behavior. An isolated empty-profile startup was observed rendering the Codex sign-in screen; no provider task was submitted and no daemon was created before sign-in. This does **not** settle authenticated-session behavior.
+`Prototypes/real_codex_integration.py` exercises the actual runtime and Codex
+0.154.0 with two authorized private profile clones and three real sessions. The
+clones retain native model settings; unrelated copied hooks/plugins/MCP servers
+were disabled for the fixture. Two sessions share a configuration directory.
 
-Before claiming Codex integration works, verify two simultaneous tokens against one preset directory and scoped stop behavior. If the shared daemon reuses its environment, run a private foreground app-server per Chauffeur Codex session and connect the native TUI using `--remote unix:///...`; ownership and lifetime must include both processes. Do not stop the user's shared daemon as a session-stop mechanism.
+- Six actual `chauffeur_send_message` calls have the expected authenticated
+  senders/recipients. Native approval prompts show the exact arguments and receive
+  one-time approval; no persistent approval rule is installed.
+- `notify` records completion and each native conversation ID.
+- Stopping one session leaves another session using that same profile usable.
+- Explicit resume keeps the native conversation ID, starts a new process and
+  successfully uses its reissued Chauffeur grant.
+- Restarting the runtime preserves the live tmux processes and endpoint; a real
+  client makes a new successful MCP call afterward.
+- A `never` approval-policy fixture was rejected by native Codex before any
+  message write. Chauffeur did not override that permission setting.
 
-Further required evidence: real clients list/call all tools, preserve existing MCP servers, deliver documented lifecycle events, and correctly resume recorded IDs. Codex approval/input signals remain degraded until a trusted launch-scoped route is proved. No automatic idle wake is claimed.
+The real CLI first exposed an invalid launch configuration: JSON-escaped path
+slashes are not valid TOML escapes. The adapter now emits TOML-compatible string
+and array literals; the runtime fixture checks them with Python's TOML parser.
+
+For the tested default launch route, per-session credentials and scoped stop are
+now demonstrated. A separate foreground app-server is not required by this
+evidence. This does not cover arbitrary native feature/configuration changes or
+explicit remote/shared-daemon workflows; `--remote` remains a conflicting managed
+argument. No user daemon is stopped by Chauffeur's session-stop implementation.
+
+Further evidence remains required for all tools, preserved pre-existing MCP
+servers, Claude hooks/resume, inbox acknowledgement, and cross-provider delegation.
+Codex approval/input status signals remain degraded until a trusted launch-scoped
+route is proved. Native approval interaction is verified, but no automatic idle
+wake is claimed. The integration remains labelled unverified until the full gate
+passes. Private detailed artifacts are under `.local/real-codex-artifacts/`;
+only the redacted summary is suitable for sharing.
 
 ## Skill loading
 

@@ -35,7 +35,8 @@ Registration and separate-Spaces acceptance are still under validation.
 
 ## Verify
 
-Python 3 is required for the fixture scripts.
+The Python integration fixtures require Python 3.11 or newer (including its
+standard-library TOML parser).
 
 ```sh
 swift test
@@ -51,6 +52,20 @@ Fixtures use temporary data, private tmux servers, and fake CLI processes. The
 native probe uses the built Debug app and stores reports/images under
 `.build/native-probe-artifacts/`. Xcode also includes `ChauffeurAppUITests` for
 OS-driven UI testing, which requires macOS automation access.
+
+The separate real-provider check requires two existing authenticated **test
+clones**, with unrelated hooks/plugins/MCP servers disabled. It sends six small
+fixture messages using the profiles' native model settings and grants one-time
+approval only to those exact tool calls:
+
+```sh
+python3 Prototypes/real_codex_integration.py \
+  --profile-a /path/to/private/codex-a --profile-b /path/to/private/codex-b
+```
+
+Its redacted result and private failure artifacts are written under
+`.local/real-codex-artifacts/`. Do not include private terminal/history files in
+shared diagnostics. See [V3](docs/decisions/V3-mcp-and-status.md) for verified scope.
 
 ## Start using a development build
 

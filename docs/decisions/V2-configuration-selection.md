@@ -1,6 +1,7 @@
 # V2 — configuration selection
 
-Status: environment/path fixture checks passed; real-account checks open.
+Status: environment/path fixtures and real Codex profile checks passed; Claude
+and full account-display acceptance remain open.
 
 ## Decision
 
@@ -18,6 +19,21 @@ Installed help was checked on 2026-09-15: Codex 0.154.0 supports `-C`, `--add-di
 
 ## Remaining gate evidence
 
-Two existing configuration directories per CLI, with intended account labels, are needed for the PRD account-isolation scenario. No credentials were copied or real profiles modified. macOS Keychain behavior and provider-specific settings remain to be validated. A directory label alone is not evidence of an authenticated account.
+On 2026-09-15 the user authorized private copies of existing Codex/Claude profile
+directories for testing. Two clones per CLI were created outside Git, with
+symlink targets copied into independent files. The Codex clones report ChatGPT
+logins and contain distinct account-context IDs. Three real Codex sessions,
+including two sharing one profile, completed authenticated message operations,
+explicit resume and runtime restart checks. See [V3](V3-mcp-and-status.md).
 
-Codex's shared app-server behavior must also be resolved with V3: a daemon may retain its own launch environment after a TUI client exits. Per-TUI environment filtering alone must not be treated as proving backend isolation or scoped stop behavior.
+Claude's original profiles report signed-in accounts; their directory clones do
+not. Their matching macOS Keychain records are outside the directory copies.
+Permission to copy those two records into the private clones is pending. The
+application itself still does not copy credentials or change native profiles.
+See Claude's [credential storage documentation](https://code.claude.com/docs/en/authentication#credential-management)
+for its macOS Keychain and private-file fallback routes.
+
+Native account/usage display, Claude authentication and provider-specific
+settings remain acceptance gates. A directory label alone is not evidence of an
+authenticated account. The default Codex launch route now has real credential
+and scoped-stop evidence; alternate daemon/remote routes are not claimed.

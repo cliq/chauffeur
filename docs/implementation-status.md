@@ -31,25 +31,28 @@ the PRD's real-CLI, native-window, and daily-use acceptance scenarios.
   kill/restart with surviving tmux processes, mailbox persistence and revocation.
   Worktree API checks cover preview/create/remove and external registration,
   preserving external checkout files on unregister.
+- `Prototypes/real_codex_integration.py`: two private authenticated Codex profiles,
+  three real sessions, six attributed messages with native approval, completion
+  IDs, scoped peer stop, explicit resume and runtime/MCP reconnection.
 
 ## Stage audit
 
 | Plan items | Current state | Still required |
 | --- | --- | --- |
-| Stage 0 V1–V5 | Five decision documents; terminal/runtime/native fixtures | Real CLI/profile gates; Codex daemon resolution; macOS/Spaces/LaunchAgent gate |
+| Stage 0 V1–V5 | Decision documents; fixtures; real default-route Codex credential/stop evidence | Full real CLI/profile gates; macOS/Spaces/LaunchAgent gate |
 | 1.1 Records/store | Implemented and tested, including external reload/conflict errors | Complete reference-integrity checks; targeted file watcher (current one-second reload also runs with no UI); empty-set UI acceptance |
 | 1.2 Runtime skeleton | Lock, peer-checked Unix socket, version handshake, health helper, background executable | Verify bundled LaunchAgent registration; structured redacted log files |
 | 1.3–1.7 Presets/projects/groups/welcome/windows | Native editors, cancellable discovery, relink/archive, welcome and project windows implemented | Full interaction and four-Spaces acceptance |
-| 1.8 Basic launch | Runtime launch, fixture CLI, filtered environment, private exec handoff, terminal attachment/input/resize/stop | Real CLI account/status checks, complete preflight, Codex backend ownership |
+| 1.8 Basic launch | Runtime/real Codex launch, filtered environment, private exec handoff, terminal input/resize/stop | Full native account/status checks, Claude launch, complete preflight |
 | 1.9 Session details | Native details show the immutable launch snapshot and lifecycle/coordination records | Real-session interaction acceptance |
 | 2.1 Screen/history | tmux live state; bounded persisted snapshots, disk cleanup, native history/search | Real CLI native attach/search/copy/link verification and sustained rotation |
-| 2.2 Reconnect | Positive pane/process reconciliation; explicit native-ID resume path | Real-provider resume and service-failure edge cases |
+| 2.2 Reconnect | Positive pane/process reconciliation; real Codex explicit native-ID resume and MCP reconnect | Claude resume and remaining service-failure edge cases |
 | 2.3–2.4 Quit/tabs/split | Native tabs/split, window-state writes, quit/stop-all and keyboard commands implemented | OS keyboard and real-CLI/Spaces acceptance; direct normal/force-quit fixture implemented |
 | 2.5 Worktrees | Create/list/safe-remove implementation and Git integration test | Periodic external inventory reconciliation; launch/removal concurrency audit (UI and explicit external registration implemented) |
 | 2.6 Multiple repos | Explicit additional folder selection in launch API; primary main checkout excluded | Real CLI access test (shared-checkout warning and explicit additional-folder UI implemented) |
-| 2.7 Status/attention | Lifecycle records, authenticated event handler, unread/pending counts | Real hooks; notifications and closed-UI routing (attention UI implemented) |
+| 2.7 Status/attention | Lifecycle records, real Codex completion IDs, unread/pending counts | Claude hooks; native attention signals; notifications and closed-UI routing |
 | 2.8 Sleep/service loss | Runtime loop plus native wake reconnect, health and recovery actions | Real sleep/wake and service registration/failure acceptance |
-| 3.1–3.3 Credentials/MCP/mailboxes | Implemented with ledger and HTTP fixture checks | Full HTTP/client compliance; real shared-preset connections (UI cancellation and delivery details implemented) |
+| 3.1–3.3 Credentials/MCP/mailboxes | Ledger/HTTP fixtures; real Codex shared-profile credentials and messages | Full HTTP/client compliance; Claude shared-profile connections; remaining real tool cases |
 | 3.4 Delegation | Durable reservation, launch path, worktree default, limits, depth check, result transaction | Bidirectional real-CLI acceptance, crash-window integration tests and failed-child visibility audit |
 | 3.5 Wake | Bounded inbox wait; no terminal message injection | Real idle/busy validation (pending-attention UI implemented) |
 | 3.6–3.7 Coordination UI/skill | Tool descriptions and native message/delegation details implemented | Bundled skill and loading/install/removal routes |
@@ -58,7 +61,8 @@ the PRD's real-CLI, native-window, and daily-use acceptance scenarios.
 
 ## Next implementation order
 
-1. Finish foundation edge-case tests and resolve Codex backend token/stop ownership.
+1. Complete Claude authenticated checks, cross-provider MCP cases, and remaining
+   foundation edge-case tests.
 2. Stabilize and verify native terminal/window lifetime, restore/focus, and the
    app interaction scenarios through direct probes and XCUITest.
 3. Complete native service lifecycle, persisted screen/history, worktree UI and

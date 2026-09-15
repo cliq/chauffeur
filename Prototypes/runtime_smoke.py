@@ -12,6 +12,7 @@ import struct
 import subprocess
 import tempfile
 import time
+import tomllib
 import uuid
 
 repository = Path(__file__).resolve().parents[1]
@@ -137,6 +138,13 @@ with tempfile.TemporaryDirectory(prefix="chauffeur-smoke-", dir="/tmp") as direc
             assert call("launch", launch)["id"] == session["id"]
             payload = wait_for(lambda: json.loads((checkout / (".chauffeur-fixture-" + session["id"] + ".json")).read_text()))
             assert payload["configurationPath"] == str(config.resolve()) and not payload["inheritedAPIKey"]
+            # Check generated arguments with a TOML parser, as the real Codex CLI
+            # does. JSON's optional escaped slash breaks URL and notify values.
+            argv = payload["arguments"]
+            overrides = tomllib.loads("\n".join(argv[i + 1] for i, arg in enumerate(argv) if arg == "-c"))
+            assert overrides["mcp_servers"]["chauffeur"]["url"] == health["mcpEndpoint"]
+            assert overrides["mcp_servers"]["chauffeur"]["bearer_token_env_var"] == "CHAUFFEUR_SESSION_TOKEN"
+            assert overrides["notify"] == [str(binary.parent / "chauffeurctl"), "event", "--session", session["id"], "turn-finished"]
             sessions.append(session); credentials.append(payload)
         assert len({value["token"] for value in credentials}) == 3
         token_a, token_b, token_other = [item["token"] for item in credentials]
