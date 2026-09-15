@@ -68,7 +68,13 @@ import ChauffeurRuntimeKit
                     await runtime.maintainHistory()
                 }
             }
-            defer { reconcile.cancel(); history.cancel() }
+            let repositories = Task {
+                while !Task.isCancelled {
+                    await runtime.reconcileWorktrees()
+                    do { try await Task.sleep(for: .seconds(5)) } catch { break }
+                }
+            }
+            defer { reconcile.cancel(); history.cancel(); repositories.cancel() }
             defer { _fixLifetime(server) }
             try await MCPServer.run(runtime: runtime, port: port ?? recordedPort ?? 0)
         } catch {

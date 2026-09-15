@@ -26,7 +26,13 @@ struct SessionLaunchView: View {
     private var folder: ProjectFolder? { project.folders.first { $0.id == folderID && $0.registered } }
     private var worktrees: [Worktree] { model.snapshot.store.worktrees.map(\.value).filter { $0.projectID == project.id && $0.folderID == folderID && $0.registered } }
     private var primaryPath: String { worktrees.first { $0.id == worktreeID }?.path ?? folder?.canonicalPath ?? "" }
-    private var sharing: [Session] { model.snapshot.sessions.filter { $0.state.isLive && $0.launch.workingDirectory == primaryPath } }
+    private var primaryGitIdentity: UUID? {
+        worktrees.first { $0.id == worktreeID }?.gitIdentity
+            ?? model.snapshot.repositoryInventories?.flatMap(\.entries).first { $0.path == primaryPath }?.gitIdentity
+    }
+    private var sharing: [Session] { model.snapshot.sessions.filter { peer in
+        peer.state.isLive && (peer.launch.workingDirectory == primaryPath || primaryGitIdentity.map { (peer.launch.gitWorktreeIdentities ?? []).contains($0) } == true)
+    } }
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text("New Session").font(.title2)

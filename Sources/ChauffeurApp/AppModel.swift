@@ -14,6 +14,7 @@ struct AppSnapshot: Decodable, Sendable {
     var settings = RetentionSettings()
     var snapshotStorage = SnapshotStorageStatus(budgetBytes: RetentionSettings().snapshotBudgetBytes)
     var errors: [ChauffeurError] = []
+    var repositoryInventories: [RepositoryInventory]?
     init() {}
 }
 
@@ -171,7 +172,7 @@ struct AppSnapshot: Decodable, Sendable {
         DiagnosticApp(version: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String, service: serviceStatus, error: serviceDiagnosticError)
     }
     func cachedDiagnostics() -> DiagnosticsReport {
-        var report = DiagnosticsReport(sessions: snapshot.sessions, health: snapshot.health, errors: snapshot.store.errors + snapshot.errors,
+        var report = DiagnosticsReport(sessions: snapshot.sessions, health: snapshot.health, errors: snapshot.store.errors + (snapshot.repositoryInventories ?? []).compactMap(\.error) + snapshot.errors,
             observation: snapshotReceivedAt == nil ? .unavailable : .cached, observedAt: snapshotReceivedAt)
         report.app = diagnosticApp
         return report

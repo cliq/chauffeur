@@ -14,11 +14,15 @@ public actor RuntimeCoordinator {
     private var sessions: [UUID: Session] = [:]
     private var launching = Set<UUID>()
     private var stopping = Set<UUID>()
+    private var checkoutClaims = CheckoutClaims()
     private var endpoint: String?
     private var settings = RetentionSettings()
     private var recentErrors: [ChauffeurError] = []
     private let logs: RuntimeLogStore?
     private var metadataErrors: [ChauffeurError] = []
+    private var repositoryInventories: [RepositoryInventory] = []
+    private var worktreeScan: Task<Void, Never>?
+    private var worktreeRecordWrites = Set<UUID>()
     private var captures: [UUID: Task<TerminalSnapshot?, Error>] = [:]
     private var maintaining = false
     private var retentionSettingsPending = false
@@ -70,7 +74,54 @@ public actor RuntimeCoordinator {
     }
     public func snapshot() async throws -> JSONValue {
         let snapshot = await store.reload()
-        return .object(["store": try .from(snapshot), "sessions": try .from(Array(sessions.values).sorted { $0.createdAt < $1.createdAt }), "messages": try .from(await ledger.allMessages()), "delegations": try .from(await ledger.allDelegations()), "health": health(), "settings": try .from(settings), "snapshotStorage": try .from(snapshotStorage), "errors": try .from(recentErrors)])
+        return .object(["store": try .from(snapshot), "sessions": try .from(Array(sessions.values).sorted { $0.createdAt < $1.createdAt }), "messages": try .from(await ledger.allMessages()), "delegations": try .from(await ledger.allDelegations()), "health": health(), "settings": try .from(settings), "snapshotStorage": try .from(snapshotStorage), "errors": try .from(recentErrors), "repositoryInventories": try .from(repositoryInventories)])
+    }
+    public func reconcileWorktrees() async {
+        if let pending = worktreeScan { await pending.value; return }
+        let pending = Task { await self.scanWorktrees() }
+        worktreeScan = pending
+        await pending.value
+        worktreeScan = nil
+    }
+    private func scanWorktrees() async {
+        let snapshot = await store.reload()
+        let records = snapshot.worktrees.filter { $0.value.registered }
+        var seenSources = Set<String>()
+        let sources = (snapshot.projects.flatMap { $0.value.folders.filter(\.registered).map(\.canonicalPath) }.sorted()
+            + records.map { $0.value.repositoryPath }.sorted() + records.map { $0.value.path }.sorted()).filter { seenSources.insert($0).inserted }
+        var observations: [RepositoryInventory] = []
+        var repositories: [UUID: RepositoryInventory] = [:]
+        for path in sources {
+            if Task.isCancelled { return }
+            let result = await worktrees.observe(at: path, cached: repositories)
+            if result.status == .available, let id = result.repositoryID {
+                if let index = observations.firstIndex(where: { $0.status == .available && $0.repositoryID == id }) {
+                    observations[index].sourcePaths?.append(path)
+                } else {
+                    var grouped = result; grouped.sourcePaths = [path]
+                    observations.append(grouped); repositories[id] = grouped
+                }
+            } else { observations.append(result) }
+        }
+        for stored in records {
+            let observed = repositories[stored.value.repositoryID]
+                ?? observations.first { $0.sourcePath == stored.value.repositoryPath }
+                ?? RepositoryInventory(sourcePath: stored.value.repositoryPath, status: .failed)
+            let updated = await worktrees.reconciled(stored.value, inventory: observed)
+            guard updated != stored.value else { continue }
+            do { try await saveWorktree(updated, expectedVersion: stored.version) }
+            catch let error as ChauffeurError where error.code == "edit_conflict" || error.code == "worktree_busy" { /* Next scan uses the new record; never overwrite an external edit or removal. */ }
+            catch let error as ChauffeurError { record(error) }
+            catch { record(ChauffeurError("worktree_unavailable", "Worktree reconciliation could not save a record")) }
+        }
+        repositoryInventories = observations
+    }
+    @discardableResult private func saveWorktree(_ value: Worktree, expectedVersion: String? = nil, finishingRemoval: Bool = false) async throws -> Stored<Worktree> {
+        guard !worktreeRecordWrites.contains(value.id), finishingRemoval || !checkoutClaims.isRemoving(path: value.path, worktreeID: value.id) else {
+            throw ChauffeurError("worktree_busy", "Worktree metadata is being updated. Retry after the operation finishes", path: value.path)
+        }
+        worktreeRecordWrites.insert(value.id); defer { worktreeRecordWrites.remove(value.id) }
+        return try await store.save(value, expectedVersion: expectedVersion)
     }
     private func persist(_ session: Session) async throws {
         try await ledger.register(session)
@@ -97,7 +148,7 @@ public actor RuntimeCoordinator {
         let snapshot = await store.reload()
         let logReport = logs?.recent() ?? DiagnosticLogs(status: .unavailable)
         let logErrors = logReport.status == .unavailable ? [ChauffeurError("log_unavailable", "Structured logs are unavailable")] : []
-        return DiagnosticsReport(sessions: Array(sessions.values), health: health(), errors: snapshot.errors + recentErrors + logErrors, observation: .live, observedAt: Date(), logs: logReport)
+        return DiagnosticsReport(sessions: Array(sessions.values), health: health(), errors: snapshot.errors + repositoryInventories.compactMap(\.error) + recentErrors + logErrors, observation: .live, observedAt: Date(), logs: logReport)
     }
     private var liveSessionIDs: Set<UUID> { Set(sessions.values.filter { $0.state.isLive }.map(\.id)) }
     private func captureHistory(_ sessionID: UUID) async throws -> TerminalSnapshot? {
@@ -224,28 +275,42 @@ public actor RuntimeCoordinator {
             guard let message = try await ledger.allMessages().first(where: { $0.id == messageID }) else { throw ChauffeurError("missing_message", "Message not found") }
             return try .from(await ledger.cancelMessage(messageID, caller: Caller(sessionID: message.senderID, scope: message.scope)))
         case "worktreeInventory": return try .from(await worktrees.inventory(at: params.requiredString("path")))
+        case "refreshWorktrees": await reconcileWorktrees(); return try .from(repositoryInventories)
         case "previewWorktree", "registerWorktree":
             let snapshot = await store.current(), projectID = try params.uuid("projectID"), folderID = try params.uuid("folderID")
             guard let folder = snapshot.projects.first(where: { $0.value.id == projectID })?.value.folders.first(where: { $0.id == folderID && $0.registered }) else { throw ChauffeurError("missing_folder", "Select a registered repository") }
             let repositoryID = try await worktrees.repositoryID(at: folder.canonicalPath)
             if request.method == "previewWorktree" { return .object(["path": .string(await worktrees.destination(repositoryID: repositoryID, branch: try params.requiredString("branch")).path)]) }
             let path = Paths.canonical(try params.requiredString("path"))
-            guard let entry = try await worktrees.inventory(at: folder.canonicalPath).first(where: { $0.path == path }) else { throw ChauffeurError("missing_worktree", "Path is not in this repository's Git worktree inventory") }
-            if var existing = snapshot.worktrees.first(where: { $0.value.projectID == projectID && $0.value.folderID == folderID && $0.value.path == path }) {
+            guard let entry = try await worktrees.inventory(at: folder.canonicalPath).first(where: { $0.path == path }), entry.availability == .available else { throw ChauffeurError("missing_worktree", "Path is not available in this repository's Git worktree inventory") }
+            if var existing = snapshot.worktrees.first(where: { $0.value.projectID == projectID && $0.value.folderID == folderID && $0.value.repositoryID == repositoryID && (($0.value.gitIdentity != nil && $0.value.gitIdentity == entry.gitIdentity) || ($0.value.gitIdentity == nil && $0.value.path == path)) }) {
+                var observation = RepositoryInventory(sourcePath: folder.canonicalPath, status: .available)
+                observation.repositoryID = repositoryID; observation.entries = [entry]
+                existing.value = await worktrees.reconciled(existing.value, inventory: observation)
                 existing.value.registered = true
-                return try .from(await store.save(existing.value, expectedVersion: existing.version))
+                return try .from(await saveWorktree(existing.value, expectedVersion: existing.version))
             }
-            return try .from(await store.save(Worktree(projectID: projectID, folderID: folderID, repositoryID: repositoryID, path: path, repositoryPath: folder.canonicalPath, branch: entry.branch, baseCommit: entry.commit, managed: false)))
+            var registered = Worktree(projectID: projectID, folderID: folderID, repositoryID: repositoryID, path: path, repositoryPath: folder.canonicalPath, branch: entry.branch, baseCommit: entry.commit, managed: false)
+            registered.gitIdentity = entry.gitIdentity
+            return try .from(await saveWorktree(registered))
         case "createWorktree":
             let snapshot = await store.current(), projectID = try params.uuid("projectID"), folderID = try params.uuid("folderID")
             guard let folder = snapshot.projects.first(where: { $0.value.id == projectID })?.value.folders.first(where: { $0.id == folderID && $0.registered }) else { throw ChauffeurError("missing_folder", "Select an available project folder") }
             let worktree = try await worktrees.create(projectID: projectID, folder: folder, branch: params.requiredString("branch"), baseRef: params.requiredString("baseRef"))
-            return try .from(await store.save(worktree))
+            return try .from(await saveWorktree(worktree))
         case "removeWorktree":
             let snapshot = await store.current(), worktreeID = try params.uuid("worktreeID")
             guard var stored = snapshot.worktrees.first(where: { $0.value.id == worktreeID }) else { throw ChauffeurError("missing_worktree", "Worktree not found") }
-            if stored.value.managed { try await worktrees.remove(stored.value, liveSessions: Array(sessions.values)) }
-            stored.value.registered = false; return try .from(await store.save(stored.value, expectedVersion: stored.version))
+            guard !worktreeRecordWrites.contains(worktreeID) else { throw ChauffeurError("worktree_busy", "Worktree metadata is being updated. Retry removal") }
+            if stored.value.managed {
+                let relatedIDs = Set(snapshot.worktrees.filter { Paths.canonical($0.value.path) == Paths.canonical(stored.value.path) || (stored.value.gitIdentity != nil && $0.value.gitIdentity == stored.value.gitIdentity) }.map { $0.value.id })
+                try checkoutClaims.beginRemoval(worktreeID, path: stored.value.path, worktreeIDs: relatedIDs, gitIdentity: stored.value.gitIdentity, sessions: Array(sessions.values))
+                defer { checkoutClaims.endRemoval(worktreeID) }
+                try await worktrees.remove(stored.value, liveSessions: Array(sessions.values))
+                stored.value.registered = false
+                return try .from(await saveWorktree(stored.value, expectedVersion: stored.version, finishingRemoval: true))
+            }
+            stored.value.registered = false; return try .from(await saveWorktree(stored.value, expectedVersion: stored.version))
         case "saveSettings":
             let value = try params.decode(RetentionSettings.self); try value.validate()
             try JSONCoding.encode(value).write(to: root.appendingPathComponent("settings.json"), options: .atomic)
@@ -277,14 +342,18 @@ public actor RuntimeCoordinator {
         }
         guard let folder = project.folders.first(where: { $0.id == request.folderID && $0.registered }) else { throw ChauffeurError("missing_folder", "Select a registered project folder") }
         var workingDirectory = folder.canonicalPath
+        var selectedWorktree: Worktree?
         if let worktreeID = request.worktreeID {
             guard let worktree = snapshot.worktrees.first(where: { $0.value.id == worktreeID && $0.value.projectID == project.id && $0.value.folderID == folder.id && $0.value.registered })?.value else { throw ChauffeurError("missing_worktree", "Select a registered worktree for this repository") }
             workingDirectory = worktree.path
+            selectedWorktree = worktree
         }
         let additionalPaths = try request.additionalFolderIDs.filter { $0 != folder.id }.map { id in
             guard let extra = project.folders.first(where: { $0.id == id && $0.registered }) else { throw ChauffeurError("missing_folder", "Additional project folder is unavailable") }
             return try Paths.directory(extra.canonicalPath)
         }
+        try checkoutClaims.beginLaunch(sessionID, paths: [workingDirectory] + additionalPaths, worktreeID: request.worktreeID, allowSharedCheckout: request.allowSharedCheckout)
+        defer { checkoutClaims.endLaunch(sessionID) }
         let launch = LaunchSnapshot(preset: preset, set: set, executablePath: preset.executable, executableVersion: "unverified", workingDirectory: workingDirectory, additionalPaths: additionalPaths)
         var session = Session(projectID: project.id, groupID: request.groupID, title: request.title, launch: launch, folderID: folder.id)
         session.id = sessionID; session.worktreeID = request.worktreeID; session.initialTask = request.task
@@ -295,9 +364,26 @@ public actor RuntimeCoordinator {
         do {
             try preset.validate()
             session.launch.workingDirectory = try Paths.directory(workingDirectory)
+            var identities: [UUID] = []
+            var primaryIdentity: UUID?
+            for (index, path) in ([session.launch.workingDirectory] + additionalPaths).enumerated() {
+                if let identity = try? await worktrees.identity(at: path) { identities.append(identity); if index == 0 { primaryIdentity = identity } }
+            }
+            try checkoutClaims.setGitIdentities(sessionID, identities: identities, primary: primaryIdentity)
+            session.launch.gitWorktreeIdentities = identities
+            if let selectedWorktree {
+                let repositoryID = try await worktrees.repositoryID(at: session.launch.workingDirectory)
+                let identity = try await worktrees.identity(at: session.launch.workingDirectory)
+                guard repositoryID == selectedWorktree.repositoryID, selectedWorktree.gitIdentity == nil || identity == selectedWorktree.gitIdentity else {
+                    throw ChauffeurError("worktree_unavailable", "The selected checkout was replaced. Refresh the Git inventory and select its current record", path: session.launch.workingDirectory)
+                }
+            }
             session.launch.configurationPath = try Paths.directory(preset.configurationDirectory)
             session.launch.executablePath = try Paths.executable(preset.executable, environment: baseEnvironment)
-            let sharing = sessions.values.filter { $0.id != session.id && $0.state.isLive && $0.launch.workingDirectory == session.launch.workingDirectory }
+            let sharing = sessions.values.filter { peer in
+                peer.id != session.id && peer.state.isLive && (peer.launch.workingDirectory == session.launch.workingDirectory
+                    || primaryIdentity.map { (peer.launch.gitWorktreeIdentities ?? []).contains($0) } == true)
+            }
             guard sharing.isEmpty || request.allowSharedCheckout else { throw ChauffeurError("shared_checkout", "Checkout is already used by: \(sharing.map(\.title).joined(separator: ", ")). Explicitly choose to share it", path: workingDirectory) }
             let token = try await ledger.issueGrant(sessionID: session.id)
             var environment = try LaunchPolicy.environment(base: baseEnvironment, preset: preset, sessionID: session.id, token: token)
@@ -328,6 +414,10 @@ public actor RuntimeCoordinator {
         guard session.nativeConversationID != nil else { throw ChauffeurError("resume_unavailable", "No native conversation ID is available. Create a new session explicitly") }
         guard !launching.contains(sessionID) else { throw ChauffeurError("launch_pending", "Resume is already in progress") }
         launching.insert(sessionID); defer { launching.remove(sessionID) }
+        try checkoutClaims.beginLaunch(sessionID, paths: [session.launch.workingDirectory] + session.launch.additionalPaths, worktreeID: session.worktreeID)
+        do { try checkoutClaims.setGitIdentities(sessionID, identities: session.launch.gitWorktreeIdentities ?? []) }
+        catch { checkoutClaims.endLaunch(sessionID); throw error }
+        defer { checkoutClaims.endLaunch(sessionID) }
         try await terminals.stop(sessionID: sessionID, force: true)
         _ = try Paths.directory(session.launch.configurationPath); _ = try Paths.directory(session.launch.workingDirectory)
         session.state = .starting; session.error = nil; session.failureCode = nil; session.exitStatus = nil; session.runtimeID = id; try await persist(session)
@@ -416,7 +506,7 @@ public actor RuntimeCoordinator {
                 delegation.state = .launching; try await ledger.updateDelegation(delegation)
                 if !delegation.shareCheckout {
                     let worktree = try await worktrees.create(projectID: project.id, folder: folder, branch: "chauffeur/\(String(delegation.id.uuidString.prefix(12)).lowercased())", baseRef: "HEAD")
-                    try await store.save(worktree); delegation.worktreeID = worktree.id
+                    try await saveWorktree(worktree); delegation.worktreeID = worktree.id
                     try await ledger.updateDelegation(delegation)
                 }
                 _ = try await ledger.authenticate(token)

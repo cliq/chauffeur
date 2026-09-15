@@ -20,10 +20,16 @@ the PRD's real-CLI, native-window, and daily-use acceptance scenarios.
   line/byte budgets, and survive terminal/runtime loss. Native history is
   read-only and searchable; completed-message cleanup preserves queued/received
   messages. See [retention and recovery](terminal-history.md).
-- Twenty Swift tests: canonical paths/discovery, per-child environment, argument validation,
+- Twenty-four Swift tests: canonical paths/discovery, per-child environment, argument validation,
   atomic file replacement/conflicts/corrupt files, durable group-scoped messages,
   grant revocation, retry keys, bounded single-level delegation, and safe Git
   worktree creation/removal.
+- Periodic Git inventory reconciliation follows known worktree moves and branch
+  changes, preserves base commits and launch paths, and distinguishes replacement
+  checkouts. Launch/removal reservations cover pending sessions, additional
+  directories, aliases, and Git identities after moves. The real-Git/socket
+  fixture reproduces the former removal race and checks the fix; see
+  [worktrees and cleanup](worktrees.md).
 - Typed diagnostics export through Settings and `chauffeurctl`, with explicit
   live/cached/unavailable observations. Private structured logs rotate within
   2 MiB. Tests cover sensitive-field exclusion, hostile input, bounds, legacy
@@ -60,7 +66,7 @@ the PRD's real-CLI, native-window, and daily-use acceptance scenarios.
 | 2.1 Screen/history | tmux live state; bounded persisted snapshots, disk cleanup, native history/search | Real CLI native attach/search/copy/link verification and sustained rotation |
 | 2.2 Reconnect | Positive pane/process reconciliation; real Codex explicit native-ID resume and MCP reconnect | Claude resume and remaining service-failure edge cases |
 | 2.3–2.4 Quit/tabs/split | Native tabs/split, window-state writes, quit/stop-all and keyboard commands implemented | OS keyboard and real-CLI/Spaces acceptance; direct normal/force-quit fixture implemented |
-| 2.5 Worktrees | Create/list/safe-remove implementation and Git integration test | Periodic external inventory reconciliation; launch/removal concurrency audit (UI and explicit external registration implemented) |
+| 2.5 Worktrees | Create/list/safe-remove; periodic external inventory; identity-based moves/replacements; pending launch/removal and metadata-write reservations; Git/socket regression fixture | Real-CLI removal and native control acceptance; whole-repository relocation; recovery/resume after external checkout replacement |
 | 2.6 Multiple repos | Explicit additional folder selection in launch API; primary main checkout excluded | Real CLI access test (shared-checkout warning and explicit additional-folder UI implemented) |
 | 2.7 Status/attention | Lifecycle records, real Codex completion IDs, unread/pending counts | Claude hooks; native attention signals; notifications and closed-UI routing |
 | 2.8 Sleep/service loss | Runtime loop plus native wake reconnect, health/recovery actions; actual service termination/restart verified | Real sleep/wake and service lifecycle with live real sessions |

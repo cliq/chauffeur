@@ -57,6 +57,7 @@ clang Prototypes/pty_signal_mask.c Sources/CChauffeur/CChauffeur.c \
 .build/pty-signal-mask
 python3 Prototypes/terminal_continuity.py
 python3 Prototypes/runtime_smoke.py
+python3 Prototypes/worktree_smoke.py
 python3 Prototypes/native_window_smoke.py
 ```
 
@@ -130,3 +131,6 @@ Use **History and Search** or **Command-F** for retained terminal output, includ
 ended sessions. Settings controls line, disk and completed-message limits. See
 [terminal history and recovery](docs/terminal-history.md) for defaults, cleanup
 and service-loss behaviour.
+
+Worktree inventory refreshes in the background. See [worktrees and cleanup](docs/worktrees.md)
+for external moves, shared-checkout checks, safe removal, and recovery.

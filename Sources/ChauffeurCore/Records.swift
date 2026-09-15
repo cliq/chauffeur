@@ -120,6 +120,7 @@ public struct LaunchSnapshot: Codable, Equatable, Sendable {
     public var configurationPath: String
     public var workingDirectory: String
     public var additionalPaths: [String]
+    public var gitWorktreeIdentities: [UUID]?
     public var launchedAt = Date()
     public init(preset: AgentPreset, set: PresetSet, executablePath: String, executableVersion: String, workingDirectory: String, additionalPaths: [String]) {
         self.preset = preset; self.presetSetName = set.name; self.presetSetRevision = set.revision
@@ -174,6 +175,7 @@ public struct Worktree: Record, Equatable {
     public var branch: String
     public var baseCommit: String
     public var managed: Bool
+    public var gitIdentity: UUID?
     public var availability: Availability = .available
     public var registered = true
     public init(projectID: UUID, folderID: UUID, repositoryID: UUID, path: String, repositoryPath: String, branch: String, baseCommit: String, managed: Bool) {

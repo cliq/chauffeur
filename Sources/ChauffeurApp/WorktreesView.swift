@@ -1,14 +1,6 @@
 import SwiftUI
 import ChauffeurCore
 
-struct InventoryEntry: Decodable, Identifiable {
-    var path: String
-    var commit: String
-    var branch: String
-    var locked: Bool
-    var prunable: Bool
-    var id: String { path }
-}
 struct WorktreesView: View {
     @EnvironmentObject private var model: AppModel
     @Environment(\.dismiss) private var dismiss
@@ -17,11 +9,16 @@ struct WorktreesView: View {
     @State private var branch = ""
     @State private var baseRef = "HEAD"
     @State private var destination = ""
-    @State private var inventory: [InventoryEntry] = []
     @State private var busy = false
     @State private var failure: String?
     @State private var removing: Worktree?
-    private var folder: ProjectFolder? { project.folders.first { $0.id == folderID } }
+    private var currentProject: Project { model.project(project.id) ?? project }
+    private var folder: ProjectFolder? { currentProject.folders.first { $0.id == folderID } }
+    private var observation: RepositoryInventory? {
+        guard let folder else { return nil }
+        return model.snapshot.repositoryInventories?.first { $0.sourcePath == folder.canonicalPath || $0.sourcePaths?.contains(folder.canonicalPath) == true }
+    }
+    private var inventory: [GitWorktree] { observation?.entries ?? [] }
     private var records: [Worktree] { model.snapshot.store.worktrees.map(\.value).filter { $0.projectID == project.id && $0.folderID == folderID && $0.registered } }
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -29,7 +26,7 @@ struct WorktreesView: View {
             HStack {
                 Picker("Repository", selection: $folderID) {
                     Text("Choose a repository").tag(UUID?.none)
-                    ForEach(project.folders.filter(\.registered)) { folder in Text(folder.name).tag(Optional(folder.id)) }
+                    ForEach(currentProject.folders.filter(\.registered)) { folder in Text(folder.name).tag(Optional(folder.id)) }
                 }
                 Button("Refresh Git Inventory") { refresh() }.disabled(folder == nil || busy)
             }
@@ -39,8 +36,12 @@ struct WorktreesView: View {
                         VStack(alignment: .leading, spacing: 5) {
                             Text(tree.branch.isEmpty ? "Detached HEAD" : tree.branch).fontWeight(.medium)
                             Text(tree.path).font(.caption).textSelection(.enabled)
-                            Text("\(tree.managed ? "Chauffeur managed" : "External") · \(inventory.contains { $0.path == tree.path } ? "Available" : "Missing from inventory")").font(.caption).foregroundStyle(.secondary)
-                            let associated = model.snapshot.sessions.filter { $0.launch.workingDirectory == tree.path || $0.launch.additionalPaths.contains(tree.path) }
+                            Text("\(tree.managed ? "Chauffeur managed" : "External") · \(tree.availability.rawValue.capitalized)").font(.caption).foregroundStyle(.secondary)
+                            if inventory.first(where: { $0.path == tree.path })?.locked == true { Text("Locked in Git").font(.caption).foregroundStyle(.secondary) }
+                            let associated = model.snapshot.sessions.filter { session in
+                                session.worktreeID == tree.id || session.launch.workingDirectory == tree.path || session.launch.additionalPaths.contains(tree.path)
+                                    || tree.gitIdentity.map { (session.launch.gitWorktreeIdentities ?? []).contains($0) } == true
+                            }
                             if !associated.isEmpty { Text("Sessions: \(associated.map(\.title).joined(separator: ", "))").font(.caption) }
                         }
                         Spacer()
@@ -51,7 +52,7 @@ struct WorktreesView: View {
                     HStack {
                         VStack(alignment: .leading) { Text(entry.branch.isEmpty ? "Detached HEAD" : entry.branch); Text(entry.path).font(.caption).foregroundStyle(.secondary) }
                         Spacer()
-                        Button("Register") { register(entry) }.disabled(busy)
+                        Button("Register") { register(entry) }.disabled(busy || entry.availability != .available)
                     }
                 }
             }.frame(height: 240)
@@ -64,10 +65,15 @@ struct WorktreesView: View {
             }
             if busy { ProgressView().controlSize(.small) }
             if let failure { Text(failure).foregroundStyle(.red).textSelection(.enabled) }
+            if let observation {
+                if let error = observation.error { Text(error.errorDescription ?? "Git inventory unavailable").foregroundStyle(.red).font(.caption) }
+                else if observation.status == .notRepository { Text("This folder is not a Git repository.").font(.caption).foregroundStyle(.secondary) }
+                else { Text("Git inventory checked \(observation.observedAt, style: .relative) ago. Refreshes while the background service is running.").font(.caption).foregroundStyle(.secondary) }
+            }
             Text("Removal requires a clean app-managed worktree with no live sessions. Branches are preserved. External worktrees are only unregistered.").font(.caption).foregroundStyle(.secondary)
         }.padding(24).frame(width: 760)
-            .onAppear { folderID = project.folders.first(where: \.registered)?.id }
-            .onChange(of: folderID) { _, _ in inventory = []; refresh() }
+            .onAppear { folderID = currentProject.folders.first(where: \.registered)?.id }
+            .onChange(of: folderID) { _, _ in refresh() }
             .task(id: "\(folderID?.uuidString ?? ""):\(branch)") {
                 guard let folderID, !branch.isEmpty else { destination = ""; return }
                 try? await Task.sleep(for: .milliseconds(250)); guard !Task.isCancelled else { return }
@@ -81,9 +87,9 @@ struct WorktreesView: View {
             } message: { Text("\(removing?.branch ?? "")\n\(removing?.path ?? "")") }
     }
     private func refresh() {
-        guard let folder else { return }
+        guard folder != nil else { return }
         busy = true; failure = nil
-        Task { defer { busy = false }; do { inventory = try await model.call("worktreeInventory", .object(["path": .string(folder.canonicalPath)])).decode([InventoryEntry].self) } catch { failure = error.localizedDescription } }
+        Task { defer { busy = false }; do { _ = try await model.call("refreshWorktrees"); try await model.refresh() } catch { failure = error.localizedDescription } }
     }
     private func create() {
         guard let folderID else { return }; busy = true; failure = nil
@@ -92,7 +98,7 @@ struct WorktreesView: View {
             catch { failure = error.localizedDescription; busy = false }
         }
     }
-    private func register(_ entry: InventoryEntry) {
+    private func register(_ entry: GitWorktree) {
         guard let folderID else { return }
         model.perform { _ = try await model.call("registerWorktree", .object(["projectID": .string(project.id.uuidString), "folderID": .string(folderID.uuidString), "path": .string(entry.path)])) }
     }
