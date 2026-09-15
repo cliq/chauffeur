@@ -56,7 +56,7 @@ struct FolderLauncherTests {
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: source.path)
         try TerminalLauncherInstallation.install(executable: source, at: destination)
         try TerminalLauncherInstallation.install(executable: source, at: destination)
-        #expect(try FileManager.default.destinationOfSymbolicLink(atPath: destination.path) == source.resolvingSymlinksInPath().path)
+        #expect(TerminalLauncherInstallation.isInstalled(executable: source, at: destination))
         try FileManager.default.removeItem(at: destination)
         try Data("keep me".utf8).write(to: destination)
         #expect(throws: ChauffeurError.self) { try TerminalLauncherInstallation.install(executable: source, at: destination) }
@@ -66,5 +66,51 @@ struct FolderLauncherTests {
         try FileManager.default.createSymbolicLink(at: destination, withDestinationURL: foreign)
         #expect(throws: ChauffeurError.self) { try TerminalLauncherInstallation.install(executable: source, at: destination) }
         #expect(try FileManager.default.destinationOfSymbolicLink(atPath: destination.path) == foreign.path)
+    }
+
+    @Test func installedCommandPreservesArgumentsAndCanBeRepairedAfterAppMove() throws {
+        let root = try directory(); defer { try? FileManager.default.removeItem(at: root) }
+        let original = root.appendingPathComponent("App '日本語 $()"), moved = root.appendingPathComponent("Moved app")
+        try FileManager.default.createDirectory(at: original, withIntermediateDirectories: true)
+        let source = original.appendingPathComponent("chauffeur-launcher"), destination = root.appendingPathComponent("bin/chauffeur")
+        try Data("#!/bin/sh\nprintf '%s\\000' \"$@\"\n".utf8).write(to: source)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: source.path)
+        try TerminalLauncherInstallation.install(executable: source, at: destination)
+        let arguments = ["", "--", "space 日本語", "\"' $() `literal`", "line\nbreak"]
+        func output() throws -> Data {
+            let process = Process(), pipe = Pipe()
+            process.executableURL = destination; process.arguments = arguments; process.standardOutput = pipe
+            try process.run()
+            let data = pipe.fileHandleForReading.readDataToEndOfFile()
+            process.waitUntilExit()
+            #expect(process.terminationStatus == 0)
+            return data
+        }
+        let expected = Data((arguments.joined(separator: "\0") + "\0").utf8)
+        #expect(try output() == expected)
+        try FileManager.default.moveItem(at: original, to: moved)
+        let newSource = moved.appendingPathComponent("chauffeur-launcher")
+        #expect(!TerminalLauncherInstallation.isInstalled(executable: newSource, at: destination))
+        try TerminalLauncherInstallation.install(executable: newSource, at: destination)
+        #expect(TerminalLauncherInstallation.isInstalled(executable: newSource, at: destination))
+        #expect(try output() == expected)
+    }
+
+    @Test func installationUpgradesAnExistingAppLinkWithoutLeavingTemporaryFiles() throws {
+        let root = try directory(); defer { try? FileManager.default.removeItem(at: root) }
+        let oldApp = root.appendingPathComponent("Previous.app")
+        let oldSource = oldApp.appendingPathComponent("Contents/MacOS/chauffeur-launcher")
+        let source = root.appendingPathComponent("new-launcher"), destination = root.appendingPathComponent("chauffeur")
+        try FileManager.default.createDirectory(at: oldSource.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let plist = try PropertyListSerialization.data(fromPropertyList: ["CFBundleIdentifier": "dev.chauffeur.app", "CFBundlePackageType": "APPL"], format: .xml, options: 0)
+        try plist.write(to: oldApp.appendingPathComponent("Contents/Info.plist"))
+        for path in [oldSource, source] {
+            try Data("#!/bin/sh\nexit 0\n".utf8).write(to: path)
+            try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: path.path)
+        }
+        try FileManager.default.createSymbolicLink(at: destination, withDestinationURL: oldSource)
+        try TerminalLauncherInstallation.install(executable: source, at: destination)
+        #expect(TerminalLauncherInstallation.isInstalled(executable: source, at: destination))
+        #expect(try FileManager.default.contentsOfDirectory(atPath: root.path).allSatisfy { !$0.hasPrefix(".chauffeur-") })
     }
 }

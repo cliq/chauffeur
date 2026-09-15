@@ -21,13 +21,21 @@ reuse an existing window. Other windows already open remain open.
 
 ## Packaging and verification
 
-The installed command points to `Contents/MacOS/chauffeur-launcher` inside the
-app. The distinct filename is required: on a case-insensitive volume, embedding
+The installed command is a short shell script that executes
+`Contents/MacOS/chauffeur-launcher` inside the app and passes all arguments
+unchanged. Its ownership marker lets Chauffeur replace its own command after
+the app moves, even if the old app no longer exists. Reinstall it from Settings
+in the new location. Existing unrelated commands are preserved; an earlier
+symlink installation can be upgraded while its original app is still present.
+
+The distinct embedded filename is required: on a case-insensitive volume, embedding
 `chauffeur` alongside the app's `Chauffeur` executable overwrites the GUI. The
 embedding script rejects a target that resolves to the GUI executable.
 
 - `FolderLauncherTests`: strict literal URLs, closest ancestors, shared folders,
-  aliases, worktrees, idempotent installation and unrelated-command preservation.
+  aliases, worktrees, idempotent installation, unrelated-command preservation,
+  actual execution with literal arguments, repair after moving the app, and
+  upgrade from an existing app link.
 - `Prototypes/folder_launcher_smoke.py`: actual Launch Services cold/warm routing,
   nested/relative/Unicode/symlink paths, no duplicate windows, ambiguous project
   choice, invalid paths, and cold relaunch. It also stops the isolated runtime,
@@ -44,6 +52,5 @@ agent sessions. Results are under `.build/folder-launcher-artifacts/` and
 ## Remaining installation checks
 
 The actual `/usr/local/bin/` installation still needs administrator authentication
-on the development Mac. Reinstallation currently updates a link to an existing
-Chauffeur app, but repair of a link whose old app has been moved/deleted remains
-to be implemented and verified.
+on the development Mac. The repair fix is in the current sources and Debug build;
+the Release build supplied for testing has been left unchanged.

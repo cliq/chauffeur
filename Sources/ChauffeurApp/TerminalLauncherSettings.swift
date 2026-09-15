@@ -20,7 +20,7 @@ struct TerminalLauncherSettings: View {
         }.onAppear { refresh() }
     }
     private func refresh() {
-        installed = (try? FileManager.default.destinationOfSymbolicLink(atPath: TerminalLauncherInstallation.destination.path)) == executable.resolvingSymlinksInPath().path
+        installed = TerminalLauncherInstallation.isInstalled(executable: executable)
     }
     private func install() {
         failure = nil
