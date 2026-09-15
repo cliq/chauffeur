@@ -1,0 +1,151 @@
+import Foundation
+import Darwin
+import CChauffeur
+import ChauffeurCore
+
+public struct PaneIdentity: Codable, Sendable {
+    public var sessionName: String
+    public var paneID: String
+    public var processID: Int32
+    public var dead: Bool
+    public var exitStatus: Int32?
+}
+
+public actor TmuxHost {
+    public let executable: String
+    public let socketPath: String
+    private let runtimeDirectory: URL
+    private let ctlPath: String
+    private var attachments: [UUID: (UUID, PTYAttachment)] = [:]
+    private let environment: [String: String]
+    public init(runtimeDirectory: URL, ctlPath: String, environment: [String: String]) throws {
+        self.runtimeDirectory = runtimeDirectory; self.ctlPath = ctlPath
+        self.executable = try Paths.executable("tmux", environment: environment)
+        self.socketPath = runtimeDirectory.appendingPathComponent("tmux.sock").path
+        self.environment = environment.filter { ["HOME", "USER", "LOGNAME", "PATH", "LANG", "LC_ALL", "TMPDIR"].contains($0.key) }
+    }
+    private func command(_ arguments: [String]) async throws -> CommandResult {
+        try await ProcessRunner.run(executable, ["-S", socketPath, "-f", "/dev/null"] + arguments, environment: environment)
+    }
+    public func inventory() async throws -> [PaneIdentity] {
+        let result = try await command(["list-panes", "-a", "-F", "#{session_name}\t#{pane_id}\t#{pane_pid}\t#{pane_dead}\t#{pane_dead_status}"])
+        if result.status != 0 {
+            if result.error.contains("no server running") || result.error.contains("no sessions") || result.error.contains("no current target") || result.error.contains("No such file") || result.error.contains("Connection refused") { return [] }
+            throw ChauffeurError("terminal_inventory", "Cannot inspect terminal service")
+        }
+        return result.output.split(separator: "\n").compactMap { line in
+            let fields = line.split(separator: "\t", omittingEmptySubsequences: false).map(String.init)
+            guard fields.count == 5, let pid = Int32(fields[2]) else { return nil }
+            return PaneIdentity(sessionName: fields[0], paneID: fields[1], processID: pid, dead: fields[3] == "1", exitStatus: Int32(fields[4]))
+        }
+    }
+    public func spawn(session: Session, payload: ExecPayload, scrollback: Int) async throws -> PaneIdentity {
+        let name = session.id.uuidString
+        guard !(try await inventory()).contains(where: { $0.sessionName == name }) else { throw ChauffeurError("already_running", "Session already has a terminal. Reattach instead") }
+        let config = runtimeDirectory.appendingPathComponent("tmux.conf")
+        // A separate socket/config keeps user tmux sessions and key bindings out
+        // of Chauffeur. Direct argv launch never evaluates the task in a shell.
+        try Data("set -g status off\nset -g prefix None\nset -g prefix2 None\nset -g mouse on\nset -g history-limit \(scrollback)\nset -g remain-on-exit on\nset -g exit-empty off\nset -g update-environment ''\nset -g default-terminal tmux-256color\n".utf8).write(to: config, options: .atomic)
+        let payloadPath = runtimeDirectory.appendingPathComponent("launch-\(session.id).json")
+        guard FileManager.default.createFile(atPath: payloadPath.path, contents: try JSONCoding.encode(payload), attributes: [.posixPermissions: 0o600]) else { throw ChauffeurError("launch_file", "Cannot create private launch handoff") }
+        defer { try? FileManager.default.removeItem(at: payloadPath) }
+        let result = try await ProcessRunner.run(executable, ["-S", socketPath, "-f", config.path, "new-session", "-d", "-s", name, "-x", "100", "-y", "30", "-c", payload.directory, ctlPath, "internal-exec", payloadPath.path], environment: environment)
+        guard result.status == 0 else { throw ChauffeurError("terminal_launch", "tmux could not start the session", path: payload.directory) }
+        let handoffDeadline = ContinuousClock.now.advanced(by: .seconds(5))
+        while FileManager.default.fileExists(atPath: payloadPath.path) && ContinuousClock.now < handoffDeadline { try await Task.sleep(for: .milliseconds(20)) }
+        guard !FileManager.default.fileExists(atPath: payloadPath.path) else { throw ChauffeurError("launch_handoff_timeout", "Terminal helper did not consume its launch configuration") }
+        _ = try await command(["set-option", "-t", name, "history-limit", String(scrollback)])
+        guard let pane = try await inventory().first(where: { $0.sessionName == name }) else { throw ChauffeurError("terminal_launch", "Launched terminal could not be found") }
+        return pane
+    }
+    public func attach(sessionID: UUID, owner: UUID, connection: SocketConnection, cols: Int, rows: Int) async throws {
+        guard attachments[sessionID] == nil else { throw ChauffeurError("already_attached", "This terminal is attached in another view. Close that view before attaching") }
+        // Reserve ownership before any suspension; concurrent attaches cannot win.
+        let attachment = try PTYAttachment(executable: executable, arguments: ["-S", socketPath, "attach-session", "-t", sessionID.uuidString], directory: runtimeDirectory.path, environment: environment.merging(["TERM": "xterm-256color"], uniquingKeysWith: { _, new in new }), cols: cols, rows: rows)
+        attachments[sessionID] = (owner, attachment)
+        attachment.startOutput(to: connection)
+    }
+    public func input(sessionID: UUID, owner: UUID, bytes: Data) throws {
+        guard let (actualOwner, attachment) = attachments[sessionID], actualOwner == owner else { throw ChauffeurError("attachment_lost", "Terminal attachment ownership was lost") }
+        try attachment.input(bytes)
+    }
+    public func resize(sessionID: UUID, owner: UUID, cols: Int, rows: Int) throws {
+        guard let (actualOwner, attachment) = attachments[sessionID], actualOwner == owner else { throw ChauffeurError("attachment_lost", "Terminal attachment ownership was lost") }
+        try attachment.resize(cols: cols, rows: rows)
+    }
+    public func detach(sessionID: UUID, owner: UUID) {
+        guard let (actualOwner, attachment) = attachments[sessionID], actualOwner == owner else { return }
+        attachment.close(); attachments.removeValue(forKey: sessionID)
+    }
+    public func capture(sessionID: UUID, lines: Int) async throws -> Data {
+        let result = try await command(["capture-pane", "-p", "-e", "-S", "-\(lines)", "-t", sessionID.uuidString])
+        guard result.status == 0 else { throw ChauffeurError("snapshot_unavailable", "Terminal snapshot unavailable") }
+        return Data(result.output.utf8)
+    }
+    public func interrupt(sessionID: UUID) async throws {
+        let result = try await command(["send-keys", "-t", sessionID.uuidString, "C-c"])
+        guard result.status == 0 else { throw ChauffeurError("interrupt_failed", "Session is no longer live") }
+    }
+    public func stop(sessionID: UUID, force: Bool) async throws {
+        guard let pane = try await inventory().first(where: { $0.sessionName == sessionID.uuidString }) else { return }
+        if force || pane.dead {
+            let result = try await command(["kill-session", "-t", sessionID.uuidString])
+            guard result.status == 0 else { throw ChauffeurError("stop_failed", "Could not stop terminal session") }
+        } else {
+            // Positive tmux ownership check above. Each pane is a PTY session
+            // leader; signal this execution's process group only.
+            guard kill(-pane.processID, SIGTERM) == 0 || errno == ESRCH else { throw ChauffeurError("stop_failed", "Graceful stop failed; force stop is available") }
+        }
+    }
+}
+
+private final class PTYAttachment: @unchecked Sendable {
+    private let descriptor: Int32
+    private let pid: Int32
+    private let lock = NSLock()
+    private var stopped = false
+    init(executable: String, arguments: [String], directory: String, environment: [String: String], cols: Int, rows: Int) throws {
+        try Self.validateSize(cols, rows)
+        var argv = ([executable] + arguments).map { strdup($0) } + [nil]
+        var envp = environment.map { strdup("\($0.key)=\($0.value)") } + [nil]
+        defer { argv.forEach { free($0) }; envp.forEach { free($0) } }
+        var master: Int32 = -1
+        pid = chauffeur_spawn_pty(executable, &argv, &envp, directory, &master, UInt16(cols), UInt16(rows))
+        guard pid > 0 else { throw ChauffeurError("pty_failed", "Could not allocate terminal attachment") }
+        descriptor = master
+    }
+    deinit { Darwin.close(descriptor) }
+    func startOutput(to connection: SocketConnection) {
+        DispatchQueue.global(qos: .userInitiated).async { [self] in
+            defer { close(); connection.close(); var status: Int32 = 0; waitpid(pid, &status, 0) }
+            var buffer = [UInt8](repeating: 0, count: 16_384)
+            while true {
+                let count = Darwin.read(descriptor, &buffer, buffer.count)
+                if count < 0 && errno == EINTR { continue }
+                guard count > 0 else { return }
+                do { try connection.send(TerminalPacket(kind: "output", bytes: Data(buffer.prefix(count)))) }
+                catch { return }
+            }
+        }
+    }
+    func input(_ data: Data) throws {
+        try Validation.require(data.count <= 1024 * 1024, "Terminal input is too large")
+        lock.lock(); defer { lock.unlock() }
+        guard !stopped else { throw ChauffeurError("attachment_closed", "Terminal view detached") }
+        try data.withUnsafeBytes { raw in
+            var offset = 0
+            while offset < data.count {
+                let count = Darwin.write(descriptor, raw.baseAddress!.advanced(by: offset), raw.count - offset)
+                if count < 0 && errno == EINTR { continue }
+                guard count > 0 else { throw ChauffeurError("input_failed", "Terminal input failed") }
+                offset += count
+            }
+        }
+    }
+    func resize(cols: Int, rows: Int) throws { try Self.validateSize(cols, rows); guard chauffeur_resize(descriptor, UInt16(cols), UInt16(rows)) == 0 else { throw ChauffeurError("resize_failed", "Terminal resize failed") } }
+    func close() {
+        lock.lock(); defer { lock.unlock() }
+        if !stopped { stopped = true; kill(pid, SIGTERM) }
+    }
+    private static func validateSize(_ cols: Int, _ rows: Int) throws { try Validation.require((2...500).contains(cols) && (2...300).contains(rows), "Terminal dimensions must be 2–500 columns and 2–300 rows") }
+}

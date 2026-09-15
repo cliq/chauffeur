@@ -1,0 +1,310 @@
+import Foundation
+import ChauffeurCore
+
+public actor RuntimeCoordinator {
+    public let id = UUID()
+    public let store: FileStore
+    public let ledger: Ledger
+    public let terminals: TmuxHost
+    public let worktrees: WorktreeManager
+    public let root: URL
+    private let ctlPath: String
+    private let baseEnvironment: [String: String]
+    private var sessions: [UUID: Session] = [:]
+    private var launching = Set<UUID>()
+    private var stopping = Set<UUID>()
+    private var endpoint: String?
+    private var settings = RetentionSettings()
+    private var recentErrors: [ChauffeurError] = []
+    public init(root: URL, ctlPath: String, environment: [String: String]) throws {
+        self.root = root; self.ctlPath = ctlPath; self.baseEnvironment = environment
+        store = try FileStore(root: root)
+        ledger = try Ledger(path: root.appendingPathComponent("runtime/ledger.sqlite").path)
+        terminals = try TmuxHost(runtimeDirectory: root.appendingPathComponent("runtime"), ctlPath: ctlPath, environment: environment)
+        worktrees = WorktreeManager(root: root.appendingPathComponent("worktrees"))
+    }
+    public func start() async throws {
+        let snapshot = await store.reload()
+        // The ledger preserves accepted membership and orphaned live sessions
+        // even if a project directory was removed while the service was running.
+        let recorded = try await ledger.allSessions()
+        for item in recorded { sessions[item.id] = item }
+        for record in snapshot.sessions {
+            if let existing = sessions[record.value.id], existing.projectID != record.value.projectID || existing.groupID != record.value.groupID {
+                recentErrors.append(ChauffeurError("immutable_membership", "Session file changes its recorded membership; restore its original IDs", path: record.path))
+                continue
+            }
+            sessions[record.value.id] = record.value
+            try await ledger.register(record.value)
+        }
+        if let data = try? Data(contentsOf: root.appendingPathComponent("settings.json")) {
+            do { let loaded = try JSONCoding.decode(RetentionSettings.self, from: data); try loaded.validate(); settings = loaded }
+            catch { recentErrors.append(ChauffeurError("invalid_settings", "Cannot load retention settings", path: root.appendingPathComponent("settings.json").path)) }
+        }
+        try await reconcile(startup: true)
+        for var delegation in try await ledger.allDelegations() where [.reserved, .launching].contains(delegation.state) {
+            if let child = sessions[delegation.childID], child.state.isLive { delegation.state = .running }
+            else { delegation.state = .interrupted; delegation.error = "Runtime stopped during launch. Inspect the retained worktree and explicitly retry" }
+            try await ledger.updateDelegation(delegation)
+        }
+    }
+    public func setEndpoint(port: Int) { endpoint = "http://127.0.0.1:\(port)/mcp" }
+    public func health() -> JSONValue {
+        .object(["runtimeID": .string(id.uuidString), "version": .string(RuntimeVersion.current), "protocolVersion": .number(Double(WireProtocol.major)), "mcpEndpoint": endpoint.map(JSONValue.string) ?? .null, "liveSessions": .number(Double(sessions.values.filter { $0.state.isLive }.count)), "status": .string("running")])
+    }
+    public func snapshot() async throws -> JSONValue {
+        let snapshot = await store.reload()
+        return .object(["store": try .from(snapshot), "sessions": try .from(Array(sessions.values).sorted { $0.createdAt < $1.createdAt }), "messages": try .from(await ledger.allMessages()), "delegations": try .from(await ledger.allDelegations()), "health": health(), "settings": try .from(settings), "errors": try .from(recentErrors)])
+    }
+    private func persist(_ session: Session) async throws {
+        try await ledger.register(session)
+        sessions[session.id] = session
+        let snapshot = await store.current()
+        guard snapshot.projects.contains(where: { $0.value.id == session.projectID }) else { return }
+        do { try await store.save(session, expectedVersion: snapshot.sessions.first { $0.value.id == session.id }?.version) }
+        catch let error as ChauffeurError { record(error) }
+    }
+    public func record(_ error: ChauffeurError) { recentErrors.append(error); if recentErrors.count > 100 { recentErrors.removeFirst(recentErrors.count - 100) } }
+    public func reconcile(startup: Bool = false) async throws {
+        let inventory = try await terminals.inventory()
+        for var session in Array(sessions.values) where !launching.contains(session.id) {
+            let pane = inventory.first { $0.sessionName == session.id.uuidString }
+            let sameOwner = pane != nil && (session.processID == nil || session.processID == pane?.processID) && (session.terminalIdentity == nil || session.terminalIdentity == pane?.paneID)
+            if let pane, sameOwner {
+                if pane.dead && session.state.isLive {
+                    session.state = stopping.contains(session.id) ? .interrupted : (pane.exitStatus == 0 ? .exited : .failed)
+                    session.error = pane.exitStatus == 0 ? nil : "CLI exited with status \(pane.exitStatus.map(String.init) ?? "unknown")"
+                    try await ledger.revoke(sessionID: session.id)
+                    stopping.remove(session.id)
+                } else if !pane.dead && startup {
+                    session.state = .activityUnknown; session.runtimeID = id; session.processID = pane.processID; session.terminalIdentity = pane.paneID
+                }
+            } else if session.state.isLive {
+                session.state = .interrupted; session.error = "Terminal ownership was lost. Resume a recorded conversation explicitly"
+                try await ledger.revoke(sessionID: session.id)
+            }
+            if sessions[session.id] != session { session.updatedAt = Date(); try await persist(session) }
+        }
+        let pending = try await ledger.allMessages().filter { [.queued, .received].contains($0.state) }
+        for var session in Array(sessions.values) {
+            let count = pending.filter { $0.recipientID == session.id }.count
+            if session.pendingMessages != count { session.pendingMessages = count; try await persist(session) }
+        }
+    }
+    public func handle(_ request: IPCRequest) async throws -> JSONValue {
+        guard request.version == WireProtocol.major else { throw ChauffeurError("protocol_mismatch", "App and runtime protocol versions differ. Restart the background service") }
+        let params = request.params
+        switch request.method {
+        case "hello", "version", "status": return health()
+        case "snapshot": return try await snapshot()
+        case "savePresetSet": return try .from(await store.save(params["record"].decode(PresetSet.self), expectedVersion: params["version"].string))
+        case "savePreset": return try .from(await store.save(params["record"].decode(AgentPreset.self), expectedVersion: params["version"].string))
+        case "saveProject": return try .from(await store.save(params["record"].decode(Project.self), expectedVersion: params["version"].string))
+        case "saveWindow": return try .from(await store.save(params["record"].decode(WindowState.self), expectedVersion: params["version"].string))
+        case "discoverFolders":
+            let parent = try params.requiredString("path")
+            return try .from(await Task.detached { RepositoryDiscovery.scan(parent: parent) }.value)
+        case "launch": return try .from(await launch(params.decode(LaunchRequest.self)))
+        case "resume": return try .from(await resume(params.uuid("sessionID")))
+        case "interrupt": try await terminals.interrupt(sessionID: params.uuid("sessionID")); return .object(["sent": .bool(true)])
+        case "stop":
+            let sessionID = try params.uuid("sessionID")
+            guard sessions[sessionID] != nil else { throw ChauffeurError("missing_session", "Session not found") }
+            stopping.insert(sessionID)
+            try await ledger.revoke(sessionID: sessionID)
+            try await terminals.stop(sessionID: sessionID, force: params["force"].bool ?? false)
+            try await reconcile()
+            return .object(["requested": .bool(true)])
+        case "markRead":
+            let sessionID = try params.uuid("sessionID")
+            guard var session = sessions[sessionID] else { throw ChauffeurError("missing_session", "Session not found") }
+            session.unread = false; try await persist(session); return .null
+        case "event": return try await event(params)
+        case "worktreeInventory": return try .from(await worktrees.inventory(at: params.requiredString("path")))
+        case "createWorktree":
+            let snapshot = await store.current(), projectID = try params.uuid("projectID"), folderID = try params.uuid("folderID")
+            guard let folder = snapshot.projects.first(where: { $0.value.id == projectID })?.value.folders.first(where: { $0.id == folderID && $0.registered }) else { throw ChauffeurError("missing_folder", "Select an available project folder") }
+            let worktree = try await worktrees.create(projectID: projectID, folder: folder, branch: params.requiredString("branch"), baseRef: params.requiredString("baseRef"))
+            return try .from(await store.save(worktree))
+        case "removeWorktree":
+            let snapshot = await store.current(), worktreeID = try params.uuid("worktreeID")
+            guard var stored = snapshot.worktrees.first(where: { $0.value.id == worktreeID }) else { throw ChauffeurError("missing_worktree", "Worktree not found") }
+            if stored.value.managed { try await worktrees.remove(stored.value, liveSessions: Array(sessions.values)) }
+            stored.value.registered = false; return try .from(await store.save(stored.value, expectedVersion: stored.version))
+        case "saveSettings":
+            let value = try params.decode(RetentionSettings.self); try value.validate()
+            try JSONCoding.encode(value).write(to: root.appendingPathComponent("settings.json"), options: .atomic)
+            settings = value; return try .from(value)
+        case "reconcile": try await reconcile(); return health()
+        default: throw ChauffeurError("unknown_method", "Unknown runtime method")
+        }
+    }
+    public func launch(_ request: LaunchRequest, child: Delegation? = nil) async throws -> Session {
+        // User retry UUID is also the durable session UUID. A retry after an IPC
+        // timeout returns the original record, including failures, without spawn.
+        let sessionID = child?.childID ?? request.retryKey
+        let fingerprint = JSONCoding.digest(try JSONCoding.encode(request))
+        if let existing = sessions[sessionID] {
+            guard existing.launchRequestFingerprint == fingerprint else { throw ChauffeurError("retry_conflict", "Launch request ID was already used with different fields") }
+            return existing
+        }
+        guard !launching.contains(sessionID) else { throw ChauffeurError("launch_pending", "Launch is still in progress. Retry with the same request ID") }
+        launching.insert(sessionID); defer { launching.remove(sessionID) }
+        let snapshot = await store.reload()
+        guard let project = snapshot.projects.first(where: { $0.value.id == request.projectID })?.value, !project.archived else { throw ChauffeurError("missing_project", "Select an active project") }
+        guard project.groups.contains(where: { $0.id == request.groupID && !$0.archived }) else { throw ChauffeurError("missing_group", "Select an active group in this project") }
+        guard let set = snapshot.presetSets.first(where: { $0.value.id == project.presetSetID })?.value, !set.archived,
+              let preset = snapshot.presets.first(where: { $0.value.id == request.presetID && $0.value.setID == set.id && !$0.value.archived })?.value else {
+            throw ChauffeurError("missing_preset", "Project's preset set is empty or selected preset is unavailable")
+        }
+        guard let folder = project.folders.first(where: { $0.id == request.folderID && $0.registered }) else { throw ChauffeurError("missing_folder", "Select a registered project folder") }
+        var workingDirectory = folder.canonicalPath
+        if let worktreeID = request.worktreeID {
+            guard let worktree = snapshot.worktrees.first(where: { $0.value.id == worktreeID && $0.value.projectID == project.id && $0.value.folderID == folder.id && $0.value.registered })?.value else { throw ChauffeurError("missing_worktree", "Select a registered worktree for this repository") }
+            workingDirectory = worktree.path
+        }
+        let additionalPaths = try request.additionalFolderIDs.filter { $0 != folder.id }.map { id in
+            guard let extra = project.folders.first(where: { $0.id == id && $0.registered }) else { throw ChauffeurError("missing_folder", "Additional project folder is unavailable") }
+            return try Paths.directory(extra.canonicalPath)
+        }
+        let launch = LaunchSnapshot(preset: preset, set: set, executablePath: preset.executable, executableVersion: "unverified", workingDirectory: workingDirectory, additionalPaths: additionalPaths)
+        var session = Session(projectID: project.id, groupID: request.groupID, title: request.title, launch: launch, folderID: folder.id)
+        session.id = sessionID; session.worktreeID = request.worktreeID; session.initialTask = request.task
+        session.launchRequestFingerprint = fingerprint
+        session.parentID = child?.parentID; session.delegationID = child?.id; session.runtimeID = id
+        if preset.kind == .claude { session.nativeConversationID = session.id.uuidString }
+        try await persist(session)
+        do {
+            try preset.validate()
+            session.launch.workingDirectory = try Paths.directory(workingDirectory)
+            session.launch.configurationPath = try Paths.directory(preset.configurationDirectory)
+            session.launch.executablePath = try Paths.executable(preset.executable, environment: baseEnvironment)
+            let sharing = sessions.values.filter { $0.id != session.id && $0.state.isLive && $0.launch.workingDirectory == session.launch.workingDirectory }
+            guard sharing.isEmpty || request.allowSharedCheckout else { throw ChauffeurError("shared_checkout", "Checkout is already used by: \(sharing.map(\.title).joined(separator: ", ")). Explicitly choose to share it", path: workingDirectory) }
+            let token = try await ledger.issueGrant(sessionID: session.id)
+            var environment = try LaunchPolicy.environment(base: baseEnvironment, preset: preset, sessionID: session.id, token: token)
+            environment["CHAUFFEUR_SOCKET"] = root.appendingPathComponent("runtime/runtime.sock").path
+            let capabilities = try await CLIAdapter.capabilities(executable: session.launch.executablePath, kind: preset.kind, environment: environment)
+            session.launch.executableVersion = capabilities.version
+            if !additionalPaths.isEmpty && !capabilities.additionalDirectories { throw ChauffeurError("unsupported_directories", "This CLI does not support additional directories") }
+            if request.coordinationEnabled && (!capabilities.coordination || endpoint == nil) { throw ChauffeurError("integration_unavailable", capabilities.limitation ?? "MCP service is unavailable. Retry or explicitly select basic terminal mode") }
+            session.launch.preset.integration = request.coordinationEnabled ? .unverified : .unavailable
+            let integration = root.appendingPathComponent("runtime/integration/\(session.id)")
+            try FileManager.default.createDirectory(at: integration, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+            let arguments = try CLIAdapter.arguments(session: session, endpoint: endpoint ?? "", ctlPath: ctlPath, integrationDirectory: integration, coordination: request.coordinationEnabled, resume: false)
+            try await persist(session)
+            let pane = try await terminals.spawn(session: session, payload: ExecPayload(executable: session.launch.executablePath, arguments: arguments, environment: environment, directory: session.launch.workingDirectory), scrollback: settings.scrollbackLines)
+            session.processID = pane.processID; session.terminalIdentity = pane.paneID; session.state = .activityUnknown
+            try await persist(session)
+            return session
+        } catch {
+            session.state = .failed; session.error = (error as? ChauffeurError)?.errorDescription ?? "Launch failed. Verify the executable and configuration directory"
+            try await ledger.revoke(sessionID: session.id); try await persist(session)
+            throw error
+        }
+    }
+    private func resume(_ sessionID: UUID) async throws -> Session {
+        try await reconcile()
+        guard var session = sessions[sessionID], !session.state.isLive else { throw ChauffeurError("already_live", "Reattach the live session instead of resuming") }
+        guard session.nativeConversationID != nil else { throw ChauffeurError("resume_unavailable", "No native conversation ID is available. Create a new session explicitly") }
+        guard !launching.contains(sessionID) else { throw ChauffeurError("launch_pending", "Resume is already in progress") }
+        launching.insert(sessionID); defer { launching.remove(sessionID) }
+        try await terminals.stop(sessionID: sessionID, force: true)
+        _ = try Paths.directory(session.launch.configurationPath); _ = try Paths.directory(session.launch.workingDirectory)
+        session.state = .starting; session.error = nil; session.runtimeID = id; try await persist(session)
+        do {
+            let token = try await ledger.issueGrant(sessionID: sessionID)
+            var preset = session.launch.preset; preset.configurationDirectory = session.launch.configurationPath
+            var environment = try LaunchPolicy.environment(base: baseEnvironment, preset: preset, sessionID: sessionID, token: token)
+            environment["CHAUFFEUR_SOCKET"] = root.appendingPathComponent("runtime/runtime.sock").path
+            let integration = root.appendingPathComponent("runtime/integration/\(session.id)")
+            try FileManager.default.createDirectory(at: integration, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+            let arguments = try CLIAdapter.arguments(session: session, endpoint: endpoint ?? "", ctlPath: ctlPath, integrationDirectory: integration, coordination: session.launch.preset.integration != .unavailable, resume: true)
+            let pane = try await terminals.spawn(session: session, payload: ExecPayload(executable: session.launch.executablePath, arguments: arguments, environment: environment, directory: session.launch.workingDirectory), scrollback: settings.scrollbackLines)
+            session.processID = pane.processID; session.terminalIdentity = pane.paneID; session.state = .activityUnknown
+            try await persist(session); return session
+        } catch {
+            session.state = .failed; session.error = (error as? ChauffeurError)?.errorDescription ?? "Resume failed"
+            try await ledger.revoke(sessionID: session.id); try await persist(session); throw error
+        }
+    }
+    private func event(_ params: JSONValue) async throws -> JSONValue {
+        let sessionID = try params.uuid("sessionID"), token = try params.requiredString("token")
+        let caller = try await ledger.authenticate(token)
+        guard caller.sessionID == sessionID, var session = sessions[sessionID], session.state.isLive else { throw ChauffeurError("unauthorized", "Event does not belong to this session") }
+        switch try params.requiredString("event") {
+        case "running": session.state = .running
+        case "turn-finished": session.state = .turnFinished; session.unread = true
+        case "needs-attention": session.state = .needsAttention; session.unread = true
+        default: throw ChauffeurError("unknown_event", "Unsupported lifecycle event")
+        }
+        if let nativeID = params["nativeConversationID"].string, UUID(uuidString: nativeID) != nil {
+            if let previous = session.nativeConversationID, previous != nativeID { throw ChauffeurError("conversation_mismatch", "Hook reported a different native conversation") }
+            session.nativeConversationID = nativeID
+        }
+        session.updatedAt = Date(); try await persist(session); return .object(["accepted": .bool(true)])
+    }
+    public func attach(sessionID: UUID, owner: UUID, connection: SocketConnection, cols: Int, rows: Int) async throws {
+        guard sessions[sessionID]?.state.isLive == true else { throw ChauffeurError("not_live", "Session is not live. Inspect its details or resume explicitly") }
+        try await terminals.attach(sessionID: sessionID, owner: owner, connection: connection, cols: cols, rows: rows)
+    }
+    public func callTool(token: String, name: String, arguments: JSONValue) async throws -> JSONValue {
+        let caller = try await ledger.authenticate(token)
+        try MCPTools.validate(name: name, arguments: arguments)
+        switch name {
+        case "chauffeur_discover":
+            let snapshot = await store.current()
+            guard let project = snapshot.projects.first(where: { $0.value.id == caller.scope.projectID })?.value else { throw ChauffeurError("project_unavailable", "Project metadata is unavailable") }
+            let peers = try await ledger.peers(caller).map { session -> JSONValue in
+                .object(["id": .string(session.id.uuidString), "title": .string(session.title), "status": .string(session.state.label), "workingDirectory": .string(session.launch.workingDirectory), "preset": .string(session.launch.preset.name), "parentID": session.parentID.map { .string($0.uuidString) } ?? .null])
+            }
+            return .object(["sessionID": .string(caller.sessionID.uuidString), "projectID": .string(project.id.uuidString), "project": .string(project.name), "groupID": .string(caller.scope.groupID.uuidString), "group": .string(project.groups.first { $0.id == caller.scope.groupID }?.name ?? "Unavailable"), "repositories": try .from(project.folders.filter(\.registered)), "presets": .array(snapshot.presets.filter { $0.value.setID == project.presetSetID && !$0.value.archived }.map { .object(["id": .string($0.value.id.uuidString), "name": .string($0.value.name), "kind": .string($0.value.kind.rawValue)]) }), "peers": .array(peers)])
+        case "chauffeur_send_message":
+            return try .from(await ledger.send(caller: caller, recipientID: arguments.uuid("recipientID"), body: arguments.requiredString("body"), references: arguments["references"].array.compactMap(\.string), retryKey: arguments.requiredString("retryKey")))
+        case "chauffeur_inbox":
+            let acknowledge = try arguments["acknowledge"].array.map { item -> UUID in
+                guard let value = item.string.flatMap(UUID.init(uuidString:)) else { throw ChauffeurError("invalid_argument", "Acknowledge IDs must be UUIDs") }; return value
+            }
+            let wait = arguments["waitSeconds"].int ?? 0
+            try Validation.require((0...25).contains(wait), "Inbox wait must be between 0 and 25 seconds")
+            var incoming = try await ledger.inbox(caller: caller, acknowledge: acknowledge)
+            let deadline = ContinuousClock.now.advanced(by: .seconds(wait))
+            while incoming.isEmpty && ContinuousClock.now < deadline {
+                try await Task.sleep(for: .milliseconds(200))
+                let currentCaller = try await ledger.authenticate(token)
+                incoming = try await ledger.inbox(caller: currentCaller)
+            }
+            return try .from(incoming)
+        case "chauffeur_reply":
+            let message = try await ledger.message(arguments.uuid("messageID"), caller: caller)
+            return try .from(await ledger.send(caller: caller, recipientID: message.senderID, body: arguments.requiredString("body"), references: arguments["references"].array.compactMap(\.string), retryKey: arguments.requiredString("retryKey"), replyToID: message.id))
+        case "chauffeur_delegation_status": return try .from(await ledger.delegation(arguments.uuid("delegationID"), caller: caller))
+        case "chauffeur_report_result": return try .from(await ledger.reportResult(caller: caller, delegationID: arguments.uuid("delegationID"), result: arguments.requiredString("result"), retryKey: arguments.requiredString("retryKey")))
+        case "chauffeur_delegate":
+            let (reserved, isNew) = try await ledger.reserveDelegation(caller: caller, task: arguments.requiredString("task"), presetID: arguments.uuid("presetID"), folderID: arguments.uuid("folderID"), shareCheckout: arguments["shareCheckout"].bool ?? false, retryKey: arguments.requiredString("retryKey"), limit: settings.maxLiveChildren)
+            guard isNew else { return try .from(reserved) }
+            var delegation = reserved
+            do {
+                let snapshot = await store.current()
+                guard let project = snapshot.projects.first(where: { $0.value.id == caller.scope.projectID })?.value,
+                      let folder = project.folders.first(where: { $0.id == delegation.folderID && $0.registered }) else { throw ChauffeurError("missing_folder", "Delegation folder is unavailable in this project") }
+                guard snapshot.presets.contains(where: { $0.value.id == delegation.presetID && $0.value.setID == project.presetSetID && !$0.value.archived }) else { throw ChauffeurError("missing_preset", "Delegation preset is unavailable in this project's set") }
+                delegation.state = .launching; try await ledger.updateDelegation(delegation)
+                if !delegation.shareCheckout {
+                    let worktree = try await worktrees.create(projectID: project.id, folder: folder, branch: "chauffeur/\(String(delegation.id.uuidString.prefix(12)).lowercased())", baseRef: "HEAD")
+                    try await store.save(worktree); delegation.worktreeID = worktree.id
+                    try await ledger.updateDelegation(delegation)
+                }
+                _ = try await ledger.authenticate(token)
+                let request = LaunchRequest(projectID: caller.scope.projectID, groupID: caller.scope.groupID, presetID: delegation.presetID, folderID: delegation.folderID, title: String(delegation.task.prefix(100)), worktreeID: delegation.worktreeID, task: delegation.task, allowSharedCheckout: delegation.shareCheckout, retryKey: delegation.childID)
+                _ = try await launch(request, child: delegation)
+                delegation.state = .running
+            } catch {
+                delegation.state = .failed; delegation.error = (error as? ChauffeurError)?.errorDescription ?? "Delegation failed; any created worktree is retained"
+            }
+            try await ledger.updateDelegation(delegation)
+            return try .from(delegation)
+        default: throw ChauffeurError("unknown_tool", "Unknown Chauffeur tool")
+        }
+    }
+}
