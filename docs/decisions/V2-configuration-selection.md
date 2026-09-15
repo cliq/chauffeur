@@ -60,3 +60,6 @@ a different account. Its private configuration copy reported signed out after
 native startup, so the distinct-account probe stopped before sending any model
 task. That clone needs a fresh native sign-in before the account-separation case
 can proceed; the cause of its lost login has not been established.
+
+The user chose to continue with the current A/B profiles. The different-account
+Claude check remains deferred; no further sign-in changes are being attempted.

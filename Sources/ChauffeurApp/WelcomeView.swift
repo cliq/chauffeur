@@ -57,6 +57,7 @@ struct WelcomeView: View {
             .sheet(item: $editingProject) { project in ProjectEditor(project: project) { _ in editingProject = nil } }
             .onChange(of: model.online) { _, online in
                 guard online, !restored else { return }; restored = true
+                if model.pendingSessionRoute != nil { return }
                 let windows = model.snapshot.store.windows.filter { $0.value.wasOpen && model.project($0.value.id) != nil }
                 if !windows.isEmpty { for window in windows { openWindow(id: "project", value: window.value.id) }; dismissWindow(id: "welcome") }
             }

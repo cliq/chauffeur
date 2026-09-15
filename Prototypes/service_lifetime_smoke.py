@@ -125,6 +125,15 @@ try:
     assert Path(os.fsdecode(path.value)).resolve() == app / "Contents/MacOS/ChauffeurRuntime", "launchd selected a different app bundle"
     assert first["liveSessions"] == 0 and not call("snapshot")["sessions"], "Default runtime must have no sessions"
     summary["normalUIQuit"] = "same runtime remains available"
+    notifications = wait_for(lambda: call("notificationStatus"), lambda value: value["authorization"] != "unavailable")
+    assert not notifications["enabled"], "Use a default store with notifications disabled for this check"
+    notification_app = app / "Contents/Library/ChauffeurNotifications.app"
+    assert notification_app.is_dir(), "Notification helper is missing from the app bundle"
+    subprocess.run(["/usr/bin/open", "-g", str(notification_app)], check=True, capture_output=True)
+    notifications = wait_for(lambda: call("notificationStatus"), lambda value: value["helperConnected"] and value["authorization"] != "unknown")
+    assert not notifications["enabled"]
+    summary["notificationHelper"] = "Launch Services started the bundled helper with the UI closed; native authorization read without requesting permission"
+    summary["notificationAuthorization"] = notifications["authorization"]
     subprocess.run(["launchctl", "kill", "SIGTERM", job], check=True, capture_output=True)
     recovered = wait_for(lambda: call("status"), lambda value: value["runtimeID"] != first["runtimeID"] and value.get("mcpEndpoint") is not None)
     assert recovered["mcpEndpoint"] == first["mcpEndpoint"]

@@ -45,6 +45,10 @@ See [service setup and recovery](docs/service-recovery.md) for startup issues,
 replacing a development build and the actual LaunchAgent acceptance probe.
 Separate-Spaces acceptance remains open.
 
+Optional [session notifications](docs/notifications.md) run through an embedded
+background app and open the selected project/session, including a cold app launch.
+Enable them in Settings → Runtime; macOS notification permission is separate.
+
 ## Verify
 
 The Python integration fixtures require Python 3.11 or newer (including its

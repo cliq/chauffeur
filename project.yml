@@ -29,6 +29,12 @@ targets:
         product: ChauffeurCore
       - package: SwiftTerm
         product: SwiftTerm
+    info:
+      path: .build/generated/Chauffeur-Info.plist
+      properties:
+        CFBundleURLTypes:
+          - CFBundleURLName: dev.chauffeur.session
+            CFBundleURLSchemes: [chauffeur]
     settings:
       base:
         PRODUCT_NAME: Chauffeur
@@ -46,6 +52,7 @@ targets:
         outputFiles:
           - "$(TARGET_BUILD_DIR)/$(CONTENTS_FOLDER_PATH)/MacOS/ChauffeurRuntime"
           - "$(TARGET_BUILD_DIR)/$(CONTENTS_FOLDER_PATH)/MacOS/chauffeurctl"
+          - "$(TARGET_BUILD_DIR)/$(CONTENTS_FOLDER_PATH)/Library/ChauffeurNotifications.app"
           - "$(TARGET_BUILD_DIR)/$(CONTENTS_FOLDER_PATH)/Library/LaunchAgents/dev.chauffeur.runtime.plist"
   ChauffeurAppUITests:
     type: bundle.ui-testing

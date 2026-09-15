@@ -54,6 +54,12 @@ public actor Ledger {
           retry_key TEXT NOT NULL, request_hash TEXT NOT NULL, state TEXT NOT NULL, record TEXT NOT NULL,
           UNIQUE(parent_id, retry_key)
         );
+        CREATE TABLE IF NOT EXISTS notification_preferences (id INTEGER PRIMARY KEY CHECK(id=1), enabled INTEGER NOT NULL);
+        INSERT OR IGNORE INTO notification_preferences(id,enabled) VALUES(1,0);
+        CREATE TABLE IF NOT EXISTS attention_notices (
+          session_id TEXT PRIMARY KEY REFERENCES sessions(id), notice_id TEXT NOT NULL,
+          delivered INTEGER NOT NULL DEFAULT 0, record TEXT NOT NULL
+        );
         """
         guard sqlite3_exec(connection.handle, schema, nil, nil, nil) == SQLITE_OK else { throw ChauffeurError("ledger_schema", "Cannot initialize coordination ledger") }
         try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: path)
@@ -101,13 +107,37 @@ public actor Ledger {
     private func decode<T: Decodable>(_ type: T.Type, _ text: String) throws -> T { try JSONCoding.decode(type, from: Data(text.utf8)) }
     private func scopeValues(_ caller: Caller) -> [String?] { [caller.scope.projectID.uuidString, caller.scope.groupID.uuidString] }
     private func denied() -> ChauffeurError { ChauffeurError("not_found", "Record not found in this session's group") }
-    public func register(_ session: Session) throws {
-        if let existing = try rows("SELECT project_id,group_id,parent_id FROM sessions WHERE id=?", [session.id.uuidString]).first {
-            guard existing[0] == session.projectID.uuidString, existing[1] == session.groupID.uuidString, existing[2] == (session.parentID?.uuidString ?? "") else {
-                throw ChauffeurError("immutable_membership", "Session membership and parent cannot change")
+    public func register(_ session: Session, notification: AttentionReason? = nil) throws {
+        try transaction {
+            if let existing = try rows("SELECT project_id,group_id,parent_id FROM sessions WHERE id=?", [session.id.uuidString]).first {
+                guard existing[0] == session.projectID.uuidString, existing[1] == session.groupID.uuidString, existing[2] == (session.parentID?.uuidString ?? "") else {
+                    throw ChauffeurError("immutable_membership", "Session membership and parent cannot change")
+                }
             }
+            try execute("INSERT INTO sessions(id,project_id,group_id,parent_id,live,record) VALUES(?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET live=excluded.live,record=excluded.record", [session.id.uuidString, session.projectID.uuidString, session.groupID.uuidString, session.parentID?.uuidString, session.state.isLive ? "1" : "0", try encode(session)])
+            if let notification { try enqueueNotification(session: session, reason: notification) }
         }
-        try execute("INSERT INTO sessions(id,project_id,group_id,parent_id,live,record) VALUES(?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET live=excluded.live,record=excluded.record", [session.id.uuidString, session.projectID.uuidString, session.groupID.uuidString, session.parentID?.uuidString, session.state.isLive ? "1" : "0", try encode(session)])
+    }
+    public func notificationsEnabled() throws -> Bool {
+        try rows("SELECT enabled FROM notification_preferences WHERE id=1").first?[0] == "1"
+    }
+    public func setNotificationsEnabled(_ enabled: Bool) throws {
+        try transaction {
+            try execute("UPDATE notification_preferences SET enabled=? WHERE id=1", [enabled ? "1" : "0"])
+            if !enabled { try execute("DELETE FROM attention_notices") }
+        }
+    }
+    private func enqueueNotification(session: Session, reason: AttentionReason) throws {
+        guard try notificationsEnabled() else { return }
+        let notice = AttentionNotice(route: SessionRoute(projectID: session.projectID, sessionID: session.id), reason: reason)
+        try execute("INSERT INTO attention_notices(session_id,notice_id,record) VALUES(?,?,?) ON CONFLICT(session_id) DO UPDATE SET notice_id=excluded.notice_id,record=excluded.record,delivered=0", [session.id.uuidString, notice.id.uuidString, try encode(notice)])
+    }
+    public func pendingNotifications() throws -> [AttentionNotice] {
+        try rows("SELECT record FROM attention_notices WHERE delivered=0 ORDER BY rowid LIMIT 100").map { try decode(AttentionNotice.self, $0[0]) }
+    }
+    public func acknowledgeNotification(_ id: UUID) throws {
+        // An acknowledgement for an older notice cannot swallow a newer event.
+        try execute("UPDATE attention_notices SET delivered=1 WHERE notice_id=?", [id.uuidString])
     }
     public func issueGrant(sessionID: UUID) throws -> String {
         var random = [UInt8](repeating: 0, count: 32)
@@ -158,6 +188,7 @@ public actor Ledger {
             }
             let message = Message(scope: caller.scope, senderID: caller.sessionID, recipientID: recipientID, body: body, references: references, replyToID: replyToID, delegationID: delegationID)
             try execute("INSERT INTO messages(id,project_id,group_id,sender_id,recipient_id,retry_key,request_hash,state,record) VALUES(?,?,?,?,?,?,?,?,?)", [message.id.uuidString] + scopeValues(caller) + [caller.sessionID.uuidString, recipientID.uuidString, retryKey, requestHash, message.state.rawValue, try encode(message)])
+            try enqueueNotification(session: peer(recipientID, caller: caller), reason: delegationID == nil ? .message : .result)
             return message
         }
     }

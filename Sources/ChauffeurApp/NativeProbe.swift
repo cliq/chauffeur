@@ -16,6 +16,30 @@ import ChauffeurCore
             let root = URL(fileURLWithPath: path)
             let phase = ProcessInfo.processInfo.environment["CHAUFFEUR_NATIVE_PROBE_PHASE"] ?? "1"
             do {
+                if phase == "route" {
+                    guard let project = ProcessInfo.processInfo.environment["CHAUFFEUR_ROUTE_PROJECT"].flatMap(UUID.init(uuidString:)),
+                          let session = ProcessInfo.processInfo.environment["CHAUFFEUR_ROUTE_SESSION"].flatMap(UUID.init(uuidString:)) else {
+                        throw ChauffeurError("native_probe", "Missing route fixture identity")
+                    }
+                    try await wait("cold-launch URL selected the session") {
+                        model.online && layouts[project]?.window?.isVisible == true && layouts[project]?.state.selectedSessionID == session && model.pendingSessionRoute == nil
+                    }
+                    guard layouts.count == 1, layouts[project]?.state.tabs == [session] else {
+                        throw ChauffeurError("native_probe", "Cold-launch URL restored an unexpected project or tab")
+                    }
+                    layouts[project]?.window?.performClose(nil)
+                    try await wait("route project closed") { !model.openProjects.contains(project) }
+                    let missing = SessionRoute(projectID: UUID(), sessionID: UUID())
+                    _ = try await NSWorkspace.shared.open([missing.url], withApplicationAt: Bundle.main.bundleURL, configuration: NSWorkspace.OpenConfiguration())
+                    try await wait("missing notification target presented an error") {
+                        model.error != nil && NSApp.windows.contains { $0.isVisible && $0.title == "Welcome to Chauffeur" }
+                    }
+                    model.error = nil
+                    await model.finishPendingWindowWrites()
+                    let result: JSONValue = .object(["passed": .bool(true), "phase": .string(phase), "routing": .string("Launch Services cold launch selected the recorded project/session with all project windows previously closed"), "processID": .number(Double(ProcessInfo.processInfo.processIdentifier))])
+                    try JSONCoding.encode(result).write(to: root.appendingPathComponent("native-phase-route.json"), options: .atomic)
+                    model.quit(); return
+                }
                 try await wait("four restored project windows") {
                     model.online && layouts.count == 4 && layouts.values.allSatisfy { $0.window?.isVisible == true }
                 }
@@ -90,8 +114,21 @@ import ChauffeurCore
                     guard model.snapshot.store.windows.first(where: { $0.value.id == closingID })?.value.wasOpen == false else {
                         throw ChauffeurError("native_probe", "Closing a window did not save its closed state")
                     }
-                    openProject?(closingID)
+                    let routedSession = closing.state.tabs.last!
+                    closing.search = "does-not-match-any-session"
+                    let route = SessionRoute(projectID: closingID, sessionID: routedSession)
+                    let configuration = NSWorkspace.OpenConfiguration()
+                    configuration.activates = true
+                    _ = try await NSWorkspace.shared.open([route.url], withApplicationAt: Bundle.main.bundleURL, configuration: configuration)
                     try await wait("closed project reopened") { layouts[closingID]?.window?.isVisible == true && model.openProjects.contains(closingID) }
+                    try await wait("notification URL selected the recorded session") {
+                        layouts[closingID]?.state.selectedSessionID == routedSession && layouts[closingID]?.search == "" && model.pendingSessionRoute == nil
+                    }
+                    _ = try await NSWorkspace.shared.open([route.url], withApplicationAt: Bundle.main.bundleURL, configuration: configuration)
+                    try await wait("repeated notification URL consumed") { model.pendingSessionRoute == nil }
+                    guard NSApp.windows.filter({ $0.isVisible && $0.identifier?.rawValue == "project-\(closingID.uuidString)" }).count == 1 else {
+                        throw ChauffeurError("native_probe", "Notification URL duplicated its project window")
+                    }
                 }
                 guard model.error == nil else { throw ChauffeurError("native_probe", model.error!) }
                 if let view = first.window?.contentView, let bitmap = view.bitmapImageRepForCachingDisplay(in: view.bounds) {

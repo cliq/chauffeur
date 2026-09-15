@@ -20,7 +20,7 @@ the PRD's real-CLI, native-window, and daily-use acceptance scenarios.
   line/byte budgets, and survive terminal/runtime loss. Native history is
   read-only and searchable; completed-message cleanup preserves queued/received
   messages. See [retention and recovery](terminal-history.md).
-- Twenty-eight Swift tests: canonical paths/discovery, per-child environment, argument validation,
+- Thirty-two Swift tests: canonical paths/discovery, per-child environment, argument validation,
   atomic file replacement/conflicts/corrupt files, durable group-scoped messages,
   grant revocation, retry keys, bounded single-level delegation, and safe Git
   worktree creation/removal.
@@ -64,6 +64,11 @@ the PRD's real-CLI, native-window, and daily-use acceptance scenarios.
   helper starts and a subsequent Debug build refreshes registration for its own
   helper. Both bundles verify after embedding and signing.
 
+- Optional [session notifications](notifications.md) with a durable, coalesced outbox,
+  signed accessory app, opt-in controls, and strict project/session navigation.
+  Launch Services warm/cold URL routing and helper startup with the UI closed
+  pass; Notification Center authorization/delivery/click acceptance remains open.
+
 ## Stage audit
 
 | Plan items | Current state | Still required |
@@ -79,7 +84,7 @@ the PRD's real-CLI, native-window, and daily-use acceptance scenarios.
 | 2.3–2.4 Quit/tabs/split | Native tabs/split, window-state writes, quit/stop-all and keyboard commands implemented | OS keyboard and real-CLI/Spaces acceptance; direct normal/force-quit fixture implemented |
 | 2.5 Worktrees | Create/list/safe-remove; periodic external inventory; identity-based moves/replacements; pending launch/removal and metadata-write reservations; Git/socket regression fixture | Real-CLI removal and native control acceptance; whole-repository relocation; recovery/resume after external checkout replacement |
 | 2.6 Multiple repos | Explicit additional folder selection in launch API; primary main checkout excluded | Real CLI access test (shared-checkout warning and explicit additional-folder UI implemented) |
-| 2.7 Status/attention | Lifecycle records, real Codex/Claude completion IDs, Claude permission attention hooks, unread/pending counts | Remaining native attention signals; notifications and closed-UI routing |
+| 2.7 Status/attention | Lifecycle records, real Codex/Claude completion IDs, permission attention hooks, unread/pending counts; optional durable notifications; native warm/cold URL routing and background helper startup | Actual OS notification authorization, delivery/click, enabled-helper recovery/update, and remaining native attention signals |
 | 2.8 Sleep/service loss | Runtime loop plus native wake reconnect, health/recovery actions; actual service termination/restart verified | Real sleep/wake and service lifecycle with live real sessions |
 | 3.1–3.3 Credentials/MCP/mailboxes | Ledger/HTTP fixtures; real Codex/Claude shared-profile credentials and messages | Full HTTP/client compliance; remaining real tool cases and controlled existing-server preservation |
 | 3.4 Delegation | Durable reservation, launch path, worktree default, limits, depth check, result transaction | Bidirectional real-CLI acceptance, crash-window integration tests and failed-child visibility audit |

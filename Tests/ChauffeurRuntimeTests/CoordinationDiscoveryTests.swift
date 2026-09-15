@@ -8,6 +8,7 @@ struct CoordinationDiscoveryTests {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("chauffeur-discover-\(UUID())")
         defer { try? FileManager.default.removeItem(at: root) }
         let runtime = try RuntimeCoordinator(root: root, ctlPath: "/bin/false", environment: [:])
+        try await runtime.ledger.setNotificationsEnabled(true)
         let set = PresetSet(name: "Fixture")
         let project = Project(name: "Fixture", presetSetID: set.id)
         try await runtime.store.save(set)
@@ -33,5 +34,7 @@ struct CoordinationDiscoveryTests {
         let report = try await runtime.callTool(token: childToken, name: "chauffeur_report_result", arguments: .object(["delegationID": discovery["delegationID"], "result": .string("Verified fixture result"), "retryKey": .string("fixture-result")]))
         #expect(report["senderID"].string == child.id.uuidString && report["recipientID"].string == parent.id.uuidString)
         #expect(try await runtime.ledger.inbox(caller: parentCaller).first?.body == "Verified fixture result")
+        let notice = try #require(await runtime.ledger.pendingNotifications().first)
+        #expect(notice.reason == .result && notice.route.sessionID == parent.id && notice.route.projectID == project.id)
     }
 }

@@ -74,7 +74,8 @@ import ChauffeurRuntimeKit
                     do { try await Task.sleep(for: .seconds(5)) } catch { break }
                 }
             }
-            defer { reconcile.cancel(); history.cancel(); repositories.cancel() }
+            let notifications = Task { await NotificationHelper.maintain(runtime: runtime, executable: executable, root: root) }
+            defer { reconcile.cancel(); history.cancel(); repositories.cancel(); notifications.cancel() }
             defer { _fixLifetime(server) }
             try await MCPServer.run(runtime: runtime, port: port ?? recordedPort ?? 0)
         } catch {

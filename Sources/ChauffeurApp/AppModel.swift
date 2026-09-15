@@ -15,10 +15,32 @@ struct AppSnapshot: Decodable, Sendable {
     var snapshotStorage = SnapshotStorageStatus(budgetBytes: RetentionSettings().snapshotBudgetBytes)
     var errors: [ChauffeurError] = []
     var repositoryInventories: [RepositoryInventory]?
+    var notifications: NotificationStatus?
     init() {}
 }
 
 @MainActor final class AppModel: ObservableObject {
+    struct Navigation: Equatable { var id = UUID(); let route: SessionRoute }
+    @Published var pendingSessionRoute: Navigation?
+    var openProjectWindow: ((UUID) -> Void)?
+    var openWelcomeWindow: (() -> Void)?
+    private var openedRouteID: UUID?
+    func openSessionURL(_ url: URL) {
+        guard let route = SessionRoute(url: url) else { return }
+        pendingSessionRoute = Navigation(route: route)
+        processPendingRoute()
+    }
+    func processPendingRoute() {
+        guard online, let navigation = pendingSessionRoute, let openProjectWindow else { return }
+        guard project(navigation.route.projectID) != nil, session(navigation.route.sessionID)?.projectID == navigation.route.projectID else {
+            error = "The notification's project or session is no longer available."
+            pendingSessionRoute = nil; openWelcomeWindow?(); return
+        }
+        guard openedRouteID != navigation.id else { return }
+        openedRouteID = navigation.id
+        openProjectWindow(navigation.route.projectID)
+        NSApp.activate(ignoringOtherApps: true)
+    }
     @Published var snapshot = AppSnapshot()
     @Published var online = false
     @Published var serviceMessage = "Connecting to background service…"
@@ -81,6 +103,7 @@ struct AppSnapshot: Decodable, Sendable {
                         snapshot = try await Task.detached { try result.decode(AppSnapshot.self) }.value
                         snapshotReceivedAt = Date()
                         online = true; serviceMessage = "Background service running · \(snapshot.sessions.filter { $0.state.isLive }.count) live sessions"
+                        processPendingRoute()
                     }
                 } catch {
                     online = false
@@ -167,6 +190,7 @@ struct AppSnapshot: Decodable, Sendable {
         snapshot = try await Task.detached { try result.decode(AppSnapshot.self) }.value
         snapshotReceivedAt = Date()
         online = true
+        processPendingRoute()
     }
     private var diagnosticApp: DiagnosticApp {
         DiagnosticApp(version: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String, service: serviceStatus, error: serviceDiagnosticError)

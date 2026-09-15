@@ -29,6 +29,20 @@ public actor RuntimeCoordinator {
     private var lastMessageCleanup = Date.distantPast
     private var snapshotStorage = SnapshotStorageStatus(budgetBytes: RetentionSettings().snapshotBudgetBytes)
     private var skillInstaller: SkillInstaller?
+    private var notificationAuthorization = NotificationAuthorization.unknown
+    private var notificationHeartbeat: Date?
+    private var notificationHelperAvailable = false
+    private var notificationCleanupPending = false
+    public func configureNotifications(available: Bool) { notificationHelperAvailable = available }
+    public func shouldLaunchNotificationHelper() async throws -> Bool {
+        let enabled = try await ledger.notificationsEnabled()
+        return notificationHelperAvailable && (enabled || notificationCleanupPending)
+    }
+    private func notificationStatus() async throws -> NotificationStatus {
+        NotificationStatus(enabled: try await ledger.notificationsEnabled(),
+                           authorization: notificationHelperAvailable ? notificationAuthorization : .unavailable,
+                           helperConnected: notificationHeartbeat.map { Date().timeIntervalSince($0) < 15 } ?? false)
+    }
     public init(root: URL, ctlPath: String, environment: [String: String], logs: RuntimeLogStore? = nil, id: UUID = UUID()) throws {
         self.id = id
         self.logs = logs ?? (try? RuntimeLogStore(root: RuntimeLogStore.directory(for: root)))
@@ -75,7 +89,7 @@ public actor RuntimeCoordinator {
     }
     public func snapshot() async throws -> JSONValue {
         let snapshot = await store.reload()
-        return .object(["store": try .from(snapshot), "sessions": try .from(Array(sessions.values).sorted { $0.createdAt < $1.createdAt }), "messages": try .from(await ledger.allMessages()), "delegations": try .from(await ledger.allDelegations()), "health": health(), "settings": try .from(settings), "snapshotStorage": try .from(snapshotStorage), "errors": try .from(recentErrors), "repositoryInventories": try .from(repositoryInventories)])
+        return .object(["store": try .from(snapshot), "sessions": try .from(Array(sessions.values).sorted { $0.createdAt < $1.createdAt }), "messages": try .from(await ledger.allMessages()), "delegations": try .from(await ledger.allDelegations()), "health": health(), "settings": try .from(settings), "notifications": try .from(await notificationStatus()), "snapshotStorage": try .from(snapshotStorage), "errors": try .from(recentErrors), "repositoryInventories": try .from(repositoryInventories)])
     }
     public func reconcileWorktrees() async {
         if let pending = worktreeScan { await pending.value; return }
@@ -124,9 +138,10 @@ public actor RuntimeCoordinator {
         worktreeRecordWrites.insert(value.id); defer { worktreeRecordWrites.remove(value.id) }
         return try await store.save(value, expectedVersion: expectedVersion)
     }
-    private func persist(_ session: Session) async throws {
-        try await ledger.register(session)
+    private func persist(_ session: Session, notification: AttentionReason? = nil) async throws {
         let previous = sessions[session.id]
+        let reason = notification ?? (session.state == .failed && previous?.state != .failed ? .failure : nil)
+        try await ledger.register(session, notification: reason)
         if previous == nil || previous?.state != session.state || previous?.processID != session.processID || previous?.runtimeID != session.runtimeID || previous?.failureCode != session.failureCode {
             var entry = RuntimeLogEntry(.sessionChanged, runtimeID: id)
             entry.sessionID = session.id; entry.projectID = session.projectID; entry.groupID = session.groupID
@@ -239,6 +254,31 @@ public actor RuntimeCoordinator {
         switch request.method {
         case "hello", "version", "status": return health()
         case "snapshot": return try await snapshot()
+        case "notificationStatus": return try .from(await notificationStatus())
+        case "setNotifications":
+            guard let enabled = params["enabled"].bool else { throw ChauffeurError("invalid_argument", "enabled must be a boolean") }
+            if enabled && !notificationHelperAvailable { throw ChauffeurError("notification_unavailable", "Notifications require Chauffeur's installed app and default background service") }
+            let previous = try await ledger.notificationsEnabled()
+            try await ledger.setNotificationsEnabled(enabled)
+            if previous && !enabled { notificationCleanupPending = true }
+            return try .from(await notificationStatus())
+        case "notificationWork":
+            let authorization = try params["authorization"].decode(NotificationAuthorization.self)
+            notificationAuthorization = authorization; notificationHeartbeat = Date()
+            let enabled = try await ledger.notificationsEnabled()
+            if !enabled { notificationCleanupPending = false; return try .from(NotificationWork(enabled: false, deliveries: [])) }
+            let snapshot = await store.reload()
+            var deliveries: [NotificationDelivery] = []
+            for notice in try await ledger.pendingNotifications() {
+                guard let session = sessions[notice.route.sessionID], session.projectID == notice.route.projectID,
+                      let project = snapshot.projects.first(where: { $0.value.id == notice.route.projectID })?.value else {
+                    try await ledger.acknowledgeNotification(notice.id); continue
+                }
+                deliveries.append(NotificationDelivery(notice: notice, project: project.name, session: session.title))
+            }
+            return try .from(NotificationWork(enabled: true, deliveries: deliveries))
+        case "acknowledgeNotification":
+            try await ledger.acknowledgeNotification(params.uuid("noticeID")); return .null
         case "diagnostics": return try .from(await diagnostics())
         case "skillDocument": return .string(String(decoding: try CoordinationSkill.bundled().document, as: UTF8.self))
         case "skillStatus", "installSkill", "removeSkill":
@@ -454,17 +494,20 @@ public actor RuntimeCoordinator {
         let sessionID = try params.uuid("sessionID"), token = try params.requiredString("token")
         let caller = try await ledger.authenticate(token)
         guard caller.sessionID == sessionID, var session = sessions[sessionID], session.state.isLive else { throw ChauffeurError("unauthorized", "Event does not belong to this session") }
+        var notification: AttentionReason?
         switch try params.requiredString("event") {
         case "running": session.state = .running
-        case "turn-finished": session.state = .turnFinished; session.unread = true
-        case "needs-attention": session.state = .needsAttention; session.unread = true
+        case "turn-finished": session.state = .turnFinished; session.unread = true; notification = .completion
+        case "needs-attention":
+            if session.state != .needsAttention { notification = .input }
+            session.state = .needsAttention; session.unread = true
         default: throw ChauffeurError("unknown_event", "Unsupported lifecycle event")
         }
         if let nativeID = params["nativeConversationID"].string, UUID(uuidString: nativeID) != nil {
             if let previous = session.nativeConversationID, previous != nativeID { throw ChauffeurError("conversation_mismatch", "Hook reported a different native conversation") }
             session.nativeConversationID = nativeID
         }
-        session.updatedAt = Date(); try await persist(session); return .object(["accepted": .bool(true)])
+        session.updatedAt = Date(); try await persist(session, notification: notification); return .object(["accepted": .bool(true)])
     }
     public func attach(sessionID: UUID, owner: UUID, connection: SocketConnection, cols: Int, rows: Int) async throws {
         guard sessions[sessionID]?.state.isLive == true else { throw ChauffeurError("not_live", "Session is not live. Inspect its details or resume explicitly") }

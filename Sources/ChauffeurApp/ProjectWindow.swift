@@ -100,7 +100,8 @@ struct ProjectWindow: View {
                 layout.state.wasOpen = false; model.saveWindow(layout.state); model.openProjects.remove(projectID)
                 layout.loaded = false
             }))
-            .onAppear { restore() }
+            .onAppear { restore(); consumeSessionRoute() }
+            .onChange(of: model.pendingSessionRoute) { _, _ in consumeSessionRoute() }
             .onChange(of: model.online) { _, online in if online { restore(); layout.synchronizeTerminals(model: model) } }
             .onChange(of: layout.state) { _, _ in
                 guard layout.loaded else { return }
@@ -222,6 +223,19 @@ struct ProjectWindow: View {
         if layout.state.splitSessionID == layout.state.selectedSessionID { layout.state.splitSessionID = nil }
         layout.state.wasOpen = true; model.projectOpened(projectID); saveLayout()
         layout.synchronizeTerminals(model: model)
+        consumeSessionRoute()
+    }
+    private func consumeSessionRoute() {
+        guard layout.loaded, model.online, let navigation = model.pendingSessionRoute,
+              navigation.route.projectID == projectID,
+              let session = model.session(navigation.route.sessionID), session.projectID == projectID else { return }
+        layout.search = ""; layout.state.selectedGroupID = session.groupID
+        layout.state.sidebarVisible = true
+        layout.state.splitSessionID = nil
+        select(session.id)
+        model.pendingSessionRoute = nil
+        layout.window?.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
     }
     private func saveLayout() { if layout.loaded { model.saveWindow(layout.state) } }
     private func select(_ id: UUID) { layout.select(id); model.perform { _ = try await model.call("markRead", .object(["sessionID": .string(id.uuidString)])) } }

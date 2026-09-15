@@ -104,12 +104,29 @@ settings were left unchanged, and the user was asked to enable UI-testing access
 The user has said they will enable access. The latest check still reports both
 Automation Mode and Developer mode disabled; XCUITest has not yet run.
 
+## Notification implementation and partial evidence
+
+The signed app now includes an accessory notification app, a durable opt-in
+outbox, Settings controls, and project/session URL routing. See
+[session notifications](../notifications.md) for behavior and architecture.
+
+The native fixture sends a URL through Launch Services to reopen a closed project
+window and select the recorded session without duplicates. A separate cold launch
+starts the app with all saved project windows closed and no tabs, then opens only
+the addressed project/session. All ten fixture agent PIDs remain unchanged.
+
+The actual service probe launches the bundled notification app with Chauffeur's
+UI closed. It reads native authorization (`notDetermined`) over the private IPC
+connection and exits while notifications are disabled, without requesting access.
+This proves the helper can run and communicate; actual notification delivery and
+click handling still require macOS permission and native acceptance.
+
 ## Remaining gate evidence
 
 - Run XCUITest, native keyboard/copy/paste/find/link and accessibility interactions.
 - Place four windows on separate Spaces; confirm focus, frames and restoration.
-- Validate sleep/wake, service loss, notifications, and notification routing when
-  the UI is closed.
+- Validate sleep/wake, remaining service-loss cases, native notification permission,
+  banner delivery/clicks with the UI closed, and enabled-helper recovery/update.
 - Repeat lifetime scenarios with both real CLIs and their intended accounts.
 
 The full V5 gate remains open.

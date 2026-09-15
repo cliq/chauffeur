@@ -114,7 +114,24 @@ with tempfile.TemporaryDirectory(prefix="chauffeur-native-", dir="/tmp") as dire
             assert len([w for w in after["store"]["windows"] if w["value"]["wasOpen"]]) == 4
             reports.append(report)
         assert len({report["frame"] for report in reports}) == 1, "Project frame did not restore"
-        print(json.dumps({"nativeViewProbe": "pass", "phases": reports, "normalAndForceQuitRelaunch": "same ten processes; four windows restored", "artifacts": str(artifacts), "OSUIAutomationAndSpaces": "pending"}, indent=2))
+        # Launch Services delivers the same URL used by notification clicks into a
+        # cold app. Clear persisted windows/tabs so restoration cannot mask a bug.
+        for record in after["store"]["windows"]:
+            window = dict(record["value"], wasOpen=False, tabs=[])
+            window.pop("selectedSessionID", None); window.pop("splitSessionID", None)
+            call("saveWindow", {"record": window, "version": record["version"]})
+        target = after["sessions"][-1]
+        route = f"chauffeur://session/{target['projectID']}/{target['id']}"
+        command = ["/usr/bin/open", "-n", "-W", "-a", str(app.parent.parent),
+                   "--env", f"CHAUFFEUR_SOCKET={socket_path}", "--env", f"CHAUFFEUR_NATIVE_PROBE_DIR={root}",
+                   "--env", "CHAUFFEUR_NATIVE_PROBE_PHASE=route", "--env", "CHAUFFEUR_NATIVE_PROBE_HOLD=0",
+                   "--env", f"CHAUFFEUR_ROUTE_PROJECT={target['projectID']}", "--env", f"CHAUFFEUR_ROUTE_SESSION={target['id']}",
+                   "--stdout", str(artifacts / "app-route.log"), "--stderr", str(artifacts / "app-route.log"), route]
+        subprocess.run(command, check=True, timeout=60)
+        route_report = json.loads((root / "native-phase-route.json").read_text())
+        assert route_report["passed"], route_report
+        assert {s["processID"] for s in before["sessions"]} == {s["processID"] for s in call("snapshot")["sessions"]}
+        print(json.dumps({"nativeViewProbe": "pass", "phases": reports, "normalAndForceQuitRelaunch": "same ten processes; four windows restored", "coldURLRouting": route_report, "artifacts": str(artifacts), "OSUIAutomationAndSpaces": "pending"}, indent=2))
     finally:
         for result in root.glob("native-phase-*.*"):
             shutil.copy(result, artifacts / result.name)

@@ -8,6 +8,7 @@ let package = Package(
         .library(name: "ChauffeurCore", targets: ["ChauffeurCore"]),
         .library(name: "ChauffeurRuntimeKit", targets: ["ChauffeurRuntimeKit"]),
         .executable(name: "ChauffeurRuntime", targets: ["ChauffeurRuntime"]),
+        .executable(name: "ChauffeurNotifications", targets: ["ChauffeurNotifications"]),
         .executable(name: "chauffeurctl", targets: ["ChauffeurCtl"])
     ],
     dependencies: [
@@ -20,6 +21,7 @@ let package = Package(
         .target(name: "CChauffeur", publicHeadersPath: "include"),
         .target(name: "ChauffeurRuntimeKit", dependencies: ["ChauffeurCore", "CSQLite", "CChauffeur", .product(name: "Hummingbird", package: "hummingbird")]),
         .executableTarget(name: "ChauffeurRuntime", dependencies: ["ChauffeurRuntimeKit"]),
+        .executableTarget(name: "ChauffeurNotifications", dependencies: ["ChauffeurCore"]),
         .executableTarget(name: "ChauffeurCtl", dependencies: ["ChauffeurCore", "CChauffeur"]),
         .testTarget(name: "ChauffeurCoreTests", dependencies: ["ChauffeurCore"]),
         .testTarget(name: "ChauffeurRuntimeTests", dependencies: ["ChauffeurRuntimeKit"])

@@ -65,6 +65,9 @@ import ChauffeurCore
 @MainActor final class AppDelegate: NSObject, NSApplicationDelegate {
     let model = AppModel()
     func applicationDidFinishLaunching(_ notification: Notification) { model.start() }
+    func application(_ application: NSApplication, open urls: [URL]) {
+        for url in urls { model.openSessionURL(url) }
+    }
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         model.isTerminating = true
@@ -75,8 +78,13 @@ extension Notification.Name { static let chauffeurCommand = Notification.Name("C
 
 struct AppAlerts: ViewModifier {
     @EnvironmentObject private var model: AppModel
+    @Environment(\.openWindow) private var openWindow
     func body(content: Content) -> some View {
-        content.alert("Chauffeur", isPresented: Binding(get: { model.error != nil }, set: { if !$0 { model.error = nil } })) {
+        content.onAppear {
+            model.openProjectWindow = { id in openWindow(id: "project", value: id) }
+            model.openWelcomeWindow = { openWindow(id: "welcome") }
+            model.processPendingRoute()
+        }.alert("Chauffeur", isPresented: Binding(get: { model.error != nil }, set: { if !$0 { model.error = nil } })) {
             Button("OK") { model.error = nil }
         } message: { Text(model.error ?? "") }
         .sheet(isPresented: $model.stopAllPresented) {
