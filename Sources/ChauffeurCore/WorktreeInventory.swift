@@ -19,6 +19,7 @@ public struct RepositoryInventory: Codable, Sendable {
     public var sourcePath: String
     public var sourcePaths: [String]?
     public var repositoryID: UUID?
+    public var legacyRepositoryID: UUID?
     public var entries: [GitWorktree] = []
     public var observedAt = Date()
     public var status: Status

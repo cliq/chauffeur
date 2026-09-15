@@ -111,6 +111,15 @@ public enum SessionState: String, Codable, CaseIterable, Sendable {
     public var isLive: Bool { [.starting, .running, .needsAttention, .turnFinished, .activityUnknown].contains(self) }
 }
 
+public struct CheckoutIdentity: Codable, Equatable, Sendable {
+    public var path: String
+    public var directoryIdentity: UUID
+    public var gitIdentity: UUID?
+    public init(path: String, directoryIdentity: UUID, gitIdentity: UUID?) {
+        self.path = path; self.directoryIdentity = directoryIdentity; self.gitIdentity = gitIdentity
+    }
+}
+
 public struct LaunchSnapshot: Codable, Equatable, Sendable {
     public var preset: AgentPreset
     public var presetSetName: String
@@ -121,6 +130,7 @@ public struct LaunchSnapshot: Codable, Equatable, Sendable {
     public var workingDirectory: String
     public var additionalPaths: [String]
     public var gitWorktreeIdentities: [UUID]?
+    public var checkoutIdentities: [CheckoutIdentity]?
     public var launchedAt = Date()
     public init(preset: AgentPreset, set: PresetSet, executablePath: String, executableVersion: String, workingDirectory: String, additionalPaths: [String]) {
         self.preset = preset; self.presetSetName = set.name; self.presetSetRevision = set.revision
@@ -170,6 +180,8 @@ public struct Worktree: Record, Equatable {
     public var projectID: UUID
     public var folderID: UUID
     public var repositoryID: UUID
+    // Missing in records whose repository ID was derived from its old path.
+    public var repositoryIdentityVersion: Int?
     public var path: String
     public var repositoryPath: String
     public var branch: String
@@ -181,6 +193,7 @@ public struct Worktree: Record, Equatable {
     public var registered = true
     public init(projectID: UUID, folderID: UUID, repositoryID: UUID, path: String, repositoryPath: String, branch: String, baseCommit: String, managed: Bool) {
         self.projectID = projectID; self.folderID = folderID; self.repositoryID = repositoryID
+        self.repositoryIdentityVersion = 1
         self.path = path; self.repositoryPath = repositoryPath; self.branch = branch; self.baseCommit = baseCommit; self.managed = managed
     }
     public func validate() throws { try Validation.absolutePath(path); try Validation.absolutePath(repositoryPath) }

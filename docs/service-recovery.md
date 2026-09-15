@@ -29,6 +29,24 @@ processes; it does not replay tasks. Missing terminal ownership is recorded as
 ended session with a recorded native conversation ID. See
 [terminal history](terminal-history.md) for retained output and its limits.
 
+### Resuming after a checkout changes
+
+Resume uses the original configuration directory, working directory, additional
+directories, and recorded native conversation ID. It verifies the checkout at
+each path before altering the ended session or terminal. If a folder is missing,
+restore the original checkout to the recorded path. If a different folder or Git
+repository replaced it, restore the original to resume, or start a new session
+in the replacement. Relinking the project affects new launches and worktree
+inventory; it does not rewrite previous launch snapshots.
+
+The check covers plain folders as well as Git checkouts. Saved directory and Git
+identities remain stable when the original folder is moved away and back on the
+same filesystem. A copy or new clone does not prove it is the original checkout.
+For older sessions, a complete list of recorded Git identities can verify every
+path; missing or incomplete identity records produce an explicit error and
+require a new session. Saved history remains available after a rejected resume.
+See [worktree recovery](worktrees.md#moving-the-main-repository).
+
 ### Stopping a session during startup
 
 **Stop Session** also cancels an in-progress launch or resume. It terminates a

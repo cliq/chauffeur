@@ -71,6 +71,23 @@ path, Chauffeur reports the stale inventory. Git documents
 that relationship. Chauffeur does not repair or prune Git's bookkeeping
 automatically.
 
+### Moving the main repository
+
+After moving the main repository on the same filesystem, relink its folder in
+**Edit Project…** and repair Git's linked-worktree bookkeeping if needed using
+[`git worktree repair`](https://git-scm.com/docs/git-worktree#_details) from the new
+main repository. Refresh Git inventory. Repository identity now follows the
+filesystem identity of Git's common directory, so registered worktrees retain
+their Chauffeur IDs, original base commits, and existing managed paths. New
+checkouts use the current repository ID under managed storage.
+
+Older records used a hash of the common directory's path. Reconciliation upgrades
+them after matching their recorded checkout identity, or their original path in
+the original repository when no checkout identity was saved. Registering a known
+checkout after a move reuses its record. A copy, clone, or move to a different
+filesystem has different file identities and needs explicit registration; it
+does not inherit cleanup ownership from the original.
+
 ## Live sessions and sharing
 
 Session launch snapshots keep their original paths. A worktree move updates the
@@ -79,6 +96,21 @@ worktree identities for primary and additional directories so a move does not
 hide a live session from cleanup checks or shared-checkout warnings. This also
 applies when the session selected a normal project folder pointing into a
 worktree instead of selecting a worktree record.
+
+**Resume Conversation** checks every original primary and additional directory
+before changing the ended session or its terminal. New snapshots bind each path
+to its directory identity and, when present, Git's administrative-directory
+identity. Missing paths, replacement directories, changed symlink targets, and
+replacement Git metadata prevent resume. Ordinary file edits and branch changes
+do not replace those identities. Restoring the original checkout at its original
+path allows the same native conversation and profile to resume.
+
+Relinking a project or refreshing worktrees does not move a conversation's
+historical launch path. For a moved conversation checkout, restore that path to
+resume or create a new session at its new location. Older snapshots can verify
+Git identity when they recorded one for every path; incomplete legacy identity
+lists require a new session. Rejection preserves the ended session and terminal
+history. See [conversation recovery](service-recovery.md#resuming-after-a-checkout-changes).
 
 Launching, resuming, and removing checkouts use runtime reservations that remain
 held while filesystem checks, Git commands, and process startup are awaiting
@@ -112,6 +144,19 @@ inaccessible checkout records remain visible for recovery.
   newline paths, missing sources, and reservation interleavings. Creation retry
   tests cover concurrent callers, runtime restart, conflicting fields, removed
   records, legacy requests, and retained files after agent startup failure.
+- Repository relocation tests move a real Git repository, repair its linked
+  worktrees, relink the project, migrate legacy identities, reopen the runtime,
+  and remove a clean managed checkout. Resume fixtures replace primary and
+  additional Git metadata, replace a plain folder or its symlink target, and
+  restore the original. They verify refusal preserves the ended terminal and
+  successful recovery uses the same native conversation/profile. These agents
+  are fixtures; no provider account or real conversation is involved.
+- `Prototypes/real_checkout_recovery.py` exercises the same recovery through real
+  Codex 0.154.0 and Claude Code 2.1.273 (basic-terminal mode). Each resumed
+  conversation recalls a token from its first turn without receiving it again.
+  Both reject removal while live, then permit clean managed removal after Stop
+  while preserving the branch. Private reports are under
+  `.local/checkout-recovery-{codex,claude}/`; these runs use only authorized clones.
 - `python3 Prototypes/quick_session_smoke.py` opens the actual new-worktree sheet
   through the repository action in an isolated signed Debug app. A temporary Git
   repo and fixture agent verify invalid-branch recovery, retained worktree after
@@ -126,7 +171,8 @@ inaccessible checkout records remain visible for recovery.
   a UI or explicit refresh, verifies external unregister preserves files, and
   verifies a moved worktree used through a regular folder remains protected.
 
-Remaining end-to-end acceptance includes real Codex and Claude sessions, native
-worktree controls, whole-repository relocation, and the full multi-project workflow in the PRD. Git identity
-does not make an immutable launch path follow a move for conversation resume;
-resume and recovery after external checkout replacement need separate validation.
+Remaining end-to-end acceptance includes native worktree-control interactions.
+Whole-repository relocation and checkout-replacement recovery have both fixture
+and real-provider evidence; Claude 2.1.273 was tested in basic-terminal mode and
+its coordination/status compatibility remains unverified. Final multi-project
+workload testing is tracked in V2.

@@ -251,7 +251,12 @@ public actor FileStore {
         let url = try projectDirectory(value.projectID).appendingPathComponent("worktrees/\(value.id.uuidString).json")
         try reference(snapshot.projects.contains { $0.value.id == value.projectID && $0.value.folders.contains { $0.id == value.folderID } }, "Worktree must reference a folder in its project", at: url)
         if let existing = snapshot.worktrees.first(where: { $0.value.id == value.id })?.value {
-            try reference(existing.projectID == value.projectID && existing.folderID == value.folderID && existing.repositoryID == value.repositoryID, "Worktree project, folder and repository cannot change", at: url)
+            let upgradingIdentity = existing.repositoryIdentityVersion == nil && value.repositoryIdentityVersion == 1
+                && value.gitIdentity != nil && (existing.gitIdentity == value.gitIdentity
+                    || (existing.gitIdentity == nil && existing.path == value.path))
+            try reference(existing.projectID == value.projectID && existing.folderID == value.folderID
+                && (existing.repositoryID == value.repositoryID || upgradingIdentity)
+                && (existing.repositoryIdentityVersion == value.repositoryIdentityVersion || upgradingIdentity), "Worktree project, folder and repository cannot change", at: url)
         }
         let saved = try write(value, at: url, expectedVersion: expectedVersion)
         snapshot.worktrees.removeAll { $0.value.id == value.id }; snapshot.worktrees.append(saved)

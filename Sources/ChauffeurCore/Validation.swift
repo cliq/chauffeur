@@ -72,6 +72,17 @@ public enum LaunchPolicy {
         return result
     }
 
+    public static func validateAdditionalDirectories(_ paths: [String], preset: AgentPreset) throws {
+        guard !paths.isEmpty, preset.kind == .codex else { return }
+        let readOnly = preset.arguments.enumerated().contains { index, argument in
+            argument == "--sandbox=read-only" || argument == "-s=read-only"
+                || ((argument == "--sandbox" || argument == "-s") && preset.arguments.dropFirst(index + 1).first == "read-only")
+        }
+        guard !readOnly else {
+            throw ChauffeurError("unsupported_directories", "Codex's read-only sandbox cannot add writable folders. Remove the additional folders or select workspace-write in the preset's launch arguments")
+        }
+    }
+
     public static func validateArguments(_ arguments: [String], kind: CLIKind) throws {
         let common: Set<String> = ["--", "--add-dir", "--worktree", "--resume", "--continue", "--session-id", "--fork-session", "--remote", "--remote-auth-token-env", "--cloud", "--teleport"]
         let codex: Set<String> = ["-C", "--cd", "-c", "--config", "--last", "--all"]

@@ -125,6 +125,11 @@ public actor RuntimeCoordinator {
         }
         for stored in records {
             let observed = repositories[stored.value.repositoryID]
+                ?? observations.first { observation in
+                    stored.value.repositoryIdentityVersion == nil && observation.status == .available
+                        && (observation.legacyRepositoryID == stored.value.repositoryID
+                            || stored.value.gitIdentity.map { identity in observation.entries.contains { $0.gitIdentity == identity } } == true)
+                }
                 ?? observations.first { $0.sourcePath == stored.value.repositoryPath }
                 ?? RepositoryInventory(sourcePath: stored.value.repositoryPath, status: .failed)
             let updated = await worktrees.reconciled(stored.value, inventory: observed)
@@ -362,9 +367,15 @@ public actor RuntimeCoordinator {
             if request.method == "previewWorktree" { return .object(["path": .string(await worktrees.destination(repositoryID: repositoryID, branch: try params.requiredString("branch")).path)]) }
             let path = Paths.canonical(try params.requiredString("path"))
             guard let entry = try await worktrees.inventory(at: folder.canonicalPath).first(where: { $0.path == path }), entry.availability == .available else { throw ChauffeurError("missing_worktree", "Path is not available in this repository's Git worktree inventory") }
-            if var existing = snapshot.worktrees.first(where: { $0.value.projectID == projectID && $0.value.folderID == folderID && $0.value.repositoryID == repositoryID && (($0.value.gitIdentity != nil && $0.value.gitIdentity == entry.gitIdentity) || ($0.value.gitIdentity == nil && $0.value.path == path)) }) {
-                var observation = RepositoryInventory(sourcePath: folder.canonicalPath, status: .available)
-                observation.repositoryID = repositoryID; observation.entries = [entry]
+            var observation = RepositoryInventory(sourcePath: folder.canonicalPath, status: .available)
+            observation.repositoryID = repositoryID; observation.entries = [entry]
+            observation.legacyRepositoryID = try await worktrees.legacyRepositoryID(at: folder.canonicalPath)
+            if var existing = snapshot.worktrees.first(where: {
+                let record = $0.value
+                let sameCheckout = record.gitIdentity != nil && record.gitIdentity == entry.gitIdentity
+                let sameRepository = record.repositoryID == repositoryID || (record.repositoryIdentityVersion == nil && (sameCheckout || record.repositoryID == observation.legacyRepositoryID))
+                return record.projectID == projectID && record.folderID == folderID && sameRepository && (sameCheckout || (record.gitIdentity == nil && record.path == path))
+            }) {
                 existing.value = await worktrees.reconciled(existing.value, inventory: observation)
                 existing.value.registered = true
                 return try .from(await saveWorktree(existing.value, expectedVersion: existing.version))
@@ -474,20 +485,24 @@ public actor RuntimeCoordinator {
             try await persist(session)
             try Task.checkCancellation()
             try preset.validate()
+            try LaunchPolicy.validateAdditionalDirectories(additionalPaths, preset: preset)
             session.launch.workingDirectory = try Paths.directory(workingDirectory)
-            var identities: [UUID] = []
-            var primaryIdentity: UUID?
-            for (index, path) in ([session.launch.workingDirectory] + additionalPaths).enumerated() {
-                if let identity = try? await worktrees.identity(at: path) { identities.append(identity); if index == 0 { primaryIdentity = identity } }
+            var checkouts: [CheckoutIdentity] = []
+            for path in [session.launch.workingDirectory] + additionalPaths {
+                checkouts.append(try await worktrees.checkoutIdentity(at: path))
                 try Task.checkCancellation()
             }
+            let identities = checkouts.compactMap(\.gitIdentity), primaryIdentity = checkouts.first?.gitIdentity
             try checkoutClaims.setGitIdentities(sessionID, identities: identities, primary: primaryIdentity)
             session.launch.gitWorktreeIdentities = identities
+            session.launch.checkoutIdentities = checkouts
             if let selectedWorktree {
                 let repositoryID = try await worktrees.repositoryID(at: session.launch.workingDirectory)
                 let identity = try await worktrees.identity(at: session.launch.workingDirectory)
+                let legacyID = selectedWorktree.repositoryIdentityVersion == nil ? try await worktrees.legacyRepositoryID(at: session.launch.workingDirectory) : nil
+                let sameRepository = repositoryID == selectedWorktree.repositoryID || (selectedWorktree.repositoryIdentityVersion == nil && (selectedWorktree.repositoryID == legacyID || identity == selectedWorktree.gitIdentity))
                 try Task.checkCancellation()
-                guard repositoryID == selectedWorktree.repositoryID, selectedWorktree.gitIdentity == nil || identity == selectedWorktree.gitIdentity else {
+                guard sameRepository, selectedWorktree.gitIdentity == nil || identity == selectedWorktree.gitIdentity else {
                     throw ChauffeurError("worktree_unavailable", "The selected checkout was replaced. Refresh the Git inventory and select its current record", path: session.launch.workingDirectory)
                 }
             }
@@ -550,10 +565,14 @@ public actor RuntimeCoordinator {
         do { try checkoutClaims.setGitIdentities(sessionID, identities: session.launch.gitWorktreeIdentities ?? []) }
         catch { checkoutClaims.endLaunch(sessionID); throw error }
         defer { checkoutClaims.endLaunch(sessionID) }
+        // A rejected resume keeps the ended session and its saved terminal.
+        // Preflight must finish before stopping the pane or persisting startup.
+        try await worktrees.validateResume(session.launch)
+        _ = try Paths.directory(session.launch.configurationPath)
+        try Task.checkCancellation()
         do {
             try await terminals.stop(sessionID: sessionID, force: true)
             try Task.checkCancellation()
-            _ = try Paths.directory(session.launch.configurationPath); _ = try Paths.directory(session.launch.workingDirectory)
             session.state = .starting; session.error = nil; session.failureCode = nil; session.exitStatus = nil; session.runtimeID = id; try await persist(session)
             try Task.checkCancellation()
             let token = try await ledger.issueGrant(sessionID: sessionID)

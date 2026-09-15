@@ -1,6 +1,6 @@
 # CLI and platform compatibility
 
-Last inspected: 2026-09-15. These are observed development-machine versions,
+Last inspected: 2026-09-16. These are observed development-machine versions,
 not a completed real-provider support matrix.
 
 | Component | Version | Current evidence |
@@ -13,6 +13,7 @@ not a completed real-provider support matrix.
 | Hummingbird | 2.26.0 | Actual loopback MCP requests exercised with fixture credentials |
 | Codex | 0.154.0 | Three real sessions/two profiles; authenticated messages, native approvals/completion, scoped stop, explicit resume and runtime reconnect pass |
 | Claude Code | 2.1.272 | Three real sessions/two profiles; native account/process configuration, authenticated messages, permission/completion hooks, scoped stop, explicit resume and runtime reconnect pass; both profiles report the same account |
+| Claude Code | 2.1.273 | Installed update; basic-terminal launch and explicit conversation resume pass with repository relocation and checkout-replacement recovery. Coordination and status-hook compatibility remain unverified |
 
 ## Capability behavior
 
@@ -21,6 +22,20 @@ versions have a candidate coordination configuration, recorded as unverified.
 Other versions require an explicit basic-terminal launch, showing unavailable
 coordination/status. Missing `--add-dir` support rejects a multi-directory launch.
 Missing native conversation IDs disable resume; no global resume selector is used.
+
+Codex 0.154.0 rejects `--add-dir` with a read-only sandbox. Chauffeur reports an
+explicit `-s read-only` or `--sandbox read-only` preset combined with additional
+folders before inspecting or spawning the CLI (including `=read-only` forms).
+Remove additional folders or explicitly choose `workspace-write` in the preset.
+Native configuration and managed policy can also affect effective permissions;
+the CLI still enforces them. Chauffeur does not silently increase permissions.
+
+`Prototypes/real_checkout_recovery.py` verifies a moved main repository,
+replacement primary/additional Git metadata, restored-checkout resume with actual
+conversation recall, live-removal refusal, and clean removal preserving the
+branch. It passed with Codex 0.154.0 and Claude Code 2.1.273 in basic-terminal
+mode, using authorized private profile clones. This does not establish hook or
+coordination compatibility for Claude 2.1.273.
 
 Codex's proposed status path is turn completion through `notify`. It does not
 prove approval or input status; these remain unknown when no supported event is

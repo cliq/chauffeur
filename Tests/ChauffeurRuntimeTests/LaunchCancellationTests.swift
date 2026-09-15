@@ -5,6 +5,107 @@ import ChauffeurCore
 @testable import ChauffeurRuntimeKit
 
 struct LaunchCancellationTests {
+    @Test(arguments: [["--sandbox", "read-only"], ["-s", "read-only"], ["--sandbox=read-only"], ["-s=read-only"]])
+    func codexReadOnlyAdditionalFoldersFailBeforeInspectingOrStartingTheCLI(arguments: [String]) async throws {
+        let fixture = try await LaunchFixture.make(); defer { fixture.cleanup() }
+        let preset = try #require(await fixture.runtime.store.current().presets.first)
+        var changed = preset.value; changed.kind = .codex; changed.arguments = arguments
+        try await fixture.runtime.store.save(changed, expectedVersion: preset.version)
+        let additional = fixture.path("additional")
+        try FileManager.default.createDirectory(at: additional, withIntermediateDirectories: true)
+        let stored = try #require(await fixture.runtime.store.current().projects.first)
+        var project = stored.value; project.addFolder(ProjectFolder(path: additional.path))
+        try await fixture.runtime.store.save(project, expectedVersion: stored.version)
+        var request = fixture.request; request.additionalFolderIDs = [project.folders.last!.id]
+        let result = await Task { [request] in try await fixture.runtime.launch(request) }.result
+        #expect(result.failureCode == "unsupported_directories")
+        #expect(!FileManager.default.fileExists(atPath: fixture.path("version-entered").path))
+        #expect(try await fixture.runtime.terminals.inventory().isEmpty)
+        #expect(try await fixture.session().state == .failed)
+        // Removing the additional folder keeps read-only available.
+        request.additionalFolderIDs = []; request.retryKey = UUID()
+        #expect(try await fixture.runtime.launch(request).state.isLive)
+    }
+
+    @Test(arguments: ["directory", "symlink", "missing"]) func rejectedResumePreservesEndedTerminalAndNonGitFolderIdentity(replacement: String) async throws {
+        let fixture = try await LaunchFixture.make(); defer { fixture.cleanup() }
+        let checkout = fixture.path("checkout"), backup = fixture.path("original-checkout"), other = fixture.path("other")
+        try FileManager.default.createDirectory(at: checkout, withIntermediateDirectories: true)
+        let project = try #require(await fixture.runtime.store.current().projects.first)
+        var changed = project.value
+        changed.folders[0].selectedPath = checkout.path; changed.folders[0].canonicalPath = Paths.canonical(checkout.path)
+        try await fixture.runtime.store.save(changed, expectedVersion: project.version)
+        let launched = try await fixture.runtime.launch(fixture.request)
+        try await fixture.wait { FileManager.default.fileExists(atPath: fixture.path("started").path) }
+        #expect(kill(try #require(launched.processID), SIGUSR1) == 0)
+        try await fixture.wait { try await fixture.runtime.terminals.inventory().first?.dead == true }
+        try await fixture.runtime.reconcile()
+        let ended = try await fixture.session()
+        let pane = try #require(await fixture.runtime.terminals.inventory().first)
+        try FileManager.default.moveItem(at: checkout, to: backup)
+        switch replacement {
+        case "directory": try FileManager.default.createDirectory(at: checkout, withIntermediateDirectories: true)
+        case "symlink":
+            try FileManager.default.createDirectory(at: other, withIntermediateDirectories: true)
+            try FileManager.default.createSymbolicLink(at: checkout, withDestinationURL: other)
+        default: break
+        }
+        var code: String?
+        do { _ = try await fixture.runtime.handle(IPCRequest("resume", params: .object(["sessionID": .string(launched.id.uuidString)]))) }
+        catch let error as ChauffeurError { code = error.code }
+        #expect(code == (replacement == "missing" ? "missing_directory" : "checkout_changed"))
+        #expect(try await fixture.session().launch == ended.launch)
+        #expect(try await fixture.session().state == .exited)
+        #expect(try await fixture.runtime.terminals.inventory().first?.paneID == pane.paneID)
+        if replacement != "missing" { try FileManager.default.removeItem(at: checkout) }
+        try FileManager.default.moveItem(at: backup, to: checkout)
+        let resumed = try await fixture.runtime.handle(IPCRequest("resume", params: .object(["sessionID": .string(launched.id.uuidString)]))).decode(Session.self)
+        #expect(resumed.state.isLive && resumed.launch == ended.launch && resumed.nativeConversationID == ended.nativeConversationID)
+        _ = try await fixture.stop()
+    }
+
+    @Test(arguments: [false, true]) func resumeRejectsReplacedCheckoutsAndAcceptsTheRestoredOriginal(additional: Bool) async throws {
+        let fixture = try await LaunchFixture.make(); defer { fixture.cleanup() }
+        func initializeRepository(_ directory: URL) async throws {
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            for arguments in [["init", "-b", "main"], ["-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "-c", "commit.gpgsign=false", "-c", "core.hooksPath=/dev/null", "commit", "--allow-empty", "-m", "Initial"]] {
+                let result = try await ProcessRunner.run("/usr/bin/git", ["-C", directory.path] + arguments)
+                try #require(result.status == 0, "Git fixture failed: \(result.error)")
+            }
+        }
+        try await initializeRepository(fixture.root)
+        var request = fixture.request
+        let checkout = additional ? fixture.path("additional") : fixture.root
+        if additional {
+            try await initializeRepository(checkout)
+            let stored = try #require(await fixture.runtime.store.current().projects.first)
+            var project = stored.value; project.addFolder(ProjectFolder(path: checkout.path))
+            try await fixture.runtime.store.save(project, expectedVersion: stored.version)
+            request.additionalFolderIDs = [project.folders.last!.id]
+        }
+        let launched = try await fixture.runtime.launch(request)
+        _ = try await fixture.stop()
+        let stopped = try await fixture.session()
+        // Recreate Git at the same path while preserving the checkout directory.
+        // A path/existence check alone would resume into the replacement repo.
+        let originalGit = checkout.appendingPathComponent(".git")
+        let savedGit = fixture.path("original-git-metadata")
+        try FileManager.default.moveItem(at: originalGit, to: savedGit)
+        try await initializeRepository(checkout)
+        var failure: String?
+        do { _ = try await fixture.runtime.handle(IPCRequest("resume", params: .object(["sessionID": .string(launched.id.uuidString)]))) }
+        catch let error as ChauffeurError { failure = error.code }
+        #expect(failure == "checkout_changed")
+        #expect(try await fixture.runtime.terminals.inventory().allSatisfy(\.dead))
+        #expect(try await fixture.session().launch == stopped.launch)
+        try FileManager.default.removeItem(at: originalGit)
+        try FileManager.default.moveItem(at: savedGit, to: originalGit)
+        let resumed = try await fixture.runtime.handle(IPCRequest("resume", params: .object(["sessionID": .string(launched.id.uuidString)]))).decode(Session.self)
+        #expect(resumed.state.isLive && resumed.nativeConversationID == launched.nativeConversationID)
+        #expect(resumed.launch.configurationPath == launched.launch.configurationPath)
+        _ = try await fixture.stop()
+    }
+
     @Test func backgroundMetadataWatchingPreservesAnAgentWhileItsProjectIsMoved() async throws {
         let fixture = try await LaunchFixture.make(); defer { fixture.cleanup() }
         let launched = try await fixture.runtime.launch(fixture.request)

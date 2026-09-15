@@ -4,6 +4,61 @@ import ChauffeurCore
 @testable import ChauffeurRuntimeKit
 
 struct WorktreeTests {
+    @Test func legacyResumeRequiresAnIdentityForEveryPathAndDamagedGitIsNotAPlainFolder() async throws {
+        let root = URL(fileURLWithPath: "/tmp/chauffeur-legacy-resume-\(UUID())")
+        let repo = root.appendingPathComponent("repo"), plain = root.appendingPathComponent("plain")
+        try FileManager.default.createDirectory(at: repo, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: plain, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try #require(try await ProcessRunner.run("/usr/bin/git", ["-C", repo.path, "init", "-b", "main"]).status == 0)
+        let manager = WorktreeManager(root: root.appendingPathComponent("managed"))
+        let set = PresetSet(name: "Fixture"), preset = AgentPreset(setID: UUID(), name: "Fixture", kind: .claude, executable: "/bin/cat", configurationDirectory: root.path)
+        var launch = LaunchSnapshot(preset: preset, set: set, executablePath: "/bin/cat", executableVersion: "fixture", workingDirectory: Paths.canonical(repo.path), additionalPaths: [])
+        launch.gitWorktreeIdentities = [try await manager.identity(at: repo.path)]
+        // Decoding a snapshot written before checkout bindings remains valid.
+        let decoded = try JSONCoding.decode(LaunchSnapshot.self, from: JSONCoding.encode(launch))
+        #expect(decoded.checkoutIdentities == nil)
+        try await manager.validateResume(decoded)
+        launch.additionalPaths = [Paths.canonical(plain.path)]
+        var code: String?
+        do { try await manager.validateResume(launch) } catch let error as ChauffeurError { code = error.code }
+        #expect(code == "checkout_unverified")
+        launch.additionalPaths = []; launch.gitWorktreeIdentities = [UUID()]
+        code = nil
+        do { try await manager.validateResume(launch) } catch let error as ChauffeurError { code = error.code }
+        #expect(code == "checkout_changed")
+        #expect(try await manager.checkoutIdentity(at: plain.path).gitIdentity == nil)
+        try Data("gitdir: /nonexistent-chauffeur-fixture\n".utf8).write(to: plain.appendingPathComponent(".git"))
+        await #expect(throws: ChauffeurError.self) { try await manager.checkoutIdentity(at: plain.path) }
+        try FileManager.default.removeItem(at: plain.appendingPathComponent(".git"))
+        try FileManager.default.createDirectory(at: plain.appendingPathComponent(".git"), withIntermediateDirectories: true)
+        await #expect(throws: ChauffeurError.self) { try await manager.checkoutIdentity(at: plain.path) }
+    }
+
+    @Test func repositoryIdentitySurvivesMovingTheMainRepository() async throws {
+        let root = URL(fileURLWithPath: "/tmp/chauffeur-repo-move-\(UUID())").resolvingSymlinksInPath()
+        let original = root.appendingPathComponent("original"), moved = root.appendingPathComponent("moved")
+        try FileManager.default.createDirectory(at: original, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        func git(_ directory: URL, _ args: [String]) async throws {
+            let result = try await ProcessRunner.run("/usr/bin/git", ["-C", directory.path, "-c", "core.hooksPath=/dev/null", "-c", "commit.gpgsign=false"] + args)
+            try #require(result.status == 0, "Git fixture failed: \(result.error)")
+        }
+        try await git(original, ["init", "-b", "main"])
+        try await git(original, ["-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "--allow-empty", "-m", "Initial"])
+        let manager = WorktreeManager(root: root.appendingPathComponent("managed"))
+        let tree = try await manager.create(projectID: UUID(), folder: ProjectFolder(path: original.path), branch: "task/move", baseRef: "HEAD")
+        try FileManager.default.moveItem(at: original, to: moved)
+        try await git(moved, ["worktree", "repair"])
+        #expect(try await manager.repositoryID(at: moved.path) == tree.repositoryID)
+        let updated = await manager.reconciled(tree, inventory: manager.observe(at: moved.path))
+        #expect(updated.availability == .available && updated.id == tree.id && updated.baseCommit == tree.baseCommit)
+        #expect(updated.repositoryPath == Paths.canonical(moved.path))
+        #expect(updated.gitIdentity == tree.gitIdentity)
+        try await manager.remove(updated, liveSessions: [])
+        #expect(!FileManager.default.fileExists(atPath: tree.path))
+    }
+
     @Test func inventoryRecognizesMovesAndReplacementsWithoutRewritingBaseCommit() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("chauffeur-inventory-\(UUID())")
         let repo = root.appendingPathComponent("repo")

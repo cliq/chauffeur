@@ -22,7 +22,7 @@ unverified real-CLI or native behavior; deferred workload checks remain unverifi
   line/byte budgets, and survive terminal/runtime loss. Native history is
   read-only and searchable; completed-message cleanup preserves queued/received
   messages. See [retention and recovery](terminal-history.md).
-- Sixty Swift tests: canonical paths/discovery, folder routing/launcher installation and relocation repair, per-child environment, argument validation and quoting,
+- Sixty-seven Swift tests: canonical paths/discovery, folder routing/launcher installation and relocation repair, per-child environment, argument validation and quoting,
   atomic file replacement/conflicts/corrupt files, durable group-scoped messages,
   grant revocation, retry keys, bounded single-level delegation, and safe Git
   worktree creation/removal.
@@ -88,6 +88,23 @@ unverified real-CLI or native behavior; deferred workload checks remain unverifi
   directories, aliases, and Git identities after moves. The real-Git/socket
   fixture reproduces the former removal race and checks the fix; see
   [worktrees and cleanup](worktrees.md).
+- Repository identities now survive same-filesystem moves of the main repository.
+  Real-Git/runtime tests verify relinking, legacy record migration without duplicate
+  registration, runtime reopen, and clean removal. Resume validates each original
+  primary/additional checkout before altering the ended terminal. Fixture tests
+  cover Git replacement, plain-folder replacement, changed symlinks, missing paths,
+  and restoration with the same conversation/profile. Complete legacy Git identity
+  lists remain usable; incomplete legacy records are reported explicitly.
+  See [checkout recovery](service-recovery.md#resuming-after-a-checkout-changes).
+- Real Codex 0.154.0 and Claude Code 2.1.273 sessions pass main-repository
+  relocation, primary/additional checkout-replacement refusal, restored-checkout
+  resume with conversation recall, live-removal refusal, and clean removal with
+  branch preservation. Claude's installed update is tested in basic-terminal mode;
+  its coordination/status hooks remain outside the verified version list.
+  Explicit Codex read-only arguments with additional folders now produce an
+  actionable preflight error, matching the native CLI's observed restriction.
+  The signed Debug build, runtime/worktree socket fixtures, and native quick-session
+  probe pass. These recovery changes await the next Release build.
 - Typed diagnostics export through Settings and `chauffeurctl`, with explicit
   live/cached/unavailable observations. Private structured logs rotate within
   2 MiB. Tests cover sensitive-field exclusion, hostile input, bounds, legacy
@@ -136,7 +153,7 @@ unverified real-CLI or native behavior; deferred workload checks remain unverifi
 | 2.1 Screen/history | tmux live state; bounded persisted snapshots, disk cleanup, native history/search | Real CLI native attach/search/copy/link verification and sustained rotation |
 | 2.2 Reconnect | Positive pane/process reconciliation; real Codex/Claude explicit native-ID resume and MCP reconnect | Remaining service-failure edge cases and full native acceptance |
 | 2.3–2.4 Quit/tabs/split | Native tabs/split, window-state writes, quit/stop-all and keyboard commands implemented | OS keyboard and focused real-CLI acceptance; direct normal/force-quit fixture implemented; final Spaces workload is in V2 |
-| 2.5 Worktrees | Create/list/safe-remove; periodic external inventory; identity-based moves/replacements; pending launch/removal and metadata-write reservations; Git/socket regression fixture | Real-CLI removal and native control acceptance; whole-repository relocation; recovery/resume after external checkout replacement |
+| 2.5 Worktrees | Create/list/safe-remove; periodic external inventory; identity-based moves/replacements; pending launch/removal and metadata-write reservations; legacy migration fixtures and real Codex/Claude repository-relocation, replacement/resume, and removal checks | Native worktree-control interaction acceptance |
 | 2.6 Multiple repos | Explicit additional folder selection in launch API; primary main checkout excluded | Real CLI access test (shared-checkout warning and explicit additional-folder UI implemented) |
 | 2.7 Status/attention | Lifecycle records, real Codex/Claude completion IDs, permission attention hooks, unread/pending counts; optional durable notifications; native warm/cold URL routing and background helper startup; user enabled and authorized notifications | Actual OS delivery/click, enabled-helper recovery/update, and remaining native attention signals |
 | 2.8 Sleep/service loss | Runtime loop plus native wake reconnect, health/recovery actions; actual service termination/restart verified | Real sleep/wake and service lifecycle with live real sessions |

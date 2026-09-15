@@ -4,6 +4,68 @@ import ChauffeurCore
 @testable import ChauffeurRuntimeKit
 
 struct WorktreeCreationTests {
+    @Test(arguments: [false, true]) func legacyRepositoryIdentityMigratesAfterRelinkingAMovedRepository(registerFirst: Bool) async throws {
+        let fixture = try await Fixture.make(); defer { fixture.cleanup() }
+        let stored = try await fixture.runtime.createWorktree(fixture.request)
+        var legacy = stored.value
+        legacy.repositoryIdentityVersion = nil
+        legacy.repositoryID = try await fixture.runtime.worktrees.legacyRepositoryID(at: fixture.repo.path)
+        try JSONCoding.encode(legacy).write(to: URL(fileURLWithPath: stored.path), options: .atomic)
+        _ = await fixture.runtime.store.reload()
+        let moved = fixture.root.appendingPathComponent("moved repo")
+        try FileManager.default.moveItem(at: fixture.repo, to: moved)
+        let repaired = try await ProcessRunner.run("/usr/bin/git", ["-C", moved.path, "worktree", "repair"])
+        try #require(repaired.status == 0)
+        let project = try #require(await fixture.runtime.store.current().projects.first)
+        var relinked = project.value
+        relinked.folders[0].selectedPath = moved.path; relinked.folders[0].canonicalPath = Paths.canonical(moved.path)
+        try await fixture.runtime.store.save(relinked, expectedVersion: project.version)
+        if registerFirst {
+            let registered = try await fixture.runtime.handle(IPCRequest("registerWorktree", params: .object([
+                "projectID": .string(project.value.id.uuidString), "folderID": .string(project.value.folders[0].id.uuidString), "path": .string(legacy.path)
+            ]))).decode(Stored<Worktree>.self)
+            #expect(registered.value.id == legacy.id)
+        }
+        await fixture.runtime.reconcileWorktrees()
+        let trees = await fixture.runtime.store.current().worktrees
+        try #require(trees.count == 1)
+        let updated = trees[0].value
+        #expect(updated.id == legacy.id && updated.path == legacy.path && updated.baseCommit == legacy.baseCommit && updated.managed)
+        #expect(updated.repositoryID == stored.value.repositoryID && updated.repositoryIdentityVersion == 1)
+        #expect(updated.repositoryPath == Paths.canonical(moved.path) && updated.availability == .available)
+        let reopened = try fixture.reopen(); try await reopened.start()
+        #expect(await reopened.store.current().worktrees.first?.value == updated)
+        _ = try await reopened.handle(IPCRequest("removeWorktree", params: .object(["worktreeID": .string(updated.id.uuidString)])))
+        #expect(!FileManager.default.fileExists(atPath: updated.path))
+    }
+
+    @Test(arguments: [false, true]) func legacyRecordWithoutCheckoutIdentityUpgradesAtItsOriginalPathOnly(observeFromLinkedCheckout: Bool) async throws {
+        let fixture = try await Fixture.make(); defer { fixture.cleanup() }
+        let stored = try await fixture.runtime.createWorktree(fixture.request)
+        var legacy = stored.value
+        legacy.repositoryIdentityVersion = nil; legacy.gitIdentity = nil
+        legacy.repositoryID = try await fixture.runtime.worktrees.legacyRepositoryID(at: fixture.repo.path)
+        try JSONCoding.encode(legacy).write(to: URL(fileURLWithPath: stored.path), options: .atomic)
+        _ = await fixture.runtime.store.reload()
+        if observeFromLinkedCheckout {
+            let project = try #require(await fixture.runtime.store.current().projects.first)
+            var linked = project.value
+            linked.folders[0].selectedPath = legacy.path; linked.folders[0].canonicalPath = legacy.path
+            try await fixture.runtime.store.save(linked, expectedVersion: project.version)
+        }
+        await fixture.runtime.reconcileWorktrees()
+        let upgraded = try #require(await fixture.runtime.store.current().worktrees.first?.value)
+        #expect(upgraded.id == stored.value.id && upgraded.repositoryID == stored.value.repositoryID && upgraded.gitIdentity == stored.value.gitIdentity)
+        #expect(upgraded.repositoryIdentityVersion == 1 && upgraded.availability == .available)
+        // Once migrated, a repository identity cannot be changed or downgraded.
+        var changed = upgraded; changed.repositoryID = UUID()
+        await #expect(throws: ChauffeurError.self) { try await fixture.runtime.store.save(changed) }
+        changed = upgraded; changed.repositoryIdentityVersion = nil
+        await #expect(throws: ChauffeurError.self) { try await fixture.runtime.store.save(changed) }
+        var unknown = legacy; unknown.repositoryPath = fixture.root.appendingPathComponent("unknown").path; unknown.path += "-unknown"
+        #expect(await fixture.runtime.worktrees.reconciled(unknown, inventory: fixture.runtime.worktrees.observe(at: fixture.repo.path)).availability != .available)
+    }
+
     @Test func retriesShareOneCheckoutAcrossConcurrentCallsAndRuntimeRestart() async throws {
         let fixture = try await Fixture.make(); defer { fixture.cleanup() }
         async let first = fixture.runtime.createWorktree(fixture.request)

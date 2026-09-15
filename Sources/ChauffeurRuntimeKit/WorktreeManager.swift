@@ -16,6 +16,10 @@ public actor WorktreeManager {
     }
     public func repositoryID(at path: String) async throws -> UUID {
         let common = try await git(path, ["rev-parse", "--path-format=absolute", "--git-common-dir"])
+        return try Self.directoryIdentity(at: Paths.canonical(Self.line(common)))
+    }
+    func legacyRepositoryID(at path: String) async throws -> UUID {
+        let common = try await git(path, ["rev-parse", "--path-format=absolute", "--git-common-dir"])
         return Self.identifier(Paths.canonical(Self.line(common)))
     }
     private static func line(_ output: String) -> String { output.hasSuffix("\n") ? String(output.dropLast()) : output }
@@ -25,11 +29,69 @@ public actor WorktreeManager {
     }
     public func identity(at path: String) async throws -> UUID {
         let directory = Paths.canonical(Self.line(try await git(path, ["rev-parse", "--absolute-git-dir"])))
+        return try Self.directoryIdentity(at: directory)
+    }
+    private static func directoryIdentity(at directory: String) throws -> UUID {
         var info = stat()
-        guard stat(directory, &info) == 0, info.st_mode & S_IFMT == S_IFDIR else { throw ChauffeurError("worktree_unavailable", "Git worktree identity is unavailable", path: path) }
+        guard stat(directory, &info) == 0, info.st_mode & S_IFMT == S_IFDIR else { throw ChauffeurError("worktree_unavailable", "Directory identity is unavailable", path: directory) }
         // The administrative directory survives `git worktree move`. Its inode
         // also distinguishes a removed/recreated worktree with the same name.
         return Self.identifier("\(info.st_dev):\(info.st_ino):\(info.st_birthtimespec.tv_sec):\(info.st_birthtimespec.tv_nsec)")
+    }
+    private static func hasGitMetadata(above path: String) -> Bool {
+        var directory = URL(fileURLWithPath: path), initial = stat()
+        guard stat(path, &initial) == 0 else { return true }
+        while true {
+            var info = stat()
+            guard stat(directory.path, &info) == 0 else { return true }
+            if info.st_dev != initial.st_dev { return false } // Git's discovery boundary.
+            if lstat(directory.appendingPathComponent(".git").path, &info) == 0 { return true }
+            if directory.path == "/" { return false }
+            directory.deleteLastPathComponent()
+        }
+    }
+    func checkoutIdentity(at path: String) async throws -> CheckoutIdentity {
+        let canonical = try Paths.directory(path)
+        let directory = try Self.directoryIdentity(at: canonical)
+        let gitIdentity: UUID?
+        do { gitIdentity = try await identity(at: canonical) }
+        catch let error as ChauffeurError where error.code == "git_failed"
+            && error.message.hasPrefix("fatal: not a git repository (or any") && !Self.hasGitMetadata(above: canonical) {
+            // Git runs with an English locale. Other failures (including broken
+            // .git files and unreadable metadata) must not become non-Git paths.
+            gitIdentity = nil
+        }
+        try Task.checkCancellation()
+        guard try Self.directoryIdentity(at: canonical) == directory else {
+            throw ChauffeurError("checkout_changed", "The checkout changed while its identity was being checked. Retry after the filesystem operation finishes", path: path)
+        }
+        return CheckoutIdentity(path: canonical, directoryIdentity: directory, gitIdentity: gitIdentity)
+    }
+    func validateResume(_ launch: LaunchSnapshot) async throws {
+        let paths = [launch.workingDirectory] + launch.additionalPaths
+        if let recorded = launch.checkoutIdentities {
+            guard recorded.map(\.path) == paths else {
+                throw ChauffeurError("checkout_unverified", "Saved checkout identities do not match this session's paths. Create a new session")
+            }
+            for checkout in recorded {
+                guard try await checkoutIdentity(at: checkout.path) == checkout else {
+                    throw ChauffeurError("checkout_changed", "A different checkout occupies this session's path. Restore the original checkout to resume, or create a new session", path: checkout.path)
+                }
+            }
+        } else {
+            // Older snapshots omitted non-Git paths from their ordered UUIDs.
+            // Only a complete one-to-one list can prove each path's identity.
+            guard let identities = launch.gitWorktreeIdentities, identities.count == paths.count else {
+                throw ChauffeurError("checkout_unverified", "This older session has no complete checkout identity record. Create a new session to use the current folders")
+            }
+            for (path, expected) in zip(paths, identities) {
+                _ = try Paths.directory(path)
+                guard try await identity(at: path) == expected else {
+                    throw ChauffeurError("checkout_changed", "A different checkout occupies this session's path. Restore the original checkout to resume, or create a new session", path: path)
+                }
+                try Task.checkCancellation()
+            }
+        }
     }
     public func inventory(at path: String) async throws -> [GitWorktree] {
         let repositoryID = try await repositoryID(at: path)
@@ -61,10 +123,12 @@ public actor WorktreeManager {
         return entries
     }
     public func observe(at path: String, cached: [UUID: RepositoryInventory] = [:]) async -> RepositoryInventory {
+        let path = Paths.canonical(path)
         var result = RepositoryInventory(sourcePath: path, status: .available)
         do {
             _ = try Paths.directory(path)
             result.repositoryID = try await repositoryID(at: path)
+            result.legacyRepositoryID = try await legacyRepositoryID(at: path)
             if let id = result.repositoryID, var previous = cached[id] {
                 previous.sourcePath = path
                 return previous
@@ -86,7 +150,9 @@ public actor WorktreeManager {
     }
     public func reconciled(_ worktree: Worktree, inventory: RepositoryInventory) -> Worktree {
         var result = worktree
-        guard inventory.status == .available, inventory.repositoryID == worktree.repositoryID else {
+        let knownCheckout = worktree.gitIdentity.map { identity in inventory.entries.contains { $0.gitIdentity == identity && $0.availability == .available } } ?? false
+        let legacyMatch = worktree.repositoryIdentityVersion == nil && (knownCheckout || inventory.legacyRepositoryID == worktree.repositoryID)
+        guard inventory.status == .available, inventory.repositoryID == worktree.repositoryID || legacyMatch else {
             result.availability = inventory.status == .missing ? .missing : .inaccessible
             return result
         }
@@ -100,6 +166,9 @@ public actor WorktreeManager {
         result.repositoryPath = inventory.sourcePath
         result.gitIdentity = entry.gitIdentity ?? result.gitIdentity
         result.availability = entry.availability ?? .available
+        if legacyMatch, result.availability == .available, let repositoryID = inventory.repositoryID, entry.gitIdentity != nil {
+            result.repositoryID = repositoryID; result.repositoryIdentityVersion = 1
+        }
         // Moving a checkout out of managed storage transfers its cleanup to the
         // user. Registering/moving it back does not silently regain ownership.
         if !entry.path.hasPrefix(root.path + "/") { result.managed = false }
