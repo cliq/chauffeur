@@ -1,8 +1,10 @@
 # MVP implementation status
 
-This tracks the original [implementation plan](mvp-implementation-plan.md).
-Unchecked requirements remain in scope. Fixture evidence does not substitute for
-the PRD's real-CLI, native-window, and daily-use acceptance scenarios.
+This tracks the [implementation plan and current goal scope](mvp-implementation-plan.md#current-goal-scope).
+On 2026-09-15, the user moved completion of Codex ↔ Claude messaging/delegation
+and final workload testing to [V2](v2-plan.md). They do not block the current goal.
+Other unfinished requirements remain in scope. Fixture evidence does not establish
+unverified real-CLI or native behavior; deferred workload checks remain unverified.
 
 ## Current executable evidence
 
@@ -78,19 +80,19 @@ the PRD's real-CLI, native-window, and daily-use acceptance scenarios.
   pass; the user enabled notifications and the native helper reports authorized.
   Delivery/click acceptance remains open.
 
-## Stage audit
+## Current-goal stage audit
 
 | Plan items | Current state | Still required |
 | --- | --- | --- |
-| Stage 0 V1–V5 | Decision documents; fixtures; real default-route Codex credential/stop evidence; actual LaunchAgent lifecycle | Full real CLI/profile gates; remaining macOS/Spaces gate |
+| Stage 0 V1–V5 | Decision documents; fixtures; real default-route Codex credential/stop evidence; actual LaunchAgent lifecycle | Remaining profile, terminal, status, and focused macOS checks; coordination and final Spaces workload are in V2 |
 | 1.1 Records/store | Implemented and tested, including external reload/conflict errors | Complete reference-integrity checks; targeted file watcher (current one-second reload also runs with no UI); empty-set UI acceptance |
 | 1.2 Runtime skeleton | Lock, peer-checked Unix socket, version handshake, health helper, verified bundled LaunchAgent registration/recovery; bounded structured logs with typed redaction | Remaining live-service release acceptance |
-| 1.3–1.7 Presets/projects/groups/welcome/windows | Native editors, cancellable discovery, relink/archive, welcome and project windows implemented | Full interaction and four-Spaces acceptance |
+| 1.3–1.7 Presets/projects/groups/welcome/windows | Native editors, cancellable discovery, relink/archive, welcome and project windows implemented | Remaining editor/window interaction checks; final four-Spaces workload is in V2 |
 | 1.8 Basic launch | Real Codex/Claude launch, filtered environment, private exec handoff, terminal input/resize/stop; Claude native account/process configuration checks | Full native account/status checks, distinct-Claude-account check, complete preflight |
 | 1.9 Session details | Native details show the immutable launch snapshot and lifecycle/coordination records | Real-session interaction acceptance |
 | 2.1 Screen/history | tmux live state; bounded persisted snapshots, disk cleanup, native history/search | Real CLI native attach/search/copy/link verification and sustained rotation |
 | 2.2 Reconnect | Positive pane/process reconciliation; real Codex/Claude explicit native-ID resume and MCP reconnect | Remaining service-failure edge cases and full native acceptance |
-| 2.3–2.4 Quit/tabs/split | Native tabs/split, window-state writes, quit/stop-all and keyboard commands implemented | OS keyboard and real-CLI/Spaces acceptance; direct normal/force-quit fixture implemented |
+| 2.3–2.4 Quit/tabs/split | Native tabs/split, window-state writes, quit/stop-all and keyboard commands implemented | OS keyboard and focused real-CLI acceptance; direct normal/force-quit fixture implemented; final Spaces workload is in V2 |
 | 2.5 Worktrees | Create/list/safe-remove; periodic external inventory; identity-based moves/replacements; pending launch/removal and metadata-write reservations; Git/socket regression fixture | Real-CLI removal and native control acceptance; whole-repository relocation; recovery/resume after external checkout replacement |
 | 2.6 Multiple repos | Explicit additional folder selection in launch API; primary main checkout excluded | Real CLI access test (shared-checkout warning and explicit additional-folder UI implemented) |
 | 2.7 Status/attention | Lifecycle records, real Codex/Claude completion IDs, permission attention hooks, unread/pending counts; optional durable notifications; native warm/cold URL routing and background helper startup; user enabled and authorized notifications | Actual OS delivery/click, enabled-helper recovery/update, and remaining native attention signals |
@@ -98,22 +100,26 @@ the PRD's real-CLI, native-window, and daily-use acceptance scenarios.
 | 2.9 Appearance setting | Todo — requested by user | Settings selection for System, Light, or Dark; persistence and consistent app/terminal appearance |
 | 2.10 Terminal project launcher | Todo — requested by user | Install a launcher in `/usr/local/bin/`; open the project containing the selected folder |
 | 2.11 Quick session on a new worktree | Todo — requested by user | One flow from a repository in the sidebar to a new worktree and session |
-| 3.1–3.3 Credentials/MCP/mailboxes | Ledger/HTTP fixtures; real Codex/Claude shared-profile credentials and messages | Full HTTP/client compliance; remaining real tool cases and controlled existing-server preservation |
-| 3.4 Delegation | Durable reservation, launch path, worktree default, limits, depth check, result transaction | Bidirectional real-CLI acceptance, crash-window integration tests and failed-child visibility audit |
-| 3.5 Wake | Bounded inbox wait; no terminal message injection | Real idle/busy validation (pending-attention UI implemented) |
-| 3.6–3.7 Coordination UI/skill | Tool descriptions, message/delegation details, bundled skill, explicit install/update/remove controls; native metadata discovery/isolation/removal fixture | Native control interaction and real model use of guidance; full F7 acceptance |
-| 4.1–4.5 Packaging/compatibility/retention/diagnostics/docs | Developer ID local builds; actual registration/update; retention settings/cleanup; diagnostics export; terminal, diagnostics and service recovery guides | Full release acceptance; native save-dialog interaction; remaining recovery guide |
-| 4.6 Release checklist | Not run | Ten real sessions/four Spaces, timings/hardware record, all F1–F7 scenarios, three normal workdays and failure log |
+| 4.1–4.5 Packaging/compatibility/retention/diagnostics/docs | Developer ID local builds; actual registration/update; retention settings/cleanup; diagnostics export; terminal, diagnostics and service recovery guides | Focused packaging/recovery acceptance; native save-dialog interaction; remaining recovery guide |
 | 4.7 Complete app manual | Todo — requested by user, after app work | Document every feature and its usage; publish through Artifact Colab MCP |
+
+## V2 — outside the current goal
+
+| Deferred item | Plan references | Status |
+| --- | --- | --- |
+| Complete Codex ↔ Claude messaging/delegation | Stage 3.1–3.7, F7, coordination portions of V3/V4 | Partially implemented; remaining completion and acceptance moved to [V2](v2-plan.md) |
+| Final workload testing | Stage 4.6, full PRD §9 workload | Not run; ten real sessions, four Spaces, performance measurements, complete F1–F7 sweep, and three workdays moved to [V2](v2-plan.md#final-workload-testing) |
 
 ## Next implementation order
 
-1. Complete cross-provider MCP cases, remaining account-selection checks, and
-   foundation edge-case tests.
+1. Complete remaining core app features, account-selection checks within the
+   user's current profile constraints, and foundation fixes.
 2. Stabilize and verify native terminal/window lifetime, restore/focus, and the
-   app interaction scenarios through direct probes and XCUITest.
+   focused app interaction scenarios through direct probes and XCUITest.
 3. Complete native service lifecycle, persisted screen/history, worktree UI and
-   reconciliation, attention/messages/delegation UI and skill integration.
-4. Package/sign the app; run the complete real-CLI and daily-use acceptance audit.
+   reconciliation, and session attention/notifications.
+4. Package/sign the app, finish focused verification, and publish the complete
+   app manual through Artifact Colab, including current V2 limitations.
 
-The goal remains active until every required item and release gate is proved.
+The goal remains active until all current-scope work is complete and its required
+checks pass. V2 items are excluded from that completion decision.

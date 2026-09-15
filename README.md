@@ -7,6 +7,8 @@ profiles, worktrees, and isolated communication groups.
 background runtime, shared core, and command-line helper. Real CLI integration
 and release acceptance remain open. See the [implementation status](docs/implementation-status.md),
 [plan](docs/mvp-implementation-plan.md), and [PRD](docs/mvp-prd.md).
+Completion of Codex ↔ Claude messaging/delegation and final workload testing are
+planned for [V2](docs/v2-plan.md) and are outside the current goal.
 
 ## Build the app
 

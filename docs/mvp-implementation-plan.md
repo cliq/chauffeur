@@ -7,6 +7,22 @@
 
 This plan turns the PRD's requirements (F1–F7), validation gates (V1–V5), and delivery stages (0–4) into concrete technical decisions, a repository layout, and ordered work items. Requirement references such as **F4.3** point to the PRD.
 
+## Current goal scope
+
+Updated 2026-09-15. The user moved these unfinished items to [V2](v2-plan.md):
+
+- **Complete Codex ↔ Claude messaging/delegation**: remaining Stage 3 work,
+  F7 acceptance, and the coordination portions of V3/V4.
+- **Final workload testing**: Stage 4.6's complete end-to-end workload, including
+  ten concurrent real sessions, the four-Spaces workload, hardware/performance
+  measurements, and three normal workdays with a failure log.
+
+These items do not block completion of the current goal. Existing implementation
+and evidence remain; unfinished V2 work must not be reported as verified. Other
+app features, fixes, packaging, and focused correctness/native checks stay in the
+current goal. The complete app manual follows the current app work and documents
+V2 limitations; it does not wait for V2 completion.
+
 ## 1. Guiding constraints
 
 Four PRD commitments drive every decision below:
@@ -91,6 +107,10 @@ Each Stage 0 gate records its outcome in `docs/decisions/Vn-<topic>.md`. `docs/c
 
 Each gate is a throwaway spike in `Prototypes/` with a written decision. No dependent feature starts before its gate passes or a documented resolution exists.
 
+Scope exception: remaining V3/V4 coordination acceptance and the final
+multi-Space workload are deferred to V2. CLI status signals, profile selection,
+terminal continuity, and focused service/window checks remain current work.
+
 | Gate | Spike | Pass evidence | Failure path |
 | --- | --- | --- | --- |
 | V1 Terminal continuity | Runtime process owns a PTY running each CLI; headless SwiftTerm mirrors output; a separate app attaches, receives a serialized screen, resizes, types, detaches, and the runtime is killed and restarted only for the UI. | Both CLIs render full-screen UIs correctly after reattach; resize propagates; scrollback bounded to a configured limit; no bytes lost while detached. | Swap PTY ownership to tmux control mode behind the same runtime API. |
@@ -135,9 +155,11 @@ Goal: quit and reopen without losing sessions; worktrees; attention (PRD stage 2
 
 Exit check: F3, F4, F5, and F6 acceptance scenarios pass for both CLIs, including force-quitting only the UI.
 
-## 7. Stage 3 — Coordination
+## 7. Stage 3 — Coordination (V2)
 
-Goal: cross-provider delegation while the UI is closed (PRD stage 3 exit).
+V2 goal: cross-provider delegation while the UI is closed (PRD stage 3 exit).
+Remaining completion work and acceptance below are outside the current goal.
+See [V2 backlog](v2-plan.md) for the unfinished work and existing evidence.
 
 1. **Credentials** — per-session random token stored hashed; issued at launch, revoked on stop/remove, reissued on resume (F7 authentication).
 2. **MCP server** — Streamable HTTP endpoint inside the runtime; tools `chauffeur_discover`, `chauffeur_send_message`, `chauffeur_inbox` (with bounded wait and acknowledge), `chauffeur_reply`, `chauffeur_delegate`, `chauffeur_delegation_status`, `chauffeur_report_result`. Names are provisional; every call resolves the caller's group from the token and filters all results by it (F7 capabilities).
@@ -147,7 +169,7 @@ Goal: cross-provider delegation while the UI is closed (PRD stage 3 exit).
 6. **UI** — messages and delegation tree in session details, delivery state, sender and group labels (F7 delivery 6).
 7. **Skill** — `SKILL.md` describing discover, inbox wait, delegate, report; installed by the route chosen in V3 with namespaced files only and a removal action.
 
-Exit check: F7 acceptance, including cross-group probing with guessed IDs, retries without duplicate launches, and delegation with the UI closed.
+V2 exit check: F7 acceptance, including cross-group probing with guessed IDs, retries without duplicate launches, and delegation with the UI closed.
 
 ## 8. Stage 4 — Personal-use release
 
@@ -156,7 +178,7 @@ Exit check: F7 acceptance, including cross-group probing with guessed IDs, retri
 3. Retention settings UI: scrollback lines, snapshot disk budget, message history limit, cleanup that never touches native conversations or queued messages.
 4. Diagnostics export: executable, version, configuration path, working directory, runtime state, recent errors; no credentials or configuration file contents.
 5. Setup and recovery notes in `docs/` covering runtime restart, interrupted sessions, and worktree cleanup.
-6. Run the PRD §9 end-to-end checklist, including ten concurrent sessions with recorded hardware and timings, then three workdays of daily use with a failure log.
+6. **Final workload testing — moved to V2**: the PRD §9 end-to-end checklist, including ten concurrent sessions with recorded hardware and timings, then three workdays of daily use with a failure log. See [V2 backlog](v2-plan.md); this is not a current-goal exit requirement.
 7. **Complete app manual** — after the app work is finished, write a manual covering every feature and how to use it, and publish it through the Artifact Colab MCP.
 
 ## 9. Cross-cutting engineering rules

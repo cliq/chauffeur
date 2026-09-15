@@ -6,6 +6,12 @@
 - Initial audience: the developer's own daily use
 - Companions: [Project overview](overview.md), [Implementation plan](mvp-implementation-plan.md)
 
+**Current goal scope update (2026-09-15):** The user deferred completion of
+Codex ↔ Claude messaging/delegation (F7/Stage 3) and final workload testing
+(the full §9 release workload) to [V2](v2-plan.md). The requirements below retain
+the full product specification; the [implementation plan's scope](mvp-implementation-plan.md#current-goal-scope)
+governs completion of the current goal.
+
 ## 1. Problem and outcome
 
 A developer works across personal and client projects, each containing several repositories and requiring different Codex or Claude Code configurations. The current workflow cannot select a configuration directory per agent preset and puts all projects into one window. This makes it difficult to keep the correct profile attached to each task and organize projects across macOS desktops.
