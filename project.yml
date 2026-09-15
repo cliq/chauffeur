@@ -1,0 +1,75 @@
+name: Chauffeur
+options:
+  bundleIdPrefix: dev.chauffeur
+  deploymentTarget:
+    macOS: "15.0"
+packages:
+  Chauffeur:
+    path: .
+  SwiftTerm:
+    url: https://github.com/migueldeicaza/SwiftTerm.git
+    exactVersion: 1.20.0
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    MACOSX_DEPLOYMENT_TARGET: "15.0"
+    CODE_SIGN_STYLE: Manual
+    CODE_SIGN_IDENTITY: "-"
+    ENABLE_APP_SANDBOX: NO
+    ENABLE_HARDENED_RUNTIME: YES
+    ENABLE_USER_SCRIPT_SANDBOXING: NO
+targets:
+  ChauffeurApp:
+    type: application
+    platform: macOS
+    sources:
+      - Sources/ChauffeurApp
+    dependencies:
+      - package: Chauffeur
+        product: ChauffeurCore
+      - package: SwiftTerm
+        product: SwiftTerm
+    settings:
+      base:
+        PRODUCT_NAME: Chauffeur
+        PRODUCT_BUNDLE_IDENTIFIER: dev.chauffeur.app
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_CFBundleDisplayName: Chauffeur
+        INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.developer-tools
+        INFOPLIST_KEY_NSPrincipalClass: NSApplication
+        MARKETING_VERSION: 0.1.0
+        CURRENT_PROJECT_VERSION: 1
+    postBuildScripts:
+      - name: Embed background runtime
+        script: '"$SRCROOT/Scripts/embed-runtime.sh"'
+        basedOnDependencyAnalysis: false
+  ChauffeurAppUITests:
+    type: bundle.ui-testing
+    platform: macOS
+    sources:
+      - Tests/ChauffeurAppUITests
+    dependencies:
+      - target: ChauffeurApp
+      - package: Chauffeur
+        product: ChauffeurCore
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.chauffeur.app.uitests
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_TARGET_NAME: ChauffeurApp
+        ENABLE_HARDENED_RUNTIME: NO
+schemes:
+  Chauffeur:
+    build:
+      targets:
+        ChauffeurApp: all
+    run:
+      config: Debug
+    archive:
+      config: Release
+    test:
+      config: Debug
+      targets:
+        - ChauffeurAppUITests
+      environmentVariables:
+        CHAUFFEUR_TEST_APP: "$(BUILT_PRODUCTS_DIR)/Chauffeur.app"

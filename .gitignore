@@ -6,3 +6,5 @@ build/
 xcuserdata/
 *.xcuserstate
 .local/
+__pycache__/
+*.pyc

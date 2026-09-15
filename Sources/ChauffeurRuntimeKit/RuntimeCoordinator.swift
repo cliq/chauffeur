@@ -66,6 +66,8 @@ public actor RuntimeCoordinator {
     }
     public func record(_ error: ChauffeurError) { recentErrors.append(error); if recentErrors.count > 100 { recentErrors.removeFirst(recentErrors.count - 100) } }
     public func reconcile(startup: Bool = false) async throws {
+        // Reload human-edited metadata even while every UI is closed.
+        _ = await store.reload()
         let inventory = try await terminals.inventory()
         for var session in Array(sessions.values) where !launching.contains(session.id) {
             let pane = inventory.first { $0.sessionName == session.id.uuidString }
@@ -120,7 +122,23 @@ public actor RuntimeCoordinator {
             guard var session = sessions[sessionID] else { throw ChauffeurError("missing_session", "Session not found") }
             session.unread = false; try await persist(session); return .null
         case "event": return try await event(params)
+        case "cancelMessage":
+            let messageID = try params.uuid("messageID")
+            guard let message = try await ledger.allMessages().first(where: { $0.id == messageID }) else { throw ChauffeurError("missing_message", "Message not found") }
+            return try .from(await ledger.cancelMessage(messageID, caller: Caller(sessionID: message.senderID, scope: message.scope)))
         case "worktreeInventory": return try .from(await worktrees.inventory(at: params.requiredString("path")))
+        case "previewWorktree", "registerWorktree":
+            let snapshot = await store.current(), projectID = try params.uuid("projectID"), folderID = try params.uuid("folderID")
+            guard let folder = snapshot.projects.first(where: { $0.value.id == projectID })?.value.folders.first(where: { $0.id == folderID && $0.registered }) else { throw ChauffeurError("missing_folder", "Select a registered repository") }
+            let repositoryID = try await worktrees.repositoryID(at: folder.canonicalPath)
+            if request.method == "previewWorktree" { return .object(["path": .string(await worktrees.destination(repositoryID: repositoryID, branch: try params.requiredString("branch")).path)]) }
+            let path = Paths.canonical(try params.requiredString("path"))
+            guard let entry = try await worktrees.inventory(at: folder.canonicalPath).first(where: { $0.path == path }) else { throw ChauffeurError("missing_worktree", "Path is not in this repository's Git worktree inventory") }
+            if var existing = snapshot.worktrees.first(where: { $0.value.projectID == projectID && $0.value.folderID == folderID && $0.value.path == path }) {
+                existing.value.registered = true
+                return try .from(await store.save(existing.value, expectedVersion: existing.version))
+            }
+            return try .from(await store.save(Worktree(projectID: projectID, folderID: folderID, repositoryID: repositoryID, path: path, repositoryPath: folder.canonicalPath, branch: entry.branch, baseCommit: entry.commit, managed: false)))
         case "createWorktree":
             let snapshot = await store.current(), projectID = try params.uuid("projectID"), folderID = try params.uuid("folderID")
             guard let folder = snapshot.projects.first(where: { $0.value.id == projectID })?.value.folders.first(where: { $0.id == folderID && $0.registered }) else { throw ChauffeurError("missing_folder", "Select an available project folder") }

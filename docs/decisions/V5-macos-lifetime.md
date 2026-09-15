@@ -1,15 +1,56 @@
 # V5 — macOS lifetime
 
-Status: native app and LaunchAgent prototype pending.
+Status: native app and fixture lifetime implemented; full macOS acceptance open.
 
-## Current evidence
+## Implementation
 
-The command-line runtime and tmux-owned terminal processes can run without any UI. The fixture smoke test starts the runtime directly, kills it, and restarts it against the same private data directory to reconcile process ownership. This proves neither LaunchAgent registration nor native window restoration.
+XcodeGen builds a macOS 15+ SwiftUI/AppKit app with `WindowGroup(for: UUID.self)`,
+a single welcome window, and SwiftTerm terminal views. It embeds locally signed
+runtime/helper binaries and a `SMAppService.agent(plistName:)` LaunchAgent.
+The native service-health UI offers registration, restart and Login Items settings.
 
-## Next prototype / chosen candidate
+Project windows persist their frame, tabs, selected group/session, sidebar state,
+and split session through runtime-owned JSON writes. Layout writes retain their
+original file version so external edits cause an explicit conflict. Closing a tab
+or window detaches its terminal views. Normal quit flushes queued layout changes
+before termination and keeps project windows marked for reopening.
 
-Use SwiftUI `WindowGroup(for: UUID.self)` and a single welcome `Window`, with SwiftTerm hosted through AppKit. Build with XcodeGen. Embed runtime and helper binaries in the app, along with a `SMAppService.agent(plistName:)` LaunchAgent definition. Verify registration and startup from the signed local app before declaring service management available.
+## Native fixture evidence
 
-Test four project windows on independent Spaces; open the same project twice and confirm focus instead of duplication; restore frames/tabs/splits; close every window and quit/force-quit only the UI while confirming terminal PIDs. Test notification routing with the UI closed. If SMAppService registration is unavailable, record an explicit supported fallback and recovery instructions.
+`Scripts/build-app.sh` and `Scripts/build-app.sh Release` succeed.
+`codesign --verify --deep --strict` validates the local app and its embedded
+binaries; Release helpers are signed with hardened runtime enabled. This is local signing, not distribution
+signing/notarization.
 
-The full V5 gate remains open. No native app or Spaces validation is claimed by the runtime fixture checks.
+`Prototypes/native_window_smoke.py` passes against the actual Debug app with an
+isolated runtime with four projects and ten fake CLI sessions. Its Debug-only
+in-app probe exercises all ten SwiftTerm views, Unicode input, resize and
+reattachment with unsent input. It also opens an existing project twice, closes
+and reopens a project window, and checks normal quit plus forced UI termination
+across three app launches. The Python harness compares runtime/process identities
+and saved window state. Reports are under `.build/native-probe-artifacts/`.
+
+The probe drives native view methods directly. Its cached-view images can show
+terminal pixels but do not reliably capture every layer of a SwiftUI window.
+They do not establish OS keyboard, accessibility, notification, or Spaces behavior.
+
+## OS automation attempt
+
+The Xcode `ChauffeurAppUITests` target builds. Its runner requires hardened
+runtime disabled for the locally signed UI-test bundle; the app retains hardened
+runtime. The test runner then times out before test execution while enabling
+macOS Automation Mode. `automationmodetool` reports that user authentication is
+required; `DevToolsSecurity -status` reports Developer mode disabled. These system
+settings were left unchanged, and the user was asked to enable UI-testing access.
+
+## Remaining gate evidence
+
+- Verify actual `SMAppService` registration and launchd restart from the app.
+  The direct fixture uses `CHAUFFEUR_SOCKET` and bypasses registration.
+- Run XCUITest, native keyboard/copy/paste/find/link and accessibility interactions.
+- Place four windows on separate Spaces; confirm focus, frames and restoration.
+- Validate sleep/wake, service loss, notifications, and notification routing when
+  the UI is closed.
+- Repeat lifetime scenarios with both real CLIs and their intended accounts.
+
+The full V5 gate remains open.

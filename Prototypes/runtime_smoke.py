@@ -15,7 +15,7 @@ import time
 import uuid
 
 repository = Path(__file__).resolve().parents[1]
-binary = repository / ".build/debug/ChauffeurRuntime"
+binary = Path(os.environ.get("CHAUFFEUR_RUNTIME_BINARY", repository / ".build/debug/ChauffeurRuntime")).resolve()
 fixture = repository / "Prototypes/fake_cli.py"
 assert binary.exists(), "Run swift build first"
 
@@ -59,6 +59,8 @@ with tempfile.TemporaryDirectory(prefix="chauffeur-smoke-", dir="/tmp") as direc
     config = root / "existing profile α"
     checkout = root / "repo with spaces"
     config.mkdir(); checkout.mkdir()
+    subprocess.run(["git", "-c", "init.defaultBranch=main", "init", "-q", str(checkout)], check=True)
+    subprocess.run(["git", "-C", str(checkout), "-c", "core.hooksPath=/dev/null", "-c", "commit.gpgsign=false", "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "-q", "--allow-empty", "-m", "Fixture"], check=True)
     socket_path = str(root / "runtime/runtime.sock")
     log = open(root / "runtime.log", "w")
     runtime = None
@@ -113,6 +115,21 @@ with tempfile.TemporaryDirectory(prefix="chauffeur-smoke-", dir="/tmp") as direc
         call("savePresetSet", {"record": {"id": set_id, "name": "Fixture set", "revision": 1, "archived": False}})
         call("savePreset", {"record": {"id": preset_id, "setID": set_id, "name": "Fake Codex", "kind": "codex", "executable": str(fixture), "configurationDirectory": str(config), "arguments": [], "integration": "unverified", "archived": False}})
         call("saveProject", {"record": {"id": project_id, "name": "Runtime fixture", "presetSetID": set_id, "folders": [{"id": folder_id, "name": "Fixture checkout", "selectedPath": str(checkout), "canonicalPath": str(checkout.resolve()), "availability": "available", "registered": True}], "groups": [{"id": group_id, "name": "Default", "isDefault": True, "archived": False, "createdAt": now, "updatedAt": now}, {"id": outside_id, "name": "Other", "isDefault": False, "archived": False, "createdAt": now, "updatedAt": now}], "archived": False, "createdAt": now, "updatedAt": now, "lastOpenedAt": now}})
+        worktree_args = {"projectID": project_id, "folderID": folder_id, "branch": "fixture/managed", "baseRef": "HEAD"}
+        preview = call("previewWorktree", worktree_args)["path"]
+        managed = call("createWorktree", worktree_args)["value"]
+        assert Path(managed["path"]).resolve() == Path(preview).resolve()
+        assert any(item["path"] == managed["path"] for item in call("worktreeInventory", {"path": str(checkout)}))
+        call("removeWorktree", {"worktreeID": managed["id"]})
+        assert not Path(managed["path"]).exists()
+        external_path = root / "external checkout"
+        subprocess.run(["git", "-C", str(checkout), "-c", "core.hooksPath=/dev/null", "worktree", "add", "-q", "-b", "fixture/external", str(external_path)], check=True)
+        external_args = {"projectID": project_id, "folderID": folder_id, "path": str(external_path)}
+        external = call("registerWorktree", external_args)["value"]
+        assert external["managed"] is False
+        call("removeWorktree", {"worktreeID": external["id"]})
+        assert external_path.is_dir(), "Unregistering an external worktree must preserve its files"
+        assert call("registerWorktree", external_args)["value"]["id"] == external["id"]
         sessions, credentials = [], []
         for index, group in enumerate([group_id, group_id, outside_id]):
             launch = {"projectID": project_id, "groupID": group, "presetID": preset_id, "folderID": folder_id, "additionalFolderIDs": [], "title": f"Fixture {index}", "allowSharedCheckout": True, "coordinationEnabled": True, "retryKey": uid()}

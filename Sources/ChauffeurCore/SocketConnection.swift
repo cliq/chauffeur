@@ -13,7 +13,7 @@ public final class SocketConnection: @unchecked Sendable {
         self.descriptor = descriptor
         var enabled: Int32 = 1
         setsockopt(descriptor, SOL_SOCKET, SO_NOSIGPIPE, &enabled, socklen_t(MemoryLayout<Int32>.size))
-        fcntl(descriptor, F_SETFD, FD_CLOEXEC)
+        _ = fcntl(descriptor, F_SETFD, FD_CLOEXEC)
     }
     public convenience init(path: String) throws {
         let descriptor = chauffeur_unix_connect(path)

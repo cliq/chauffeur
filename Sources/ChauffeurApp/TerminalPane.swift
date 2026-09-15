@@ -1,0 +1,158 @@
+import SwiftUI
+import AppKit
+import ChauffeurCore
+@preconcurrency import SwiftTerm
+
+@MainActor final class TerminalController: ObservableObject, @preconcurrency TerminalViewDelegate {
+    let sessionID: UUID
+    let owner = UUID()
+    let terminal = TerminalView(frame: NSRect(x: 0, y: 0, width: 900, height: 620))
+    @Published var status: String?
+    @Published var connected = false
+    private var connection: SocketConnection?
+    private var reader: Task<Void, Never>?
+    private var writer: Task<Void, Never>?
+    private var outgoing: AsyncStream<IPCRequest>.Continuation?
+    private var generation = UUID()
+    #if DEBUG
+    var debugEvents: [String] = []
+    private func trace(_ text: String) {
+        debugEvents.append(text)
+        if debugEvents.count > 40 { debugEvents.removeFirst(debugEvents.count - 40) }
+    }
+    #endif
+    init(sessionID: UUID, scrollback: Int) {
+        self.sessionID = sessionID
+        terminal.terminalDelegate = self
+        terminal.font = .monospacedSystemFont(ofSize: 13, weight: .regular)
+        terminal.getTerminal().changeScrollback(scrollback)
+        terminal.setAccessibilityIdentifier("terminal-\(sessionID.uuidString)")
+    }
+    func attach(socketPath: String) {
+        guard reader == nil else { return }
+        let current = UUID(); generation = current
+        #if DEBUG
+        trace("attach \(current)")
+        #endif
+        status = "Connecting…"
+        reader = Task { [weak self] in
+            guard let self else { return }
+            do {
+                let socket = try SocketConnection(path: socketPath); connection = socket
+                let size = terminal.getTerminal()
+                let request = IPCRequest("attach", params: .object(["sessionID": .string(sessionID.uuidString), "owner": .string(owner.uuidString), "cols": .number(Double(max(2, min(500, size.cols)))), "rows": .number(Double(max(2, min(300, size.rows))))]))
+                try await socket.sendAsync(request)
+                let response = try await socket.receiveAsync(IPCResponse.self)
+                guard generation == current, !Task.isCancelled else { socket.close(); return }
+                if let error = response.error { throw error }
+                guard response.version == WireProtocol.major else { throw ChauffeurError("protocol_mismatch", "Restart the service to match this app version") }
+                let (stream, continuation) = AsyncStream<IPCRequest>.makeStream(bufferingPolicy: .bufferingOldest(512))
+                outgoing = continuation
+                writer = Task {
+                    do {
+                        for await packet in stream {
+                            try await socket.sendAsync(packet)
+                            #if DEBUG
+                            trace("sent \(packet.method) \(packet.params["cols"].int ?? 0)x\(packet.params["rows"].int ?? 0)")
+                            #endif
+                        }
+                        #if DEBUG
+                        trace("writer ended \(current) cancelled=\(Task.isCancelled)")
+                        #endif
+                    }
+                    catch { socket.close() }
+                }
+                terminal.feed(text: "\u{1b}c")
+                // Layout may change while the attachment handshake is pending.
+                let currentSize = terminal.getTerminal()
+                sizeChanged(source: terminal, newCols: currentSize.cols, newRows: currentSize.rows)
+                while !Task.isCancelled && generation == current {
+                    let packet = try await socket.receiveAsync(TerminalPacket.self)
+                    guard generation == current, !Task.isCancelled else { return }
+                    guard packet.version == WireProtocol.major else { throw ChauffeurError("protocol_mismatch", "Terminal protocol changed") }
+                    if packet.kind == "error" { throw ChauffeurError("terminal_error", packet.message ?? "Terminal disconnected") }
+                    if let bytes = packet.bytes {
+                        terminal.feed(byteArray: Array(bytes)[...]); connected = true; status = nil
+                    }
+                }
+            } catch {
+                if generation == current { status = (error as? ChauffeurError)?.message ?? "Terminal disconnected. Reconnect to the live session"; connected = false }
+            }
+            if generation == current { connection?.close(); outgoing?.finish(); writer?.cancel(); reader = nil }
+        }
+    }
+    func detach() {
+        #if DEBUG
+        if reader != nil { trace("detach \(generation)") }
+        #endif
+        generation = UUID(); outgoing?.finish(); writer?.cancel(); reader?.cancel()
+        connection?.close(); connection = nil; reader = nil; writer = nil; outgoing = nil; connected = false
+    }
+    func focus() { terminal.window?.makeFirstResponder(terminal) }
+    func find() { terminal.performTextFinderAction(findSender()) }
+    private func findSender() -> NSMenuItem { let item = NSMenuItem(); item.tag = NSTextFinder.Action.showFindInterface.rawValue; return item }
+    private func enqueue(_ request: IPCRequest) {
+        let result = outgoing?.yield(request)
+        #if DEBUG
+        trace("queue \(request.method) \(request.params["cols"].int ?? 0)x\(request.params["rows"].int ?? 0): active=\(outgoing != nil)")
+        #endif
+        if case .dropped = result { status = "Terminal input queue is full. Reconnect before continuing"; connection?.close() }
+    }
+    func send(source: TerminalView, data: ArraySlice<UInt8>) { enqueue(IPCRequest("input", params: .object(["bytes": .string(Data(data).base64EncodedString())]))) }
+    func sizeChanged(source: TerminalView, newCols: Int, newRows: Int) {
+        guard newCols >= 2 && newRows >= 2 else { return }
+        enqueue(IPCRequest("resize", params: .object(["cols": .number(Double(min(newCols, 500))), "rows": .number(Double(min(newRows, 300)))])))
+    }
+    func setTerminalTitle(source: TerminalView, title: String) {}
+    func hostCurrentDirectoryUpdate(source: TerminalView, directory: String?) {}
+    func scrolled(source: TerminalView, position: Double) {}
+    func bell(source: TerminalView) { NSSound.beep() }
+    func requestOpenLink(source: TerminalView, link: String, params: [String: String]) {
+        guard let url = URL(string: link), ["http", "https", "mailto", "file"].contains(url.scheme?.lowercased() ?? "") else { return }
+        NSWorkspace.shared.open(url)
+    }
+    func clipboardCopy(source: TerminalView, content: Data) {
+        guard let text = String(data: content, encoding: .utf8) else { return }
+        NSPasteboard.general.clearContents(); NSPasteboard.general.setString(text, forType: .string)
+    }
+    func clipboardRead(source: TerminalView) -> Data? { nil }
+    func iTermContent(source: TerminalView, content: ArraySlice<UInt8>) {}
+    func rangeChanged(source: TerminalView, startY: Int, endY: Int) {}
+}
+
+struct TerminalHost: NSViewRepresentable {
+    @ObservedObject var controller: TerminalController
+    func makeNSView(context: Context) -> TerminalView { controller.terminal }
+    func updateNSView(_ nsView: TerminalView, context: Context) {}
+}
+
+struct TerminalPane: View {
+    @EnvironmentObject private var model: AppModel
+    let session: Session
+    @ObservedObject var controller: TerminalController
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text(session.title).fontWeight(.medium).lineLimit(1).help(session.title)
+                Spacer()
+                Text(session.state.label).font(.caption).foregroundStyle(session.needsAttention ? .orange : .secondary)
+                if !controller.connected && session.state.isLive {
+                    Button("Reconnect") { controller.detach(); controller.attach(socketPath: model.socketPath) }
+                }
+            }.padding(.horizontal, 12).padding(.vertical, 7).background(.bar)
+            if let status = controller.status, !controller.connected { Text(status).font(.caption).padding(8).frame(maxWidth: .infinity, alignment: .leading).background(.orange.opacity(0.12)) }
+            if session.state.isLive {
+                TerminalHost(controller: controller)
+            } else {
+                VStack(spacing: 16) {
+                    Image(systemName: session.state == .failed ? "exclamationmark.triangle" : "terminal").font(.largeTitle)
+                    Text(session.state.label).font(.title2)
+                    Text(session.error ?? "This execution has ended. Its session and messages are preserved.").foregroundStyle(.secondary).multilineTextAlignment(.center)
+                    if session.nativeConversationID != nil {
+                        Button("Resume Conversation") { model.perform { _ = try await model.call("resume", .object(["sessionID": .string(session.id.uuidString)])) } }.buttonStyle(.borderedProminent)
+                    }
+                }.padding(32).frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }.background(Color(nsColor: .textBackgroundColor))
+    }
+}
