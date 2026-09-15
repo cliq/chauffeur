@@ -123,11 +123,12 @@ Codex documents configuration/state under `CODEX_HOME`, including file-based or 
 ### F3. Independent project windows
 
 1. Provide one main window per open project, with independent navigation and terminal layout. Opening another project creates another window. Opening an already open project focuses its window.
-2. Support normal macOS window movement, resizing, full screen, Window menu navigation, and placement on different Spaces. Project selection must not replace another window's contents or move other project windows.
-3. Restore available window frame, project, tabs, selection, and split state after relaunch. Use supported macOS restoration; exact Space reassignment after reboot is not an MVP guarantee.
-4. Each window contains a project/preset-set header, repository and session sidebar, group filter, terminal area, and project attention list. The user can view all groups or one group. Session context includes agent/preset, group, repository/worktree, and branch. Full names and paths remain available when labels truncate.
-5. Offer keyboard commands for new session, open project window, session switching/search, split/unsplit, terminal search, and next session needing attention. Terminal-focused key handling must preserve CLI controls such as interrupt and escape.
-6. Closing the window or its terminal tab removes a view. Stopping an agent is a separate, clearly named action. Background sessions remain accessible when no tab is open.
+2. Provide a welcome window listing existing projects with running and needs-attention counts, plus project creation. It appears when the app starts with no project window to restore and is reachable from the Window menu; it is the entry point for opening a project when no project window is open.
+3. Support normal macOS window movement, resizing, full screen, Window menu navigation, and placement on different Spaces. Project selection must not replace another window's contents or move other project windows.
+4. Restore available window frame, project, tabs, selection, and split state after relaunch. Use supported macOS restoration; exact Space reassignment after reboot is not an MVP guarantee.
+5. Each window contains a project/preset-set header, repository and session sidebar, group filter, terminal area, and project attention list. The user can view all groups or one group. Session context includes agent/preset, group, repository/worktree, and branch. Full names and paths remain available when labels truncate.
+6. Offer keyboard commands for new session, open project window, session switching/search, split/unsplit, terminal search, and next session needing attention. Terminal-focused key handling must preserve CLI controls such as interrupt and escape.
+7. Closing the window or its terminal tab removes a view. Stopping an agent is a separate, clearly named action. Background sessions remain accessible when no tab is open.
 
 **Acceptance:** Place the four defining project windows on separate Spaces. Start an agent in each, switch between them, and verify independent tabs, selection, and input. Closing one window leaves every process alive. Reopening that project reconnects without starting duplicates or replacing another project window.
 
