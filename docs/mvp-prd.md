@@ -4,7 +4,7 @@
 - Status: Product scope established through the founder interview; implementation choices and validation gates are identified below.
 - Platform: macOS
 - Initial audience: the developer's own daily use
-- Companion: [Project overview](overview.md)
+- Companions: [Project overview](overview.md), [Implementation plan](mvp-implementation-plan.md)
 
 ## 1. Problem and outcome
 

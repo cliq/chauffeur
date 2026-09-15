@@ -58,4 +58,4 @@ The background service owns agent processes and terminals independently of proje
 
 The MVP is a locally built app for personal use. It prioritizes correct profile selection, multiple project windows, reliable terminals, worktree management, and explicit agent delegation. Public distribution, a custom chat interface, a code editor, cloud execution, and autonomous team orchestration are later scope.
 
-The [detailed MVP PRD](mvp-prd.md) defines requirements, acceptance criteria, implementation validation, and delivery stages.
+The [detailed MVP PRD](mvp-prd.md) defines requirements, acceptance criteria, implementation validation, and delivery stages. The [implementation plan](mvp-implementation-plan.md) records the technical decisions and ordered work for delivering them.
