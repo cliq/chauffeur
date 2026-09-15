@@ -12,7 +12,7 @@ not a completed real-provider support matrix.
 | SwiftTerm | 1.20.0 | Pinned; native terminal views implemented and exercised by the Debug probe |
 | Hummingbird | 2.26.0 | Actual loopback MCP requests exercised with fixture credentials |
 | Codex | 0.154.0 | Three real sessions/two profiles; authenticated messages, native approvals/completion, scoped stop, explicit resume and runtime reconnect pass |
-| Claude Code | 2.1.272 | Help/flags observed; authenticated interactive/MCP validation pending |
+| Claude Code | 2.1.272 | Help/flags and isolated skill discovery/removal observed; both authorized clones report signed in; authenticated interactive/MCP validation pending |
 
 ## Capability behavior
 
@@ -29,5 +29,7 @@ or managed policy. Silence and output volume never set completion.
 
 The default Codex launch route has real credential and scoped-stop evidence.
 Full tool coverage and cross-provider acceptance remain open. See
-[V3](decisions/V3-mcp-and-status.md). The optional
-Chauffeur skill's loading/removal route is also still pending.
+[V3](decisions/V3-mcp-and-status.md). Both baseline CLIs pass native metadata
+discovery/isolation/removal checks for the optional
+[Chauffeur skill](coordination-skill.md). File installation status does not
+override CLI skill policies or establish model use of the guidance.

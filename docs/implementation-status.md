@@ -20,10 +20,15 @@ the PRD's real-CLI, native-window, and daily-use acceptance scenarios.
   line/byte budgets, and survive terminal/runtime loss. Native history is
   read-only and searchable; completed-message cleanup preserves queued/received
   messages. See [retention and recovery](terminal-history.md).
-- Twenty-four Swift tests: canonical paths/discovery, per-child environment, argument validation,
+- Twenty-eight Swift tests: canonical paths/discovery, per-child environment, argument validation,
   atomic file replacement/conflicts/corrupt files, durable group-scoped messages,
   grant revocation, retry keys, bounded single-level delegation, and safe Git
   worktree creation/removal.
+- Bundled coordination skill with explicit per-profile install/update/remove
+  controls, ownership/conflict checks, private files, and stale-review rejection.
+  Native Codex and Claude metadata fixtures prove profile-specific discovery and
+  removal. Delegated children discover their own IDs and can report results.
+  See [coordination skill](coordination-skill.md).
 - Periodic Git inventory reconciliation follows known worktree moves and branch
   changes, preserves base commits and launch paths, and distinguishes replacement
   checkouts. Launch/removal reservations cover pending sessions, additional
@@ -73,7 +78,7 @@ the PRD's real-CLI, native-window, and daily-use acceptance scenarios.
 | 3.1–3.3 Credentials/MCP/mailboxes | Ledger/HTTP fixtures; real Codex shared-profile credentials and messages | Full HTTP/client compliance; Claude shared-profile connections; remaining real tool cases |
 | 3.4 Delegation | Durable reservation, launch path, worktree default, limits, depth check, result transaction | Bidirectional real-CLI acceptance, crash-window integration tests and failed-child visibility audit |
 | 3.5 Wake | Bounded inbox wait; no terminal message injection | Real idle/busy validation (pending-attention UI implemented) |
-| 3.6–3.7 Coordination UI/skill | Tool descriptions and native message/delegation details implemented | Bundled skill and loading/install/removal routes |
+| 3.6–3.7 Coordination UI/skill | Tool descriptions, message/delegation details, bundled skill, explicit install/update/remove controls; native metadata discovery/isolation/removal fixture | Native control interaction and real model use of guidance; full F7 acceptance |
 | 4.1–4.5 Packaging/compatibility/retention/diagnostics/docs | Developer ID local builds; actual registration/update; retention settings/cleanup; diagnostics export; terminal, diagnostics and service recovery guides | Full release acceptance; native save-dialog interaction; remaining recovery guide |
 | 4.6 Release checklist | Not run | Ten real sessions/four Spaces, timings/hardware record, all F1–F7 scenarios, three normal workdays and failure log |
 

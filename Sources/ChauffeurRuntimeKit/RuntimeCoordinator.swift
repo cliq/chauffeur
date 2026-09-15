@@ -28,6 +28,7 @@ public actor RuntimeCoordinator {
     private var retentionSettingsPending = false
     private var lastMessageCleanup = Date.distantPast
     private var snapshotStorage = SnapshotStorageStatus(budgetBytes: RetentionSettings().snapshotBudgetBytes)
+    private var skillInstaller: SkillInstaller?
     public init(root: URL, ctlPath: String, environment: [String: String], logs: RuntimeLogStore? = nil, id: UUID = UUID()) throws {
         self.id = id
         self.logs = logs ?? (try? RuntimeLogStore(root: RuntimeLogStore.directory(for: root)))
@@ -239,6 +240,17 @@ public actor RuntimeCoordinator {
         case "hello", "version", "status": return health()
         case "snapshot": return try await snapshot()
         case "diagnostics": return try .from(await diagnostics())
+        case "skillDocument": return .string(String(decoding: try CoordinationSkill.bundled().document, as: UTF8.self))
+        case "skillStatus", "installSkill", "removeSkill":
+            let presetID = try params.uuid("presetID")
+            let snapshot = await store.reload()
+            guard let preset = snapshot.presets.first(where: { $0.value.id == presetID })?.value else { throw ChauffeurError("missing_preset", "Preset no longer exists") }
+            if skillInstaller == nil { skillInstaller = SkillInstaller(skill: try CoordinationSkill.bundled()) }
+            let installer = skillInstaller!
+            if request.method == "skillStatus" { return try .from(await installer.status(directory: preset.configurationDirectory)) }
+            let revision = try params.requiredString("revision")
+            if request.method == "installSkill" { return try .from(await installer.install(directory: preset.configurationDirectory, revision: revision)) }
+            return try .from(await installer.remove(directory: preset.configurationDirectory, revision: revision))
         case "terminalSnapshot":
             let sessionID = try params.uuid("sessionID")
             guard sessions[sessionID] != nil else { throw ChauffeurError("missing_session", "Session not found") }
@@ -469,10 +481,12 @@ public actor RuntimeCoordinator {
         case "chauffeur_discover":
             let snapshot = await store.current()
             guard let project = snapshot.projects.first(where: { $0.value.id == caller.scope.projectID })?.value else { throw ChauffeurError("project_unavailable", "Project metadata is unavailable") }
-            let peers = try await ledger.peers(caller).map { session -> JSONValue in
+            let members = try await ledger.peers(caller)
+            let current = members.first { $0.id == caller.sessionID }
+            let peers = members.map { session -> JSONValue in
                 .object(["id": .string(session.id.uuidString), "title": .string(session.title), "status": .string(session.state.label), "workingDirectory": .string(session.launch.workingDirectory), "preset": .string(session.launch.preset.name), "parentID": session.parentID.map { .string($0.uuidString) } ?? .null])
             }
-            return .object(["sessionID": .string(caller.sessionID.uuidString), "projectID": .string(project.id.uuidString), "project": .string(project.name), "groupID": .string(caller.scope.groupID.uuidString), "group": .string(project.groups.first { $0.id == caller.scope.groupID }?.name ?? "Unavailable"), "repositories": try .from(project.folders.filter(\.registered)), "presets": .array(snapshot.presets.filter { $0.value.setID == project.presetSetID && !$0.value.archived }.map { .object(["id": .string($0.value.id.uuidString), "name": .string($0.value.name), "kind": .string($0.value.kind.rawValue)]) }), "peers": .array(peers)])
+            return .object(["sessionID": .string(caller.sessionID.uuidString), "parentID": current?.parentID.map { .string($0.uuidString) } ?? .null, "delegationID": current?.delegationID.map { .string($0.uuidString) } ?? .null, "projectID": .string(project.id.uuidString), "project": .string(project.name), "groupID": .string(caller.scope.groupID.uuidString), "group": .string(project.groups.first { $0.id == caller.scope.groupID }?.name ?? "Unavailable"), "repositories": try .from(project.folders.filter(\.registered)), "presets": .array(snapshot.presets.filter { $0.value.setID == project.presetSetID && !$0.value.archived }.map { .object(["id": .string($0.value.id.uuidString), "name": .string($0.value.name), "kind": .string($0.value.kind.rawValue)]) }), "peers": .array(peers)])
         case "chauffeur_send_message":
             return try .from(await ledger.send(caller: caller, recipientID: arguments.uuid("recipientID"), body: arguments.requiredString("body"), references: arguments["references"].array.compactMap(\.string), retryKey: arguments.requiredString("retryKey")))
         case "chauffeur_inbox":

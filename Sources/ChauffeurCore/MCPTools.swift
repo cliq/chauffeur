@@ -29,7 +29,7 @@ public enum MCPTools {
             ])])
         }
         return [
-            tool("chauffeur_discover", "Discover your authenticated project/group, registered repository paths and same-group sessions. Group membership is enforced by the server. Shared paths do not provide file isolation.", [:], []),
+            tool("chauffeur_discover", "Discover your authenticated session, parentID and delegationID (null for a user-created session), project/group, registered repository paths, presets and same-group sessions. Use your delegationID to report a delegated result. Group membership is enforced by the server. Shared paths do not provide file isolation.", [:], []),
             tool("chauffeur_send_message", "Durably queue a message for a same-group session, including explicit context references. Supply a stable retryKey and reuse it only for the identical message. Queued does not mean read. Never paste messages into a terminal.", ["recipientID": string, "body": string, "references": strings, "retryKey": string], ["recipientID", "body", "retryKey"]),
             tool("chauffeur_inbox", "Read your own queued/received messages, optionally wait up to 25 seconds, and acknowledge IDs after processing them. Busy or exited recipients retain their inbox. Waiting does not submit terminal input.", ["waitSeconds": .object(["type": .string("integer"), "minimum": .number(0), "maximum": .number(25)]), "acknowledge": strings], []),
             tool("chauffeur_reply", "Reply to a message received by this session. The server attributes the reply to you and routes it to the original sender in your group.", ["messageID": string, "body": string, "references": strings, "retryKey": string], ["messageID", "body", "retryKey"]),

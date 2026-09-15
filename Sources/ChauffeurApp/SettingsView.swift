@@ -8,6 +8,7 @@ struct SettingsView: View {
     @State private var editedSet: PresetSet?
     @State private var newPreset = false
     @State private var editedPreset: AgentPreset?
+    @State private var skillPreset: AgentPreset?
     @State private var retention = RetentionSettings()
     var body: some View {
         TabView {
@@ -29,6 +30,8 @@ struct SettingsView: View {
                             VStack(alignment: .leading, spacing: 5) {
                                 HStack { Text(preset.name).fontWeight(.semibold); Text(preset.kind == .codex ? "Codex" : "Claude Code").foregroundStyle(.secondary); if preset.archived { Text("Archived").font(.caption) }; Spacer(); Button("Edit…") { editedPreset = preset } }
                                 Text(preset.configurationDirectory).font(.caption).textSelection(.enabled)
+                                Button("Chauffeur Skill…") { skillPreset = preset }
+                                    .accessibilityIdentifier("preset-skill-\(preset.id.uuidString)")
                                 if model.presets.filter({ Paths.canonical($0.configurationDirectory) == Paths.canonical(preset.configurationDirectory) }).count > 1 { Label("Configuration directory shared by multiple presets", systemImage: "person.2").font(.caption).foregroundStyle(.secondary) }
                                 if set.defaultPresetID == preset.id { Text("Default preset").font(.caption).foregroundStyle(.tint) }
                             }.padding(.vertical, 6)
@@ -65,6 +68,7 @@ struct SettingsView: View {
             .sheet(item: $editedSet) { set in PresetSetEditor(presetSet: set) { id in selectedSet = id; editedSet = nil } }
             .sheet(isPresented: $newPreset) { if let selectedSet { PresetEditor(setID: selectedSet) } }
             .sheet(item: $editedPreset) { preset in PresetEditor(setID: preset.setID, preset: preset) }
+            .sheet(item: $skillPreset) { preset in CoordinationSkillView(preset: preset) }
     }
 }
 

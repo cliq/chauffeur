@@ -24,6 +24,7 @@ public enum DiagnosticCode: String, Codable, Sendable {
     case unknown_event, unknown_method, unknown_terminal_command, unknown_tool, unmanaged_path
     case unreadable_directory, unresolved_preset_set, unsupported_directories, usage, version_failed
     case working_directory, worktree_busy, worktree_unavailable
+    case skill_bundle, skill_busy, skill_conflict, skill_unavailable
 
     public static func redacting(_ value: String?) -> Self { value.flatMap(Self.init(rawValue:)) ?? .operation_failed }
 }

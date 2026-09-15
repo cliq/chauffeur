@@ -26,14 +26,16 @@ logins and contain distinct account-context IDs. Three real Codex sessions,
 including two sharing one profile, completed authenticated message operations,
 explicit resume and runtime restart checks. See [V3](V3-mcp-and-status.md).
 
-Claude's original profiles report signed-in accounts; their directory clones do
-not. Their matching macOS Keychain records are outside the directory copies.
-Permission to copy those two records into the private clones is pending. The
-application itself still does not copy credentials or change native profiles.
+Claude's directory copies initially lacked their matching macOS Keychain
+credentials. After separate explicit authorization on 2026-09-15, those two
+records were copied into private `0600` credential files in the test clones.
+Both clones now report signed in; credential values were omitted from output.
+The application itself does not copy credentials. Skill installation is a
+separate explicit action that changes only namespaced guidance files.
 See Claude's [credential storage documentation](https://code.claude.com/docs/en/authentication#credential-management)
 for its macOS Keychain and private-file fallback routes.
 
-Native account/usage display, Claude authentication and provider-specific
+Native account/usage display, authenticated Claude sessions and provider-specific
 settings remain acceptance gates. A directory label alone is not evidence of an
 authenticated account. The default Codex launch route now has real credential
 and scoped-stop evidence; alternate daemon/remote routes are not claimed.

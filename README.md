@@ -66,6 +66,11 @@ native probe uses the built Debug app and stores reports/images under
 `.build/native-probe-artifacts/`. Xcode also includes `ChauffeurAppUITests` for
 OS-driven UI testing, which requires macOS automation access.
 
+`python3 Prototypes/skill_installation.py` checks the real CLIs' skill metadata
+using fresh fixture profiles, with no inference prompt. See the
+[coordination skill guide](docs/coordination-skill.md) for scope and installation
+checks.
+
 The separate real-provider check requires two existing authenticated **test
 clones**, with unrelated hooks/plugins/MCP servers disabled. It sends six small
 fixture messages using the profiles' native model settings and grants one-time
@@ -90,6 +95,10 @@ shared diagnostics. See [V3](docs/decisions/V3-mcp-and-status.md) for verified s
    additional repository paths. Shared checkouts require an explicit choice.
 4. Use tabs and a two-pane split to work with terminals. Session Details shows
    launch paths, process identity, messages, delegations, and stop/resume actions.
+
+Optionally install the [Chauffeur coordination skill](docs/coordination-skill.md)
+from **Settings → Presets → Chauffeur Skill…**. Installation applies to all
+sessions using that profile and can be removed from the same sheet.
 
 Closing a terminal tab, project window, or quitting the UI keeps agents running.
 Stop Session ends an execution. Resume Conversation uses its recorded native ID

@@ -15,7 +15,7 @@ let package = Package(
         .package(url: "https://github.com/hummingbird-project/hummingbird.git", exact: "2.26.0")
     ],
     targets: [
-        .target(name: "ChauffeurCore", dependencies: ["CChauffeur"]),
+        .target(name: "ChauffeurCore", dependencies: ["CChauffeur"], resources: [.copy("Resources/Skills")]),
         .systemLibrary(name: "CSQLite", pkgConfig: "sqlite3"),
         .target(name: "CChauffeur", publicHeadersPath: "include"),
         .target(name: "ChauffeurRuntimeKit", dependencies: ["ChauffeurCore", "CSQLite", "CChauffeur", .product(name: "Hummingbird", package: "hummingbird")]),

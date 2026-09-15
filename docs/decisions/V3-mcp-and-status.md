@@ -57,4 +57,18 @@ only the redacted summary is suitable for sharing.
 
 ## Skill loading
 
-Planned Claude route: bundle a namespaced plugin skill and load using `--plugin-dir`, verified in installed help. Planned Codex route: a namespaced directory under documented user `.agents/skills` discovery with explicit install/removal controls. Neither route is implemented or validated yet. Tool descriptions already explain the essential workflow without a skill.
+The optional versioned skill is bundled and explicitly installed into the
+selected profile's `skills/chauffeur` directory. Native Codex 0.154.0 and Claude
+Code 2.1.272 metadata checks prove discovery in profile A, absence in profile B,
+and removal. Codex was also checked with the authorized profile clones. The
+Claude check uses normal discovery; its `--bare` metadata catalog was empty
+and does not establish normal loading behavior.
+
+Settings provides review/install/update/remove controls. Receipts and content
+hashes prevent replacing or deleting edited or unmanaged files. Status checks
+are read-only; stale reviews reject mutations after path or version changes.
+The guidance is generic, shared by sessions using that profile, and optional.
+Discovery now exposes the authenticated caller's parent/delegation IDs so a
+child can report its result. Full model-driven acceptance remains open.
+See [the skill guide](../coordination-skill.md) for loading sources, limitations,
+recovery and the reproducible native/IPC fixture.
