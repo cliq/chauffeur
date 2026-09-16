@@ -37,10 +37,10 @@ import ChauffeurCore
             CommandGroup(after: .windowArrangement) {
                 Button("Welcome to Chauffeur") { openWindow(id: "welcome") }.keyboardShortcut("0", modifiers: [.command, .shift])
             }
-            CommandGroup(before: .appTermination) {
-                Button("Stop All Sessions and Quit…") { model.stopAllPresented = true }
-            }
             CommandGroup(replacing: .appTermination) {
+                Button("Stop All Sessions and Quit…") { model.confirmStopAllAndQuit() }
+                    .disabled(model.stopAllPresented || model.isStoppingAll)
+                Divider()
                 Button("Quit Chauffeur") { model.quit() }.keyboardShortcut("q")
             }
             CommandGroup(replacing: .help) {
@@ -89,19 +89,5 @@ struct AppAlerts: ViewModifier {
         }.alert("Chauffeur", isPresented: Binding(get: { model.error != nil }, set: { if !$0 { model.error = nil } })) {
             Button("OK") { model.error = nil }
         } message: { Text(model.error ?? "") }
-        .sheet(isPresented: $model.stopAllPresented) {
-            VStack(alignment: .leading, spacing: 16) {
-                Text("Stop all sessions and quit?").font(.title2)
-                Text("These executions will receive a graceful stop request:")
-                List(model.snapshot.sessions.filter { $0.state.isLive }) { session in
-                    Text("\(model.project(session.projectID)?.name ?? "Project unavailable") · \(session.title)")
-                }.frame(height: 220)
-                HStack {
-                    Button("Cancel") { model.stopAllPresented = false }.keyboardShortcut(.cancelAction)
-                    Spacer()
-                    Button("Stop All and Quit", role: .destructive) { model.stopAllPresented = false; model.stopAllAndQuit() }
-                }
-            }.padding(24).frame(width: 530)
-        }
     }
 }

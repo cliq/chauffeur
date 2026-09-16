@@ -61,6 +61,36 @@ temporary launch payload and terminal before releasing the launch reservation.
 Stopping an already-running process still uses graceful termination, with the
 existing Force Stop action available if it does not exit.
 
+### Stop all sessions and quit
+
+Choose **Chauffeur → Stop All Sessions and Quit…** to review the active executions
+across every project. One confirmation lists the targets. **Cancel** leaves them
+running. Confirmation sends graceful stops to the listed targets, then quits the
+UI only after they have stopped. A session started after the confirmation opened
+is outside that target list.
+
+If an execution refuses to stop, Chauffeur stays open and reports that it is still
+stopping. Open its **Session Details**, choose **Force Stop…**, review that
+confirmation, and retry Stop All or use normal Quit. The background service stays
+available after the UI quits. Stop All is also available with all project windows
+closed; normal **Quit Chauffeur** continues to leave agents running.
+
+`Prototypes/session_controls_smoke.py` verifies these controls through macOS
+Accessibility in an isolated signed Debug app. It reproduced the missing menu
+item and duplicate confirmation sheets before their fixes. The check covers
+individual Stop/Force Stop cancellation and confirmation, one Stop All dialog
+across two windows, fixed confirmation targets, an agent ignoring graceful stop,
+and successful Stop All after every project window closes. It also checks
+immutable launch details after a shared preset edit, sidebar search, new-session
+and open-project commands, and cycling all three attention items. Invalid
+executables produce failed records without processes. Evidence:
+`.build/session-controls-artifacts/`.
+
+A separate read-only check of the existing real exited Claude session verifies
+the displayed preset/revision, configuration/working paths, and expanded launch
+snapshot against its stored record. The record and prior window visibility are
+unchanged afterward. Private evidence: `.local/session-details-native/`.
+
 Terminal inventory and saved-screen metadata use printable separators so they
 work with a minimal login environment and the C locale. Unreadable inventory
 produces a service error; it is not interpreted as proof that all agents exited.

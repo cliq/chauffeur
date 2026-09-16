@@ -102,7 +102,8 @@ struct AppSnapshot: Decodable, Sendable {
     private var serviceDiagnosticError: NSError?
     private(set) var initialServiceStatus: Int?
     @Published var error: String?
-    @Published var stopAllPresented = false
+    @Published private(set) var stopAllPresented = false
+    @Published private(set) var isStoppingAll = false
     @Published var openProjects = Set<UUID>()
     var isTerminating = false
     let socketPath: String
@@ -356,14 +357,30 @@ struct AppSnapshot: Decodable, Sendable {
         windowVersions[id] = snapshot.store.windows.first { $0.value.id == id }?.version
         windowConflicts.remove(id)
     }
-    func stopAllAndQuit() {
-        let targets = snapshot.sessions.filter { $0.state.isLive }.map(\.id)
-        perform {
-            for id in targets { _ = try await self.call("stop", .object(["sessionID": .string(id.uuidString), "force": .bool(false)])) }
-            try await Task.sleep(for: .seconds(1)); try await self.refresh()
-            let remaining = self.snapshot.sessions.filter { targets.contains($0.id) && $0.state.isLive }
-            guard remaining.isEmpty else { throw ChauffeurError("sessions_still_running", "Some sessions are still stopping. Use Force stop in their details, then quit") }
-            self.quit()
+    func confirmStopAllAndQuit() {
+        guard !stopAllPresented, !isStoppingAll else { return }
+        let targets = snapshot.sessions.filter { $0.state.isLive }.map {
+            StopAllConfirmation.Target(id: $0.id, label: "\(project($0.projectID)?.name ?? "Project unavailable") · \($0.title)")
+        }
+        stopAllPresented = true
+        StopAllConfirmation.show(targets: targets) { [weak self] confirmed in
+            guard let self else { return }
+            self.stopAllPresented = false
+            if confirmed { self.stopAllAndQuit(targets: targets.map(\.id)) }
+        }
+    }
+    private func stopAllAndQuit(targets: [UUID]) {
+        guard !isStoppingAll else { return }
+        isStoppingAll = true
+        Task {
+            defer { isStoppingAll = false }
+            do {
+                for id in targets { _ = try await call("stop", .object(["sessionID": .string(id.uuidString), "force": .bool(false)])) }
+                try await Task.sleep(for: .seconds(1)); try await refresh()
+                let remaining = snapshot.sessions.filter { targets.contains($0.id) && $0.state.isLive }
+                guard remaining.isEmpty else { throw ChauffeurError("sessions_still_running", "Some sessions are still stopping. Use Force Stop in their details, then quit") }
+                quit()
+            } catch { StopAllConfirmation.failure(error.localizedDescription) }
         }
     }
     func finishPendingWindowWrites() async {

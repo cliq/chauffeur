@@ -118,11 +118,11 @@ struct ProjectWindow: View {
                 switch command {
                 case "new-session": showLaunch()
                 case "split": layout.toggleSplit()
-                case "search-sessions": searchFocused = true
+                case "search-sessions": layout.state.sidebarVisible = true; searchFocused = true
                 case "find": if let id = layout.state.selectedSessionID { layout.controllers[id]?.find() }
                 case "next": cycle(1)
                 case "previous": cycle(-1)
-                case "attention": if let next = sessions.first(where: { $0.needsAttention && $0.id != layout.state.selectedSessionID }) ?? sessions.first(where: \.needsAttention) { select(next.id) }
+                case "attention": nextAttention()
                 default: break
                 }
             }
@@ -319,6 +319,12 @@ struct ProjectWindow: View {
         guard !layout.state.tabs.isEmpty else { return }
         let current = layout.state.tabs.firstIndex { $0 == layout.state.selectedSessionID } ?? 0
         select(layout.state.tabs[(current + offset + layout.state.tabs.count) % layout.state.tabs.count])
+    }
+    private func nextAttention() {
+        let attention = sessions.filter(\.needsAttention)
+        guard !attention.isEmpty else { return }
+        let next = attention.firstIndex { $0.id == layout.state.selectedSessionID }.map { ($0 + 1) % attention.count } ?? 0
+        select(attention[next].id)
     }
 }
 

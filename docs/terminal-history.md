@@ -15,6 +15,10 @@ terminal still exists. Typing or pasting into history does not send agent input.
 | Command-F | Open saved history and its Find field. Search covers normal scrollback and the captured active screen. |
 | Command-Shift-] / Command-Shift-[ | Select the next / previous session tab. |
 | Command-D | Show or hide a second terminal pane. Two open session tabs are required to split. |
+| Command-K | Reveal the sidebar and focus session search in the active project. |
+| Command-Shift-A | Cycle through every session needing attention in the current project/group/search view. |
+| Command-N | Open the New Session sheet for the active project. |
+| Command-Shift-O | Open the Welcome window to choose another project. |
 | Control-C / Escape | Pass the key to the focused live CLI. The CLI decides whether to interrupt, cancel a prompt, or exit. |
 | Command-Q | Quit Chauffeur's UI while its agents keep running. |
 | Command-click | Open an ordinary URL or an explicit terminal hyperlink in its associated app. |

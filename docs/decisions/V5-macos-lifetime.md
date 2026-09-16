@@ -105,6 +105,17 @@ The probe drives native view methods directly. Its cached-view images can show
 terminal pixels but do not reliably capture every layer of a SwiftUI window.
 They do not establish OS keyboard, accessibility, notification, or Spaces behavior.
 
+`Prototypes/session_controls_smoke.py` adds OS-driven checks of two project
+windows. It verifies session details, Stop/Force Stop confirmations, one app-wide
+Stop All confirmation, cancellation, fixed target ownership, and recovery from
+a process refusing graceful stop. Stop All also works with every project window
+closed. The app stays open on a failed stop and keeps its runtime after a
+successful Stop All/Quit. Native shortcuts cover New Session, Open Project,
+search with a hidden sidebar, and a full three-item attention cycle. These checks
+found and fixed a missing Stop All menu item, duplicate sheets, hidden search,
+and attention cycling that previously skipped the third item. The existing
+terminal-controls regression still verifies normal Command-Q preserves agents.
+
 ## OS automation attempt
 
 The Xcode `ChauffeurAppUITests` target builds. Its runner requires hardened

@@ -98,6 +98,18 @@ unverified real-CLI or native behavior; deferred workload checks remain unverifi
   app-wide selection. Four isolated native app launches verify persistence,
   window/terminal default colors, cursor contrast, newly created terminals, and
   preservation of existing text in terminal and history buffers.
+- [Session and quit controls](service-recovery.md#stop-all-sessions-and-quit)
+  pass through native OS actions across two project windows. Stop/Force Stop
+  cancellation and confirmation, one Stop All dialog with fixed targets,
+  resistant-process recovery, and Stop All with every project window closed
+  pass. The check fixed a missing menu item and duplicate sheets. Command-K now
+  reveals a hidden sidebar, and Next Attention cycles all items instead of
+  alternating between the first two. New-session/open-project shortcuts,
+  immutable preset details after edits, and missing-executable failure without
+  process creation pass. A real exited session's details and expanded launch
+  snapshot also match its stored metadata. Evidence:
+  `.build/session-controls-artifacts/` and `.local/session-details-native/`.
+  Normal Command-Q/terminal controls still pass; these app fixes await Release.
 - [Terminal folder routing](terminal-launcher.md) passes native cold/warm launch,
   folder selection, shared-project choice, repeated-route and service-loss layout
   recovery checks. Startup subscriptions wait for helper registration refresh;
@@ -186,12 +198,12 @@ unverified real-CLI or native behavior; deferred workload checks remain unverifi
 | Stage 0 V1–V5 | Decision documents; V1 terminal continuity with real native CLI reattachment and bounded fixture history; real default-route Codex credential/stop evidence; actual LaunchAgent lifecycle | Remaining profile, status, and focused macOS checks; coordination and final Spaces workload are in V2 |
 | 1.1 Records/store | Atomic writes, reference/ownership diagnostics, external-edit conflicts, preset revision tracking, last-used preference, empty-set UI/runtime checks, and targeted filesystem watching with recovery pass | — |
 | 1.2 Runtime skeleton | Lock, peer-checked Unix socket, version handshake, health helper, verified bundled LaunchAgent registration/recovery; bounded structured logs with typed redaction | Remaining live-service release acceptance |
-| 1.3–1.7 Presets/projects/groups/welcome/windows | Native editors, cancellable discovery, relink/archive, welcome and project windows implemented | Remaining editor/window interaction checks; final four-Spaces workload is in V2 |
+| 1.3–1.7 Presets/projects/groups/welcome/windows | Native editors, cancellable discovery, relink/archive, welcome and project windows implemented; OS-driven window/search/new-session/attention commands pass | Remaining editor interaction checks; final four-Spaces workload is in V2 |
 | 1.8 Basic launch | Real Codex/Claude launch, filtered environment, private exec handoff, terminal input/resize/stop; cancellable launch/resume with terminal cleanup; Claude native account/process configuration checks | Full native account/status checks, distinct-Claude-account check, complete preflight |
-| 1.9 Session details | Native details show the immutable launch snapshot and lifecycle/coordination records | Real-session interaction acceptance |
+| 1.9 Session details | Native immutable context after preset edits, individual execution controls, and a real saved session's expanded launch snapshot match the stored record | Ship ended-execution help text in the next Release |
 | 2.1 Screen/history | tmux live state; bounded persisted snapshots, disk cleanup, native history/search; real Codex/Claude native attach, Unicode, clipboard and reply search; native link/mouse forwarding and 60,000-line retention/recovery pass | Ship hyperlink capability fix in the next Release |
 | 2.2 Reconnect | Positive pane/process reconciliation; real Codex/Claude explicit native-ID resume and MCP reconnect | Remaining service-failure edge cases and full native acceptance |
-| 2.3–2.4 Quit/tabs/split | Native tabs/split, window-state writes, quit/stop-all and keyboard commands implemented; OS switching/split/quit shortcuts pass with fixtures; real Codex/Claude normal and forced UI quit preserve process and draft through reattachment | Remaining window-command and Stop All confirmation interactions; final Spaces workload is in V2 |
+| 2.3–2.4 Quit/tabs/split | Native tabs/split, window-state writes and OS keyboard commands pass; real Codex/Claude normal/forced UI quit preserve process and draft; native Stop All confirmation/cancellation, fixed targets, resistant-stop recovery and no-window operation pass | Ship control fixes in the next Release; final Spaces workload is in V2 |
 | 2.5 Worktrees | Create/list/safe-remove; periodic external inventory; identity-based moves/replacements; pending launch/removal and metadata-write reservations; legacy migration fixtures and real Codex/Claude repository-relocation, replacement/resume, and removal checks; native manager controls and concurrent registration pass | Ship manager fixes in the next Release |
 | 2.6 Multiple repos | Explicit additional folder selection in launch API; primary main checkout excluded | Real CLI access test (shared-checkout warning and explicit additional-folder UI implemented) |
 | 2.7 Status/attention | Lifecycle records, real Codex/Claude completion IDs, permission attention hooks, unread/pending counts; optional durable notifications; actual Notification Center delivery/cold click and enabled-helper recovery/update pass | Remaining native attention signals; transient banners/alternate Focus settings unverified |

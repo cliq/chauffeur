@@ -36,7 +36,7 @@ struct SessionDetailsView: View {
                     } else if session.nativeConversationID != nil {
                         Button("Resume Conversation") { model.perform { _ = try await model.call("resume", .object(["sessionID": .string(session.id.uuidString)])) } }
                     }
-                    Text("Closing the terminal view keeps this execution running. Stopping a parent preserves its children and their work.").font(.caption).foregroundStyle(.secondary)
+                    Text(session.state.isLive ? "Closing the terminal view keeps this execution running. Stopping a parent preserves its children and their work." : "This execution has ended. Its launch settings and saved terminal history remain available.").font(.caption).foregroundStyle(.secondary)
                     if session.launch.preset.integration != .supported {
                         Text(session.launch.preset.integration == .unavailable ? "Coordination and semantic status are unavailable in basic terminal mode." : "CLI coordination is under validation. Fine-grained activity may be unknown; terminal silence is not completion.").font(.caption).foregroundStyle(.secondary)
                     }

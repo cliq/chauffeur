@@ -32,6 +32,15 @@ func describe(_ element: AXUIElement) -> [String: Any] {
     return result
 }
 var queue = [application], elements: [AXUIElement] = []
+if request["windowTitle"] != nil || request["windowIdentifier"] != nil {
+    let windows = attribute(application, kAXWindowsAttribute) as? [AXUIElement] ?? []
+    let matches = windows.filter {
+        if let identifier = request["windowIdentifier"] as? String { return attribute($0, kAXIdentifierAttribute) as? String == identifier }
+        return attribute($0, kAXTitleAttribute) as? String == request["windowTitle"] as? String
+    }
+    guard matches.count == 1 else { print("{\"error\":\"Expected one matching window\"}"); exit(1) }
+    queue = matches
+}
 while !queue.isEmpty, elements.count < 1500 {
     let element = queue.removeFirst()
     guard !elements.contains(where: { CFEqual($0, element) }) else { continue }
@@ -47,6 +56,9 @@ let pid = Int32(request["pid"] as! Int)
 func focus(_ element: AXUIElement) -> Bool {
     NSRunningApplication(processIdentifier: pid)?.activate()
     AXUIElementSetAttributeValue(application, kAXFrontmostAttribute as CFString, kCFBooleanTrue)
+    if let window = attribute(element, kAXWindowAttribute), CFGetTypeID(window as CFTypeRef) == AXUIElementGetTypeID() {
+        AXUIElementPerformAction(window as! AXUIElement, kAXRaiseAction as CFString)
+    }
     for _ in 0..<30 {
         AXUIElementSetAttributeValue(element, kAXFocusedAttribute as CFString, kCFBooleanTrue)
         if let current = attribute(application, kAXFocusedUIElementAttribute), CFEqual(current as CFTypeRef, element) { return true }
