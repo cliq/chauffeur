@@ -130,6 +130,13 @@ unverified real-CLI or native behavior; deferred workload checks remain unverifi
   folder selection, shared-project choice, repeated-route and service-loss layout
   recovery checks. Startup subscriptions wait for helper registration refresh;
   writes that could not connect retain their queued window state.
+- App-wide errors now use one native dialog owner. A native unregistered-folder
+  route reproduced three simultaneous dialogs before the fix. Repeated errors
+  now coalesce, distinct errors remain queued, and the same error can be shown
+  again after dismissal. Session/stop/window/attention controls still pass, with
+  every fixture agent preserved through error dismissal. Evidence:
+  `.build/app-errors-before-fix.log` and `.build/app-errors-session-controls.log`.
+  This fix is in the signed Debug build, awaiting the next Release.
 - Release startup now verifies an actual visible GUI window in an isolated copy.
   Fixed a case-insensitive filename collision where embedding `chauffeur`
   overwrote `Chauffeur`; the embedded launcher is now `chauffeur-launcher`, with

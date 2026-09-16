@@ -8,7 +8,7 @@ import ChauffeurCore
     @Environment(\.openWindow) private var openWindow
     var body: some Scene {
         Window("Welcome to Chauffeur", id: "welcome") {
-            WelcomeView().modifier(AppAlerts()).environmentObject(model)
+            WelcomeView().modifier(AppWindowSetup()).environmentObject(model)
         }
         .defaultSize(width: 820, height: 500)
         .windowResizability(.contentMinSize)
@@ -16,7 +16,7 @@ import ChauffeurCore
         .restorationBehavior(.disabled)
         WindowGroup("Project", id: "project", for: UUID.self) { $projectID in
             if let projectID {
-                ProjectWindow(projectID: projectID).modifier(AppAlerts()).environmentObject(model)
+                ProjectWindow(projectID: projectID).modifier(AppWindowSetup()).environmentObject(model)
             }
         }
         .defaultSize(width: 1240, height: 820)
@@ -47,7 +47,7 @@ import ChauffeurCore
                 Button("Chauffeur Help") { openWindow(id: "help") }
             }
         }
-        Settings { SettingsView().modifier(AppAlerts()).environmentObject(model) }
+        Settings { SettingsView().modifier(AppWindowSetup()).environmentObject(model) }
             .defaultSize(width: 830, height: 550)
             .windowResizability(.contentMinSize)
         Window("Chauffeur Help", id: "help") {
@@ -66,7 +66,11 @@ import ChauffeurCore
 
 @MainActor final class AppDelegate: NSObject, NSApplicationDelegate {
     let model = AppModel()
-    func applicationDidFinishLaunching(_ notification: Notification) { model.start() }
+    private var errors: AppErrorPresenter?
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        errors = AppErrorPresenter(model: model)
+        model.start()
+    }
     func application(_ application: NSApplication, open urls: [URL]) {
         for url in urls { model.openSessionURL(url) }
     }
@@ -78,7 +82,7 @@ import ChauffeurCore
 }
 extension Notification.Name { static let chauffeurCommand = Notification.Name("ChauffeurCommand") }
 
-struct AppAlerts: ViewModifier {
+struct AppWindowSetup: ViewModifier {
     @EnvironmentObject private var model: AppModel
     @Environment(\.openWindow) private var openWindow
     func body(content: Content) -> some View {
@@ -86,8 +90,6 @@ struct AppAlerts: ViewModifier {
             model.openProjectWindow = { id in openWindow(id: "project", value: id) }
             model.openWelcomeWindow = { openWindow(id: "welcome") }
             model.processPendingRoute()
-        }.alert("Chauffeur", isPresented: Binding(get: { model.error != nil }, set: { if !$0 { model.error = nil } })) {
-            Button("OK") { model.error = nil }
-        } message: { Text(model.error ?? "") }
+        }
     }
 }

@@ -123,6 +123,15 @@ an embedded helper changed and Xcode skipped signing the outer bundle.
 
 ## Inspecting health
 
+App-wide errors have one native dialog owner. An error appears once even with
+several project windows and Welcome open. Repeats of the currently displayed
+error coalesce; distinct errors wait until the current dialog is dismissed.
+Reporting the same error again after dismissal still presents it. A native
+regression routes two unregistered fixture folders while two project windows
+are open. It reproduced three dialogs for one error before the fix, and now
+verifies one dialog, ordered errors, and unchanged live sessions. Evidence:
+`.build/app-errors-before-fix.log` and `.build/app-errors-session-controls.log`.
+
 ```sh
 .build/debug/chauffeurctl status
 launchctl print gui/$(id -u)/dev.chauffeur.runtime

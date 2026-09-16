@@ -176,6 +176,33 @@ with tempfile.TemporaryDirectory(prefix='chauffeur-session-controls-', dir='/tmp
         terminal_b = 'terminal-' + resistant['id']
         wait_for(lambda: control(terminal_id) and 'Chauffeur fixture' in control(terminal_id)['value'], 'first terminal ready')
         ax('key', terminal_id, keyCode=53)
+        # One shared error must not create a sheet in every project and Welcome
+        # window. Repeated errors coalesce while distinct errors remain queued.
+        unregistered = [root / ('unregistered-' + name) for name in ['one', 'two']]
+        for folder in unregistered: folder.mkdir()
+        def open_unregistered(folder):
+            subprocess.run([str(binary_dir / 'chauffeur-launcher'), str(folder)], capture_output=True, check=True)
+        def error_buttons():
+            return [c for c in controls() if c['role'] == 'AXButton' and 'OK' in [c['label'], c['title']]]
+        open_unregistered(unregistered[0])
+        wait_for(lambda: str(unregistered[0]) in text_values() and error_buttons(), 'folder routing error')
+        time.sleep(.4)
+        assert len(error_buttons()) == 1, 'An app error must have one dialog across all windows'
+        open_unregistered(unregistered[0])
+        open_unregistered(unregistered[1])
+        time.sleep(.4)
+        assert len(error_buttons()) == 1 and str(unregistered[1]) not in text_values(), 'A second error must wait for the first'
+        ax('press', title='OK')
+        wait_for(lambda: str(unregistered[1]) in text_values() and len(error_buttons()) == 1, 'next queued error')
+        ax('press', title='OK')
+        wait_for(lambda: not error_buttons(), 'errors dismissed once each')
+        open_unregistered(unregistered[0])
+        wait_for(lambda: str(unregistered[0]) in text_values() and len(error_buttons()) == 1, 'same error can be reported again after dismissal')
+        ax('press', title='OK')
+        wait_for(lambda: not error_buttons(), 'repeated error dismissed')
+        ax('closeWindow', title='Welcome to Chauffeur', role='AXWindow')
+        assert live_ids() == {session_id, second['id'], resistant['id']}
+        ax('key', terminal_id, keyCode=53)
         # Details must keep the launch snapshot after the shared preset is edited.
         stored = next(p for p in call('snapshot')['store']['presets'] if p['value']['id'] == preset_id)
         changed = dict(stored['value'], name='Edited preset name')
@@ -275,6 +302,7 @@ with tempfile.TemporaryDirectory(prefix='chauffeur-session-controls-', dir='/tmp
         assert not live_ids()
         assert call('status')['runtimeID'] == session['runtimeID']
         report = {'passed': True, 'immutableSessionDetails': True, 'individualStopCancelAndConfirm': True,
+                  'oneAppErrorAcrossWindows': True, 'repeatedErrorsCoalesce': True, 'distinctErrorsQueued': True,
                   'forceStopCancelAndConfirm': True, 'searchAndNewSessionCommands': True, 'openProjectWindowCommand': True,
                   'nextAttentionCyclesAllItems': True, 'missingExecutableDoesNotSpawn': True,
                   'oneStopAllConfirmation': True, 'stopAllCancelPreservesAgents': True,
