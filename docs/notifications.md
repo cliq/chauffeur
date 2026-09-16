@@ -5,6 +5,13 @@ Notifications are off by default. In **Chauffeur → Settings → Runtime**, ena
 macOS permission prompt. If access was denied, change it in System Settings →
 Notifications. Focus and other macOS settings can silence alerts.
 
+Once connected, **Send Test Notification** sends a sample alert for the most
+recently updated session in an active project. Create a session first if none
+exists. The test does not change its status or send agent input. A queued real
+alert takes priority; a test has a separate macOS identifier so it does not
+replace a delivered real alert. If no banner appears, open Notification Center
+by clicking the date/time in the menu bar and find **Chauffeur Notifications**.
+
 Alerts include the project and session names, with generic text for input
 requests, completed turns, failures, incoming messages, or delegation results.
 They omit terminal output, message bodies, task/result content, and credentials.
@@ -42,7 +49,8 @@ their membership against its current store before opening a window.
 
 - Swift tests cover opt-in, no historical replay, durable coalescing, stale
   acknowledgements, retry identity, group rejection, result-recipient routing,
-  bounded display names, and strict navigation URL parsing.
+  bounded display names, strict navigation URL parsing, and test-alert isolation
+  from session/message records and pending real alerts.
 - `Prototypes/native_window_smoke.py` sends real Launch Services URLs into a
   running app and a cold app with all project windows previously closed. The
   selected project/session opens without a duplicate window or new agent process.
@@ -51,8 +59,23 @@ their membership against its current store before opening a window.
   without requesting access. It requires an empty default store with notifications
   disabled and removes its test service registration afterward.
 
-The user enabled notifications on the development Mac; the native helper now
-reports `authorized`, enabled, and connected. Banner delivery, notification clicks
-with the main UI quit, Focus behavior, and enabled-helper recovery/update remain
-native acceptance gates. Direct URL tests establish navigation behavior, not
-Notification Center delivery.
+- `Prototypes/notification_native_smoke.py --use-default-service` uses an existing
+  read session with no live agents and notifications already enabled/authorized.
+  It presses **Send Test Notification** through macOS Accessibility, closes the
+  project, quits the UI, kills only the notification helper, waits for recovery,
+  and sends a test while the UI is closed. It opens Notification Center and
+  presses the actual matching macOS alert. The containing app cold-launches and
+  opens the previously closed project with the correct session selected. Session
+  and message records and the runtime identity stay unchanged. It does not reset
+  the store, unregister the service or change OS permission/Focus settings.
+
+Notification and terminal-folder routes now also dismiss the Welcome window
+after their project opens. The native notification check reproduced Welcome
+remaining behind the project before this fix and verifies its dismissal.
+
+This native check passes on the development Mac. Updating the registered app
+from Release to Debug also replaced the enabled helper while preserving the
+macOS authorization grant. Evidence is private under `.local/notification-native/`
+and `.local/notification-native-repeat/`. Notification Center delivery and a real
+cold-launch click are verified. Transient banner visibility and behavior under
+different Focus settings are not established by this check.

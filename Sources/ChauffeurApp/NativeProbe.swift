@@ -24,6 +24,9 @@ import ChauffeurCore
                     try await wait("cold-launch URL selected the session") {
                         model.online && layouts[project]?.window?.isVisible == true && layouts[project]?.state.selectedSessionID == session && model.pendingSessionRoute == nil
                     }
+                    try await wait("cold-launch URL dismissed Welcome") {
+                        !NSApp.windows.contains { $0.isVisible && $0.title == "Welcome to Chauffeur" }
+                    }
                     guard layouts.count == 1, layouts[project]?.state.tabs == [session] else {
                         throw ChauffeurError("native_probe", "Cold-launch URL restored an unexpected project or tab")
                     }

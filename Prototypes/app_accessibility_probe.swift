@@ -2,7 +2,7 @@ import AppKit
 import ApplicationServices
 import Foundation
 
-// Drives only the explicitly supplied fixture PID using existing OS permission.
+// Drives only the explicitly supplied app PID using existing OS permission.
 // No permission prompts or settings changes. Keyboard events target that PID
 // only, after checking the requested text field has keyboard focus.
 guard AXIsProcessTrusted() else {
@@ -22,6 +22,9 @@ func describe(_ element: AXUIElement) -> [String: Any] {
     }
     result["value"] = attribute(element, kAXValueAttribute) as? String ?? ""
     result["enabled"] = attribute(element, kAXEnabledAttribute) as? Bool ?? false
+    var actions: CFArray?
+    AXUIElementCopyActionNames(element, &actions)
+    result["actions"] = actions as? [String] ?? []
     var point = CGPoint.zero, size = CGSize.zero
     if let value = attribute(element, kAXPositionAttribute), CFGetTypeID(value as CFTypeRef) == AXValueGetTypeID() { AXValueGetValue(value as! AXValue, .cgPoint, &point) }
     if let value = attribute(element, kAXSizeAttribute), CFGetTypeID(value as CFTypeRef) == AXValueGetTypeID() { AXValueGetValue(value as! AXValue, .cgSize, &size) }
@@ -32,9 +35,9 @@ var queue = [application], elements: [AXUIElement] = []
 while !queue.isEmpty, elements.count < 1500 {
     let element = queue.removeFirst()
     guard !elements.contains(where: { CFEqual($0, element) }) else { continue }
-    // Window controls suffice for these fixtures. Avoid collecting system
+    // Window controls suffice by default. Avoid collecting system
     // Recent Items or unrelated entries from the app's menu bar.
-    if attribute(element, kAXRoleAttribute) as? String == kAXMenuBarRole { continue }
+    if request["includeMenus"] as? Bool != true, attribute(element, kAXRoleAttribute) as? String == kAXMenuBarRole { continue }
     elements.append(element)
     queue.append(contentsOf: attribute(element, kAXChildrenAttribute) as? [AXUIElement] ?? [])
     if CFEqual(element, application) { queue.append(contentsOf: attribute(element, kAXWindowsAttribute) as? [AXUIElement] ?? []) }
@@ -106,6 +109,9 @@ else {
     if matches.count == 1, let element = matches.first {
         if operation == "press" {
             let status = AXUIElementPerformAction(element, kAXPressAction as CFString)
+            result = ["performed": status == .success, "status": status.rawValue]
+        } else if operation == "closeWindow", let button = attribute(element, kAXCloseButtonAttribute), CFGetTypeID(button as CFTypeRef) == AXUIElementGetTypeID() {
+            let status = AXUIElementPerformAction(button as! AXUIElement, kAXPressAction as CFString)
             result = ["performed": status == .success, "status": status.rawValue]
         } else if operation == "resize", let width = request["width"] as? Double, let height = request["height"] as? Double {
             var size = CGSize(width: width, height: height)

@@ -41,6 +41,7 @@ import ChauffeurCore
 struct ProjectWindow: View {
     @EnvironmentObject private var model: AppModel
     @Environment(\.openWindow) private var openWindow
+    @Environment(\.dismissWindow) private var dismissWindow
     @StateObject private var layout: ProjectLayout
     let projectID: UUID
     @State private var launching = false
@@ -291,6 +292,7 @@ struct ProjectWindow: View {
         collapsedRepositories.remove(navigation.match.folderID)
         layout.state.sidebarVisible = true
         model.pendingProjectRoute = nil
+        dismissWindow(id: "welcome")
         layout.window?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
     }
@@ -303,6 +305,7 @@ struct ProjectWindow: View {
         layout.state.splitSessionID = nil
         select(session.id)
         model.pendingSessionRoute = nil
+        dismissWindow(id: "welcome")
         layout.window?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
     }

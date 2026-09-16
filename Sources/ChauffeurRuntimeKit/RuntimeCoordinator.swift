@@ -278,6 +278,13 @@ public actor RuntimeCoordinator {
         case "hello", "version", "status": return health()
         case "snapshot": return try await snapshot()
         case "notificationStatus": return try .from(await notificationStatus())
+        case "testNotification":
+            let status = try await notificationStatus()
+            guard status.enabled, status.helperConnected, [.authorized, .provisional].contains(status.authorization) else { throw ChauffeurError("notifications_unavailable", "Enable and allow session notifications, then wait for the notification helper to connect") }
+            let sessionID = try params.uuid("sessionID")
+            let snapshot = await store.refresh()
+            guard let session = sessions[sessionID], snapshot.projects.contains(where: { $0.value.id == session.projectID && !$0.value.archived }) else { throw ChauffeurError("missing_session", "Select a session in an active project") }
+            return try .from(await ledger.testNotification(sessionID: sessionID))
         case "setNotifications":
             guard let enabled = params["enabled"].bool else { throw ChauffeurError("invalid_argument", "enabled must be a boolean") }
             if enabled && !notificationHelperAvailable { throw ChauffeurError("notification_unavailable", "Notifications require Chauffeur's installed app and default background service") }

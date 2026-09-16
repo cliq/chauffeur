@@ -135,6 +135,22 @@ public actor Ledger {
     public func pendingNotifications() throws -> [AttentionNotice] {
         try rows("SELECT record FROM attention_notices WHERE delivered=0 ORDER BY rowid LIMIT 100").map { try decode(AttentionNotice.self, $0[0]) }
     }
+    /// A sample alert must not change a session or replace a pending real event.
+    public func testNotification(sessionID: UUID) throws -> AttentionNotice {
+        try transaction {
+            guard try notificationsEnabled() else { throw ChauffeurError("notifications_disabled", "Enable session notifications first") }
+            guard let row = try rows("SELECT record FROM sessions WHERE id=?", [sessionID.uuidString]).first else { throw ChauffeurError("missing_session", "Select an existing session") }
+            let session = try decode(Session.self, row[0])
+            if let pending = try rows("SELECT record FROM attention_notices WHERE session_id=? AND delivered=0", [sessionID.uuidString]).first {
+                let notice = try decode(AttentionNotice.self, pending[0])
+                guard notice.reason == .test else { throw ChauffeurError("notification_pending", "This session already has a notification waiting for delivery. Try again after it is delivered") }
+                return notice
+            }
+            let notice = AttentionNotice(route: SessionRoute(projectID: session.projectID, sessionID: sessionID), reason: .test)
+            try execute("INSERT INTO attention_notices(session_id,notice_id,record) VALUES(?,?,?) ON CONFLICT(session_id) DO UPDATE SET notice_id=excluded.notice_id,record=excluded.record,delivered=0", [sessionID.uuidString, notice.id.uuidString, try encode(notice)])
+            return notice
+        }
+    }
     public func acknowledgeNotification(_ id: UUID) throws {
         // An acknowledgement for an older notice cannot swallow a newer event.
         try execute("UPDATE attention_notices SET delivered=1 WHERE notice_id=?", [id.uuidString])

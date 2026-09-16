@@ -58,6 +58,18 @@ The service probe contains no CLI sessions and does not prove the remaining
 Spaces, sleep/wake, notification or real-session gates. See
 [service recovery](../service-recovery.md) for setup and development updates.
 
+The separate `Prototypes/notification_native_smoke.py --use-default-service`
+check now verifies an actual Notification Center alert using an existing read
+session and the user's enabled notification permission. With the target project
+closed and the main UI quit, the enabled helper recovers after termination and
+delivers a test alert. A native Accessibility press on that alert cold-launches
+the containing app and selects the right session in the previously closed
+project. The session/message records and runtime identity remain unchanged.
+An enabled Release-to-Debug helper update also preserved authorization. See
+[notification verification](../notifications.md#verification-and-remaining-acceptance)
+for the boundary between verified Notification Center delivery/click and
+unverified transient banner/Focus behavior.
+
 ## Native fixture evidence
 
 `Scripts/build-app.sh` and `Scripts/build-app.sh Release` succeed.

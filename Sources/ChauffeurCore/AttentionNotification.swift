@@ -18,7 +18,7 @@ public struct SessionRoute: Codable, Sendable, Equatable {
 }
 
 public enum AttentionReason: String, Codable, Sendable {
-    case input, completion, failure, message, result
+    case input, completion, failure, message, result, test
     public var body: String {
         switch self {
         case .input: "This session needs your input."
@@ -26,6 +26,7 @@ public enum AttentionReason: String, Codable, Sendable {
         case .failure: "This session failed. Open it to inspect the details."
         case .message: "This session has a new message."
         case .result: "A delegated session reported a result."
+        case .test: "This is a test notification. Click to open this session."
         }
     }
 }
@@ -38,7 +39,7 @@ public struct AttentionNotice: Codable, Sendable, Equatable, Identifiable {
     public init(route: SessionRoute, reason: AttentionReason) { self.route = route; self.reason = reason }
     /// A stable identifier replaces an older alert for the same session, including
     /// a retry after the helper dies between OS acceptance and ledger acknowledgement.
-    public var identifier: String { "session-\(route.sessionID.uuidString)" }
+    public var identifier: String { "\(reason == .test ? "test" : "session")-\(route.sessionID.uuidString)" }
 }
 
 public struct NotificationDelivery: Codable, Sendable {

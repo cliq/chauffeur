@@ -22,7 +22,7 @@ unverified real-CLI or native behavior; deferred workload checks remain unverifi
   line/byte budgets, and survive terminal/runtime loss. Native history is
   read-only and searchable; completed-message cleanup preserves queued/received
   messages. See [retention and recovery](terminal-history.md).
-- Sixty-eight Swift tests: canonical paths/discovery, folder routing/launcher installation and relocation repair, per-child environment, argument validation and quoting,
+- Sixty-nine Swift tests: canonical paths/discovery, folder routing/launcher installation and relocation repair, per-child environment, argument validation and quoting,
   atomic file replacement/conflicts/corrupt files, durable group-scoped messages,
   grant revocation, retry keys, bounded single-level delegation, and safe Git
   worktree creation/removal.
@@ -159,7 +159,15 @@ unverified real-CLI or native behavior; deferred workload checks remain unverifi
   signed accessory app, opt-in controls, and strict project/session navigation.
   Launch Services warm/cold URL routing and helper startup with the UI closed
   pass; the user enabled notifications and the native helper reports authorized.
-  Delivery/click acceptance remains open.
+  Native **Send Test Notification**, enabled-helper update/recovery, actual
+  Notification Center delivery and clicking its alert with the UI quit pass.
+  The previously closed project opens with the correct session selected, without
+  changing session/message records or restarting the runtime. Tests use existing
+  read sessions; no data reset or OS preference changes. Evidence is private under
+  `.local/notification-native/`. Transient banners and alternate Focus settings
+  remain unverified. Notification and terminal-folder routes dismiss Welcome
+  after opening their project, with native regression coverage. These changes
+  await the next Release build.
 
 ## Current-goal stage audit
 
@@ -176,7 +184,7 @@ unverified real-CLI or native behavior; deferred workload checks remain unverifi
 | 2.3–2.4 Quit/tabs/split | Native tabs/split, window-state writes, quit/stop-all and keyboard commands implemented; OS switching/split/quit shortcuts pass with fixtures; real Codex/Claude normal and forced UI quit preserve process and draft through reattachment | Remaining window-command and Stop All confirmation interactions; final Spaces workload is in V2 |
 | 2.5 Worktrees | Create/list/safe-remove; periodic external inventory; identity-based moves/replacements; pending launch/removal and metadata-write reservations; legacy migration fixtures and real Codex/Claude repository-relocation, replacement/resume, and removal checks; native manager controls and concurrent registration pass | Ship manager fixes in the next Release |
 | 2.6 Multiple repos | Explicit additional folder selection in launch API; primary main checkout excluded | Real CLI access test (shared-checkout warning and explicit additional-folder UI implemented) |
-| 2.7 Status/attention | Lifecycle records, real Codex/Claude completion IDs, permission attention hooks, unread/pending counts; optional durable notifications; native warm/cold URL routing and background helper startup; user enabled and authorized notifications | Actual OS delivery/click, enabled-helper recovery/update, and remaining native attention signals |
+| 2.7 Status/attention | Lifecycle records, real Codex/Claude completion IDs, permission attention hooks, unread/pending counts; optional durable notifications; actual Notification Center delivery/cold click and enabled-helper recovery/update pass | Remaining native attention signals; transient banners/alternate Focus settings unverified |
 | 2.8 Sleep/service loss | Runtime loop plus native wake reconnect, health/recovery actions; actual service termination/restart verified | Real sleep/wake and service lifecycle with live real sessions |
 | 2.9 Appearance setting | Implemented; System/Light/Dark, persistence, native window and terminal default-color checks pass | — |
 | 2.10 Terminal project launcher | Implemented Settings installer and folder routing; native cold/warm and Release startup checks pass; relocation repair and literal argument forwarding tested | Actual `/usr/local/bin/` installation requires macOS administrator authentication; ship the repair fix in the next Release build |

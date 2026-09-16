@@ -114,6 +114,7 @@ with tempfile.TemporaryDirectory(prefix='chauffeur-launcher-', dir='/tmp') as di
         # Cold start via the symlink, using cwd; unrelated saved windows stay closed.
         run(cwd=repo_a / 'Sources')
         cold = wait_for(lambda: (s if (s := state()).get('online') and s['windows'] == ['project-' + a] and s['selectedFolders'].get(a) == folder_a else None))
+        wait_for(lambda: not state()['welcomeVisible'])
         first_pid = cold['processID']
         run([repo_b / 'Sources'])
         wait_for(lambda: (s if sorted((s := state())['windows']) == sorted(['project-' + a, 'project-' + b]) and s['selectedFolders'].get(b) == folder_b else None))

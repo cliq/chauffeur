@@ -4,6 +4,40 @@ import ChauffeurCore
 @testable import ChauffeurRuntimeKit
 
 struct NotificationTests {
+    @Test func testAlertPreservesSessionAndPendingRealNotifications() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("chauffeur-test-notification-\(UUID())")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let ledger = try Ledger(path: root.appendingPathComponent("ledger.sqlite").path)
+        var session = LedgerTests().session(project: UUID(), group: UUID())
+        session.state = .exited
+        try await ledger.register(session)
+        let savedSessions = try await ledger.allSessions()
+        await #expect(throws: ChauffeurError.self) { try await ledger.testNotification(sessionID: session.id) }
+        try await ledger.setNotificationsEnabled(true)
+        await #expect(throws: ChauffeurError.self) { try await ledger.testNotification(sessionID: UUID()) }
+        let test = try await ledger.testNotification(sessionID: session.id)
+        #expect(test.reason == .test && test.route.sessionID == session.id && test.route.projectID == session.projectID)
+        #expect(try await ledger.allSessions() == savedSessions)
+        #expect(try await ledger.allMessages().isEmpty)
+        #expect(try await ledger.testNotification(sessionID: session.id).id == test.id)
+        #expect(try await ledger.pendingNotifications().count == 1)
+        // A real event takes priority over a queued test, with its own stable OS identifier.
+        try await ledger.register(session, notification: .completion)
+        let real = try #require(await ledger.pendingNotifications().first)
+        #expect(real.identifier != test.identifier)
+        await #expect(throws: ChauffeurError.self) { try await ledger.testNotification(sessionID: session.id) }
+        #expect(try await ledger.pendingNotifications() == [real])
+        try await ledger.acknowledgeNotification(test.id)
+        #expect(try await ledger.pendingNotifications() == [real])
+        try await ledger.acknowledgeNotification(real.id)
+        let repeated = try await ledger.testNotification(sessionID: session.id)
+        #expect(repeated.id != test.id && repeated.identifier == test.identifier)
+        #expect(try await ledger.allSessions() == savedSessions)
+        try await ledger.setNotificationsEnabled(false)
+        #expect(try await ledger.pendingNotifications().isEmpty)
+    }
+
     @Test func optInCoalescingDurabilityAndStaleAcknowledgement() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("chauffeur-notifications-\(UUID())")
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
