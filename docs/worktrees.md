@@ -98,6 +98,13 @@ does not inherit cleanup ownership from the original.
 
 ## Live sessions and sharing
 
+In **New Session → Additional repository access**, select each extra repository
+the agent needs. The sheet shows its exact existing path. The primary working
+directory stays at the chosen worktree, and Chauffeur does not implicitly add
+that repository's main checkout. Each extra path is passed through the CLI's
+`--add-dir` option. Extra repositories keep their existing checkouts; creating a
+primary worktree does not isolate changes in those repositories.
+
 Session launch snapshots keep their original paths. A worktree move updates the
 worktree record, not the historical launch snapshot. New sessions record Git
 worktree identities for primary and additional directories so a move does not
@@ -166,6 +173,15 @@ inaccessible checkout records remain visible for recovery.
   Both reject removal while live, then permit clean managed removal after Stop
   while preserving the branch. Private reports are under
   `.local/checkout-recovery-{codex,claude}/`; these runs use only authorized clones.
+- `Prototypes/real_repository_access.py` verifies actual reads and writes from a
+  primary worktree and an explicitly selected additional repository, including
+  paths with spaces. Codex 0.154.0 and Claude Code 2.1.273 basic-terminal mode
+  both pass. Random input tokens are absent from prompts, and expected output
+  files prove tool execution. The main checkout and a sibling worktree remain
+  clean and unchanged. The second turn runs after the isolated Release runtime
+  is killed and restarted; the same CLI process, conversation, profile and
+  launch snapshot survive. Private reports are under
+  `.local/repository-access-{codex,claude}/`.
 - `python3 Prototypes/quick_session_smoke.py` opens the actual new-worktree sheet
   through the repository action in an isolated signed Debug app. A temporary Git
   repo and fixture agent verify invalid-branch recovery, retained worktree after

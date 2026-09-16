@@ -29,6 +29,17 @@ processes; it does not replay tasks. Missing terminal ownership is recorded as
 ended session with a recorded native conversation ID. See
 [terminal history](terminal-history.md) for retained output and its limits.
 
+`Prototypes/real_repository_access.py` verifies this with the signed Release
+runtime and real Codex 0.154.0 / Claude Code 2.1.273 basic-terminal sessions.
+After their first file-reading turn, it kills only the private runtime and
+starts a replacement against the same store. Both retain their process ID,
+terminal identity, conversation ID, profile and launch snapshot. Their next
+turn recalls the previously read values and writes the expected files in the
+primary worktree and selected additional repository. No task is replayed.
+Evidence is under `.local/repository-access-{codex,claude}/`. This verifies
+standalone runtime-crash recovery; actual LaunchAgent updates and sleep/wake
+have separate acceptance requirements.
+
 ### Resuming after a checkout changes
 
 Resume uses the original configuration directory, working directory, additional

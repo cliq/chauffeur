@@ -37,12 +37,23 @@ branch. It passed with Codex 0.154.0 and Claude Code 2.1.273 in basic-terminal
 mode, using authorized private profile clones. This does not establish hook or
 coordination compatibility for Claude 2.1.273.
 
+`Prototypes/real_repository_access.py` also passes on these versions using the
+signed Release runtime. Real tools read and write the selected primary worktree
+and additional repository, including paths with spaces. The main checkout is
+not added to the launch and remains unchanged, as does a sibling worktree.
+Killing and restarting only the private runtime preserves the real CLI process,
+conversation and recorded launch; both providers complete another tool-using
+turn after recovery. Claude uses explicit basic-terminal mode. This does not
+claim OS sleep/wake or LaunchAgent-update coverage.
+
 `Prototypes/real_terminal_controls.py` uses the same authorized clones in a
 signed isolated Debug app. Both current CLIs pass native trust prompts, Unicode
 typing, copy/paste, resize, normal/forced UI quit, preserved unsent input and
 same-process reattachment, followed by another provider reply. Unicode replies
-are searchable and copyable from their captures. This is focused two-turn
-evidence; link/mouse, sustained rotation and final workload coverage remain open.
+are searchable and copyable from their captures. Native link/mouse forwarding and
+sustained bounded-history rotation have separate fixture evidence in
+[implementation status](implementation-status.md). Final workload coverage is
+deferred to V2.
 
 Codex's proposed status path is turn completion through `notify`. It does not
 prove approval or input status; these remain unknown when no supported event is

@@ -156,6 +156,16 @@ unverified real-CLI or native behavior; deferred workload checks remain unverifi
   actionable preflight error, matching the native CLI's observed restriction.
   The signed Debug build, runtime/worktree socket fixtures, and native quick-session
   probe pass. These recovery changes are in the current Release.
+- Real Codex 0.154.0 and Claude Code 2.1.273 basic-terminal sessions read and
+  write a primary worktree and an explicitly selected additional repository,
+  including paths with spaces. Random file contents are absent from prompts;
+  actual file changes establish tool access. The main checkout and a sibling
+  worktree remain unchanged. Killing and restarting the private signed Release
+  runtime preserves each real CLI process, conversation, profile and launch
+  snapshot; another tool-using turn succeeds afterward. Evidence:
+  `.local/repository-access-{codex,claude}/` and
+  `Prototypes/real_repository_access.py`. This is standalone crash recovery,
+  separate from native LaunchAgent updates and OS sleep/wake.
 - Typed diagnostics export through Settings and `chauffeurctl`, with explicit
   live/cached/unavailable observations. Private structured logs rotate within
   2 MiB. Tests cover sensitive-field exclusion, hostile input, bounds, legacy
@@ -234,9 +244,9 @@ startup logs are `.build/release-editor-build.log` and
 | 2.2 Reconnect | Positive pane/process reconciliation; real Codex/Claude explicit native-ID resume and MCP reconnect | Remaining service-failure edge cases and full native acceptance |
 | 2.3–2.4 Quit/tabs/split | Native tabs/split, window-state writes and OS keyboard commands pass; real Codex/Claude normal/forced UI quit preserve process and draft; native Stop All confirmation/cancellation, fixed targets, resistant-stop recovery and no-window operation pass | Final Spaces workload is in V2 |
 | 2.5 Worktrees | Create/list/safe-remove; periodic external inventory; identity-based moves/replacements; pending launch/removal and metadata-write reservations; legacy migration fixtures and real Codex/Claude repository-relocation, replacement/resume, and removal checks; native manager controls and concurrent registration pass | — |
-| 2.6 Multiple repos | Explicit additional folder selection in launch API; primary main checkout excluded | Real CLI access test (shared-checkout warning and explicit additional-folder UI implemented) |
+| 2.6 Multiple repos | Explicit additional-folder UI and shared-checkout warning; real Codex/Claude read/write at primary worktree and selected additional path, with spaces; main checkout and sibling worktree remain unchanged | — |
 | 2.7 Status/attention | Lifecycle records, real Codex/Claude completion IDs, permission attention hooks, unread/pending counts; optional durable notifications; actual Notification Center delivery/cold click and enabled-helper recovery/update pass | Remaining native attention signals; transient banners/alternate Focus settings unverified |
-| 2.8 Sleep/service loss | Runtime loop plus native wake reconnect, health/recovery actions; actual service termination/restart verified | Real sleep/wake and service lifecycle with live real sessions |
+| 2.8 Sleep/service loss | Runtime loop plus native wake reconnect, health/recovery actions; actual service termination/restart; real Codex/Claude survive standalone Release runtime crash with same process/conversation and successful tool use afterward | Real sleep/wake and native LaunchAgent lifecycle with live real sessions |
 | 2.9 Appearance setting | Implemented; System/Light/Dark, persistence, native window and terminal default-color checks pass | — |
 | 2.10 Terminal project launcher | Implemented Settings installer and folder routing; native cold/warm and Release startup checks pass; relocation repair and literal argument forwarding tested | Actual `/usr/local/bin/` installation requires macOS administrator authentication |
 | 2.11 Quick session on a new worktree | Implemented; concurrent/persisted retry tests and native sheet/fixture-agent launch pass | Real CLI/native acceptance remains tracked under 1.8 and 2.5 |
