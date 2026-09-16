@@ -77,6 +77,9 @@ struct SettingsView: View {
                 NotificationSettingsSection()
                 TerminalLauncherSettings()
                 Section("Retention and Delegation") {
+                    Toggle("Keep finished sessions", isOn: $retention.keepFinishedSessions)
+                        .accessibilityIdentifier("settings.keep-finished-sessions")
+                    Text("When off, closing an agent or shell tab stops the session and deletes its saved history. When on, closed sessions remain in Finished until you delete them.").font(.caption).foregroundStyle(.secondary)
                     TextField("Scrollback lines", value: $retention.scrollbackLines, format: .number)
                     TextField("Snapshot budget (bytes)", value: $retention.snapshotBudgetBytes, format: .number)
                     TextField("Completed message history (days)", value: $retention.completedMessageDays, format: .number)

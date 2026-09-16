@@ -274,6 +274,39 @@ struct LaunchCancellationTests {
 }
 
 struct ShellSessionTests {
+    @Test func legacyRetentionSettingsDefaultToDiscardingClosedSessions() throws {
+        let legacy = Data(#"{"scrollbackLines":1234,"snapshotBudgetBytes":1048576,"completedMessageDays":30,"maxLiveChildren":2}"#.utf8)
+        let settings = try JSONCoding.decode(RetentionSettings.self, from: legacy)
+        #expect(!settings.keepFinishedSessions && settings.scrollbackLines == 1234)
+        #expect(!RetentionSettings().keepFinishedSessions)
+    }
+
+    @Test(arguments: [false, true], [false, true])
+    func closingTabsHonorsRetentionAndFinishedSessionsCanBeDeleted(keep: Bool, shell: Bool) async throws {
+        let fixture = try await LaunchFixture.make(); defer { fixture.cleanup() }
+        var settings = RetentionSettings(); settings.keepFinishedSessions = keep
+        _ = try await fixture.runtime.handle(IPCRequest("saveSettings", params: .from(settings)))
+        let request = shell ? LaunchRequest.shell(projectID: fixture.request.projectID, groupID: fixture.request.groupID, folderID: fixture.request.folderID, title: "Shell") : fixture.request
+        let session = try await fixture.runtime.launch(request)
+        let params: JSONValue = .object(["sessionID": .string(session.id.uuidString)])
+        await #expect(throws: ChauffeurError.self) {
+            _ = try await fixture.runtime.handle(IPCRequest("deleteSession", params: params))
+        }
+        await fixture.runtime.maintainHistory()
+        _ = try await fixture.runtime.handle(IPCRequest("closeSession", params: params))
+        #expect(try await !fixture.runtime.terminals.inventory().contains { $0.sessionName == session.id.uuidString })
+        let stored = await fixture.runtime.store.current().sessions.first { $0.value.id == session.id }
+        if keep {
+            #expect(stored?.value.state.isLive == false)
+            #expect(try await fixture.runtime.snapshots.read(session.id) != nil)
+            _ = try await fixture.runtime.handle(IPCRequest("deleteSession", params: params))
+        } else { #expect(stored == nil) }
+        await fixture.runtime.maintainHistory()
+        #expect(await fixture.runtime.store.current().sessions.allSatisfy { $0.value.id != session.id })
+        #expect(try await fixture.runtime.snapshots.read(session.id) == nil)
+        #expect(try await fixture.runtime.snapshot()["sessions"].decode([Session].self).allSatisfy { $0.id != session.id })
+    }
+
     @Test func shellSessionsRunTheLoginShellWithoutClaimingTheCheckout() async throws {
         let fixture = try await LaunchFixture.make(); defer { fixture.cleanup() }
         let project = try #require(await fixture.runtime.store.current().projects.first).value

@@ -249,11 +249,23 @@ public struct WindowState: Record, Equatable {
 }
 
 public struct RetentionSettings: Codable, Equatable, Sendable {
+    public var keepFinishedSessions = false
     public var scrollbackLines = 10_000
     public var snapshotBudgetBytes = 256 * 1024 * 1024
     public var completedMessageDays = 90
     public var maxLiveChildren = 4
     public init() {}
+    private enum CodingKeys: String, CodingKey {
+        case keepFinishedSessions, scrollbackLines, snapshotBudgetBytes, completedMessageDays, maxLiveChildren
+    }
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        keepFinishedSessions = try values.decodeIfPresent(Bool.self, forKey: .keepFinishedSessions) ?? false
+        scrollbackLines = try values.decodeIfPresent(Int.self, forKey: .scrollbackLines) ?? 10_000
+        snapshotBudgetBytes = try values.decodeIfPresent(Int.self, forKey: .snapshotBudgetBytes) ?? 256 * 1024 * 1024
+        completedMessageDays = try values.decodeIfPresent(Int.self, forKey: .completedMessageDays) ?? 90
+        maxLiveChildren = try values.decodeIfPresent(Int.self, forKey: .maxLiveChildren) ?? 4
+    }
     public func validate() throws {
         try Validation.require((100...100_000).contains(scrollbackLines), "Scrollback must be 100–100,000 lines")
         try Validation.require((1_048_576...2_147_483_648).contains(snapshotBudgetBytes), "Snapshot budget must be 1 MiB–2 GiB")

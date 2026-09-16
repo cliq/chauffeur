@@ -98,6 +98,7 @@ struct ProjectWindow: View {
     }
     @State private var closingTab: TabClosure?
     @State private var checkingTab = false
+    @State private var deletingSession: Session?
     @FocusState private var searchFocused: Bool
     init(projectID: UUID) { self.projectID = projectID; _layout = StateObject(wrappedValue: ProjectLayout(projectID: projectID)) }
     private var project: Project? { model.project(projectID) }
@@ -144,6 +145,10 @@ struct ProjectWindow: View {
                 .confirmationDialog("Delete \(deletingCheckout?.title ?? "worktree")?", isPresented: Binding(get: { deletingCheckout != nil }, set: { if !$0 { deletingCheckout = nil } }), titleVisibility: .visible) {
                     Button("Delete Worktree", role: .destructive) { if let row = deletingCheckout { deleteWorktree(row) }; deletingCheckout = nil }
                 } message: { Text(deletionMessage(deletingCheckout)) }
+                .confirmationDialog("Delete \(deletingSession?.title ?? "finished session")?", isPresented: Binding(get: { deletingSession != nil }, set: { if !$0 { deletingSession = nil } }), titleVisibility: .visible) {
+                    Button("Delete Finished Session", role: .destructive) { if let session = deletingSession { deleteSession(session) }; deletingSession = nil }
+                    Button("Cancel", role: .cancel) { deletingSession = nil }
+                } message: { Text("Permanently deletes this session and its saved terminal history.") }
                 .confirmationDialog("Close \(closingTab?.session.title ?? "session")?", isPresented: Binding(get: { closingTab != nil }, set: { if !$0 { closingTab = nil } }), titleVisibility: .visible) {
                     Button("Close Tab") { if let closing = closingTab { closeTab(closing.session) }; closingTab = nil }
                     Button("Cancel", role: .cancel) { closingTab = nil }
@@ -364,6 +369,7 @@ struct ProjectWindow: View {
             .contextMenu {
                 Button("Session Details") { selectSession(session.id); layout.detailsVisible = true }
                 if session.state.isLive { Button("Stop Session…") { selectSession(session.id); layout.detailsVisible = true } }
+                else { Button("Delete Finished Session…", role: .destructive) { deletingSession = session }.disabled(!model.online) }
             }
     }
     private func sessionIcon(_ session: Session) -> String {
@@ -407,7 +413,7 @@ struct ProjectWindow: View {
                 let sessions = openSessions(in: folder, path: path)
                 VStack(spacing: 0) {
                     if !sessions.isEmpty {
-                        SessionStrip(sessions: sessions, project: project, selectedID: layout.state.selectedSessionID, select: { selectSession($0.id) }, details: { selectSession($0.id); layout.detailsVisible = true }, revealPath: { FilePanels.reveal($0.launch.workingDirectory) })
+                        SessionStrip(sessions: sessions, project: project, keepFinishedSessions: model.snapshot.settings.keepFinishedSessions, delete: { deletingSession = $0 }, selectedID: layout.state.selectedSessionID, select: { selectSession($0.id) }, details: { selectSession($0.id); layout.detailsVisible = true }, revealPath: { FilePanels.reveal($0.launch.workingDirectory) })
                         Divider()
                     }
                     if let selected = model.session(layout.state.selectedSessionID), sessions.contains(where: { $0.id == selected.id }) {
@@ -487,7 +493,7 @@ struct ProjectWindow: View {
         if let folder = selectedFolder, let path = layout.selectedWorktreePath { return openSessions(in: folder, path: path) }
         return model.session(layout.state.selectedSessionID).map { [$0] } ?? []
     }
-    /// Closing a tab keeps its session running, so confirm before hiding work in
+    /// Closing a tab stops its session, so confirm before ending work in
     /// progress. A shell waiting at its own prompt closes without asking.
     private func closeCurrentTab() {
         guard closingTab == nil, !checkingTab else { return }
@@ -504,17 +510,33 @@ struct ProjectWindow: View {
         }
     }
     private func closeTab(_ session: Session) {
-        layout.closedSessionIDs.insert(session.id)
-        layout.controllers.removeValue(forKey: session.id)?.detach()
+        finishTab(session, method: "closeSession")
+    }
+    private func deleteSession(_ session: Session) {
+        finishTab(session, method: "deleteSession")
+    }
+    private func finishTab(_ session: Session, method: String) {
+        guard !checkingTab, model.online else { return }
+        checkingTab = true
         let tabs = openTabs
-        guard let index = tabs.firstIndex(where: { $0.id == session.id }) else { return }
+        let index = tabs.firstIndex { $0.id == session.id } ?? 0
         let remaining = tabs.filter { $0.id != session.id }
-        layout.state.selectedSessionID = remaining.isEmpty ? nil : remaining[min(index, remaining.count - 1)].id
-        if let id = layout.state.selectedSessionID { markRead(id) }
+        model.perform {
+            defer { checkingTab = false }
+            _ = try await model.call(method, .object(["sessionID": .string(session.id.uuidString)]))
+            layout.controllers.removeValue(forKey: session.id)?.detach()
+            layout.closedSessionIDs.remove(session.id)
+            if layout.state.selectedSessionID == session.id {
+                layout.state.selectedSessionID = remaining.isEmpty ? nil : remaining[min(index, remaining.count - 1)].id
+                if let id = layout.state.selectedSessionID { markRead(id) }
+            }
+        }
     }
     private func closeMessage(_ closing: TabClosure?) -> String {
         let running = closing?.command.map { "“\($0)” is running in this terminal." } ?? "This session is still running."
-        return running + " Closing the tab keeps it running in the background; reopen it from the Sessions sidebar."
+        return running + (model.snapshot.settings.keepFinishedSessions
+            ? " Closing the tab stops it and keeps its history in Finished."
+            : " Closing the tab stops it and permanently deletes its saved history.")
     }
     private var terminalTarget: (folder: ProjectFolder, row: CheckoutRow)? {
         guard let project, let folder = selectedFolder ?? project.folders.first(where: \.registered) else { return nil }
@@ -775,6 +797,8 @@ struct ProjectWindow: View {
 private struct SessionStrip: View {
     let sessions: [Session]
     let project: Project
+    let keepFinishedSessions: Bool
+    let delete: (Session) -> Void
     let selectedID: UUID?
     let select: (Session) -> Void
     let details: (Session) -> Void
@@ -782,8 +806,8 @@ private struct SessionStrip: View {
     @State private var showFinished = false
     private var live: [Session] { WorktreeSessions.live(sessions) }
     /// Failed or unread sessions stay visible; other finished ones collapse.
-    private var visible: [Session] { sessions.filter { $0.state.isLive || $0.needsAttention } }
-    private var finished: [Session] { WorktreeSessions.finished(sessions).filter { !$0.needsAttention } }
+    private var visible: [Session] { sessions.filter { !keepFinishedSessions || $0.state.isLive || $0.needsAttention } }
+    private var finished: [Session] { keepFinishedSessions ? WorktreeSessions.finished(sessions).filter { !$0.needsAttention } : [] }
     var body: some View {
         ScrollView(.horizontal) {
             HStack(spacing: 6) {
@@ -822,6 +846,7 @@ private struct SessionStrip: View {
             .contextMenu {
                 Button("Session Details") { details(session) }
                 if session.state.isLive { Button("Stop Session…") { details(session) } }
+                else { Button("Delete Finished Session…", role: .destructive) { delete(session) } }
                 Button("Reveal in Finder") { revealPath(session) }
             }
     }

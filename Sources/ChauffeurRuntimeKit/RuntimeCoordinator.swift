@@ -364,7 +364,14 @@ public actor RuntimeCoordinator {
         case "launch": return try .from(await launch(params.decode(LaunchRequest.self)))
         case "resume": return try .from(await resume(params.uuid("sessionID")))
         case "interrupt": try await terminals.interrupt(sessionID: params.uuid("sessionID")); return .object(["sent": .bool(true)])
-        case "stop":
+        case "deleteSession":
+            let sessionID = try params.uuid("sessionID")
+            guard stopRequests.insert(sessionID).inserted else { throw ChauffeurError("stop_pending", "Session cleanup is already in progress") }
+            defer { stopRequests.remove(sessionID) }
+            try await reconcile()
+            try await deleteFinishedSession(sessionID)
+            return .object(["deleted": .bool(true)])
+        case "stop", "closeSession":
             let sessionID = try params.uuid("sessionID")
             guard sessions[sessionID] != nil || launchTasks[sessionID] != nil else { throw ChauffeurError("missing_session", "Session not found") }
             guard stopRequests.insert(sessionID).inserted else { throw ChauffeurError("stop_pending", "Stop is already in progress") }
@@ -372,6 +379,9 @@ public actor RuntimeCoordinator {
                 stopRequests.remove(sessionID)
                 if sessions[sessionID]?.state.isLive != true { stopping.remove(sessionID) }
             }
+            let closing = request.method == "closeSession"
+            let keepHistory = settings.keepFinishedSessions
+            if closing && keepHistory { _ = try? await captureHistory(sessionID) }
             stopGenerations[sessionID, default: 0] += 1
             stopping.insert(sessionID)
             let launch = launchTasks[sessionID]
@@ -380,8 +390,14 @@ public actor RuntimeCoordinator {
             // Wait for startup's cleanup before acknowledging Stop. A resume
             // cannot enter while either reservation is held.
             if let launch { _ = await launch.result }
-            try await terminals.stop(sessionID: sessionID, force: params["force"].bool ?? false)
+            try await terminals.stop(sessionID: sessionID, force: closing || (params["force"].bool ?? false))
             try await reconcile()
+            if closing {
+                if keepHistory, var session = sessions[sessionID] {
+                    session.unread = false
+                    try await persist(session)
+                } else { try await deleteFinishedSession(sessionID) }
+            }
             return .object(["requested": .bool(true)])
         case "markRead":
             let sessionID = try params.uuid("sessionID")
@@ -458,6 +474,22 @@ public actor RuntimeCoordinator {
                 || (session.worktreeID == nil && Paths.canonical(session.launch.workingDirectory) == canonical))
         }
     }
+    private func deleteFinishedSession(_ sessionID: UUID) async throws {
+        guard let session = sessions[sessionID] else { throw ChauffeurError("missing_session", "Session not found") }
+        guard !session.state.isLive, !launching.contains(sessionID) else {
+            throw ChauffeurError("active_session", "Stop the session before deleting its history")
+        }
+        // Finish any capture before removing its archive and retire a dead pane
+        // so periodic capture cannot recreate the deleted history.
+        if let capture = captures[sessionID] { _ = await capture.result }
+        try await terminals.stop(sessionID: sessionID, force: true)
+        try await ledger.forget(sessionID: sessionID)
+        try await snapshots.delete(sessionID)
+        try await store.delete(session: sessionID)
+        sessions.removeValue(forKey: sessionID)
+        snapshotStorage = try await snapshots.status(budgetBytes: settings.snapshotBudgetBytes)
+    }
+
     /// Deletes a checkout, its records, and the history of its finished sessions.
     /// The checkout is removed from disk only when Git still lists it there.
     private func deleteWorktree(projectID: UUID, folderID: UUID, path requested: String, preview: Bool = false, discardChanges: Bool = false) async throws -> JSONValue {
