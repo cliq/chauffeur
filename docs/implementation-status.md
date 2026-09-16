@@ -263,9 +263,11 @@ crash recovery, the Runtime settings restart button, and bundled-helper
 replacement without changing the default service/store. Evidence:
 `.local/live-service-registration/summary.json`. Its real-session extension is
 implemented, with native profile selection and provider-reply assertions, but
-has not passed; the console locked during testing. Unlocking the Mac is required
-to resume those desktop checks. Sleep/wake and launcher-install choices remain
-pending separately. See [private service acceptance](service-recovery.md#private-native-service-fixture).
+has not passed yet. The user unlocked the Mac, authorized the native launcher
+installer, and chose to perform sleep/wake once the private sessions are ready.
+The actual launcher installation and registered-folder invocation now pass.
+The full live-session service/sleep check is in progress. See
+[private service acceptance](service-recovery.md#private-native-service-fixture).
 
 | Plan items | Current state | Still required |
 | --- | --- | --- |
@@ -283,7 +285,7 @@ pending separately. See [private service acceptance](service-recovery.md#private
 | 2.7 Status/attention | Native approval/completion/normal-exit labels and conversation IDs pass; Claude clears permission attention after tool use and stays finished while idle; unread/pending counts and optional durable notifications; actual Notification Center delivery/cold click and enabled-helper recovery/update pass | Codex approval detection unavailable; real API-error hooks, transient banners/alternate Focus settings unverified |
 | 2.8 Sleep/service loss | Runtime loop plus native wake reconnect, health/recovery actions; actual service termination/restart; real Codex/Claude survive standalone Release runtime crash with same process/conversation and successful tool use afterward | Real sleep/wake and native LaunchAgent lifecycle with live real sessions |
 | 2.9 Appearance setting | Implemented; System/Light/Dark, persistence, native window and terminal default-color checks pass | — |
-| 2.10 Terminal project launcher | Implemented Settings installer and folder routing; native cold/warm and Release startup checks pass; relocation repair and literal argument forwarding tested | Actual `/usr/local/bin/` installation requires macOS administrator authentication |
+| 2.10 Terminal project launcher | Implemented Settings installer and folder routing; native cold/warm and Release startup checks pass; relocation repair and literal argument forwarding tested; actual administrator-authenticated `/usr/local/bin/chauffeur` installation opens a registered project and preserves records | — |
 | 2.11 Quick session on a new worktree | Implemented; concurrent/persisted retry tests and native sheet/fixture-agent launch pass | Real CLI/native acceptance remains tracked under 1.8 and 2.5 |
 | 4.1–4.5 Packaging/compatibility/retention/diagnostics/docs | Developer ID local builds; actual registration/update; retention settings/cleanup; diagnostics export; terminal, diagnostics and service recovery guides | Remaining focused recovery acceptance under 2.8 |
 | 4.7 Complete app manual | [Complete local draft](manual.html), covering all implemented features, shortcuts and V2 limits; light/dark/mobile layout and internal links verified | Update pending acceptance results, then publish through Artifact Colab MCP after app work |
@@ -297,12 +299,11 @@ pending separately. See [private service acceptance](service-recovery.md#private
 
 ## Next implementation order
 
-1. Run the prepared private native LaunchAgent check with live Codex and Claude
-   sessions after the user unlocks the console. The registration-only check
-   passes; the full script has not passed.
-2. Finish actual sleep/wake and `/usr/local/bin/chauffeur` installation after
-   the user's pending choices. Sleep affects the whole Mac; installation needs
-   macOS administrator authentication.
+1. Finish the private native LaunchAgent check with live Codex and Claude
+   sessions. The registration-only check passes; the full script has not passed.
+2. Tell the user when both private sessions are ready, then verify their chosen
+   manual sleep/wake cycle through native power events and provider replies.
+   The terminal command's actual installation is complete.
 3. Resolve any failures, package/sign any resulting app changes, and update the
    manual's acceptance notes. The existing Release remains available to test.
 4. Publish the complete manual through Artifact Colab and verify the published

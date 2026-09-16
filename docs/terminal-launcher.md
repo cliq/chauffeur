@@ -49,9 +49,13 @@ All native fixtures use isolated runtime stores, no provider accounts, and no
 agent sessions. Results are under `.build/folder-launcher-artifacts/` and
 `.build/release-startup-artifacts/`.
 
-## Remaining installation checks
+## Native installation evidence
 
-The actual `/usr/local/bin/` installation still needs administrator authentication
-on the development Mac. The repair fix is included in the signed Release build.
-Installation and literal forwarding pass in private writable destinations; the
-native installer requests macOS authentication for the root-owned system folder.
+On 2026-09-16, the user authorized installation through the signed Release app's
+native macOS administrator prompt. `/usr/local/bin/chauffeur` is a root-owned
+executable with mode 0755 and points to that Release's `chauffeur-launcher`.
+The installed command's help and relative-folder invocation both pass; running
+it from a registered repository opens Signos while preserving existing session,
+message and preset records and the same runtime. Private evidence:
+`.local/launcher-native/summary.json`. Relocation repair and literal forwarding
+also pass in private writable destinations.
