@@ -244,9 +244,9 @@
       <h3>Create or register without launching</h3>
       <p>Open <strong>… → Manage Worktrees…</strong>, choose a repository, and use the branch/base-ref fields and <strong>Create Worktree</strong>. Opening it from a repository or worktree context menu selects the corresponding repository immediately. The manager displays registered worktrees and other Git checkouts. Use <strong>Register</strong> to make an existing checkout available in the session picker. <strong>Refresh Git Inventory</strong> requests a fresh scan.</p>
       <p>Inventory updates in the background as well. External creates, moves, branch changes, and missing checkouts are reflected after reconciliation. A copied or replaced directory does not inherit the original checkout’s cleanup ownership. If a move leaves Git’s own records stale, repair those records with Git before refreshing.</p>
-      <h3>Remove or unregister</h3>
-      <p><strong>Remove…</strong> is available for app-managed worktrees. Confirm the displayed path and branch. Removal refuses a dirty checkout, untracked files, or a checkout referenced by a live session, including additional-repository access. Stop the relevant execution first and decide what to do with its files.</p>
-      <p>Branches are preserved. External worktrees use <strong>Unregister</strong>, which removes the Chauffeur registration and leaves their files on disk. Closing a tab, stopping a session, or archiving a project never automatically removes a worktree.</p>
+      <h3>Delete a worktree</h3>
+      <p>Choose <strong>Delete Worktree…</strong> from a worktree’s context menu or <strong>Delete…</strong> in Manage Worktrees. The confirmation warns if uncommitted, untracked, or ignored files will be permanently lost. Stop live sessions before deleting the checkout. Deletion also removes finished sessions and their saved terminal history.</p>
+      <p>Branches with no commits unique to other local branches are also deleted. Branches with unique commits are preserved. Closing a tab, stopping a session, or archiving a project never automatically removes a worktree.</p>
       <div class="note"><p><strong>Example:</strong> Create <code>feature/search-ui</code> for one agent and <code>feature/search-api</code> for another. Their checkouts of that repository are separate. If both sessions also receive access to the same additional repository, that additional checkout is still shared.</p></div>
     </section>
 

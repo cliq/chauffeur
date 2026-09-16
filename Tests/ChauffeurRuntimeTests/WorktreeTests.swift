@@ -99,6 +99,35 @@ struct WorktreeTests {
         #expect(await manager.observe(at: root.path).status == .notRepository)
         #expect(await manager.observe(at: root.appendingPathComponent("missing").path).status == .missing)
     }
+    @Test func deletionPreservesUniqueCommitsAndWarnsAboutIgnoredFiles() async throws {
+        let root = URL(fileURLWithPath: "/tmp/chauffeur-delete-\(UUID())")
+        let repo = root.appendingPathComponent("repo")
+        try FileManager.default.createDirectory(at: repo, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        func git(_ path: String, _ args: [String]) async throws -> CommandResult {
+            try await ProcessRunner.run("/usr/bin/git", ["-C", path, "-c", "core.hooksPath=/dev/null", "-c", "commit.gpgsign=false", "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid"] + args)
+        }
+        try #require(try await git(repo.path, ["init", "-b", "main"]).status == 0)
+        try Data("ignored.txt\n".utf8).write(to: repo.appendingPathComponent(".gitignore"))
+        try #require(try await git(repo.path, ["add", ".gitignore"]).status == 0)
+        try #require(try await git(repo.path, ["commit", "-m", "Initial"]).status == 0)
+        let manager = WorktreeManager(root: root.appendingPathComponent("managed"))
+        let tree = try await manager.create(projectID: UUID(), folder: ProjectFolder(path: repo.path), branch: "task/unique", baseRef: "HEAD")
+        #expect(try await !manager.hasChanges(at: tree.path))
+        try #require(try await git(tree.path, ["commit", "--allow-empty", "-m", "Unique"]).status == 0)
+        try Data("local".utf8).write(to: URL(fileURLWithPath: tree.path).appendingPathComponent("ignored.txt"))
+        #expect(try await manager.hasChanges(at: tree.path))
+        await #expect(throws: ChauffeurError.self) { try await manager.remove(tree, liveSessions: []) }
+        try await manager.remove(tree, liveSessions: [], discardChanges: true)
+        #expect(try await git(repo.path, ["show-ref", "--verify", "refs/heads/task/unique"]).status == 0)
+        // Another branch protects the commits even when main has not merged them.
+        try #require(try await git(repo.path, ["branch", "saved", "task/unique"]).status == 0)
+        await manager.deleteBranchIfUnused("task/unique", repository: repo.path)
+        #expect(try await git(repo.path, ["show-ref", "--verify", "refs/heads/task/unique"]).status != 0)
+        await manager.deleteBranchIfUnused("main", repository: repo.path)
+        #expect(try await git(repo.path, ["show-ref", "--verify", "refs/heads/main"]).status == 0)
+    }
+
     @Test func independentCheckoutsAndSafeRemoval() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("chauffeur-worktrees-\(UUID())")
         let repo = root.appendingPathComponent("répo space")
@@ -128,10 +157,14 @@ struct WorktreeTests {
         await #expect(throws: ChauffeurError.self) { try await manager.remove(second, liveSessions: [live]) }
         try await manager.remove(second, liveSessions: [])
         #expect(!FileManager.default.fileExists(atPath: second.path))
-        #expect(try await git(["show-ref", "--verify", "refs/heads/task/two"]).status == 0)
+        #expect(try await git(["show-ref", "--verify", "refs/heads/task/two"]).status != 0)
         var external = first; external.managed = false
         await #expect(throws: ChauffeurError.self) { try await manager.remove(external, liveSessions: []) }
         await #expect(throws: ChauffeurError.self) { try await manager.create(projectID: projectID, folder: folder, branch: "task/one", baseRef: "main") }
         #expect(FileManager.default.fileExists(atPath: first.path))
+        #expect(try await manager.hasChanges(at: first.path))
+        try await manager.remove(first, liveSessions: [], discardChanges: true)
+        #expect(!FileManager.default.fileExists(atPath: first.path))
+        #expect(try await git(["show-ref", "--verify", "refs/heads/task/one"]).status != 0)
     }
 }

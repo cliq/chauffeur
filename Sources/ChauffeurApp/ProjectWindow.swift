@@ -90,6 +90,8 @@ struct ProjectWindow: View {
     @State private var sidebarReveal: SidebarReveal?
     @State private var pendingWorktree: Worktree?
     @State private var deletingCheckout: CheckoutRow?
+    @State private var deletionHasChanges = false
+    @State private var checkingDeletion = false
     private struct TabClosure {
         let session: Session
         let command: String?
@@ -346,7 +348,7 @@ struct ProjectWindow: View {
         Button("Reveal in Finder") { FilePanels.reveal(row.path) }.disabled(row.availability != .available)
         if !row.isMain {
             Divider()
-            Button("Delete Worktree…", role: .destructive) { deletingCheckout = row }
+            Button("Delete Worktree…", role: .destructive) { prepareDeletion(row) }
                 .disabled(!model.online || !row.liveSessions.isEmpty)
                 .help(row.liveSessions.isEmpty ? "" : "Stop its live sessions first")
         }
@@ -435,7 +437,7 @@ struct ProjectWindow: View {
                                    description: Text(row.finished ? "The checkout no longer exists. Its finished sessions stay available above until you delete the worktree." : "Launch an agent or open a shell in \(row.title)."))
             HStack(spacing: 12) {
                 if row.finished {
-                    Button("Delete Worktree…", role: .destructive) { deletingCheckout = row }.disabled(!model.online || !row.liveSessions.isEmpty)
+                    Button("Delete Worktree…", role: .destructive) { prepareDeletion(row) }.disabled(!model.online || !row.liveSessions.isEmpty)
                 } else {
                     Button("Launch Agent…") { launchAgent(in: row, folder: folder) }.buttonStyle(.borderedProminent).disabled(!canLaunch(in: row)).accessibilityIdentifier("checkout.empty.launch")
                     Button("Open Shell") { openShell(in: row, folder: folder) }.disabled(!canLaunch(in: row)).accessibilityIdentifier("checkout.empty.shell")
@@ -610,7 +612,7 @@ struct ProjectWindow: View {
         guard let row else { return "" }
         let history = row.sessions.isEmpty ? "No session history is affected." : "\(row.sessions.count) finished session\(row.sessions.count == 1 ? "" : "s") and their saved terminal history are deleted."
         if row.finished { return "The checkout is already gone.\n\(history)" }
-        return "Removes the checkout at \(row.path) from disk with git worktree remove. It must have no modified or untracked files. The branch is kept.\n\(history)"
+        return (deletionHasChanges ? "This worktree has uncommitted, untracked, or ignored files. These changes will be permanently lost.\n\n" : "") + "Removes the checkout at \(row.path) from disk with git worktree remove. Branches with no unique commits are also deleted.\n\(history)"
     }
     private func showWorktrees(folderID: UUID?) {
         worktreeSheet = WorktreeSheet(folderID: folderID)
@@ -640,10 +642,21 @@ struct ProjectWindow: View {
             collapsedRepositories.remove(folder.id)
         }
     }
+    private func prepareDeletion(_ row: CheckoutRow) {
+        guard let project, !checkingDeletion else { return }
+        checkingDeletion = true
+        model.perform {
+            defer { checkingDeletion = false }
+            let preview = try await model.call("previewWorktreeDeletion", .object(["projectID": .string(project.id.uuidString), "folderID": .string(row.folderID.uuidString), "path": .string(row.path)]))
+            deletionHasChanges = preview["hasChanges"].bool == true
+            deletingCheckout = row
+        }
+    }
     private func deleteWorktree(_ row: CheckoutRow) {
         guard let project else { return }
+        let discardChanges = deletionHasChanges
         model.perform {
-            _ = try await model.call("deleteWorktree", .object(["projectID": .string(project.id.uuidString), "folderID": .string(row.folderID.uuidString), "path": .string(row.path)]))
+            _ = try await model.call("deleteWorktree", .object(["projectID": .string(project.id.uuidString), "folderID": .string(row.folderID.uuidString), "path": .string(row.path), "discardChanges": .bool(discardChanges)]))
             if layout.selectedWorktreePath.map({ Paths.canonical($0) == Paths.canonical(row.path) }) == true {
                 layout.selectCheckout(folderID: row.folderID, path: nil, sessions: [])
             }

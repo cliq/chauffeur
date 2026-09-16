@@ -177,16 +177,18 @@ struct WorktreeCreationTests {
         #expect(code == "dirty_worktree")
         snapshot = await fixture.runtime.store.reload()
         #expect(FileManager.default.fileExists(atPath: marker.path) && snapshot.sessions.count == 1 && snapshot.worktrees.count == 1)
-        try FileManager.default.removeItem(at: marker)
-        let result = try await fixture.runtime.handle(IPCRequest("deleteWorktree", params: params))
+        let preview = try await fixture.runtime.handle(IPCRequest("previewWorktreeDeletion", params: params))
+        #expect(preview["hasChanges"].bool == true)
+        let confirmed: JSONValue = .object(["projectID": .string(fixture.project.id.uuidString), "folderID": .string(folder.id.uuidString), "path": .string(external.path), "discardChanges": .bool(true)])
+        let result = try await fixture.runtime.handle(IPCRequest("deleteWorktree", params: confirmed))
         #expect(result["deletedCheckout"].bool == true && result["deletedSessions"].int == 1 && result["deletedRecords"].int == 1)
         snapshot = await fixture.runtime.store.reload()
         #expect(!FileManager.default.fileExists(atPath: external.path))
         #expect(snapshot.sessions.isEmpty && snapshot.worktrees.isEmpty)
         #expect(try await fixture.runtime.worktrees.inventory(at: fixture.repo.path).count == 1)
         #expect(try await fixture.runtime.snapshot()["sessions"].array.isEmpty)
-        // The branch survives, as with any git worktree remove.
-        #expect(try await ProcessRunner.run("/usr/bin/git", ["-C", fixture.repo.path, "show-ref", "--verify", "refs/heads/external"]).status == 0)
+        // A branch without unique commits is removed too.
+        #expect(try await ProcessRunner.run("/usr/bin/git", ["-C", fixture.repo.path, "show-ref", "--verify", "refs/heads/external"]).status != 0)
         // The main checkout can never be deleted this way.
         let main: JSONValue = .object(["projectID": .string(fixture.project.id.uuidString), "folderID": .string(folder.id.uuidString), "path": .string(fixture.repo.path)])
         await #expect(throws: ChauffeurError.self) { _ = try await fixture.runtime.handle(IPCRequest("deleteWorktree", params: main)) }

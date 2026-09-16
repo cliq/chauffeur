@@ -13,6 +13,7 @@ struct WorktreesView: View {
     @State private var busy = false
     @State private var failure: String?
     @State private var removing: CheckoutRow?
+    @State private var deletionHasChanges = false
     @State private var creation: WorktreeCreationRequest?
     init(project: Project, initialFolderID: UUID? = nil, worktreeCreated: @escaping (Worktree) -> Void = { _ in }) {
         self.project = project
@@ -57,7 +58,7 @@ struct WorktreesView: View {
                             }
                         }
                         Spacer()
-                        Button("Delete…") { removing = row }.disabled(busy || !row.liveSessions.isEmpty)
+                        Button("Delete…") { prepareDeletion(row) }.disabled(busy || !row.liveSessions.isEmpty)
                             .help(row.liveSessions.isEmpty ? "Delete the checkout and its session history" : "Stop its live sessions first")
                             .accessibilityIdentifier("worktrees.remove.\(row.worktreeID?.uuidString ?? row.path)")
                     }.padding(10)
@@ -97,7 +98,7 @@ struct WorktreesView: View {
                 else if observation.status == .notRepository { Text("This folder is not a Git repository.").font(.caption).foregroundStyle(.secondary) }
                 else { Text("Git inventory checked \(observation.observedAt, style: .relative) ago. Refreshes while the background service is running.").font(.caption).foregroundStyle(.secondary) }
             }
-            Text("Deleting a worktree removes its checkout with git worktree remove (it must be clean and have no live sessions) and its finished sessions' history. Branches are preserved.").font(.caption).foregroundStyle(.secondary)
+            Text("Deleting a worktree removes its checkout and finished session history. Stop live sessions first. You will be warned before local changes are discarded. Branches with no unique commits are also deleted.").font(.caption).foregroundStyle(.secondary)
         }.padding(24).frame(width: 760).interactiveDismissDisabled(busy)
             .onAppear { refresh() }
             .onChange(of: folderID) { _, _ in refresh() }
@@ -110,17 +111,25 @@ struct WorktreesView: View {
             }
             .confirmationDialog("Delete \(removing?.title ?? "worktree")?", isPresented: Binding(get: { removing != nil }, set: { if !$0 { removing = nil } }), titleVisibility: .visible) {
                 Button("Delete Worktree", role: .destructive) {
-                    if let removing, let folderID {
-                        run { _ = try await model.call("deleteWorktree", .object(["projectID": .string(project.id.uuidString), "folderID": .string(folderID.uuidString), "path": .string(removing.path)])) }
+                    if let removing {
+                        let discardChanges = deletionHasChanges
+                        run { _ = try await model.call("deleteWorktree", .object(["projectID": .string(project.id.uuidString), "folderID": .string(removing.folderID.uuidString), "path": .string(removing.path), "discardChanges": .bool(discardChanges)])) }
                     }
                     removing = nil
                 }
             } message: {
                 if let removing {
-                    Text((removing.finished ? "The checkout is already gone." : "Removes \(removing.path) from disk. It must have no modified or untracked files; the branch is kept.")
+                    Text((deletionHasChanges ? "This worktree has uncommitted, untracked, or ignored files. These changes will be permanently lost.\n\n" : "") + (removing.finished ? "The checkout is already gone." : "Removes \(removing.path) from disk. Branches with no unique commits are also deleted.")
                          + (removing.sessions.isEmpty ? "" : "\n\(removing.sessions.count) finished session\(removing.sessions.count == 1 ? "" : "s") and their terminal history are deleted."))
                 }
             }
+    }
+    private func prepareDeletion(_ row: CheckoutRow) {
+        run {
+            let preview = try await model.call("previewWorktreeDeletion", .object(["projectID": .string(project.id.uuidString), "folderID": .string(row.folderID.uuidString), "path": .string(row.path)]))
+            deletionHasChanges = preview["hasChanges"].bool == true
+            removing = row
+        }
     }
     private func refresh() {
         guard folder != nil else { return }

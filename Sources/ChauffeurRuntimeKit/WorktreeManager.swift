@@ -209,7 +209,7 @@ public actor WorktreeManager {
     }
     /// Removes a checkout with `git worktree remove`. External checkouts are
     /// only deleted when the caller explicitly asks for it.
-    public func remove(_ worktree: Worktree, liveSessions: [Session], allowExternal: Bool = false) async throws {
+    public func remove(_ worktree: Worktree, liveSessions: [Session], allowExternal: Bool = false, discardChanges: Bool = false) async throws {
         let path = Paths.canonical(worktree.path)
         let managedRoot = Paths.canonical(root.path) + "/"
         if !allowExternal {
@@ -229,10 +229,32 @@ public actor WorktreeManager {
         let inventory = try await inventory(at: worktree.repositoryPath)
         guard let entry = inventory.first(where: { $0.path == path }), !entry.locked else { throw ChauffeurError("worktree_unavailable", "Worktree is missing or locked", path: path) }
         guard worktree.gitIdentity == nil || entry.gitIdentity == worktree.gitIdentity else { throw ChauffeurError("worktree_unavailable", "A different checkout now occupies this path. Refresh the Git inventory", path: path) }
-        guard try await git(path, ["status", "--porcelain=v1", "-z", "--untracked-files=all"]).isEmpty else {
-            throw ChauffeurError("dirty_worktree", "Worktree has modified or untracked files", path: path)
+        let dirty = try await hasChanges(at: path)
+        guard discardChanges || !dirty else {
+            throw ChauffeurError("dirty_worktree", "Worktree has uncommitted, untracked, or ignored files. Confirm deletion to discard them", path: path)
         }
-        _ = try await git(worktree.repositoryPath, ["worktree", "remove", "--", path])
+        // Git still enforces locks and refuses to remove the main checkout.
+        _ = try await git(worktree.repositoryPath, ["worktree", "remove"] + (discardChanges ? ["--force"] : []) + ["--", path])
+        await deleteBranchIfUnused(entry.branch, repository: worktree.repositoryPath)
+    }
+    public func hasChanges(at path: String) async throws -> Bool {
+        // Ignored files also disappear when the checkout is removed.
+        try await !git(path, ["status", "--porcelain=v1", "-z", "--untracked-files=all", "--ignored"]).isEmpty
+    }
+    public func deleteBranchIfUnused(_ branch: String, repository: String) async {
+        guard !branch.isEmpty else { return } // Detached HEAD.
+        let reference = "refs/heads/" + branch
+        do {
+            let commit = Self.line(try await git(repository, ["rev-parse", "--verify", reference]))
+            let unique = try await git(repository, ["rev-list", "--count", commit, "--not", "--exclude=" + branch, "--branches"])
+            guard unique.trimmingCharacters(in: .whitespacesAndNewlines) == "0",
+                  try await !inventory(at: repository).contains(where: { $0.branch == branch }) else { return }
+            // Compare-and-delete preserves a branch advanced during the check.
+            _ = try await git(repository, ["update-ref", "-d", reference, commit])
+        } catch {
+            // Conservatively keep the branch if its safety cannot be proven.
+            // The checkout is already removed; history cleanup must still run.
+        }
     }
     /// Drops Git's entries for worktrees whose directories no longer exist.
     public func prune(repositoryPath: String) async throws {

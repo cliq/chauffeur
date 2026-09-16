@@ -14,9 +14,11 @@ it; records without sessions are dropped when their checkout disappears, and Git
 entries whose directory is gone are left for **Prune** in Manage Worktrees.
 
 Right-click a worktree and choose **Delete Worktree…** to remove its checkout
-with `git worktree remove` (the checkout must be clean and have no live sessions;
-the branch is kept) together with its finished sessions and their saved terminal
-history. On a Finished row the same action removes just the history.
+together with its finished sessions and saved terminal history. Stop live sessions
+first. The confirmation warns when uncommitted, untracked, or ignored files will
+be permanently lost. Branches with no commits unique to other local branches are
+also deleted; branches with unique commits are preserved. On a Finished row the
+same action removes the history and cleans up an eligible branch.
 
 **Open Shell** starts your login shell in the checkout as a Chauffeur session. It
 keeps running when the window closes, appears in the checkout's session strip, and
