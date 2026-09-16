@@ -130,4 +130,5 @@ and confirms the agent retains its process ID throughout.
 
 The full Swift suite, signed Debug build, socket/runtime and worktree regression
 fixtures, and native session-sheet fixture pass with the watcher enabled. Logs
-are under `.build/metadata-watcher-*.log`; the supplied Release build is unchanged.
+are under `.build/metadata-watcher-*.log`. The current packaged version is tracked
+in [implementation status](implementation-status.md#current-release--2026-09-16).

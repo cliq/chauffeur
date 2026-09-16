@@ -101,7 +101,7 @@ unverified real-CLI or native behavior; deferred workload checks remain unverifi
   after its sheet dismisses and the project window becomes visible; the native
   check reproduced the extra window before the fix. Evidence:
   `.build/editor-controls-artifacts/`. Session/window and terminal-pointer
-  regressions pass. This handoff fix is in Debug, awaiting the next Release.
+  regressions pass. The handoff fix is included in the current Release.
 - [Appearance settings](appearance.md) offer System, Light, and Dark with saved
   app-wide selection. Four isolated native app launches verify persistence,
   window/terminal default colors, cursor contrast, newly created terminals, and
@@ -202,7 +202,7 @@ unverified real-CLI or native behavior; deferred workload checks remain unverifi
 ## Current Release — 2026-09-16
 
 `build/Build/Products/Release/Chauffeur.app` now includes app/runtime changes
-through `9d9de27`, signed with Leonardo Lobato's Developer ID certificate. Deep,
+through `7062126`, signed with Leonardo Lobato's Developer ID certificate. Deep,
 strict bundle-signature verification passes. The embedded `chauffeur-launcher`
 and GUI `Chauffeur` are distinct files.
 
@@ -216,7 +216,9 @@ XCUITest remains unrun. Evidence: `.build/release-startup-artifacts/`.
 The user's Release was then relaunched at its original path and opened the saved
 Signos project. The service reconnects, and the existing session, message and
 preset records match the pre-launch snapshot. Private evidence:
-`.local/release-latest/`. The current Release is open for testing.
+`.local/release-editor/`. The current Release is open for testing. Build and
+startup logs are `.build/release-editor-build.log` and
+`.build/release-editor-startup.log`.
 
 ## Current-goal stage audit
 
