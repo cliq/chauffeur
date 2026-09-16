@@ -15,6 +15,15 @@ not a completed real-provider support matrix.
 | Claude Code | 2.1.272 | Three real sessions/two profiles; native account/process configuration, authenticated messages, permission/completion hooks, scoped stop, explicit resume and runtime reconnect pass; both profiles report the same account |
 | Claude Code | 2.1.273 | Basic-terminal launch/resume and checkout recovery pass; native UI input/clipboard/resize/history and normal/forced UI quit preserve the process and draft. Coordination and status-hook compatibility remain unverified |
 
+`Prototypes/native_profile_selection.py` verifies two concurrent native project
+windows per current CLI in the signed Release app. Native `/status` account
+displays match the authorized clones, and actual child process indicators prove
+the selected configuration directories and removal of inherited fake provider
+credentials. Both live basic-mode sessions report **Activity unknown**. The
+Codex clones have distinct stored account contexts; Claude A/B share an account,
+and the different-account Claude check remains deferred by the user. No model
+prompts are sent by this check.
+
 ## Capability behavior
 
 The adapter checks `--version` and `--help` before spawning an agent. Baseline

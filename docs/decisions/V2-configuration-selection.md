@@ -1,7 +1,8 @@
 # V2 — configuration selection
 
-Status: environment/path fixtures and real Codex profile checks passed; Claude
-and full account-display acceptance remain open.
+Status: environment/path fixtures and native two-window Codex/Claude profile
+checks pass with the authorized A/B clones. Distinct-Claude-account acceptance
+is deferred at the user's request.
 
 ## Decision
 
@@ -51,9 +52,26 @@ Both supplied Claude profiles currently report the same account and
 organization. This proves separate configuration-directory selection and
 matching native account displays; distinct-Claude-account selection remains
 unverified. Six real message operations, scoped stop, explicit resume and
-runtime reconnection also pass; see [V3](V3-mcp-and-status.md). Native usage
-displays, additional provider-specific settings, and broader UI acceptance
-remain open. Alternate daemon/remote routes are not claimed.
+runtime reconnection also pass; see [V3](V3-mcp-and-status.md). Alternate
+daemon/remote routes are not claimed.
+
+`Prototypes/native_profile_selection.py` subsequently passes with the signed
+Release app, Codex 0.154.0 and Claude Code 2.1.273 in explicit basic-terminal
+mode. Each CLI has two simultaneous sessions in separate native project
+windows. macOS keyboard input opens each real `/status` display. Its account
+email matches the selected clone; Claude's organization and conversation ID
+also match native `auth status` diagnostics. Codex `doctor --json` reports the
+intended configuration directory, and its two clones have distinct stored
+account contexts. Raw JWTs and credentials stay in memory and are never logged.
+
+For all four processes, fixed indicators obtained through `KERN_PROCARGS2`
+confirm the exact child configuration directory and absence of the injected
+invalid provider/authentication variables. Both basic-mode sessions remain
+`Activity unknown` while live. The check sends no model prompts. Private native
+display captures and reports are under `.local/profiles-native-{codex,claude}/`.
+This covers the current two-window profile/account-display requirement within
+the user's existing-profile constraint; it does not claim distinct Claude
+accounts or billing/usage isolation.
 
 A third authorized directory contained a file-based login and initially reported
 a different account. Its private configuration copy reported signed out after

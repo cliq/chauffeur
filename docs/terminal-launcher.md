@@ -52,5 +52,6 @@ agent sessions. Results are under `.build/folder-launcher-artifacts/` and
 ## Remaining installation checks
 
 The actual `/usr/local/bin/` installation still needs administrator authentication
-on the development Mac. The repair fix is in the current sources and Debug build;
-the Release build supplied for testing has been left unchanged.
+on the development Mac. The repair fix is included in the signed Release build.
+Installation and literal forwarding pass in private writable destinations; the
+native installer requests macOS authentication for the root-owned system folder.

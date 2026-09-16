@@ -102,6 +102,14 @@ unverified real-CLI or native behavior; deferred workload checks remain unverifi
   check reproduced the extra window before the fix. Evidence:
   `.build/editor-controls-artifacts/`. Session/window and terminal-pointer
   regressions pass. The handoff fix is included in the current Release.
+- Native profile selection passes with two concurrent project windows for each
+  current CLI in the signed Release app. Native account displays and process
+  configuration paths match the authorized A/B clones; inherited fake provider
+  credentials are absent. Codex clones have distinct stored account contexts;
+  Claude A/B still share an account, with its different-account check deferred
+  by the user. Both basic-mode sessions report Activity unknown. No model prompts
+  are sent. Evidence: `.local/profiles-native-{codex,claude}/` and
+  `Prototypes/native_profile_selection.py`.
 - [Appearance settings](appearance.md) offer System, Light, and Dark with saved
   app-wide selection. Four isolated native app launches verify persistence,
   window/terminal default colors, cursor contrast, newly created terminals, and
@@ -234,11 +242,11 @@ startup logs are `.build/release-editor-build.log` and
 
 | Plan items | Current state | Still required |
 | --- | --- | --- |
-| Stage 0 V1–V5 | Decision documents; V1 terminal continuity with real native CLI reattachment and bounded fixture history; real default-route Codex credential/stop evidence; actual LaunchAgent lifecycle | Remaining profile, status, and focused macOS checks; coordination and final Spaces workload are in V2 |
+| Stage 0 V1–V5 | Decision documents; native CLI terminal continuity, bounded history and two-window profile/account displays; real scoped-stop evidence; actual LaunchAgent lifecycle | Remaining status and focused macOS checks; distinct-Claude-account check deferred by user; coordination and final Spaces workload are in V2 |
 | 1.1 Records/store | Atomic writes, reference/ownership diagnostics, external-edit conflicts, preset revision tracking, last-used preference, empty-set UI/runtime checks, and targeted filesystem watching with recovery pass | — |
 | 1.2 Runtime skeleton | Lock, peer-checked Unix socket, version handshake, health helper, verified bundled LaunchAgent registration/recovery; bounded structured logs with typed redaction | Remaining live-service release acceptance |
 | 1.3–1.7 Presets/projects/groups/welcome/windows | Native preset/project/group editors, file panels, validation, discovery, relink/archive/reopen, cancellation, stale-save rejection and Welcome handoff pass; OS-driven window/search/new-session/attention commands pass | Final four-Spaces workload is in V2 |
-| 1.8 Basic launch | Real Codex/Claude launch, filtered environment, private exec handoff, terminal input/resize/stop; cancellable launch/resume with terminal cleanup; Claude native account/process configuration checks | Full native account/status checks, distinct-Claude-account check, complete preflight |
+| 1.8 Basic launch | Real Codex/Claude launch and two-window profile/account displays; filtered child environments, preflight failures, native input/resize/stop and immutable launch details; cancellable launch/resume with terminal cleanup | Distinct-Claude-account check deferred by user; remaining semantic attention acceptance tracked under 2.7 |
 | 1.9 Session details | Native immutable context after preset edits, individual execution controls, and a real saved session's expanded launch snapshot match the stored record | — |
 | 2.1 Screen/history | tmux live state; bounded persisted snapshots, disk cleanup, native history/search; real Codex/Claude native attach, Unicode, clipboard and reply search; native link/mouse forwarding and 60,000-line retention/recovery pass | — |
 | 2.2 Reconnect | Positive pane/process reconciliation; real Codex/Claude explicit native-ID resume and MCP reconnect | Remaining service-failure edge cases and full native acceptance |

@@ -55,7 +55,8 @@ This exposed and corrected several startup issues:
   the inherited environment. The runtime fixture also exercises this fallback.
 
 The service probe contains no CLI sessions and does not prove the remaining
-Spaces, sleep/wake, notification or real-session gates. See
+sleep/wake or live real-session LaunchAgent gates. The final Spaces workload is
+deferred to V2. See
 [service recovery](../service-recovery.md) for setup and development updates.
 
 The separate `Prototypes/notification_native_smoke.py --use-default-service`
@@ -155,7 +156,23 @@ Both CLIs retain their original process ID and unsent draft, then answer after
 reattachment. Their runtime ID and recorded launch profile remain unchanged.
 This is a private standalone runtime test, not a LaunchAgent update or sleep test.
 
-## Notification implementation and partial evidence
+`Prototypes/real_repository_access.py` also passes with both current real CLIs
+and the signed Release runtime. It kills only a private runtime after the first
+provider turn and starts a replacement on the same store. The CLI process,
+terminal identity, conversation and launch snapshot survive; both then complete
+another tool-using turn with correct file changes in a primary worktree and an
+additional repository. This covers standalone crash recovery, not native
+LaunchAgent updates or sleep/wake.
+
+Native pointer/link forwarding and bounded history rotation now have passing
+evidence in `.build/terminal-pointer-artifacts/` and
+`.build/history-rotation-artifacts/`. The editor acceptance check also verifies
+that creating a project dismisses Welcome after the creation sheet closes and
+the project window becomes visible. These outcomes supersede the earlier
+outstanding link/history/editor checks; see
+[implementation status](../implementation-status.md).
+
+## Notification implementation and evidence
 
 The signed app now includes an accessory notification app, a durable opt-in
 outbox, Settings controls, and project/session URL routing. See
@@ -171,16 +188,19 @@ UI closed. It reads native authorization (`notDetermined`) over the private IPC
 connection and exits while notifications are disabled, without requesting access.
 This proves the helper can run and communicate. The user subsequently enabled
 notifications, and the helper reports `authorized`, enabled, and connected.
-Actual notification delivery and click handling still require native acceptance.
+The native Notification Center delivery/click and helper recovery/update checks
+described above subsequently passed. Transient banner presentation and alternate
+Focus settings remain unverified; the actual cold-launch route is covered.
 
 ## Remaining gate evidence
 
-- Finish link/mouse checks and sustained scrollback rotation. XCUITest still
-  requires the previously requested system access.
-- Validate sleep/wake, remaining service-loss cases,
-  banner delivery/clicks with the UI closed, and enabled-helper recovery/update.
-- Finish live-service lifecycle checks with both real CLIs and their intended
-  accounts; standalone UI quit/force-quit/reattachment now passes for both.
+- Validate actual sleep/wake and native LaunchAgent lifecycle with live real CLI
+  sessions. Standalone runtime crashes and UI quit/force-quit/reattachment pass
+  for both current CLIs.
+- XCUITest remains unrun because of system automation access. Native OS-driven
+  checks have their own direct evidence; their results do not claim XCUITest ran.
+- Transient banners and alternate Focus settings remain unverified. Actual
+  Notification Center delivery, cold click, and helper recovery/update pass.
 
 The full V5 gate remains open.
 The four-window/four-Spaces workload is deferred to V2 and does not block the
