@@ -222,10 +222,15 @@ struct SessionLaunchView: View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Checkout").font(.headline)
             Form {
-                Picker("Repository", selection: $folderID) {
+                Picker("Repository", selection: Binding(get: { folderID }, set: { selected in
+                    guard selected != folderID else { return }
+                    folderID = selected
+                    checkout = startsInNewWorktree ? .newWorktree : .repository
+                    shared = false
+                })) {
                     Text("Choose a folder").tag(UUID?.none)
                     ForEach(currentProject.folders.filter(\.registered)) { folder in Text(folder.name).tag(Optional(folder.id)) }
-                }.onChange(of: folderID) { _, _ in checkout = startsInNewWorktree ? .newWorktree : .repository; shared = false }
+                }
                 Picker("Work in", selection: $checkout) {
                     Text("Repository folder").tag(Checkout.repository)
                     ForEach(worktrees) { tree in Text("\(tree.branch.isEmpty ? "Detached HEAD" : tree.branch) · \(tree.availability.rawValue)").tag(Checkout.existing(tree.id)) }
