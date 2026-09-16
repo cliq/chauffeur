@@ -157,6 +157,8 @@ with tempfile.TemporaryDirectory(prefix='chauffeur-terminal-controls-', dir='/tm
         terminal_id = 'terminal-' + session_id
         wait_for(lambda: (c if (c := control(terminal_id)) and 'Chauffeur fixture' in c['value'] else None), 'terminal exposed to accessibility')
         assert control(terminal_id)['role'] == 'AXTextArea' and control(terminal_id)['enabled']
+        assert 'Sparse cells:     gap' in control(terminal_id)['value']
+        assert '\0' not in control(terminal_id)['value'], 'Blank terminal cells must be exposed as spaces'
         text = 'native café 日本語 --literal'
         ax('insertText', terminal_id, value=text)
         wait_for(lambda: input_log.exists() and text.encode() in input_log.read_bytes(), 'native Unicode input')

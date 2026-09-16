@@ -22,6 +22,8 @@ Live terminals and saved history expose distinct, focusable text areas to macOS
 Accessibility, with their displayed text and current selection. Reading the
 accessibility value is bounded to the displayed rows. It does not serialize the
 entire retained scrollback or make saved history editable.
+Empty terminal cells read as spaces; continuation cells of wide glyphs do not
+introduce NUL characters into the accessible text.
 
 ## Saved captures
 
@@ -92,3 +94,12 @@ unsent input. Clipboard checks retain the previous clipboard in memory and
 restore it after the fixture operation. Reports and window captures are in
 `.build/terminal-controls-artifacts/`. This requires existing Accessibility access;
 it does not establish real-provider, link-opening, or full VoiceOver acceptance.
+
+`Prototypes/real_terminal_controls.py` adds real Codex 0.154.0 and Claude Code
+2.1.273 basic-terminal evidence. Native trust prompts, Unicode input and paste,
+selection/copy, OS window resize, normal and forced UI quit, and reattachment
+with the same process and unsent draft pass. Each provider's two generated
+Unicode replies can be searched and copied from History at capture time; the
+complete search text is absent from the prompts. Reports and screenshots remain
+private under `.local/terminal-native-{codex,claude}/`. Link/mouse behavior and
+sustained scrollback rotation remain separate checks.

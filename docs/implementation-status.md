@@ -63,7 +63,14 @@ unverified real-CLI or native behavior; deferred workload checks remain unverifi
   switching/split shortcuts, and Command-Q/relaunch preserving process/input.
   Terminals now expose distinct focusable live/history accessibility elements
   with displayed text and selection. Evidence: `.build/terminal-controls-artifacts/`.
-  Real-provider and link-opening acceptance remain open; these changes await Release.
+  Link/mouse and sustained rotation acceptance remain open; these changes await Release.
+- Real Codex 0.154.0 and Claude Code 2.1.273 basic-terminal runs now pass native
+  trust prompts, Unicode typing, clipboard, window/PTY resize, and history search
+  in the signed Debug app. Normal and forced UI quit preserve each real CLI's
+  process, launch profile and unsent draft; a second provider reply succeeds after
+  reattachment. Searches use generated reply text absent from the prompts.
+  Blank terminal cells exposed as NUL characters are now mapped to spaces, with
+  a native cursor-gap regression. Evidence: `.local/terminal-native-{codex,claude}/`.
 - [Metadata integrity and preset defaults](metadata-and-presets.md): child
   ownership checks, path-bearing reference diagnostics, archived history
   preservation, service-owned preset revision increments, and a remembered
@@ -164,9 +171,9 @@ unverified real-CLI or native behavior; deferred workload checks remain unverifi
 | 1.3–1.7 Presets/projects/groups/welcome/windows | Native editors, cancellable discovery, relink/archive, welcome and project windows implemented | Remaining editor/window interaction checks; final four-Spaces workload is in V2 |
 | 1.8 Basic launch | Real Codex/Claude launch, filtered environment, private exec handoff, terminal input/resize/stop; cancellable launch/resume with terminal cleanup; Claude native account/process configuration checks | Full native account/status checks, distinct-Claude-account check, complete preflight |
 | 1.9 Session details | Native details show the immutable launch snapshot and lifecycle/coordination records | Real-session interaction acceptance |
-| 2.1 Screen/history | tmux live state; bounded persisted snapshots, disk cleanup, native history/search | Real CLI native attach/search/copy/link verification and sustained rotation |
+| 2.1 Screen/history | tmux live state; bounded persisted snapshots, disk cleanup, native history/search; real Codex/Claude native attach, Unicode, clipboard and reply search pass | Native link/mouse verification and sustained rotation |
 | 2.2 Reconnect | Positive pane/process reconciliation; real Codex/Claude explicit native-ID resume and MCP reconnect | Remaining service-failure edge cases and full native acceptance |
-| 2.3–2.4 Quit/tabs/split | Native tabs/split, window-state writes, quit/stop-all and keyboard commands implemented; actual OS switching/split/quit shortcuts and reattachment pass with fixtures | Focused real-CLI acceptance; direct normal/force-quit fixture implemented; final Spaces workload is in V2 |
+| 2.3–2.4 Quit/tabs/split | Native tabs/split, window-state writes, quit/stop-all and keyboard commands implemented; OS switching/split/quit shortcuts pass with fixtures; real Codex/Claude normal and forced UI quit preserve process and draft through reattachment | Remaining window-command and Stop All confirmation interactions; final Spaces workload is in V2 |
 | 2.5 Worktrees | Create/list/safe-remove; periodic external inventory; identity-based moves/replacements; pending launch/removal and metadata-write reservations; legacy migration fixtures and real Codex/Claude repository-relocation, replacement/resume, and removal checks; native manager controls and concurrent registration pass | Ship manager fixes in the next Release |
 | 2.6 Multiple repos | Explicit additional folder selection in launch API; primary main checkout excluded | Real CLI access test (shared-checkout warning and explicit additional-folder UI implemented) |
 | 2.7 Status/attention | Lifecycle records, real Codex/Claude completion IDs, permission attention hooks, unread/pending counts; optional durable notifications; native warm/cold URL routing and background helper startup; user enabled and authorized notifications | Actual OS delivery/click, enabled-helper recovery/update, and remaining native attention signals |

@@ -98,7 +98,7 @@ else {
         if let identifier = request["identifier"] as? String { return attribute(element, kAXIdentifierAttribute) as? String == identifier }
         if let placeholder = request["placeholder"] as? String { return attribute(element, kAXPlaceholderValueAttribute) as? String == placeholder }
         if let title = request["title"] as? String {
-            return (attribute(element, kAXRoleAttribute) as? String == kAXButtonRole)
+            return (attribute(element, kAXRoleAttribute) as? String == (request["role"] as? String ?? kAXButtonRole))
                 && (attribute(element, kAXTitleAttribute) as? String == title || attribute(element, kAXDescriptionAttribute) as? String == title)
         }
         return false
@@ -106,6 +106,10 @@ else {
     if matches.count == 1, let element = matches.first {
         if operation == "press" {
             let status = AXUIElementPerformAction(element, kAXPressAction as CFString)
+            result = ["performed": status == .success, "status": status.rawValue]
+        } else if operation == "resize", let width = request["width"] as? Double, let height = request["height"] as? Double {
+            var size = CGSize(width: width, height: height)
+            let status = AXUIElementSetAttributeValue(element, kAXSizeAttribute as CFString, AXValueCreate(.cgSize, &size)!)
             result = ["performed": status == .success, "status": status.rawValue]
         } else if !focus(element) { result = ["error": "The requested control did not receive keyboard focus"] }
         else if operation == "paste" || operation == "copy" {

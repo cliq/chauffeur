@@ -1,7 +1,9 @@
 # V1 — terminal continuity
 
-Status: fixture continuity and native keyboard/clipboard/history controls pass;
-real-CLI rendering acceptance remains open.
+Status: fixture continuity and native keyboard/clipboard/history controls pass.
+Real Codex and Claude Code pass native prompts, Unicode, clipboard, resize,
+history search, and normal/forced UI quit with the same process and draft.
+Link/mouse behavior and sustained scrollback rotation remain open.
 
 ## Decision
 
@@ -45,6 +47,24 @@ accessibility tree; live and history views now expose distinct focusable text
 areas with displayed output and selection. Clipboard checks preserve the prior
 clipboard in memory. Private artifacts are in `.build/terminal-controls-artifacts/`.
 
+`Prototypes/real_terminal_controls.py` runs the same signed Debug app with real
+Codex 0.154.0 and Claude Code 2.1.273, an authorized profile clone, and a temporary
+Git repository. The actual trust prompts are accepted through native keyboard
+input after checking the displayed temporary path. Each CLI receives two
+text-only turns. Native selection/copy, Unicode typing/paste, an OS window resize
+(119×39 to 95×32 terminal cells), normal UI quit, force quit, and subsequent
+reattachment pass. The same CLI process retains an unsent draft through both UI
+relaunches and answers it afterward. Each generated Unicode reply is searched
+and copied from History at capture time; the full search string is absent from
+the corresponding prompt, preventing prompt echoes from satisfying the check.
+Private reports and screenshots are under `.local/terminal-native-{codex,claude}/`.
+Claude runs in basic-terminal mode; this does not establish 2.1.273 hook support.
+
+The real Codex trust screen exposed blank terminal cells as NUL characters in
+Accessibility. They now become spaces, while wide-glyph continuation cells are
+omitted. The native fixture explicitly draws a cursor-positioned gap and checks
+that it reads as spaces without NUL characters.
+
 ## Remaining gate evidence
 
 Bounded versioned captures are now persisted, with global disk-budget cleanup,
@@ -52,7 +72,7 @@ normal-history plus alternate-screen capture, and a native read-only search
 view. See [terminal history](../terminal-history.md) for the retention policy and
 fixture evidence.
 
-Both real CLIs must still be exercised in the SwiftTerm view, including copy,
-paste, links, cursor/mouse modes, sustained scrollback rotation, UI force quit,
-and native prompts. These remain release gates; fixture success is not a claim
-that V1 is fully passed.
+Remaining checks include native link opening, CLI cursor/mouse behavior beyond
+the observed prompts/input, and sustained scrollback rotation. The real runs
+above use two short text-only turns and do not establish those cases or final
+workload performance. V1 is not yet fully passed.

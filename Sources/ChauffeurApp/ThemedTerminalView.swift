@@ -19,6 +19,7 @@ final class ThemedTerminalView: TerminalView {
         let terminal = getTerminal()
         return (0..<terminal.rows).compactMap {
             terminal.getLine(row: $0)?.translateToString(trimRight: true, skipNullCellsFollowingWide: true)
+                .replacingOccurrences(of: "\0", with: " ")
         }.joined(separator: "\n")
     }
     override func accessibilitySelectedText() -> String? { getSelection() }

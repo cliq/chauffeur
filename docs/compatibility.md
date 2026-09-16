@@ -11,9 +11,9 @@ not a completed real-provider support matrix.
 | tmux | 3.6a | Fixture alternate-screen redraw, resize, input, detachment and runtime restart pass |
 | SwiftTerm | 1.20.0 | Pinned; native terminal views implemented and exercised by the Debug probe |
 | Hummingbird | 2.26.0 | Actual loopback MCP requests exercised with fixture credentials |
-| Codex | 0.154.0 | Three real sessions/two profiles; authenticated messages, native approvals/completion, scoped stop, explicit resume and runtime reconnect pass |
+| Codex | 0.154.0 | Three real sessions/two profiles; authenticated messages, native approvals/completion, scoped stop, explicit resume and runtime reconnect pass. Native UI input/clipboard/resize/history and normal/forced UI quit preserve the process and draft |
 | Claude Code | 2.1.272 | Three real sessions/two profiles; native account/process configuration, authenticated messages, permission/completion hooks, scoped stop, explicit resume and runtime reconnect pass; both profiles report the same account |
-| Claude Code | 2.1.273 | Installed update; basic-terminal launch and explicit conversation resume pass with repository relocation and checkout-replacement recovery. Coordination and status-hook compatibility remain unverified |
+| Claude Code | 2.1.273 | Basic-terminal launch/resume and checkout recovery pass; native UI input/clipboard/resize/history and normal/forced UI quit preserve the process and draft. Coordination and status-hook compatibility remain unverified |
 
 ## Capability behavior
 
@@ -36,6 +36,13 @@ conversation recall, live-removal refusal, and clean removal preserving the
 branch. It passed with Codex 0.154.0 and Claude Code 2.1.273 in basic-terminal
 mode, using authorized private profile clones. This does not establish hook or
 coordination compatibility for Claude 2.1.273.
+
+`Prototypes/real_terminal_controls.py` uses the same authorized clones in a
+signed isolated Debug app. Both current CLIs pass native trust prompts, Unicode
+typing, copy/paste, resize, normal/forced UI quit, preserved unsent input and
+same-process reattachment, followed by another provider reply. Unicode replies
+are searchable and copyable from their captures. This is focused two-turn
+evidence; link/mouse, sustained rotation and final workload coverage remain open.
 
 Codex's proposed status path is turn completion through `notify`. It does not
 prove approval or input status; these remain unknown when no supported event is

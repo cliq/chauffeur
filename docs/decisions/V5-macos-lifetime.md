@@ -124,6 +124,14 @@ text and selection are exposed through distinct live/history accessibility
 elements. This is fixture evidence, not a real-CLI or full VoiceOver audit; see
 [V1](V1-terminal-continuity.md) and [terminal history](../terminal-history.md).
 
+The real Codex 0.154.0 and Claude Code 2.1.273 basic-terminal runs now pass
+native prompts/input, clipboard, resize and history search in the signed Debug
+app. `Prototypes/real_terminal_controls.py` quits the UI through Command-Q, then
+reopens it, force-quits only that isolated UI process, and reopens it again.
+Both CLIs retain their original process ID and unsent draft, then answer after
+reattachment. Their runtime ID and recorded launch profile remain unchanged.
+This is a private standalone runtime test, not a LaunchAgent update or sleep test.
+
 ## Notification implementation and partial evidence
 
 The signed app now includes an accessory notification app, a durable opt-in
@@ -144,11 +152,12 @@ Actual notification delivery and click handling still require native acceptance.
 
 ## Remaining gate evidence
 
-- Finish link-opening checks and repeat the native terminal interactions with
-  real CLIs. XCUITest still requires the previously requested system access.
+- Finish link/mouse checks and sustained scrollback rotation. XCUITest still
+  requires the previously requested system access.
 - Validate sleep/wake, remaining service-loss cases,
   banner delivery/clicks with the UI closed, and enabled-helper recovery/update.
-- Repeat lifetime scenarios with both real CLIs and their intended accounts.
+- Finish live-service lifecycle checks with both real CLIs and their intended
+  accounts; standalone UI quit/force-quit/reattachment now passes for both.
 
 The full V5 gate remains open.
 The four-window/four-Spaces workload is deferred to V2 and does not block the
