@@ -60,6 +60,7 @@ For an optimized build, run `make release` and open
 side with separate settings and sessions.
 
 See [building and verifying](docs/building.md) for signing options and tests.
+For signed, notarized GitHub releases, see [release setup](docs/notarization.md).
 If macOS asks you to allow the background service, follow the link to Login Items
 & Extensions in the app. See [service recovery](docs/service-recovery.md) if it
 won't start.

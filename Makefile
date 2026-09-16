@@ -5,6 +5,7 @@ CONFIGURATION ?= Debug
 BUILD_ACTION ?= build
 DERIVED_DATA_PATH ?= build
 XCODEBUILD_ARGS ?=
+CODESIGN_FLAGS ?=
 
 PRODUCTS_DIR = $(DERIVED_DATA_PATH)/Build/Products/$(CONFIGURATION)
 APP_NAME = $(if $(filter Debug,$(CONFIGURATION)),Chauffeur Debug,Chauffeur)
@@ -25,7 +26,7 @@ build: gen
 	# Reseal the completed bundle using the identity resolved by Xcode.
 	@set -euo pipefail; \
 	  task_identity="$$(cat "$(PRODUCTS_DIR)/Chauffeur.signing-identity")"; \
-	  /usr/bin/codesign --force --sign "$$task_identity" \
+	  /usr/bin/codesign --force $(CODESIGN_FLAGS) --sign "$$task_identity" \
 	    --preserve-metadata=identifier,entitlements,flags,runtime "$(APP)"
 	$(MAKE) verify CONFIGURATION="$(CONFIGURATION)"
 	@printf '\nApp: %s\n' "$(abspath $(PRODUCTS_DIR))/$(APP_NAME).app"

@@ -56,7 +56,7 @@ targets:
         INFOPLIST_KEY_CFBundleDisplayName: $(CHAUFFEUR_DISPLAY_NAME)
         INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.developer-tools
         INFOPLIST_KEY_NSPrincipalClass: NSApplication
-        MARKETING_VERSION: 0.1.0
+        MARKETING_VERSION: "1.0"
         CURRENT_PROJECT_VERSION: 1
     postBuildScripts:
       - name: Embed background runtime

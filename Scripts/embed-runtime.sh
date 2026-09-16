@@ -18,6 +18,10 @@ cd "$SRCROOT"
 task_binary_dir=$(/usr/bin/env swift build -c "$task_config" --show-bin-path)
 task_app_dir="$TARGET_BUILD_DIR/$CONTENTS_FOLDER_PATH"
 task_identity=${EXPANDED_CODE_SIGN_IDENTITY:--}
+task_signing_flags=(--options runtime)
+if [[ "${CHAUFFEUR_NOTARIZE:-0}" == 1 ]]; then
+  task_signing_flags+=(--timestamp)
+fi
 mkdir -p "$task_app_dir/MacOS" "$task_app_dir/Library/LaunchAgents"
 task_stage=$(mktemp -d "$task_app_dir/MacOS/.chauffeur-embed.XXXXXX")
 trap 'rm -rf "$task_stage"' EXIT
@@ -32,7 +36,7 @@ for task_binary in ChauffeurRuntime chauffeurctl chauffeur; do
   # Replace executable inodes atomically; do not overwrite a Mach-O that launchd
   # may have mapped or whose code signature the kernel has already cached.
   cp "$task_binary_dir/$task_binary" "$task_stage/$task_binary"
-  /usr/bin/codesign --force --options runtime --sign "$task_identity" "$task_stage/$task_binary"
+  /usr/bin/codesign --force "${task_signing_flags[@]}" --sign "$task_identity" "$task_stage/$task_binary"
   mv -f "$task_stage/$task_binary" "$task_app_dir/MacOS/$task_embedded_name"
 done
 task_notification_app="$task_stage/ChauffeurNotifications.app"
@@ -42,7 +46,7 @@ cp "$SRCROOT/Resources/notifications/Info.plist" "$task_notification_app/Content
 /usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier $task_notification_identifier" "$task_notification_app/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c "Set :CFBundleName $task_notification_name" "$task_notification_app/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName $task_notification_name" "$task_notification_app/Contents/Info.plist"
-/usr/bin/codesign --force --options runtime --sign "$task_identity" "$task_notification_app"
+/usr/bin/codesign --force "${task_signing_flags[@]}" --sign "$task_identity" "$task_notification_app"
 # The old bundle's executable inode remains valid for a running helper.
 if [[ -d "$task_app_dir/Library/ChauffeurNotifications.app" ]]; then
   mv "$task_app_dir/Library/ChauffeurNotifications.app" "$task_stage/previous-notifications.app"

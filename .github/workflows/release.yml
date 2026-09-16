@@ -1,0 +1,148 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: macos-15
+    timeout-minutes: 60
+    permissions:
+      contents: write
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate release tag and configuration
+        id: version
+        env:
+          BUILD_CERTIFICATE_BASE64: ${{ secrets.BUILD_CERTIFICATE_BASE64 }}
+          P12_PASSWORD: ${{ secrets.P12_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+          TEAM_ID: ${{ vars.TEAM_ID }}
+          NOTARY_KEY_BASE64: ${{ secrets.NOTARY_KEY_BASE64 }}
+          NOTARY_KEY_ID: ${{ vars.NOTARY_KEY_ID }}
+          NOTARY_ISSUER_ID: ${{ vars.NOTARY_ISSUER_ID }}
+        run: |
+          set -euo pipefail
+          if [[ "$GITHUB_REF_TYPE" != tag || ! "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+(\.[0-9]+)?$ ]]; then
+            echo '::error::Select or push a release tag such as v0.1.0 (or v0.1).'
+            exit 1
+          fi
+          for name in BUILD_CERTIFICATE_BASE64 P12_PASSWORD KEYCHAIN_PASSWORD TEAM_ID \
+            NOTARY_KEY_BASE64 NOTARY_KEY_ID NOTARY_ISSUER_ID; do
+            if [[ -z "${!name}" ]]; then
+              echo "::error::Missing Actions secret or variable: $name"
+              exit 1
+            fi
+          done
+          echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Select Xcode and install XcodeGen
+        run: |
+          set -euo pipefail
+          sudo xcode-select -s /Applications/Xcode_26.3.app
+          xcodebuild -version
+          test "$(uname -m)" = arm64
+          brew install xcodegen
+
+      - name: Import Developer ID certificate
+        env:
+          BUILD_CERTIFICATE_BASE64: ${{ secrets.BUILD_CERTIFICATE_BASE64 }}
+          P12_PASSWORD: ${{ secrets.P12_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+        run: |
+          set -euo pipefail
+          umask 077
+          cert_path="$RUNNER_TEMP/developer_id.p12"
+          keychain_path="$RUNNER_TEMP/build.keychain-db"
+          printf '%s' "$BUILD_CERTIFICATE_BASE64" | base64 --decode > "$cert_path"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$keychain_path"
+          security set-keychain-settings -lut 21600 "$keychain_path"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$keychain_path"
+          security import "$cert_path" -P "$P12_PASSWORD" -t cert -f pkcs12 -k "$keychain_path" -T /usr/bin/codesign
+          security list-keychains -d user -s "$keychain_path" "$HOME/Library/Keychains/login.keychain-db"
+          security set-key-partition-list -S apple-tool:,apple: -k "$KEYCHAIN_PASSWORD" "$keychain_path" >/dev/null
+          rm -f "$cert_path"
+
+      - name: Build and verify signed app and helpers
+        env:
+          TEAM_ID: ${{ vars.TEAM_ID }}
+          RELEASE_VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          make release CODESIGN_FLAGS=--timestamp \
+            XCODEBUILD_ARGS="ARCHS=arm64 CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY='Developer ID Application' DEVELOPMENT_TEAM=$TEAM_ID CHAUFFEUR_NOTARIZE=1 ENABLE_HARDENED_RUNTIME=YES OTHER_CODE_SIGN_FLAGS='--timestamp --options=runtime' MARKETING_VERSION=$RELEASE_VERSION CURRENT_PROJECT_VERSION=$GITHUB_RUN_NUMBER"
+
+      - name: Build signed DMG
+        run: |
+          set -euo pipefail
+          mkdir -p build/dmg
+          ditto build/Build/Products/Release/Chauffeur.app build/dmg/Chauffeur.app
+          ln -s /Applications build/dmg/Applications
+          hdiutil create -volname Chauffeur -srcfolder build/dmg -ov -format UDZO build/Chauffeur.dmg
+          identity=$(cat build/Build/Products/Release/Chauffeur.signing-identity)
+          codesign --force --timestamp --sign "$identity" build/Chauffeur.dmg
+
+      - name: Notarize and staple DMG
+        env:
+          NOTARY_KEY_BASE64: ${{ secrets.NOTARY_KEY_BASE64 }}
+          NOTARY_KEY_ID: ${{ vars.NOTARY_KEY_ID }}
+          NOTARY_ISSUER_ID: ${{ vars.NOTARY_ISSUER_ID }}
+        run: |
+          set -euo pipefail
+          umask 077
+          key_path="$RUNNER_TEMP/AuthKey.p8"
+          printf '%s' "$NOTARY_KEY_BASE64" | base64 --decode > "$key_path"
+          notary_args=(--key "$key_path" --key-id "$NOTARY_KEY_ID" --issuer "$NOTARY_ISSUER_ID")
+          xcrun notarytool submit build/Chauffeur.dmg "${notary_args[@]}" \
+            --wait --timeout 30m --output-format json > build/notarization.json
+          cat build/notarization.json
+          submission_id=$(plutil -extract id raw build/notarization.json)
+          status=$(plutil -extract status raw build/notarization.json)
+          if [[ "$status" != Accepted ]]; then
+            xcrun notarytool log "$submission_id" "${notary_args[@]}" build/notarization-log.json
+            cat build/notarization-log.json
+            echo '::error::Apple did not accept the notarization submission.'
+            exit 1
+          fi
+          xcrun stapler staple build/Chauffeur.dmg
+          xcrun stapler validate build/Chauffeur.dmg
+          spctl --assess --type open --context context:primary-signature --verbose=2 build/Chauffeur.dmg
+
+      - name: Upload to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: build/Chauffeur.dmg
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+
+      - name: Upload DMG as workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Chauffeur-dmg
+          path: build/Chauffeur.dmg
+          if-no-files-found: error
+
+      - name: Upload notarization diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: notarization-diagnostics
+          path: build/notarization*.json
+          if-no-files-found: ignore
+
+      - name: Remove signing credentials
+        if: always()
+        run: |
+          security delete-keychain "$RUNNER_TEMP/build.keychain-db" || true
+          rm -f "$RUNNER_TEMP/developer_id.p12" "$RUNNER_TEMP/AuthKey.p8"
