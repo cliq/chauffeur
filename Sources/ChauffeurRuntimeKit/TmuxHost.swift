@@ -87,7 +87,9 @@ public actor TmuxHost {
         // SwiftTerm supports OSC 8 links, but tmux's generic xterm-256color
         // features do not advertise them. Set this on every attachment so links
         // survive redraws and reconnects to already-running tmux servers too.
-        let attachment = try PTYAttachment(executable: executable, arguments: ["-S", socketPath, "-T", "hyperlinks", "attach-session", "-t", sessionID.uuidString], directory: runtimeDirectory.path, environment: environment.merging(["TERM": "xterm-256color"], uniquingKeysWith: { _, new in new }), cols: cols, rows: rows)
+        // SwiftTerm always decodes UTF-8. launchd may supply no locale; without
+        // -u tmux replaces Unicode with underscores before it reaches the UI.
+        let attachment = try PTYAttachment(executable: executable, arguments: ["-u", "-S", socketPath, "-T", "hyperlinks", "attach-session", "-t", sessionID.uuidString], directory: runtimeDirectory.path, environment: environment.merging(["TERM": "xterm-256color"], uniquingKeysWith: { _, new in new }), cols: cols, rows: rows)
         attachments[sessionID] = (owner, attachment)
         attachment.startOutput(to: connection)
     }

@@ -5,6 +5,34 @@ import ChauffeurCore
 @testable import ChauffeurRuntimeKit
 
 struct LaunchCancellationTests {
+    @Test func terminalAttachmentPreservesUnicodeWithoutLocaleVariables() async throws {
+        let fixture = try await LaunchFixture.make(); defer { fixture.cleanup() }
+        let expected = "UNICODE café 界 ❯ ✓ END"
+        try Data(expected.utf8).write(to: fixture.path("unicode-output"))
+        let session = try await fixture.runtime.launch(fixture.request)
+        try await fixture.wait {
+            try await fixture.runtime.terminals.capture(sessionID: session.id, lines: 100).screen.contains(expected)
+        }
+        var descriptors: [Int32] = [-1, -1]
+        try #require(socketpair(AF_UNIX, SOCK_STREAM, 0, &descriptors) == 0)
+        let writer = SocketConnection(descriptor: descriptors[0]), reader = SocketConnection(descriptor: descriptors[1])
+        defer { writer.close(); reader.close() }
+        var timeout = timeval(tv_sec: 3, tv_usec: 0)
+        try #require(setsockopt(reader.descriptor, SOL_SOCKET, SO_RCVTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size)) == 0)
+        let owner = UUID()
+        try await fixture.runtime.terminals.attach(sessionID: session.id, owner: owner, connection: writer, cols: 100, rows: 30)
+        var output = Data()
+        // The fixture's END marker also arrives in ASCII-only mode. Wait for
+        // that complete redraw before asserting the actual non-ASCII bytes.
+        while !String(decoding: output, as: UTF8.self).contains("END") {
+            let packet = try await reader.receiveAsync(TerminalPacket.self)
+            if let bytes = packet.bytes { output.append(bytes) }
+        }
+        #expect(String(decoding: output, as: UTF8.self).contains(expected))
+        await fixture.runtime.terminals.detach(sessionID: session.id, owner: owner)
+        _ = try await fixture.stop()
+    }
+
     @Test(arguments: [["--sandbox", "read-only"], ["-s", "read-only"], ["--sandbox=read-only"], ["-s=read-only"]])
     func codexReadOnlyAdditionalFoldersFailBeforeInspectingOrStartingTheCLI(arguments: [String]) async throws {
         let fixture = try await LaunchFixture.make(); defer { fixture.cleanup() }
@@ -281,6 +309,8 @@ private struct LaunchFixture: Sendable {
         else:
             signal.signal(signal.SIGUSR1, lambda *_: sys.exit(0))
             mark('started', os.getpid())
+            if (root / 'unicode-output').exists():
+                print((root / 'unicode-output').read_text(encoding='utf-8'), flush=True)
             while True: time.sleep(0.01)
         """#.utf8).write(to: executable)
         try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: executable.path)
