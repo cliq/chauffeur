@@ -109,7 +109,7 @@
           <tr><td>Session</td><td>The saved identity and context of a conversation, plus its current or most recent execution.</td><td>Claude Code · website</td></tr>
         </tbody>
       </table></div>
-      <div class="note"><p><strong>A terminal tab is a view.</strong> Closing a tab, closing a project window, and quitting Chauffeur keep live executions running. Use a named Stop action when you want an execution to end.</p></div>
+      <div class="note"><p><strong>A terminal is a view.</strong> Switching sessions, closing a project window, and quitting Chauffeur keep live executions running. Use a named Stop action when you want an execution to end.</p></div>
     </section>
 
     <section id="presets">
@@ -157,8 +157,8 @@
     <section id="windows">
       <h2>5. Windows and groups</h2>
       <p>Each project has an independent window. Open projects from Welcome with a double-click, Return, or <strong>Open Project</strong>. Opening an already-open project focuses its existing window. Use normal macOS controls to move, resize, minimize, or make a window full screen.</p>
-      <p>The header shows the project and preset set. The sidebar lists repositories, their worktrees, sessions, and attention items. Hover truncated labels to see more context; full launch paths are also available in Session Details. Use the sidebar toggle to make more room for a terminal.</p>
-      <p>Tabs, selected session and group, split layout, sidebar state, and available window geometry are saved. <kbd>⌘⇧O</kbd> opens Welcome to choose another project; <kbd>⌘⇧0</kbd> also opens Welcome. Exact Space assignment after reboot is not guaranteed.</p>
+      <p>The header shows the project, preset set, and the selected checkout with its <strong>Launch Agent…</strong> and <strong>Open Shell</strong> actions. The sidebar has two modes. <strong>Repositories</strong> lists each repository with its main checkout and worktrees; a badge counts sessions needing attention. Select a checkout to see its sessions in the strip above the terminal, or the repository itself for an overview of all its checkouts. <strong>Sessions</strong> lists every session with the group picker and search field. Hover truncated labels to see more context; full launch paths are also available in Session Details. Use the sidebar toggle to make more room for a terminal.</p>
+      <p>Sidebar mode, selected checkout, session and group, sidebar state, and available window geometry are saved. <kbd>⌘⇧O</kbd> opens Welcome to choose another project; <kbd>⌘⇧0</kbd> also opens Welcome. Exact Space assignment after reboot is not guaranteed.</p>
       <h3>Groups</h3>
       <ol>
         <li>Choose <strong>… → Manage Groups…</strong> in a project window.</li>
@@ -190,7 +190,7 @@
       <h2>7. Use the terminal</h2>
       <p>Type directly into the real Codex or Claude Code interface. Native commands, approvals, sign-in screens, tools, and CLI settings remain inside that terminal. Chauffeur adds organization and process continuity around them.</p>
       <div class="cards">
-        <div class="card"><h3>Tabs and split</h3><p>Select a session in the sidebar to open its tab. With two tabs open, use the split toolbar button or <kbd>⌘D</kbd> for two terminal panes. Use it again to return to one pane.</p></div>
+        <div class="card"><h3>Checkouts and sessions</h3><p>Select a worktree or main checkout to see its sessions as cards above the terminal; finished sessions sit behind <strong>Finished</strong>. <kbd>⌘⇧]</kbd> and <kbd>⌘⇧[</kbd> move between that checkout's sessions. <strong>Open Shell</strong> starts a login shell there as a session that survives closing the window.</p></div>
         <div class="card"><h3>Copy, paste, and links</h3><p>Select output and press <kbd>⌘C</kbd>; use <kbd>⌘V</kbd> to paste. Hold Shift while dragging if the CLI captures mouse input. Command-click a link to open its associated app.</p></div>
         <div class="card"><h3>History and search</h3><p>Choose <strong>History and Search</strong> or press <kbd>⌘F</kbd>. Search and copy from a stable, read-only capture. <strong>Refresh</strong> captures current output when the terminal still exists.</p></div>
         <div class="card"><h3>Session Details</h3><p>Use the right-sidebar toolbar button or session context menu. Review the agent, group, preset/revision, paths, state, branch/base commit when available, and execution controls.</p></div>
@@ -202,7 +202,7 @@
     <section id="lifetime">
       <h2>8. Close, stop, and resume</h2>
       <div class="table"><table><thead><tr><th>Action</th><th>Result</th></tr></thead><tbody>
-        <tr><td>Close a tab or project window</td><td>Detach that view. Its agent keeps running and remains available in the project’s session list.</td></tr>
+        <tr><td>Select another session or close a project window</td><td>Detach that view. Its agent keeps running and remains available under its checkout and in the Sessions list.</td></tr>
         <tr><td>Quit Chauffeur / <kbd>⌘Q</kbd></td><td>Quit the UI. The background service and live agents continue.</td></tr>
         <tr><td>Interrupt</td><td>Send Control-C to the selected execution. Its CLI decides how to respond.</td></tr>
         <tr><td>Stop Session…</td><td>After confirmation, ask the selected execution to stop gracefully. Other sessions stay running.</td></tr>
@@ -365,9 +365,8 @@ chauffeur -- ./-example</code></pre>
         <tr><td><kbd>⌘N</kbd></td><td>New Session in the active project</td></tr>
         <tr><td><kbd>⌘⇧O</kbd></td><td>Open Welcome to choose a project</td></tr>
         <tr><td><kbd>⌘⇧0</kbd></td><td>Welcome to Chauffeur</td></tr>
-        <tr><td><kbd>⌘K</kbd></td><td>Reveal sidebar and focus session search</td></tr>
-        <tr><td><kbd>⌘⇧]</kbd> / <kbd>⌘⇧[</kbd></td><td>Next / previous session tab</td></tr>
-        <tr><td><kbd>⌘D</kbd></td><td>Split / unsplit terminal</td></tr>
+        <tr><td><kbd>⌘K</kbd></td><td>Reveal the sidebar in Sessions mode and focus session search</td></tr>
+        <tr><td><kbd>⌘⇧]</kbd> / <kbd>⌘⇧[</kbd></td><td>Next / previous session in the selected checkout</td></tr>
         <tr><td><kbd>⌘F</kbd></td><td>Open terminal history and Find</td></tr>
         <tr><td><kbd>⌘⇧A</kbd></td><td>Next attention item in the current view</td></tr>
         <tr><td><kbd>⌘A</kbd>, <kbd>⌘C</kbd>, <kbd>⌘V</kbd></td><td>Select terminal output, copy, paste</td></tr>

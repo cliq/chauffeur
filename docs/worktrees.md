@@ -1,10 +1,20 @@
 # Worktrees and cleanup
 
-Expand a repository in the sidebar to see its other Git worktrees, including
-external checkouts. Each row shows its branch and directory name; hover for the
-full path. Select a worktree to open its repository's manager, or use its context
-menu to reveal it in Finder. Missing registered worktrees stay visible with their
-availability status. The repository row itself represents its registered checkout.
+Expand a repository in the sidebar's **Repositories** mode to see its main
+checkout and its other Git worktrees, including external checkouts. Each row
+shows its branch and directory name, a live-session count, and an orange badge
+when a session needs attention; hover for the full path. Select a checkout to show
+its sessions above the terminal, with **Launch Agent…** and **Open Shell** for
+that checkout in the header, the empty state, and the row's context menu. Select
+the repository row for an overview of all its checkouts. Unregistered Git
+worktrees appear as **Not registered** and cannot host sessions until registered
+through **Manage Worktrees…**. Missing registered worktrees stay visible with their
+availability status.
+
+**Open Shell** starts your login shell in the checkout as a Chauffeur session. It
+keeps running when the window closes, appears in the checkout's session strip, and
+can be stopped from Session Details. Shells never block agents from the same
+checkout and are not asked about sharing it.
 
 Creating a worktree reveals the sidebar, expands its repository, scrolls the new
 row into view, and highlights it immediately. This applies to both creation

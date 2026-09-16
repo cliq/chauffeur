@@ -25,6 +25,8 @@ public enum CLIAdapter {
         try LaunchPolicy.validateArguments(preset.arguments, kind: preset.kind)
         var arguments = preset.arguments
         switch preset.kind {
+        case .shell:
+            guard !resume else { throw ChauffeurError("resume_unavailable", "Shell sessions cannot be resumed. Open a new shell") }
         case .codex:
             arguments += ["-C", session.launch.workingDirectory]
             for path in session.launch.additionalPaths { arguments += ["--add-dir", path] }

@@ -13,7 +13,9 @@ does not establish unverified real-CLI or native behavior.
 - Swift package: core records, validation, file store, runtime kit, runtime binary,
   helper, and tests.
 - Debug and Release native apps build with embedded signed runtime/helper, SwiftTerm views,
-  project/preset/group editors, session launch/details, worktrees, tabs and split.
+  project/preset/group editors, session launch/details, worktrees, and the
+  checkout-driven project window (Repositories/Sessions sidebar, session strip,
+  shell sessions). See [worktree navigation plan](worktree-navigation-plan.md).
 - A Debug app probe exercises four windows and ten rendered fixture terminals,
   Unicode input, resize, reattach, close/reopen and normal/forced UI termination.
   XCUITest is blocked before execution by macOS Automation Mode authentication.
@@ -63,7 +65,8 @@ does not establish unverified real-CLI or native behavior.
 - Native terminal keyboard and clipboard controls pass through macOS with two
   fixture sessions: Unicode/literal input, Control-B/Escape/Control-C, selection
   and copy, bracketed paste, Command-F history search, read-only history, session
-  switching/split shortcuts, and Command-Q/relaunch preserving process/input.
+  switching shortcuts inside the selected checkout, persisted checkout
+  selection, and Command-Q/relaunch preserving process/input.
   Terminals now expose distinct focusable live/history accessibility elements
   with displayed text and selection. Evidence: `.build/terminal-controls-artifacts/`.
   These changes are in the current Release; link/mouse and retention evidence follows below.
@@ -317,7 +320,7 @@ registered-folder invocation also pass. See
 | 1.9 Session details | Native immutable context after preset edits, individual execution controls, and a real saved session's expanded launch snapshot match the stored record | — |
 | 2.1 Screen/history | tmux live state; bounded persisted snapshots, disk cleanup, native history/search; real Codex/Claude native attach, Unicode, clipboard and reply search; native link/mouse forwarding and 60,000-line retention/recovery pass | — |
 | 2.2 Reconnect | Positive pane/process reconciliation; real Codex/Claude explicit native-ID resume and MCP reconnect; live native LaunchAgent recovery and actual sleep/wake pass | — |
-| 2.3–2.4 Quit/tabs/split | Native tabs/split, window-state writes and OS keyboard commands pass; real Codex/Claude normal/forced UI quit preserve process and draft; native Stop All confirmation/cancellation, fixed targets, resistant-stop recovery and no-window operation pass | Final Spaces workload is in V2 |
+| 2.3–2.4 Quit/checkout layout | Checkout-driven window (replaced tabs/split on 2026-09-16), window-state writes and OS keyboard commands pass; real Codex/Claude normal/forced UI quit preserve process and draft; native Stop All confirmation/cancellation, fixed targets, resistant-stop recovery and no-window operation pass | Final Spaces workload is in V2 |
 | 2.5 Worktrees | Create/list/safe-remove; periodic external inventory; identity-based moves/replacements; pending launch/removal and metadata-write reservations; legacy migration fixtures and real Codex/Claude repository-relocation, replacement/resume, and removal checks; native manager controls and concurrent registration pass | — |
 | 2.6 Multiple repos | Explicit additional-folder UI and shared-checkout warning; real Codex/Claude read/write at primary worktree and selected additional path, with spaces; main checkout and sibling worktree remain unchanged | — |
 | 2.7 Status/attention | Native approval/completion/normal-exit labels and conversation IDs pass; Claude clears permission attention after tool use and stays finished while idle; unread/pending counts and optional durable notifications; actual Notification Center delivery/cold click and enabled-helper recovery/update pass | Codex approval detection unavailable; real API-error hooks, transient banners/alternate Focus settings unverified |
@@ -334,6 +337,9 @@ registered-folder invocation also pass. See
 | --- | --- | --- |
 | Complete Codex ↔ Claude messaging/delegation | Stage 3.1–3.7, F7, coordination portions of V3/V4 | Partially implemented; remaining completion and acceptance moved to [V2](v2-plan.md) |
 | Final workload testing | Stage 4.6, full PRD §9 workload | Not run; ten real sessions, four Spaces, performance measurements, complete F1–F7 sweep, and three workdays moved to [V2](v2-plan.md#final-workload-testing) |
+| Searchable Git ref picker | [CLI-69](https://linear.app/cliqdev/issue/CLI-69/v2-add-a-searchable-git-ref-picker-for-worktree-base-refs), user feedback 2026-09-16 | Planned for [V2](v2-plan.md#searchable-git-ref-picker); search/select branches and accept tags/SHAs for worktree base refs |
+| Configurable worktree branch naming | [CLI-70](https://linear.app/cliqdev/issue/CLI-70/v2-support-configurable-default-branch-naming-patterns-for-worktrees), user feedback 2026-09-16 | Planned for [V2](v2-plan.md#configurable-worktree-branch-naming); naming templates extend the immediate title-derived branch suggestion |
+| Agent memory across worktrees | [CLI-71](https://linear.app/cliqdev/issue/CLI-71/v2-investigate-codex-and-claude-code-memory-continuity-across-git), user feedback 2026-09-16 | [V2 investigation](v2-plan.md#agent-memory-across-worktrees); Codex/Claude instruction, memory, and history continuity is not yet established |
 
 ## Current-goal completion
 

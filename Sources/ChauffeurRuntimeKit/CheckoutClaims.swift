@@ -10,6 +10,8 @@ struct CheckoutClaims {
         var worktreeID: UUID?
         var gitIdentities: Set<UUID> = []
         var allowSharedCheckout = true
+        /// Shell launches never make a checkout busy for agents.
+        var occupies = true
     }
     private struct Removal {
         var path: String
@@ -22,16 +24,17 @@ struct CheckoutClaims {
     static func overlap(_ first: String, _ second: String) -> Bool {
         first == second || first.hasPrefix(second == "/" ? "/" : second + "/") || second.hasPrefix(first == "/" ? "/" : first + "/")
     }
-    mutating func beginLaunch(_ id: UUID, paths: [String], worktreeID: UUID?, allowSharedCheckout: Bool = true) throws {
+    mutating func beginLaunch(_ id: UUID, paths: [String], worktreeID: UUID?, allowSharedCheckout: Bool = true, occupies: Bool = true) throws {
         let paths = paths.map(Paths.canonical)
         guard !removals.values.contains(where: { removal in
             worktreeID.map { removal.worktreeIDs.contains($0) } == true || paths.contains { Self.overlap($0, removal.path) }
         }) else { throw ChauffeurError("worktree_busy", "A checkout needed by this session is being removed. Retry after removal finishes") }
-        guard allowSharedCheckout || !launches.contains(where: { $0.key != id && $0.value.paths.first == paths.first }) else {
+        guard allowSharedCheckout || !launches.contains(where: { $0.key != id && $0.value.occupies && $0.value.paths.first == paths.first }) else {
             throw ChauffeurError("shared_checkout", "Another session is starting in this checkout. Wait for it to appear, then explicitly choose to share it")
         }
         launches[id] = Launch(paths: paths, worktreeID: worktreeID)
         launches[id]?.allowSharedCheckout = allowSharedCheckout
+        launches[id]?.occupies = occupies
     }
     mutating func setGitIdentities(_ id: UUID, identities: [UUID], primary: UUID? = nil) throws {
         let identities = Set(identities)
@@ -39,7 +42,7 @@ struct CheckoutClaims {
             throw ChauffeurError("worktree_busy", "A checkout needed by this session is being removed")
         }
         if let primary, launches[id]?.allowSharedCheckout == false,
-           launches.contains(where: { $0.key != id && $0.value.gitIdentities.contains(primary) }) {
+           launches.contains(where: { $0.key != id && $0.value.occupies && $0.value.gitIdentities.contains(primary) }) {
             throw ChauffeurError("shared_checkout", "Another session is starting in this checkout. Wait for it to appear, then explicitly choose to share it")
         }
         launches[id]?.gitIdentities = identities

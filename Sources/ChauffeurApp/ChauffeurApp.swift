@@ -7,7 +7,7 @@ import ChauffeurCore
     private var model: AppModel { delegate.model }
     @Environment(\.openWindow) private var openWindow
     var body: some Scene {
-        Window("Welcome to Chauffeur", id: "welcome") {
+        Window("Welcome to \(AppBuild.current.displayName)", id: "welcome") {
             WelcomeView().modifier(AppWindowSetup()).environmentObject(model)
         }
         .defaultSize(width: 820, height: 500)
@@ -30,7 +30,6 @@ import ChauffeurCore
                 Button("Next Session") { command("next") }.keyboardShortcut("]", modifiers: [.command, .shift])
                 Button("Previous Session") { command("previous") }.keyboardShortcut("[", modifiers: [.command, .shift])
                 Button("Search Sessions…") { command("search-sessions") }.keyboardShortcut("k")
-                Button("Split / Unsplit Terminal") { command("split") }.keyboardShortcut("d")
                 Button("Find in Terminal…") { command("find") }.keyboardShortcut("f")
                 Button("Next Attention Item") { command("attention") }.keyboardShortcut("a", modifiers: [.command, .shift])
             }
@@ -53,10 +52,10 @@ import ChauffeurCore
         Window("Chauffeur Help", id: "help") {
             VStack(alignment: .leading, spacing: 18) {
                 Text("Your agents keep running").font(.title)
-                Text("Closing a terminal tab, project window, or quitting Chauffeur detaches the view. Reopen a project to reconnect to the same live terminal.")
+                Text("Closing a project window or quitting Chauffeur detaches the view. Reopen a project to reconnect to the same live terminal.")
                 Text("Use Stop session to end an execution. Interrupt sends Control-C. Resume conversation starts a new process using its recorded native conversation ID and original profile.")
                 Text("Messages stay in an agent's inbox until it reads them through Chauffeur's MCP tools. If an idle agent needs to read its inbox, prompt it explicitly in its terminal.")
-                Text("A worktree isolates one repository. Additional repository paths are shown when launching and use their selected existing checkouts.")
+                Text("A worktree isolates one repository. Select a worktree in the sidebar to see its sessions, launch an agent there, or open a shell. Additional repository paths are shown when launching and use their selected existing checkouts.")
                 Text("Profiles reference existing CLI configuration directories. Chauffeur does not create accounts or manage sign-in.")
             }.padding(30).frame(width: 580)
         }.defaultLaunchBehavior(.suppressed).restorationBehavior(.disabled)

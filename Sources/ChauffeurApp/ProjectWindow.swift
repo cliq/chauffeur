@@ -5,37 +5,36 @@ import ChauffeurCore
 
 @MainActor final class ProjectLayout: ObservableObject {
     @Published var state: WindowState
-    @Published var selectedFolderID: UUID?
-    @Published var selectedWorktreePath: String?
     @Published var search = ""
     @Published var detailsVisible = false
     var controllers: [UUID: TerminalController] = [:]
     weak var window: NSWindow?
     var loaded = false
     init(projectID: UUID) { state = WindowState(projectID: projectID) }
+    var selectedFolderID: UUID? { state.selectedFolderID }
+    var selectedWorktreePath: String? { state.selectedWorktreePath }
     func controller(for id: UUID, scrollback: Int) -> TerminalController {
         if let controller = controllers[id] { return controller }
         let controller = TerminalController(sessionID: id, scrollback: scrollback); controllers[id] = controller; return controller
     }
-    func select(_ id: UUID) {
-        if !state.tabs.contains(id) { state.tabs.append(id) }
-        if state.splitSessionID == id { state.splitSessionID = state.selectedSessionID }
+    /// Selects a checkout. A `nil` path shows the repository overview. The
+    /// current session stays selected when it already runs in that checkout;
+    /// otherwise the first live session there is shown.
+    func selectCheckout(folderID: UUID, path: String?, sessions: [Session]) {
+        state.selectedFolderID = folderID
+        state.selectedWorktreePath = path
+        if let current = state.selectedSessionID, sessions.contains(where: { $0.id == current }) { return }
+        state.selectedSessionID = path == nil ? nil : sessions.first(where: \.state.isLive)?.id
+    }
+    func selectSession(_ id: UUID, folderID: UUID?, path: String?) {
+        state.selectedFolderID = folderID
+        state.selectedWorktreePath = path
         state.selectedSessionID = id
     }
-    func closeTab(_ id: UUID) {
-        controllers[id]?.detach(); controllers.removeValue(forKey: id)
-        state.tabs.removeAll { $0 == id }
-        if state.splitSessionID == id { state.splitSessionID = nil }
-        if state.selectedSessionID == id { state.selectedSessionID = state.tabs.last }
-    }
-    func toggleSplit() {
-        if state.splitSessionID != nil { state.splitSessionID = nil }
-        else { state.splitSessionID = state.tabs.first { $0 != state.selectedSessionID } }
-    }
     func synchronizeTerminals(model: AppModel) {
-        let visible = Set([state.selectedSessionID, state.splitSessionID].compactMap { $0 }.filter { model.session($0)?.state.isLive == true })
-        for (id, controller) in controllers where !visible.contains(id) { controller.detach() }
-        for id in visible { controller(for: id, scrollback: model.snapshot.settings.scrollbackLines).attach(socketPath: model.socketPath) }
+        let visible = state.selectedSessionID.flatMap { model.session($0)?.state.isLive == true ? $0 : nil }
+        for (id, controller) in controllers where id != visible { controller.detach() }
+        if let visible { controller(for: visible, scrollback: model.snapshot.settings.scrollbackLines).attach(socketPath: model.socketPath) }
     }
 }
 
@@ -45,8 +44,13 @@ struct ProjectWindow: View {
     @Environment(\.dismissWindow) private var dismissWindow
     @StateObject private var layout: ProjectLayout
     let projectID: UUID
-    @State private var launching = false
-    @State private var launchingInNewWorktree = false
+    private struct LaunchSheet: Identifiable {
+        let id = UUID()
+        let folderID: UUID?
+        let worktreeID: UUID?
+        let newWorktree: Bool
+    }
+    @State private var launchSheet: LaunchSheet?
     @State private var editingProject = false
     @State private var editingGroups = false
     private struct WorktreeSheet: Identifiable {
@@ -68,9 +72,13 @@ struct ProjectWindow: View {
     @FocusState private var searchFocused: Bool
     init(projectID: UUID) { self.projectID = projectID; _layout = StateObject(wrappedValue: ProjectLayout(projectID: projectID)) }
     private var project: Project? { model.project(projectID) }
+    private var allSessions: [Session] { model.sessions(in: projectID) }
+    /// Sessions-mode list, narrowed by the group picker and search field.
     private var sessions: [Session] {
-        model.sessions(in: projectID).filter { (layout.state.selectedGroupID == nil || $0.groupID == layout.state.selectedGroupID) && (layout.search.isEmpty || $0.title.localizedCaseInsensitiveContains(layout.search) || $0.launch.workingDirectory.localizedCaseInsensitiveContains(layout.search)) }
+        allSessions.filter { (layout.state.selectedGroupID == nil || $0.groupID == layout.state.selectedGroupID) && (layout.search.isEmpty || $0.title.localizedCaseInsensitiveContains(layout.search) || $0.launch.workingDirectory.localizedCaseInsensitiveContains(layout.search)) }
     }
+    private var worktreeRecords: [Worktree] { model.snapshot.store.worktrees.map(\.value) }
+    private var selectedFolder: ProjectFolder? { project?.folders.first { $0.id == layout.state.selectedFolderID && $0.registered } }
     var body: some View {
         Group {
             if let project {
@@ -80,9 +88,9 @@ struct ProjectWindow: View {
                     VStack(spacing: 0) {
                         if !model.online { ServiceHealthView().padding(10).background(.orange.opacity(0.12)); Divider() }
                         header(project)
-                        tabs
+                        Divider()
                         HSplitView {
-                            terminalArea
+                            detailArea(project)
                             if layout.detailsVisible, let session = model.session(layout.state.selectedSessionID) { SessionDetailsView(session: session, project: project).frame(minWidth: 300, idealWidth: 340, maxWidth: 460) }
                         }
                     }
@@ -91,8 +99,7 @@ struct ProjectWindow: View {
                 .toolbar {
                     ToolbarItemGroup {
                         Button { showLaunch() } label: { Label("New Session", systemImage: "plus") }.disabled(!model.online || project.archived)
-                        Button { layout.toggleSplit() } label: { Label("Split Terminal", systemImage: "rectangle.split.2x1") }.disabled(layout.state.tabs.count < 2 && layout.state.splitSessionID == nil)
-                        Button { layout.detailsVisible.toggle() } label: { Label("Session Details", systemImage: "sidebar.right") }
+                        Button { layout.detailsVisible.toggle() } label: { Label("Session Details", systemImage: "sidebar.right") }.disabled(model.session(layout.state.selectedSessionID) == nil)
                         Menu {
                             Button("Project Settings…") { editingProject = true }
                             Button("Manage Groups…") { editingGroups = true }
@@ -101,7 +108,7 @@ struct ProjectWindow: View {
                         } label: { Label("Project Actions", systemImage: "ellipsis.circle") }
                     }
                 }
-                .sheet(isPresented: $launching) { SessionLaunchView(project: project, initialGroupID: layout.state.selectedGroupID, initialFolderID: layout.selectedFolderID, startsInNewWorktree: launchingInNewWorktree, worktreeCreated: revealCreatedWorktree) { layout.select($0) } }
+                .sheet(item: $launchSheet) { sheet in SessionLaunchView(project: project, initialGroupID: layout.state.selectedGroupID, initialFolderID: sheet.folderID, initialWorktreeID: sheet.worktreeID, startsInNewWorktree: sheet.newWorktree, worktreeCreated: revealCreatedWorktree) { selectSession($0) } }
                 .sheet(isPresented: $editingProject) { ProjectEditor(project: project) { _ in editingProject = false } }
                 .sheet(isPresented: $editingGroups) { GroupsEditor(project: project) }
                 .sheet(item: $worktreeSheet) { selection in WorktreesView(project: project, initialFolderID: selection.folderID, worktreeCreated: revealCreatedWorktree) }
@@ -131,10 +138,6 @@ struct ProjectWindow: View {
                 guard layout.loaded else { return }
                 saveLayout(); layout.synchronizeTerminals(model: model)
             }
-            .onChange(of: layout.state.selectedSessionID) { _, id in
-                if let id { revealSessionCheckout(id) }
-                else { layout.selectedWorktreePath = nil }
-            }
             .onChange(of: model.snapshot.store.worktrees.map(\.value.id)) { _, ids in
                 if let pendingWorktree, ids.contains(pendingWorktree.id) { self.pendingWorktree = nil }
             }
@@ -143,8 +146,7 @@ struct ProjectWindow: View {
                 guard layout.window?.isKeyWindow == true, let command = notification.object as? String else { return }
                 switch command {
                 case "new-session": showLaunch()
-                case "split": layout.toggleSplit()
-                case "search-sessions": layout.state.sidebarVisible = true; searchFocused = true
+                case "search-sessions": layout.state.sidebarMode = .sessions; layout.state.sidebarVisible = true; searchFocused = true
                 case "find": if let id = layout.state.selectedSessionID { layout.controllers[id]?.find() }
                 case "next": cycle(1)
                 case "previous": cycle(-1)
@@ -153,32 +155,83 @@ struct ProjectWindow: View {
                 }
             }
     }
+
+    // MARK: Checkouts
+
+    /// One selectable checkout row: the repository's main checkout or a worktree.
+    private struct SidebarCheckout: Identifiable {
+        let folderID: UUID
+        let path: String
+        let branch: String
+        let availability: Availability
+        let worktreeID: UUID?
+        let isMain: Bool
+        var id: String { path }
+        /// Unregistered Git worktrees cannot host sessions until they are registered.
+        var registered: Bool { isMain || worktreeID != nil }
+        var title: String { branch.isEmpty ? (isMain ? "Main checkout" : "Detached HEAD") : branch }
+    }
+    private func inventory(for folder: ProjectFolder) -> RepositoryInventory? {
+        model.snapshot.repositoryInventories?.first { $0.sourcePath == folder.canonicalPath || $0.sourcePaths?.contains(folder.canonicalPath) == true }
+    }
+    private func checkouts(for folder: ProjectFolder, project: Project) -> [SidebarCheckout] {
+        var records = worktreeRecords.filter { $0.projectID == project.id && $0.folderID == folder.id && $0.registered }
+        // Bridge the creation response until the next store snapshot arrives.
+        if let pendingWorktree, pendingWorktree.folderID == folder.id,
+           !records.contains(where: { $0.id == pendingWorktree.id }) { records.append(pendingWorktree) }
+        let entries = inventory(for: folder)?.entries ?? []
+        let main = SidebarCheckout(folderID: folder.id, path: folder.canonicalPath, branch: entries.first { $0.path == folder.canonicalPath }?.branch ?? "", availability: folder.availability, worktreeID: nil, isMain: true)
+        var rows = records.map { SidebarCheckout(folderID: folder.id, path: $0.path, branch: $0.branch, availability: $0.availability, worktreeID: $0.id, isMain: false) }
+        for entry in entries where !records.contains(where: { $0.path == entry.path || (entry.gitIdentity != nil && $0.gitIdentity == entry.gitIdentity) }) {
+            rows.append(SidebarCheckout(folderID: folder.id, path: entry.path, branch: entry.branch, availability: entry.availability ?? .available, worktreeID: nil, isMain: false))
+        }
+        rows = rows.filter { $0.path != folder.canonicalPath }.sorted { $0.branch.localizedStandardCompare($1.branch) == .orderedAscending }
+        return [main] + rows
+    }
+    private func checkout(folder: ProjectFolder, path: String, project: Project) -> SidebarCheckout {
+        checkouts(for: folder, project: project).first { Paths.canonical($0.path) == Paths.canonical(path) }
+            ?? SidebarCheckout(folderID: folder.id, path: path, branch: "", availability: .missing, worktreeID: nil, isMain: false)
+    }
+    private func sessions(in folder: ProjectFolder, path: String) -> [Session] {
+        WorktreeSessions.sessions(allSessions, folder: folder, path: path, worktrees: worktreeRecords)
+    }
+    /// The checkout a session runs in: its worktree record path, else its working directory.
+    private func checkout(of session: Session) -> (folderID: UUID?, path: String?) {
+        guard let folder = project?.folders.first(where: { $0.id == session.folderID && $0.registered }) else { return (nil, nil) }
+        let path = worktreeRecords.first { $0.id == session.worktreeID }?.path ?? session.launch.workingDirectory
+        return (folder.id, path)
+    }
+    private func attentionCount(in folder: ProjectFolder) -> Int { allSessions.filter { $0.folderID == folder.id && $0.needsAttention }.count }
+    private var canLaunch: Bool { model.online && project?.archived == false }
+    private func canLaunch(in checkout: SidebarCheckout) -> Bool { canLaunch && checkout.registered && checkout.availability == .available }
+
+    // MARK: Sidebar
+
     private func sidebar(_ project: Project) -> some View {
         VStack(spacing: 0) {
-            Picker("Agent group", selection: $layout.state.selectedGroupID) {
-                Text("All Groups").tag(UUID?.none)
-                ForEach(project.groups.filter { !$0.archived || $0.id == layout.state.selectedGroupID }) { group in Text(group.name).tag(Optional(group.id)) }
-            }.padding(12)
-            TextField("Search sessions", text: $layout.search).textFieldStyle(.roundedBorder).padding(.horizontal, 12).padding(.bottom, 8).focused($searchFocused)
-            ScrollViewReader { proxy in
-                List {
-                    Section("Repositories") {
-                        ForEach(project.folders.filter(\.registered)) { folder in
-                            repositoryRow(folder, project: project)
-                        }
-                        Button("Add Folder…", systemImage: "folder.badge.plus") {
-                            if let path = FilePanels.directory() { let version = model.projectVersion(project.id); var changed = project; changed.addFolder(ProjectFolder(path: path)); model.perform { try await model.saveProject(changed, version: version) } }
-                        }.buttonStyle(.plain)
+            Picker("Sidebar", selection: $layout.state.sidebarMode) {
+                Text("Repositories").tag(SidebarMode.repositories)
+                Text("Sessions").tag(SidebarMode.sessions)
+            }.pickerStyle(.segmented).labelsHidden().padding(12).accessibilityIdentifier("sidebar.mode")
+            switch layout.state.sidebarMode {
+            case .repositories: repositoriesSidebar(project)
+            case .sessions: sessionsSidebar(project)
+            }
+            Text("Closing a window keeps agents running.").font(.caption2).foregroundStyle(.secondary).padding(12)
+        }.navigationSplitViewColumnWidth(min: 220, ideal: 260, max: 370)
+    }
+    private func repositoriesSidebar(_ project: Project) -> some View {
+        ScrollViewReader { proxy in
+            List {
+                Section("Repositories") {
+                    ForEach(project.folders.filter(\.registered)) { folder in
+                        repositoryRow(folder, project: project)
                     }
-                    if sessions.contains(where: \.needsAttention) {
-                        Section("Needs Attention") {
-                            ForEach(sessions.filter(\.needsAttention)) { session in sessionRow(session, project: project) }
-                        }
-                    }
-                    Section("Sessions") {
-                        ForEach(sessions) { session in sessionRow(session, project: project) }
-                    }
-                }.listStyle(.sidebar)
+                    Button("Add Folder…", systemImage: "folder.badge.plus") {
+                        if let path = FilePanels.directory() { let version = model.projectVersion(project.id); var changed = project; changed.addFolder(ProjectFolder(path: path)); model.perform { try await model.saveProject(changed, version: version) } }
+                    }.buttonStyle(.plain)
+                }
+            }.listStyle(.sidebar)
                 .task(id: sidebarReveal?.id) {
                     guard let reveal = sidebarReveal else { return }
                     // Let the newly inserted row and expanded repository lay out.
@@ -186,154 +239,291 @@ struct ProjectWindow: View {
                     guard !Task.isCancelled, sidebarReveal?.id == reveal.id else { return }
                     proxy.scrollTo(reveal.row, anchor: .center)
                 }
-            }
-            Text("Closing a tab or window keeps agents running.").font(.caption2).foregroundStyle(.secondary).padding(12)
-        }.navigationSplitViewColumnWidth(min: 220, ideal: 260, max: 370)
-    }
-    private struct SidebarWorktree: Identifiable {
-        let path: String
-        let branch: String
-        let availability: Availability
-        var id: String { path }
-    }
-    private func worktrees(for folder: ProjectFolder, project: Project) -> [SidebarWorktree] {
-        let stored = model.snapshot.store.worktrees.map(\.value)
-        var records = stored.filter { $0.projectID == project.id && $0.folderID == folder.id && $0.registered }
-        // Bridge the creation response until the next store snapshot arrives.
-        if let pendingWorktree, pendingWorktree.folderID == folder.id,
-           !stored.contains(where: { $0.id == pendingWorktree.id }) { records.append(pendingWorktree) }
-        let inventory = model.snapshot.repositoryInventories?.first { $0.sourcePath == folder.canonicalPath || $0.sourcePaths?.contains(folder.canonicalPath) == true }
-        var rows = records.map { SidebarWorktree(path: $0.path, branch: $0.branch, availability: $0.availability) }
-        for entry in inventory?.entries ?? [] where !records.contains(where: { $0.path == entry.path || (entry.gitIdentity != nil && $0.gitIdentity == entry.gitIdentity) }) {
-            rows.append(SidebarWorktree(path: entry.path, branch: entry.branch, availability: entry.availability ?? .available))
         }
-        // The repository row already represents its registered checkout.
-        return rows.filter { $0.path != folder.canonicalPath }.sorted { $0.branch.localizedStandardCompare($1.branch) == .orderedAscending }
+    }
+    private func sessionsSidebar(_ project: Project) -> some View {
+        VStack(spacing: 0) {
+            Picker("Agent group", selection: $layout.state.selectedGroupID) {
+                Text("All Groups").tag(UUID?.none)
+                ForEach(project.groups.filter { !$0.archived || $0.id == layout.state.selectedGroupID }) { group in Text(group.name).tag(Optional(group.id)) }
+            }.padding(.horizontal, 12).padding(.bottom, 8)
+            TextField("Search sessions", text: $layout.search).textFieldStyle(.roundedBorder).padding(.horizontal, 12).padding(.bottom, 8).focused($searchFocused)
+            List {
+                if sessions.contains(where: \.needsAttention) {
+                    Section("Needs Attention") {
+                        ForEach(sessions.filter(\.needsAttention)) { session in sessionRow(session, project: project) }
+                    }
+                }
+                Section("Sessions") {
+                    if sessions.isEmpty { Text(allSessions.isEmpty ? "No sessions yet" : "No sessions match").font(.caption).foregroundStyle(.secondary) }
+                    ForEach(sessions) { session in sessionRow(session, project: project) }
+                }
+            }.listStyle(.sidebar)
+        }
+    }
+    @ViewBuilder private func badge(_ count: Int) -> some View {
+        if count > 0 {
+            Text("\(count)").font(.caption2).fontWeight(.semibold).foregroundStyle(.white)
+                .padding(.horizontal, 6).padding(.vertical, 1).background(.orange, in: Capsule())
+                .accessibilityLabel("\(count) sessions need attention")
+        }
     }
     private func repositoryRow(_ folder: ProjectFolder, project: Project) -> some View {
-        let trees = worktrees(for: folder, project: project)
+        let rows = checkouts(for: folder, project: project)
+        let overviewSelected = layout.selectedFolderID == folder.id && layout.selectedWorktreePath == nil
         return DisclosureGroup(isExpanded: Binding(get: { !collapsedRepositories.contains(folder.id) }, set: { if $0 { collapsedRepositories.remove(folder.id) } else { collapsedRepositories.insert(folder.id) } })) {
-            if trees.isEmpty {
-                Text("No worktrees").font(.caption).foregroundStyle(.secondary)
-            }
-            ForEach(trees) { tree in
-                let selected = layout.selectedFolderID == folder.id && layout.selectedWorktreePath == tree.path
-                Button { revealCheckout(folderID: folder.id, worktreePath: tree.path); showWorktrees(folderID: folder.id) } label: {
-                    Label {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(tree.branch.isEmpty ? "Detached HEAD" : tree.branch).lineLimit(1)
-                            Text(URL(fileURLWithPath: tree.path).lastPathComponent).font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                            if tree.availability != .available { Text(tree.availability.rawValue.capitalized).font(.caption).foregroundStyle(.orange) }
-                        }
-                    } icon: { Image(systemName: "arrow.triangle.branch") }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 6).padding(.vertical, 4)
-                    .background(selected ? Color.accentColor.opacity(0.2) : .clear, in: RoundedRectangle(cornerRadius: 6))
-                }.buttonStyle(.plain).help(tree.path).accessibilityIdentifier("repository.worktree.\(tree.path)")
-                    .accessibilityAddTraits(selected ? .isSelected : [])
-                    .accessibilityValue(selected ? "Selected worktree" : "")
-                    .id(SidebarRowID.worktree(folder.id, tree.path))
-                    .contextMenu {
-                        Button("Manage Worktrees…") { showWorktrees(folderID: folder.id) }
-                        Button("Reveal in Finder") { FilePanels.reveal(tree.path) }.disabled(tree.availability != .available)
-                    }
-            }
+            ForEach(rows) { row in checkoutRow(row, folder: folder, project: project) }
             Button("New Worktree & Session…", systemImage: "plus") { showLaunch(folderID: folder.id, newWorktree: true) }
-                .buttonStyle(.plain).font(.caption).disabled(!model.online || project.archived || folder.availability != .available)
+                .buttonStyle(.plain).font(.caption).disabled(!canLaunch || folder.availability != .available)
                 .accessibilityIdentifier("repository.new-worktree.\(folder.id)")
         } label: {
-            Button { layout.selectedFolderID = folder.id; layout.selectedWorktreePath = nil } label: {
-                Label { Text(folder.name).foregroundStyle(layout.selectedFolderID == folder.id ? Color.accentColor : Color.primary) } icon: { Image(systemName: FileManager.default.isReadableFile(atPath: folder.canonicalPath) ? "folder" : "folder.badge.questionmark") }
+            Button { selectCheckout(folderID: folder.id, path: nil) } label: {
+                HStack {
+                    Label { Text(folder.name).foregroundStyle(overviewSelected ? Color.accentColor : Color.primary) } icon: { Image(systemName: FileManager.default.isReadableFile(atPath: folder.canonicalPath) ? "folder" : "folder.badge.questionmark") }
+                    Spacer()
+                    badge(attentionCount(in: folder))
+                }
             }.buttonStyle(.plain).help(folder.selectedPath).accessibilityIdentifier("repository.\(folder.id)")
                 .contextMenu {
-                    Button("New Session Here…") { showLaunch(folderID: folder.id) }
+                    Button("Launch Agent…") { showLaunch(folderID: folder.id) }.disabled(!canLaunch)
+                    Button("Open Shell") { openShell(folderID: folder.id, path: folder.canonicalPath) }.disabled(!canLaunch || folder.availability != .available)
                     Button("New Worktree & Session…") { showLaunch(folderID: folder.id, newWorktree: true) }
-                        .disabled(!model.online || project.archived || folder.availability != .available)
+                        .disabled(!canLaunch || folder.availability != .available)
+                    Divider()
                     Button("Manage Worktrees…") { showWorktrees(folderID: folder.id) }
                     Button("Relink / Edit Folder…") { editingProject = true }
                     Button("Reveal in Finder") { FilePanels.reveal(folder.selectedPath) }
                 }
         }.id(SidebarRowID.repository(folder.id))
     }
-    private func revealCreatedWorktree(_ tree: Worktree) {
-        guard tree.projectID == projectID, tree.registered else { return }
-        pendingWorktree = model.snapshot.store.worktrees.contains { $0.value.id == tree.id } ? nil : tree
-        revealCheckout(folderID: tree.folderID, worktreePath: tree.path)
-    }
-    private func revealCheckout(folderID: UUID, worktreePath: String?, showSidebar: Bool = true) {
-        layout.selectedFolderID = folderID
-        layout.selectedWorktreePath = worktreePath
-        collapsedRepositories.remove(folderID)
-        if showSidebar { layout.state.sidebarVisible = true }
-        sidebarReveal = SidebarReveal(row: worktreePath.map { .worktree(folderID, $0) } ?? .repository(folderID))
-    }
-    private func revealSessionCheckout(_ id: UUID) {
-        guard let session = model.session(id), session.projectID == projectID,
-              let folder = project?.folders.first(where: { $0.id == session.folderID && $0.registered }) else { return }
-        let path = model.snapshot.store.worktrees.first { $0.value.id == session.worktreeID }?.value.path ?? session.launch.workingDirectory
-        revealCheckout(folderID: folder.id, worktreePath: path == folder.canonicalPath ? nil : path, showSidebar: false)
-    }
-    private func showWorktrees(folderID: UUID?) {
-        worktreeSheet = WorktreeSheet(folderID: folderID)
+    private func checkoutRow(_ row: SidebarCheckout, folder: ProjectFolder, project: Project) -> some View {
+        let sessions = sessions(in: folder, path: row.path)
+        let live = WorktreeSessions.live(sessions).count
+        let selected = layout.selectedFolderID == folder.id && layout.selectedWorktreePath.map { Paths.canonical($0) == Paths.canonical(row.path) } == true
+        return Button { selectCheckout(folderID: folder.id, path: row.path) } label: {
+            Label {
+                HStack(alignment: .top) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(row.title).lineLimit(1)
+                        Text(row.isMain ? "Main checkout" : URL(fileURLWithPath: row.path).lastPathComponent).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                        if row.availability != .available { Text(row.availability.rawValue.capitalized).font(.caption).foregroundStyle(.orange) }
+                        else if !row.registered { Text("Not registered").font(.caption).foregroundStyle(.orange) }
+                    }
+                    Spacer(minLength: 4)
+                    if live > 0 { Text("\(live)").font(.caption2).foregroundStyle(.secondary).help("\(live) live sessions") }
+                    badge(WorktreeSessions.attentionCount(sessions))
+                }
+            } icon: { Image(systemName: row.isMain ? "house" : "arrow.triangle.branch") }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 6).padding(.vertical, 4)
+            .background(selected ? Color.accentColor.opacity(0.2) : .clear, in: RoundedRectangle(cornerRadius: 6))
+        }.buttonStyle(.plain).help(row.path)
+            .accessibilityIdentifier(row.isMain ? "repository.main.\(folder.id)" : "repository.worktree.\(row.path)")
+            .accessibilityAddTraits(selected ? .isSelected : [])
+            .accessibilityValue(selected ? "Selected worktree" : "")
+            .id(SidebarRowID.worktree(folder.id, row.path))
+            .contextMenu {
+                Button("Launch Agent…") { showLaunch(folderID: folder.id, worktreeID: row.worktreeID) }.disabled(!canLaunch(in: row))
+                Button("Open Shell") { openShell(folderID: folder.id, path: row.path) }.disabled(!canLaunch(in: row))
+                Divider()
+                Button("Manage Worktrees…") { showWorktrees(folderID: folder.id) }
+                Button("Reveal in Finder") { FilePanels.reveal(row.path) }.disabled(row.availability != .available)
+            }
     }
     private func sessionRow(_ session: Session, project: Project) -> some View {
-        Button { select(session.id) } label: {
+        Button { selectSession(session.id) } label: {
             VStack(alignment: .leading, spacing: 4) {
-                HStack { Image(systemName: session.parentID == nil ? "terminal" : "arrow.turn.down.right"); Text(session.title).lineLimit(1).fontWeight(session.id == layout.state.selectedSessionID ? .semibold : .regular) }
-                Text("\(session.launch.preset.name) · \(project.groups.first { $0.id == session.groupID }?.name ?? "Group unavailable")").font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                Text(session.state.label + (session.pendingMessages > 0 ? " · \(session.pendingMessages) messages" : "")).font(.caption).foregroundStyle(session.needsAttention ? .orange : .secondary)
+                HStack { Image(systemName: sessionIcon(session)); Text(session.title).lineLimit(1).fontWeight(session.id == layout.state.selectedSessionID ? .semibold : .regular) }
+                Text("\(presetLabel(session)) · \(project.groups.first { $0.id == session.groupID }?.name ?? "Group unavailable")").font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                Text(stateLabel(session)).font(.caption).foregroundStyle(session.needsAttention ? .orange : .secondary)
             }.padding(.vertical, 3).contentShape(Rectangle())
         }.buttonStyle(.plain).help("\(session.title)\n\(session.launch.workingDirectory)\n\(session.launch.configurationPath)")
             .contextMenu {
-                Button("Open Terminal") { select(session.id) }
-                Button("Session Details") { select(session.id); layout.detailsVisible = true }
-                if session.state.isLive { Button("Stop Session…") { select(session.id); layout.detailsVisible = true } }
+                Button("Session Details") { selectSession(session.id); layout.detailsVisible = true }
+                if session.state.isLive { Button("Stop Session…") { selectSession(session.id); layout.detailsVisible = true } }
             }
     }
+    private func sessionIcon(_ session: Session) -> String {
+        if !session.launch.preset.kind.isAgent { return "apple.terminal" }
+        return session.parentID == nil ? "terminal" : "arrow.turn.down.right"
+    }
+    private func presetLabel(_ session: Session) -> String { session.launch.preset.kind.isAgent ? session.launch.preset.name : "Shell" }
+    private func stateLabel(_ session: Session) -> String { session.state.label + (session.pendingMessages > 0 ? " · \(session.pendingMessages) messages" : "") }
+
+    // MARK: Detail
+
     private func header(_ project: Project) -> some View {
         HStack(alignment: .top) {
             VStack(alignment: .leading, spacing: 3) { Text(project.name).font(.headline); Text(model.setName(project.presetSetID)).font(.caption).foregroundStyle(.secondary) }
             Spacer()
-            if let session = model.session(layout.state.selectedSessionID) {
+            if let folder = selectedFolder {
+                let row = layout.selectedWorktreePath.map { checkout(folder: folder, path: $0, project: project) }
+                VStack(alignment: .trailing, spacing: 3) {
+                    Text(row?.path ?? folder.canonicalPath).font(.system(.caption, design: .monospaced)).lineLimit(1).help(row?.path ?? folder.canonicalPath)
+                    Text(row.map(\.title) ?? "\(folder.name) · all checkouts").font(.caption).foregroundStyle(.secondary)
+                }
+                HStack(spacing: 8) {
+                    Button("Launch Agent…") { showLaunch(folderID: folder.id, worktreeID: row?.worktreeID) }
+                        .disabled(row.map { !canLaunch(in: $0) } ?? !canLaunch).accessibilityIdentifier("checkout.launch")
+                    Button("Open Shell") { openShell(folderID: folder.id, path: row?.path ?? folder.canonicalPath) }
+                        .disabled(row.map { !canLaunch(in: $0) } ?? (!canLaunch || folder.availability != .available)).accessibilityIdentifier("checkout.shell")
+                }.controlSize(.small)
+            } else if let session = model.session(layout.state.selectedSessionID) {
                 VStack(alignment: .trailing, spacing: 3) {
                     Text(session.launch.workingDirectory).font(.system(.caption, design: .monospaced)).lineLimit(1).help(session.launch.workingDirectory)
-                    if let tree = model.snapshot.store.worktrees.first(where: { $0.value.id == session.worktreeID })?.value { Text(tree.branch).font(.caption).foregroundStyle(.secondary) }
+                    if let tree = worktreeRecords.first(where: { $0.id == session.worktreeID }) { Text(tree.branch).font(.caption).foregroundStyle(.secondary) }
                 }
             }
         }.padding(12)
     }
-    private var tabs: some View {
-        ScrollView(.horizontal) {
-            HStack(spacing: 2) {
-                ForEach(layout.state.tabs, id: \.self) { id in
-                    if let session = model.session(id) {
-                        HStack(spacing: 10) {
-                            Button(session.title) { select(id) }.buttonStyle(.plain).lineLimit(1)
-                            Button { layout.closeTab(id) } label: { Image(systemName: "xmark").font(.caption2) }.buttonStyle(.plain).help("Close tab — agent keeps running")
-                        }.padding(.horizontal, 12).padding(.vertical, 9).background(layout.state.selectedSessionID == id ? Color.accentColor.opacity(0.15) : Color.clear, in: RoundedRectangle(cornerRadius: 6))
+    @ViewBuilder private func detailArea(_ project: Project) -> some View {
+        if let folder = selectedFolder {
+            if let path = layout.state.selectedWorktreePath {
+                let row = checkout(folder: folder, path: path, project: project)
+                let sessions = sessions(in: folder, path: path)
+                VStack(spacing: 0) {
+                    if !sessions.isEmpty {
+                        SessionStrip(sessions: sessions, project: project, selectedID: layout.state.selectedSessionID, select: { selectSession($0.id) }, details: { selectSession($0.id); layout.detailsVisible = true }, revealPath: { FilePanels.reveal($0.launch.workingDirectory) })
+                        Divider()
+                    }
+                    if let selected = model.session(layout.state.selectedSessionID), sessions.contains(where: { $0.id == selected.id }) {
+                        // Per-session identity so a new selection hosts its own
+                        // terminal view instead of updating the previous one's.
+                        TerminalPane(session: selected, controller: layout.controller(for: selected.id, scrollback: model.snapshot.settings.scrollbackLines)).frame(minWidth: 240).id(selected.id)
+                    } else {
+                        checkoutEmptyState(row, folder: folder, hasFinished: !WorktreeSessions.finished(sessions).isEmpty)
                     }
                 }
-            }.padding(.horizontal, 8)
-        }.scrollIndicators(.hidden).frame(height: 42).background(.bar)
-    }
-    @ViewBuilder private var terminalArea: some View {
-        if let selected = model.session(layout.state.selectedSessionID) {
-            HSplitView {
-                // Stable sibling identities let a terminal move between panes
-                // without two representables briefly hosting the same NSView.
-                ForEach([selected] + [model.session(layout.state.splitSessionID)].compactMap { $0 }.filter { $0.id != selected.id }) { session in
-                    TerminalPane(session: session, controller: layout.controller(for: session.id, scrollback: model.snapshot.settings.scrollbackLines)).frame(minWidth: 240)
-                }
+            } else {
+                repositoryOverview(folder, project: project)
             }
+        } else if let selected = model.session(layout.state.selectedSessionID) {
+            // The session's folder is no longer registered; the terminal still works.
+            TerminalPane(session: selected, controller: layout.controller(for: selected.id, scrollback: model.snapshot.settings.scrollbackLines)).frame(minWidth: 240).id(selected.id)
         } else {
             VStack(spacing: 16) {
-                ContentUnavailableView("Ready for a session", systemImage: "terminal", description: Text("Choose an existing session in the sidebar or launch an agent using this project's presets."))
-                Button("New Session…") { showLaunch() }.buttonStyle(.borderedProminent).disabled(!model.online || project?.archived == true)
+                ContentUnavailableView("Choose a repository or worktree", systemImage: "arrow.triangle.branch", description: Text("Select a checkout in the sidebar to see its sessions, or launch an agent using this project's presets."))
+                Button("New Session…") { showLaunch() }.buttonStyle(.borderedProminent).disabled(!canLaunch)
             }.frame(maxWidth: .infinity, maxHeight: .infinity)
         }
     }
+    private func checkoutEmptyState(_ row: SidebarCheckout, folder: ProjectFolder, hasFinished: Bool) -> some View {
+        VStack(spacing: 16) {
+            ContentUnavailableView(hasFinished ? "No live sessions on this worktree" : "No sessions on this worktree", systemImage: "terminal",
+                                   description: Text(row.registered ? "Launch an agent or open a shell in \(row.title)." : "Register this worktree in Manage Worktrees before launching sessions in it."))
+            HStack(spacing: 12) {
+                Button("Launch Agent…") { showLaunch(folderID: folder.id, worktreeID: row.worktreeID) }.buttonStyle(.borderedProminent).disabled(!canLaunch(in: row)).accessibilityIdentifier("checkout.empty.launch")
+                Button("Open Shell") { openShell(folderID: folder.id, path: row.path) }.disabled(!canLaunch(in: row)).accessibilityIdentifier("checkout.empty.shell")
+                if !row.registered { Button("Manage Worktrees…") { showWorktrees(folderID: folder.id) } }
+            }
+        }.frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+    private func repositoryOverview(_ folder: ProjectFolder, project: Project) -> some View {
+        let rows = checkouts(for: folder, project: project)
+        return VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(folder.name).font(.title2)
+                    Text(folder.canonicalPath).font(.system(.caption, design: .monospaced)).foregroundStyle(.secondary).textSelection(.enabled)
+                }
+                Spacer()
+                Button("Manage Worktrees…") { showWorktrees(folderID: folder.id) }
+                Button("New Worktree & Session…") { showLaunch(folderID: folder.id, newWorktree: true) }.disabled(!canLaunch || folder.availability != .available)
+            }.padding(20)
+            List(rows) { row in
+                let sessions = sessions(in: folder, path: row.path)
+                let live = WorktreeSessions.live(sessions).count
+                HStack(alignment: .center, spacing: 12) {
+                    Image(systemName: row.isMain ? "house" : "arrow.triangle.branch").foregroundStyle(.secondary)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(row.title).fontWeight(.medium)
+                        Text(row.path).font(.system(.caption, design: .monospaced)).foregroundStyle(.secondary).lineLimit(1)
+                        if row.availability != .available { Text(row.availability.rawValue.capitalized).font(.caption).foregroundStyle(.orange) }
+                        else if !row.registered { Text("Not registered").font(.caption).foregroundStyle(.orange) }
+                    }
+                    Spacer()
+                    Text(live == 0 ? (sessions.isEmpty ? "No sessions" : "\(sessions.count) finished") : "\(live) live").font(.caption).foregroundStyle(.secondary)
+                    badge(WorktreeSessions.attentionCount(sessions))
+                    Button("Open") { selectCheckout(folderID: folder.id, path: row.path) }.controlSize(.small)
+                }.padding(.vertical, 4)
+                    .accessibilityIdentifier("overview.checkout.\(row.path)")
+            }
+        }
+    }
+
+    // MARK: Actions
+
+    private func selectCheckout(folderID: UUID, path: String?) {
+        guard let project, let folder = project.folders.first(where: { $0.id == folderID && $0.registered }) else { return }
+        collapsedRepositories.remove(folderID)
+        layout.selectCheckout(folderID: folderID, path: path, sessions: path.map { sessions(in: folder, path: $0) } ?? [])
+        if let id = layout.state.selectedSessionID { markRead(id) }
+    }
+    private func selectSession(_ id: UUID) {
+        guard let session = model.session(id), session.projectID == projectID else { return }
+        let location = checkout(of: session)
+        layout.selectSession(id, folderID: location.folderID, path: location.path)
+        if layout.state.sidebarMode == .sessions, let group = layout.state.selectedGroupID, group != session.groupID { layout.state.selectedGroupID = nil }
+        if let folderID = location.folderID {
+            collapsedRepositories.remove(folderID)
+            sidebarReveal = SidebarReveal(row: location.path.map { .worktree(folderID, $0) } ?? .repository(folderID))
+        }
+        markRead(id)
+    }
+    private func markRead(_ id: UUID) {
+        guard model.session(id)?.unread == true else { return }
+        model.perform { _ = try await model.call("markRead", .object(["sessionID": .string(id.uuidString)])) }
+    }
+    private func revealCreatedWorktree(_ tree: Worktree) {
+        guard tree.projectID == projectID, tree.registered else { return }
+        pendingWorktree = worktreeRecords.contains { $0.id == tree.id } ? nil : tree
+        layout.state.sidebarMode = .repositories
+        layout.state.sidebarVisible = true
+        selectCheckout(folderID: tree.folderID, path: tree.path)
+        sidebarReveal = SidebarReveal(row: .worktree(tree.folderID, tree.path))
+    }
+    private func showWorktrees(folderID: UUID?) {
+        worktreeSheet = WorktreeSheet(folderID: folderID)
+    }
+    private func showLaunch(folderID: UUID? = nil, worktreeID: UUID? = nil, newWorktree: Bool = false) {
+        var folderID = folderID, worktreeID = worktreeID
+        if folderID == nil, let folder = selectedFolder {
+            folderID = folder.id
+            if worktreeID == nil, !newWorktree, let path = layout.selectedWorktreePath, let project {
+                worktreeID = checkout(folder: folder, path: path, project: project).worktreeID
+            }
+        }
+        launchSheet = LaunchSheet(folderID: folderID, worktreeID: worktreeID, newWorktree: newWorktree)
+    }
+    private func openShell(folderID: UUID, path: String) {
+        guard let project, let folder = project.folders.first(where: { $0.id == folderID && $0.registered }) else { return }
+        let row = checkout(folder: folder, path: path, project: project)
+        guard canLaunch(in: row) else { return }
+        model.perform {
+            let session = try await model.launchShell(project: project, folder: folder, worktreeID: row.worktreeID, branch: row.branch)
+            layout.selectSession(session.id, folderID: folder.id, path: row.path)
+            collapsedRepositories.remove(folder.id)
+        }
+    }
+    private func cycle(_ offset: Int) {
+        let ordered: [Session]
+        if let folder = selectedFolder, let path = layout.selectedWorktreePath { ordered = sessions(in: folder, path: path) }
+        else { ordered = allSessions }
+        guard !ordered.isEmpty else { return }
+        let current = ordered.firstIndex { $0.id == layout.state.selectedSessionID } ?? -offset.signum()
+        selectSession(ordered[((current + offset) % ordered.count + ordered.count) % ordered.count].id)
+    }
+    private func nextAttention() {
+        let attention = (layout.state.sidebarMode == .sessions ? sessions : allSessions).filter(\.needsAttention)
+        guard !attention.isEmpty else { return }
+        let next = attention.firstIndex { $0.id == layout.state.selectedSessionID }.map { ($0 + 1) % attention.count } ?? 0
+        selectSession(attention[next].id)
+    }
+
+    // MARK: Lifecycle
+
     private func restore() {
-        guard model.online, !layout.loaded, project != nil else { return }
+        guard model.online, !layout.loaded, let project else { return }
         layout.loaded = true
         #if DEBUG
         NativeProbe.layouts[projectID] = layout
@@ -345,9 +535,17 @@ struct ProjectWindow: View {
         #endif
         if let saved = model.snapshot.store.windows.first(where: { $0.value.id == projectID })?.value { layout.state = saved }
         model.beginWindowEditing(projectID)
-        layout.state.tabs = layout.state.tabs.filter { model.session($0)?.projectID == projectID }
-        if !layout.state.tabs.contains(where: { $0 == layout.state.selectedSessionID }) { layout.state.selectedSessionID = layout.state.tabs.first }
-        if layout.state.splitSessionID == layout.state.selectedSessionID { layout.state.splitSessionID = nil }
+        // Tabs and split panes are gone; a legacy record keeps its selected session.
+        layout.state.tabs = []; layout.state.splitSessionID = nil
+        if let id = layout.state.selectedSessionID, model.session(id)?.projectID != projectID { layout.state.selectedSessionID = nil }
+        if let folderID = layout.state.selectedFolderID, !project.folders.contains(where: { $0.id == folderID && $0.registered }) {
+            layout.state.selectedFolderID = nil; layout.state.selectedWorktreePath = nil
+        }
+        if layout.state.selectedFolderID == nil, let session = model.session(layout.state.selectedSessionID) {
+            let location = checkout(of: session)
+            layout.state.selectedFolderID = location.folderID; layout.state.selectedWorktreePath = location.path
+        }
+        if let folderID = layout.state.selectedFolderID { collapsedRepositories.remove(folderID) }
         layout.state.wasOpen = true; model.projectOpened(projectID); saveLayout()
         layout.synchronizeTerminals(model: model)
         consumeSessionRoute()
@@ -356,9 +554,16 @@ struct ProjectWindow: View {
     private func consumeProjectRoute() {
         guard layout.loaded, model.online, let navigation = model.pendingProjectRoute,
               navigation.match.projectID == projectID else { return }
-        layout.selectedFolderID = navigation.match.folderID
-        collapsedRepositories.remove(navigation.match.folderID)
+        layout.state.sidebarMode = .repositories
         layout.state.sidebarVisible = true
+        // A folder route names a checkout: the matched worktree, else the main
+        // checkout. Its current session stays selected when it runs there.
+        if let project, let folder = project.folders.first(where: { $0.id == navigation.match.folderID && $0.registered }) {
+            let requested = Paths.canonical(navigation.match.path)
+            let path = checkouts(for: folder, project: project).first { Paths.canonical($0.path) == requested }?.path ?? folder.canonicalPath
+            selectCheckout(folderID: folder.id, path: path)
+            sidebarReveal = SidebarReveal(row: .worktree(folder.id, path))
+        }
         model.pendingProjectRoute = nil
         dismissWindow(id: "welcome")
         layout.window?.makeKeyAndOrderFront(nil)
@@ -368,35 +573,71 @@ struct ProjectWindow: View {
         guard layout.loaded, model.online, let navigation = model.pendingSessionRoute,
               navigation.route.projectID == projectID,
               let session = model.session(navigation.route.sessionID), session.projectID == projectID else { return }
-        layout.search = ""; layout.state.selectedGroupID = session.groupID
+        layout.search = ""
         layout.state.sidebarVisible = true
-        layout.state.splitSessionID = nil
-        select(session.id)
+        selectSession(session.id)
         model.pendingSessionRoute = nil
         dismissWindow(id: "welcome")
         layout.window?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
     }
     private func saveLayout() { if layout.loaded { model.saveWindow(layout.state) } }
-    private func showLaunch(folderID: UUID? = nil, newWorktree: Bool = false) {
-        if let folderID { layout.selectedFolderID = folderID }
-        launchingInNewWorktree = newWorktree; launching = true
+}
+
+/// Cards for every session in the selected checkout. Live sessions come first;
+/// finished ones stay behind a disclosure so history remains reachable.
+private struct SessionStrip: View {
+    let sessions: [Session]
+    let project: Project
+    let selectedID: UUID?
+    let select: (Session) -> Void
+    let details: (Session) -> Void
+    let revealPath: (Session) -> Void
+    @State private var showFinished = false
+    private var live: [Session] { WorktreeSessions.live(sessions) }
+    /// Failed or unread sessions stay visible; other finished ones collapse.
+    private var visible: [Session] { sessions.filter { $0.state.isLive || $0.needsAttention } }
+    private var finished: [Session] { WorktreeSessions.finished(sessions).filter { !$0.needsAttention } }
+    var body: some View {
+        ScrollView(.horizontal) {
+            HStack(spacing: 6) {
+                ForEach(visible) { card($0).opacity($0.state.isLive ? 1 : 0.85) }
+                if !finished.isEmpty {
+                    Button { showFinished.toggle() } label: {
+                        Label("Finished (\(finished.count))", systemImage: showFinished ? "chevron.down" : "chevron.right")
+                    }.buttonStyle(.plain).font(.caption).foregroundStyle(.secondary).padding(.horizontal, 8)
+                        .accessibilityIdentifier("session.strip.finished")
+                    if showFinished { ForEach(finished) { card($0).opacity(0.75) } }
+                }
+            }.padding(.horizontal, 10).padding(.vertical, 6)
+        }.scrollIndicators(.hidden).frame(height: 70).background(.bar)
+            .onAppear { revealSelectedFinished() }
+            .onChange(of: selectedID) { _, _ in revealSelectedFinished() }
     }
-    private func select(_ id: UUID) {
-        if layout.state.selectedSessionID == id { revealSessionCheckout(id) }
-        layout.select(id)
-        model.perform { _ = try await model.call("markRead", .object(["sessionID": .string(id.uuidString)])) }
+    private func revealSelectedFinished() {
+        if finished.contains(where: { $0.id == selectedID }) { showFinished = true }
     }
-    private func cycle(_ offset: Int) {
-        guard !layout.state.tabs.isEmpty else { return }
-        let current = layout.state.tabs.firstIndex { $0 == layout.state.selectedSessionID } ?? 0
-        select(layout.state.tabs[(current + offset + layout.state.tabs.count) % layout.state.tabs.count])
-    }
-    private func nextAttention() {
-        let attention = sessions.filter(\.needsAttention)
-        guard !attention.isEmpty else { return }
-        let next = attention.firstIndex { $0.id == layout.state.selectedSessionID }.map { ($0 + 1) % attention.count } ?? 0
-        select(attention[next].id)
+    private func card(_ session: Session) -> some View {
+        let selected = session.id == selectedID
+        let preset = session.launch.preset.kind.isAgent ? session.launch.preset.name : "Shell"
+        let group = project.groups.first { $0.id == session.groupID }?.name ?? "Group unavailable"
+        return Button { select(session) } label: {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(session.title).fontWeight(selected ? .semibold : .medium).lineLimit(1)
+                Text("\(preset) · \(group)").font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                Text(session.state.label + (session.pendingMessages > 0 ? " · \(session.pendingMessages) messages" : "")).font(.caption).foregroundStyle(session.needsAttention ? .orange : .secondary).lineLimit(1)
+            }.frame(minWidth: 120, maxWidth: 220, alignment: .leading)
+                .padding(.horizontal, 10).padding(.vertical, 6)
+                .background(selected ? Color.accentColor.opacity(0.15) : Color.clear, in: RoundedRectangle(cornerRadius: 6))
+                .contentShape(Rectangle())
+        }.buttonStyle(.plain).help("\(session.title)\n\(session.launch.workingDirectory)")
+            .accessibilityIdentifier("session.card.\(session.id.uuidString)")
+            .accessibilityAddTraits(selected ? .isSelected : [])
+            .contextMenu {
+                Button("Session Details") { details(session) }
+                if session.state.isLive { Button("Stop Session…") { details(session) } }
+                Button("Reveal in Finder") { revealPath(session) }
+            }
     }
 }
 

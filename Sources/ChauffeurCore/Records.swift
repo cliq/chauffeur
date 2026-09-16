@@ -5,7 +5,17 @@ public protocol Record: Codable, Identifiable, Sendable where ID == UUID {
     func validate() throws
 }
 
-public enum CLIKind: String, Codable, CaseIterable, Sendable { case codex, claude }
+public enum CLIKind: String, Codable, CaseIterable, Sendable {
+    case codex, claude
+    /// A plain login shell in a checkout. Never stored in a preset set; the
+    /// runtime synthesizes its preset when launching a shell session.
+    case shell
+    public var isAgent: Bool { self != .shell }
+    public var displayName: String {
+        switch self { case .codex: "Codex"; case .claude: "Claude Code"; case .shell: "Shell" }
+    }
+}
+public enum SidebarMode: String, Codable, Sendable { case repositories, sessions }
 public enum Availability: String, Codable, Sendable { case available, missing, inaccessible }
 public enum IntegrationState: String, Codable, Sendable { case unverified, supported, unavailable }
 
@@ -205,15 +215,36 @@ public struct WindowState: Record, Equatable {
     public var displayID: String?
     public var selectedGroupID: UUID?
     public var selectedSessionID: UUID?
+    /// Selected repository folder and checkout path. A `nil` path with a folder
+    /// selects the repository overview; the main checkout uses the folder path.
+    public var selectedFolderID: UUID?
+    public var selectedWorktreePath: String?
+    public var sidebarMode: SidebarMode = .repositories
+    /// Legacy tab layout fields. Older records still carry them; new writes
+    /// leave them empty.
     public var tabs: [UUID] = []
     public var splitSessionID: UUID?
     public var sidebarVisible = true
     public var wasOpen = false
     public init(projectID: UUID) { id = projectID }
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        frame = try container.decodeIfPresent(String.self, forKey: .frame)
+        displayID = try container.decodeIfPresent(String.self, forKey: .displayID)
+        selectedGroupID = try container.decodeIfPresent(UUID.self, forKey: .selectedGroupID)
+        selectedSessionID = try container.decodeIfPresent(UUID.self, forKey: .selectedSessionID)
+        selectedFolderID = try container.decodeIfPresent(UUID.self, forKey: .selectedFolderID)
+        selectedWorktreePath = try container.decodeIfPresent(String.self, forKey: .selectedWorktreePath)
+        sidebarMode = try container.decodeIfPresent(SidebarMode.self, forKey: .sidebarMode) ?? .repositories
+        tabs = try container.decodeIfPresent([UUID].self, forKey: .tabs) ?? []
+        splitSessionID = try container.decodeIfPresent(UUID.self, forKey: .splitSessionID)
+        sidebarVisible = try container.decodeIfPresent(Bool.self, forKey: .sidebarVisible) ?? true
+        wasOpen = try container.decodeIfPresent(Bool.self, forKey: .wasOpen) ?? false
+    }
     public func validate() throws {
         try Validation.unique(tabs, field: "tab")
-        if let selectedSessionID { try Validation.require(tabs.contains(selectedSessionID), "Selected session must be in the window's tabs") }
-        if let splitSessionID { try Validation.require(tabs.contains(splitSessionID) && splitSessionID != selectedSessionID, "Split session must be a different tab") }
+        if let selectedWorktreePath { try Validation.absolutePath(selectedWorktreePath) }
     }
 }
 

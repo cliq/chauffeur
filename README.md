@@ -26,24 +26,55 @@ and tmux available in the user's login environment. The current app build target
 Apple Silicon.
 
 ```sh
-Scripts/build-app.sh
-open build/Build/Products/Debug/Chauffeur.app
+cp Configuration/LocalSigning.xcconfig.example Configuration/LocalSigning.xcconfig
+# Set DEVELOPMENT_TEAM and any signing/bundle overrides in the local file.
+make build
+open 'build/Build/Products/Debug/Chauffeur Debug.app'
 ```
 
-The script generates the Xcode project, builds the native app, embeds its runtime
-and helper, and signs the bundle locally. Use `Scripts/build-app.sh Release` for
-an optimized local build. The default signature is ad hoc. For a persistent
-background service, select a certificate already available to `codesign`:
+`make build` (or just `make`) generates the Xcode project, builds the native app,
+embeds its runtime and helpers, and signs and verifies the complete bundle.
+Use `make release` for an optimized build at
+`build/Build/Products/Release/Chauffeur.app`. `make open` opens the generated Xcode
+project, `make test` runs Swift package tests, and `make test-ui` runs native UI tests.
+
+Debug and Release can run side by side. Debug builds use `Chauffeur Debug.app`,
+the `.debug` bundle-ID suffix, the `dev.chauffeur.debug.runtime` service, and
+`~/Library/Application Support/Chauffeur Debug`. Release keeps `Chauffeur.app`,
+`dev.chauffeur.runtime`, and the existing `~/Library/Application Support/Chauffeur`
+store. Notifications, logs, URL schemes, preferences, and installed terminal
+commands are also separate (`chauffeur-debug` versus `chauffeur`).
+
+Startup refreshes service registration after the app moves or its runtime changes.
+The app verifies the connected runtime's build, executable location/hash, and data
+directory before accepting its state. Runtime settings show the verified helper
+path. Explicit `CHAUFFEUR_SOCKET` connections bypass managed-service verification
+and are labeled as custom connections.
+
+`Configuration/Base.xcconfig` defines the shared signing defaults and
+`APP_BUNDLE_ID` (`dev.cliq.chauffeur`). Both Debug and Release include the optional,
+gitignored `Configuration/LocalSigning.xcconfig`, following the same pattern as
+Claude Monitor. The app and UI-test bundle identifiers derive from `APP_BUNDLE_ID`.
+The default identity is Apple Development. To use an installed Developer ID
+certificate for a persistent background service, add these local overrides:
+
+```xcconfig
+DEVELOPMENT_TEAM = YOUR_TEAM_ID
+CODE_SIGN_STYLE = Manual
+CODE_SIGN_IDENTITY = Developer ID Application: Your Name (YOUR_TEAM_ID)
+```
+
+For an ad-hoc build without a development team or certificate:
 
 ```sh
-CHAUFFEUR_SIGN_IDENTITY="Developer ID Application: Your Certificate Name" \
-  Scripts/build-app.sh Release
+make release XCODEBUILD_ARGS='CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY=-'
 ```
 
 Service update checks use the same certificate for Debug and Release builds.
 Ad-hoc builds remain useful for isolated fixture tests; changing ad-hoc helper
-signatures can trigger macOS launch-constraint failures. The build script verifies
-the complete signed bundle. It does not notarize or publish the app.
+signatures can trigger macOS launch-constraint failures. The Makefile uses Xcode's
+resolved identity for the app and every embedded helper. Builds are not notarized
+or published.
 
 The build explicitly allows the pinned SwiftTerm build plugin, which generates
 Swift version metadata from that checkout's Git revision. Its plugin and generator
@@ -69,7 +100,7 @@ The Python integration fixtures require Python 3.11 or newer (including its
 standard-library TOML parser).
 
 ```sh
-swift test
+make test
 clang Prototypes/pty_signal_mask.c Sources/CChauffeur/CChauffeur.c \
   -I Sources/CChauffeur/include -o .build/pty-signal-mask
 .build/pty-signal-mask
@@ -79,6 +110,7 @@ python3 Prototypes/worktree_smoke.py
 python3 Prototypes/native_window_smoke.py
 python3 Prototypes/folder_launcher_smoke.py
 python3 Prototypes/release_startup_smoke.py
+python3 Prototypes/service_installation_smoke.py
 ```
 
 Fixtures use temporary data, private tmux servers, and fake CLI processes. The
@@ -120,14 +152,15 @@ shared diagnostics. See [V3](docs/decisions/V3-mcp-and-status.md) for verified s
    repositories under a parent folder.
 3. Open a project and create a session. Choose a group, preset, checkout, and any
    additional repository paths. Shared checkouts require an explicit choice.
-4. Use tabs and a two-pane split to work with terminals. Session Details shows
+4. Select a repository's checkout in the sidebar to see its sessions, launch an
+   agent there, or open a shell. Session Details shows
    launch paths, process identity, messages, delegations, and stop/resume actions.
 
 Optionally install the [Chauffeur coordination skill](docs/coordination-skill.md)
 from **Settings → Presets → Chauffeur Skill…**. Installation applies to all
 sessions using that profile and can be removed from the same sheet.
 
-Closing a terminal tab, project window, or quitting the UI keeps agents running.
+Closing a project window or quitting the UI keeps agents running.
 Stop Session ends an execution. Resume Conversation uses its recorded native ID
 and original profile; it creates a new execution.
 

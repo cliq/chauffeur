@@ -170,7 +170,7 @@ struct TerminalPane: View {
                 VStack(spacing: 16) {
                     Image(systemName: session.state == .failed ? "exclamationmark.triangle" : "terminal").font(.largeTitle)
                     Text(session.state.label).font(.title2)
-                    Text(session.error ?? "The agent has stopped. Open History to view saved terminal output.").foregroundStyle(.secondary).multilineTextAlignment(.center)
+                    Text(session.error ?? (session.launch.preset.kind.isAgent ? "The agent has stopped. Open History to view saved terminal output." : "The shell has exited. Open History to view saved terminal output.")).foregroundStyle(.secondary).multilineTextAlignment(.center)
                     Button("Open History", systemImage: "clock.arrow.circlepath") { controller.find() }
                     if session.nativeConversationID != nil {
                         Button("Resume Conversation") { model.perform { _ = try await model.call("resume", .object(["sessionID": .string(session.id.uuidString)])) } }.buttonStyle(.borderedProminent)

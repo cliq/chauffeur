@@ -8,6 +8,7 @@ struct SessionLaunchView: View {
     let project: Project
     let initialGroupID: UUID?
     let initialFolderID: UUID?
+    var initialWorktreeID: UUID? = nil
     var startsInNewWorktree = false
     var worktreeCreated: (Worktree) -> Void = { _ in }
     let completion: (UUID) -> Void
@@ -81,7 +82,7 @@ struct SessionLaunchView: View {
     private var sharing: [Session] {
         guard checkout != .newWorktree else { return [] }
         return model.snapshot.sessions.filter { peer in
-            peer.state.isLive && (peer.launch.workingDirectory == primaryPath || primaryGitIdentity.map { (peer.launch.gitWorktreeIdentities ?? []).contains($0) } == true)
+            peer.state.isLive && peer.launch.preset.kind.isAgent && (peer.launch.workingDirectory == primaryPath || primaryGitIdentity.map { (peer.launch.gitWorktreeIdentities ?? []).contains($0) } == true)
         }
     }
     private var canLaunch: Bool {
@@ -163,6 +164,7 @@ struct SessionLaunchView: View {
                 presetID = currentProject.lastPresetID.flatMap { choices.contains($0) ? $0 : nil } ?? model.presetSets.first { $0.id == currentProject.presetSetID }?.defaultPresetID.flatMap { choices.contains($0) ? $0 : nil } ?? presets.first?.id
                 folderID = currentProject.folders.first { $0.id == initialFolderID && $0.registered }?.id ?? currentProject.folders.first(where: \.registered)?.id
                 checkout = startsInNewWorktree ? .newWorktree : .repository
+                if let initialWorktreeID, worktrees.contains(where: { $0.id == initialWorktreeID }) { checkout = .existing(initialWorktreeID) }
                 #if DEBUG
                 configureProbe()
                 #endif
@@ -207,7 +209,7 @@ struct SessionLaunchView: View {
             }
             Picker("Agent preset", selection: $presetID) {
                 Text("Choose a preset").tag(UUID?.none)
-                ForEach(presets) { preset in Text("\(preset.name) · \(preset.kind == .codex ? "Codex" : "Claude Code")").tag(Optional(preset.id)) }
+                ForEach(presets) { preset in Text("\(preset.name) · \(preset.kind.displayName)").tag(Optional(preset.id)) }
             }
             if presets.isEmpty {
                 Text(unavailablePresetsMessage)

@@ -258,6 +258,33 @@ struct LaunchCancellationTests {
     }
 }
 
+struct ShellSessionTests {
+    @Test func shellSessionsRunTheLoginShellWithoutClaimingTheCheckout() async throws {
+        let fixture = try await LaunchFixture.make(); defer { fixture.cleanup() }
+        let project = try #require(await fixture.runtime.store.current().projects.first).value
+        let request = LaunchRequest.shell(projectID: project.id, groupID: project.groups[0].id, folderID: project.folders[0].id, title: "Shell · main")
+        let shell = try await fixture.runtime.launch(request)
+        #expect(shell.state.isLive)
+        #expect(shell.launch.preset.kind == .shell && shell.launch.preset.name == "Shell")
+        #expect(shell.launch.preset.arguments == ["-l"] && shell.launch.executableVersion == "shell")
+        #expect(shell.launch.preset.integration == .unavailable && shell.nativeConversationID == nil)
+        #expect(shell.launch.executablePath.hasPrefix("/") && shell.launch.workingDirectory == project.folders[0].canonicalPath)
+        #expect(!FileManager.default.fileExists(atPath: fixture.path("runtime/integration/\(shell.id)").path))
+        // An agent still starts in the same checkout without sharing consent.
+        var agent = fixture.request; agent.allowSharedCheckout = false
+        let launched = try await fixture.runtime.launch(agent)
+        #expect(launched.state.isLive && launched.launch.preset.kind == .claude)
+        // A shell can never be resumed; its record keeps no native conversation.
+        _ = try await fixture.runtime.handle(IPCRequest("stop", params: .object(["sessionID": .string(shell.id.uuidString), "force": .bool(true)])))
+        try await fixture.wait { try await fixture.runtime.snapshot()["sessions"].decode([Session].self).first { $0.id == shell.id }?.state.isLive == false }
+        var code: String?
+        do { _ = try await fixture.runtime.handle(IPCRequest("resume", params: .object(["sessionID": .string(shell.id.uuidString)]))) }
+        catch let error as ChauffeurError { code = error.code }
+        #expect(code == "resume_unavailable")
+        _ = try await fixture.stop()
+    }
+}
+
 private extension Result where Success == Session, Failure == Error {
     var failureCode: String? {
         if case .failure(let error) = self { return (error as? ChauffeurError)?.code }

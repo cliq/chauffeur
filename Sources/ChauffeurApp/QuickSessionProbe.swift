@@ -40,7 +40,9 @@ import ChauffeurCore
                     "sheetWindow": sheet.map { .number(Double($0.windowNumber)) } ?? .null,
                     "projectWindow": NativeProbe.layouts.values.first?.window.map { .number(Double($0.windowNumber)) } ?? .null,
                     "selectedSession": NativeProbe.layouts.values.first?.state.selectedSessionID.map { .string($0.uuidString) } ?? .null,
-                    "selectedWorktree": NativeProbe.layouts.values.first?.selectedWorktreePath.map(JSONValue.string) ?? .null,
+                    "selectedWorktree": NativeProbe.layouts.values.first?.state.selectedWorktreePath.map(JSONValue.string) ?? .null,
+                    "selectedFolder": NativeProbe.layouts.values.first?.state.selectedFolderID.map { .string($0.uuidString) } ?? .null,
+                    "sidebarMode": NativeProbe.layouts.values.first.map { .string($0.state.sidebarMode.rawValue) } ?? .null,
                     "sidebarVisible": .bool(NativeProbe.layouts.values.first?.state.sidebarVisible ?? false),
                     "error": model.error.map(JSONValue.string) ?? .null
                 ])

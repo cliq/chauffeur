@@ -20,9 +20,12 @@ public struct TerminalPacket: Codable, Sendable {
     public init(kind: String, bytes: Data? = nil, message: String? = nil) { self.kind = kind; self.bytes = bytes; self.message = message }
 }
 
+public enum LaunchKind: String, Codable, Sendable { case agent, shell }
+
 public struct LaunchRequest: Codable, Sendable {
     public var projectID: UUID
     public var groupID: UUID
+    /// Ignored for shell launches, which synthesize their own preset.
     public var presetID: UUID
     public var folderID: UUID
     public var worktreeID: UUID?
@@ -32,10 +35,18 @@ public struct LaunchRequest: Codable, Sendable {
     public var allowSharedCheckout: Bool
     public var coordinationEnabled: Bool
     public var retryKey: UUID
-    public init(projectID: UUID, groupID: UUID, presetID: UUID, folderID: UUID, title: String, worktreeID: UUID? = nil, additionalFolderIDs: [UUID] = [], task: String? = nil, allowSharedCheckout: Bool = false, coordinationEnabled: Bool = true, retryKey: UUID = UUID()) {
+    /// Missing in requests from older clients, which only launch agents.
+    public var kind: LaunchKind?
+    public var launchKind: LaunchKind { kind ?? .agent }
+    public init(projectID: UUID, groupID: UUID, presetID: UUID, folderID: UUID, title: String, worktreeID: UUID? = nil, additionalFolderIDs: [UUID] = [], task: String? = nil, allowSharedCheckout: Bool = false, coordinationEnabled: Bool = true, retryKey: UUID = UUID(), kind: LaunchKind? = nil) {
         self.projectID = projectID; self.groupID = groupID; self.presetID = presetID; self.folderID = folderID; self.title = title
         self.worktreeID = worktreeID; self.additionalFolderIDs = additionalFolderIDs; self.task = task
         self.allowSharedCheckout = allowSharedCheckout; self.coordinationEnabled = coordinationEnabled; self.retryKey = retryKey
+        self.kind = kind
+    }
+    /// A login shell in the selected checkout. The preset ID is a placeholder.
+    public static func shell(projectID: UUID, groupID: UUID, folderID: UUID, title: String, worktreeID: UUID? = nil, retryKey: UUID = UUID()) -> LaunchRequest {
+        LaunchRequest(projectID: projectID, groupID: groupID, presetID: UUID(uuidString: "00000000-0000-0000-0000-000000000000")!, folderID: folderID, title: title, worktreeID: worktreeID, allowSharedCheckout: true, coordinationEnabled: false, retryKey: retryKey, kind: .shell)
     }
 }
 

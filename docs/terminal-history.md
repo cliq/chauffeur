@@ -13,9 +13,8 @@ terminal still exists. Typing or pasting into history does not send agent input.
 | Command-A, Command-C | Select terminal output and copy it. Selection can change when a live program redraws; open History for a stable capture. |
 | Command-V | Paste into the focused live terminal, using bracketed paste when the CLI enables it. |
 | Command-F | Open saved history and its Find field. Search covers normal scrollback and the captured active screen. |
-| Command-Shift-] / Command-Shift-[ | Select the next / previous session tab. |
-| Command-D | Show or hide a second terminal pane. Two open session tabs are required to split. |
-| Command-K | Reveal the sidebar and focus session search in the active project. |
+| Command-Shift-] / Command-Shift-[ | Select the next / previous session in the selected checkout. |
+| Command-K | Reveal the sidebar in Sessions mode and focus session search in the active project. |
 | Command-Shift-A | Cycle through every session needing attention in the current project/group/search view. |
 | Command-N | Open the New Session sheet for the active project. |
 | Command-Shift-O | Open the Welcome window to choose another project. |
@@ -104,7 +103,7 @@ Accessibility and keyboard events targeted only at the fixture app. Two fake
 CLI sessions record their received bytes. Checks cover Unicode typing, literal
 hyphens, Control-B, Escape and Control-C, native selection/copy, bracketed paste,
 searching normal history and the captured Unicode screen, and read-only history.
-Session switching and split shortcuts pass; interrupting one fixture leaves the
+Session switching shortcuts stay within the selected checkout and its selection persists; interrupting one fixture leaves the
 other running. Command-Q followed by a native relaunch preserves its process and
 unsent input. Clipboard checks retain the previous clipboard in memory and
 restore it after the fixture operation. Reports and window captures are in

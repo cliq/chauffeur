@@ -18,8 +18,8 @@ import time
 import uuid
 
 repository = Path(__file__).resolve().parents[1]
-app = repository / "build/Build/Products/Debug/Chauffeur.app/Contents/MacOS"
-assert (app / "Chauffeur").exists(), "Run Scripts/build-app.sh first"
+app = repository / "build/Build/Products/Debug/Chauffeur Debug.app/Contents/MacOS"
+assert (app / "Chauffeur").exists(), "Run make build first"
 artifacts = repository / ".build/native-probe-artifacts"
 artifacts.mkdir(exist_ok=True)
 
@@ -78,9 +78,12 @@ with tempfile.TemporaryDirectory(prefix="chauffeur-native-", dir="/tmp") as dire
                 session = call("launch", {"projectID": project_id, "groupID": group_id, "presetID": preset_id, "folderID": folder_id, "additionalFolderIDs": [], "title": f"Terminal {index}.{number}", "allowSharedCheckout": True, "coordinationEnabled": True, "retryKey": uid()})
                 assert session["state"] == "activityUnknown", session
                 tabs.append(session["id"])
-            window = {"id": project_id, "tabs": tabs, "selectedSessionID": tabs[0], "sidebarVisible": True, "wasOpen": True}
-            if index == 1:
-                window["splitSessionID"] = tabs[-1]
+            # Odd projects seed a legacy tab record; even projects seed the checkout layout.
+            if index % 2:
+                window = {"id": project_id, "tabs": tabs, "selectedSessionID": tabs[0], "splitSessionID": tabs[-1], "sidebarVisible": True, "wasOpen": True}
+            else:
+                window = {"id": project_id, "selectedSessionID": tabs[0], "selectedFolderID": folder_id, "selectedWorktreePath": str(checkout.resolve()),
+                          "sidebarMode": "repositories", "sidebarVisible": True, "wasOpen": True}
             call("saveWindow", {"record": window})
         before = call("snapshot")
         reports = []
@@ -112,6 +115,9 @@ with tempfile.TemporaryDirectory(prefix="chauffeur-native-", dir="/tmp") as dire
             assert {s["processID"] for s in before["sessions"]} == {s["processID"] for s in after["sessions"]}
             assert len([s for s in after["sessions"] if s["state"] == "activityUnknown"]) == 10
             assert len([w for w in after["store"]["windows"] if w["value"]["wasOpen"]]) == 4
+            for item in after["store"]["windows"]:
+                assert not item["value"].get("tabs") and item["value"].get("splitSessionID") is None, "Legacy tab layout was rewritten"
+                assert item["value"].get("selectedFolderID") and item["value"].get("selectedWorktreePath"), "Checkout selection was not derived and saved"
             reports.append(report)
         assert len({report["frame"] for report in reports}) == 1, "Project frame did not restore"
         # Launch Services delivers the same URL used by notification clicks into a
@@ -121,13 +127,13 @@ with tempfile.TemporaryDirectory(prefix="chauffeur-native-", dir="/tmp") as dire
             window.pop("selectedSessionID", None); window.pop("splitSessionID", None)
             call("saveWindow", {"record": window, "version": record["version"]})
         target = after["sessions"][-1]
-        route = f"chauffeur://session/{target['projectID']}/{target['id']}"
+        route = f"chauffeur-debug://session/{target['projectID']}/{target['id']}"
         command = ["/usr/bin/open", "-n", "-W", "-a", str(app.parent.parent),
                    "--env", f"CHAUFFEUR_SOCKET={socket_path}", "--env", f"CHAUFFEUR_NATIVE_PROBE_DIR={root}",
                    "--env", "CHAUFFEUR_NATIVE_PROBE_PHASE=route", "--env", "CHAUFFEUR_NATIVE_PROBE_HOLD=0",
                    "--env", f"CHAUFFEUR_ROUTE_PROJECT={target['projectID']}", "--env", f"CHAUFFEUR_ROUTE_SESSION={target['id']}",
                    "--stdout", str(artifacts / "app-route.log"), "--stderr", str(artifacts / "app-route.log"), route]
-        subprocess.run(command, check=True, timeout=60)
+        subprocess.run(command, check=True, timeout=180)
         route_report = json.loads((root / "native-phase-route.json").read_text())
         assert route_report["passed"], route_report
         assert {s["processID"] for s in before["sessions"]} == {s["processID"] for s in call("snapshot")["sessions"]}

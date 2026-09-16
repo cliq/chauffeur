@@ -116,6 +116,15 @@ struct AppSnapshot: Decodable, Sendable {
     private var windowWriter: Task<Void, Never>?
     private var wakeObserver: AnyCancellable?
     private let service = SMAppService.agent(plistName: "dev.chauffeur.runtime.plist")
+    private var attemptedIdentityRepair = false
+    private var usesCustomSocket: Bool { ProcessInfo.processInfo.environment["CHAUFFEUR_SOCKET"] != nil }
+    private lazy var expectedRuntimeIdentity: RuntimeIdentity? = {
+        let executable = Bundle.main.bundleURL.appendingPathComponent("Contents/MacOS/ChauffeurRuntime")
+        let root = URL(fileURLWithPath: socketPath).deletingLastPathComponent().deletingLastPathComponent()
+        return try? RuntimeIdentity(executable: executable, dataRoot: root)
+    }()
+    var runtimeIdentity: RuntimeIdentity? { try? snapshot.health["identity"].decode(RuntimeIdentity.self) }
+    var runtimeConnectionVerified: Bool { online && !usesCustomSocket }
 
     init(preferences: UserDefaults = .standard) {
         self.preferences = preferences
@@ -168,9 +177,25 @@ struct AppSnapshot: Decodable, Sendable {
                         guard let result = response.result else { continue }
                         let received = try await Task.detached { try result.decode(AppSnapshot.self) }.value
                         guard generation == connectionGeneration, !isRestartingService else { break }
+                        if !usesCustomSocket {
+                            guard let expected = expectedRuntimeIdentity else {
+                                throw ChauffeurError("runtime_identity_unavailable", "Cannot verify the bundled runtime. Rebuild or reinstall Chauffeur")
+                            }
+                            guard (try? received.health["identity"].decode(RuntimeIdentity.self)) == expected else {
+                                // Repair once per app launch. Never accept a snapshot from
+                                // another installation, or repeatedly restart competing apps.
+                                if !attemptedIdentityRepair {
+                                    attemptedIdentityRepair = true
+                                    restartService()
+                                    break
+                                }
+                                throw ChauffeurError("runtime_mismatch", "The background service belongs to a different app build or location. Restart Service from Runtime settings")
+                            }
+                            if let fingerprint = runtimeBuildFingerprint { preferences.set(fingerprint, forKey: "registeredRuntimeBuild") }
+                        }
                         snapshot = received
                         snapshotReceivedAt = Date()
-                        online = true; serviceMessage = "Background service running · \(snapshot.sessions.filter { $0.state.isLive }.count) live sessions"
+                        online = true; serviceMessage = "\(usesCustomSocket ? "Custom" : AppBuild.current.rawValue) service running\(usesCustomSocket ? "" : " · verified") · \(snapshot.sessions.filter { $0.state.isLive }.count) live sessions"
                         processPendingRoute()
                     }
                 } catch {
@@ -187,19 +212,19 @@ struct AppSnapshot: Decodable, Sendable {
     }
     func reconnect() {
         connection?.close()
-        Task { _ = try? await call("reconcile") }
     }
-    func registerService() {
+    func registerService(forceRestart: Bool = false) {
         guard ProcessInfo.processInfo.environment["CHAUFFEUR_SOCKET"] == nil else { reconnect(); return }
         guard !isRestartingService else { return }
         if initialServiceStatus == nil { initialServiceStatus = service.status.rawValue }
         do {
             // An embedded agent without a background-task record may report
             // notFound before its first registration. Let register validate it.
-            if service.status == .notRegistered || service.status == .notFound { try service.register() }
+            let needsRegistration = service.status == .notRegistered || service.status == .notFound
+            if needsRegistration { try service.register() }
             serviceRegistrationError = nil; serviceDiagnosticError = nil
             if service.status == .requiresApproval { serviceMessage = "Allow Chauffeur in System Settings → Login Items & Extensions" }
-            else if service.status == .enabled && UserDefaults.standard.string(forKey: "registeredRuntimeBuild") != runtimeBuildFingerprint {
+            else if service.status == .enabled && !needsRegistration && (forceRestart || preferences.string(forKey: "registeredRuntimeBuild") != runtimeBuildFingerprint) {
                 // SMAppService can retain a previous helper's launch constraint,
                 // even after unregistering it. Refresh registration for new code.
                 restartService()
@@ -227,12 +252,11 @@ struct AppSnapshot: Decodable, Sendable {
             catch { self.error = error.localizedDescription }
         }
     }
-    private var runtimeBuildFingerprint: String? {
+    private lazy var runtimeBuildFingerprint: String? = {
         let plist = Bundle.main.bundleURL.appendingPathComponent("Contents/Library/LaunchAgents/dev.chauffeur.runtime.plist")
-        let helper = Bundle.main.bundleURL.appendingPathComponent("Contents/MacOS/ChauffeurRuntime")
-        guard let configuration = try? Data(contentsOf: plist), let executable = try? Data(contentsOf: helper, options: .mappedIfSafe) else { return nil }
-        return JSONCoding.digest(configuration) + ":" + JSONCoding.digest(executable)
-    }
+        guard let configuration = try? Data(contentsOf: plist) else { return nil }
+        return expectedRuntimeIdentity?.registrationFingerprint(plist: configuration)
+    }()
     func restartRegisteredService() async throws {
         guard beginServiceRestart() else { return }
         try await completeServiceRestart()
@@ -251,7 +275,7 @@ struct AppSnapshot: Decodable, Sendable {
         do {
             if service.status == .enabled { try await service.unregister() }
             try service.register(); serviceRegistrationError = nil; serviceDiagnosticError = nil; reconnect()
-            if service.status == .enabled, let fingerprint = runtimeBuildFingerprint { UserDefaults.standard.set(fingerprint, forKey: "registeredRuntimeBuild") }
+            // Record this registration only after a matching runtime connects.
             // The subscription reconnects when startup finishes. An immediate
             // snapshot request would report a spurious error during shell setup.
         } catch {
@@ -315,6 +339,17 @@ struct AppSnapshot: Decodable, Sendable {
             do { try await operation(); try await refresh() }
             catch { self.error = error.localizedDescription; try? await refresh() }
         }
+    }
+    /// Starts a login shell in a checkout as a service-backed session.
+    func launchShell(project: Project, folder: ProjectFolder, worktreeID: UUID?, branch: String) async throws -> Session {
+        guard let group = project.groups.first(where: { $0.isDefault && !$0.archived }) ?? project.groups.first(where: { !$0.archived }) else {
+            throw ChauffeurError("missing_group", "Add an active group to this project before opening a shell")
+        }
+        let title = "Shell · \(branch.isEmpty ? folder.name : branch)"
+        let request = LaunchRequest.shell(projectID: project.id, groupID: group.id, folderID: folder.id, title: title, worktreeID: worktreeID)
+        let session = try await call("launch", .from(request)).decode(Session.self)
+        try await refresh()
+        return session
     }
     func save<T: ChauffeurCore.Record>(_ method: String, _ value: T, version: String?) async throws {
         _ = try await call(method, .object(["record": try .from(value), "version": version.map(JSONValue.string) ?? .null]))

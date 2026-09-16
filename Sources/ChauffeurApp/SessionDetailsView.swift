@@ -17,10 +17,12 @@ struct SessionDetailsView: View {
                     detail("Title", session.title)
                     detail("State", session.state.label)
                     detail("Group", project.groups.first { $0.id == session.groupID }?.name ?? "Unavailable")
-                    detail("Agent", session.launch.preset.kind == .codex ? "Codex" : "Claude Code")
-                    detail("Preset", session.launch.preset.name)
-                    detail("Preset set", "\(session.launch.presetSetName) · revision \(session.launch.presetSetRevision)")
-                    detail("Configuration directory", session.launch.configurationPath)
+                    detail(session.launch.preset.kind.isAgent ? "Agent" : "Kind", session.launch.preset.kind.displayName)
+                    if session.launch.preset.kind.isAgent {
+                        detail("Preset", session.launch.preset.name)
+                        detail("Preset set", "\(session.launch.presetSetName) · revision \(session.launch.presetSetRevision)")
+                        detail("Configuration directory", session.launch.configurationPath)
+                    }
                     detail("Working directory", session.launch.workingDirectory)
                     ForEach(session.launch.additionalPaths, id: \.self) { detail("Additional repository", $0) }
                     if let worktree = model.snapshot.store.worktrees.first(where: { $0.value.id == session.worktreeID })?.value { detail("Branch", worktree.branch); detail("Base commit", worktree.baseCommit) }
@@ -37,7 +39,7 @@ struct SessionDetailsView: View {
                         Button("Resume Conversation") { model.perform { _ = try await model.call("resume", .object(["sessionID": .string(session.id.uuidString)])) } }
                     }
                     Text(session.state.isLive ? "Closing the terminal view keeps this execution running. Stopping a parent preserves its children and their work." : "This execution has ended. Its launch settings and saved terminal history remain available.").font(.caption).foregroundStyle(.secondary)
-                    if session.launch.preset.integration != .supported {
+                    if session.launch.preset.kind.isAgent && session.launch.preset.integration != .supported {
                         Text(session.launch.preset.integration == .unavailable ? "Coordination and semantic status are unavailable in basic terminal mode." : "CLI coordination is under validation. Fine-grained activity may be unknown; terminal silence is not completion.").font(.caption).foregroundStyle(.secondary)
                     }
                 }

@@ -46,14 +46,14 @@ import ChauffeurCore
             for number in 1...(index <= 2 ? 3 : 2) {
                 let launch = LaunchRequest(projectID: project.id, groupID: project.groups[0].id, presetID: preset.id, folderID: folder.id, title: "Terminal \(index).\(number)", allowSharedCheckout: true)
                 let session = try await call("launch", .from(launch)).decode(Session.self)
-                sessions.append(session); window.tabs.append(session.id)
+                sessions.append(session)
+                if window.selectedSessionID == nil { window.selectedSessionID = session.id }
             }
-            window.selectedSessionID = window.tabs.first; window.wasOpen = true
-            if index == 1 { window.splitSessionID = window.tabs.last }
+            window.selectedFolderID = folder.id; window.selectedWorktreePath = folder.canonicalPath; window.wasOpen = true
             _ = try await call("saveWindow", .object(["record": try .from(window)]))
             projects.append(project)
         }
-        app = XCUIApplication(bundleIdentifier: "dev.chauffeur.app")
+        app = XCUIApplication(bundleIdentifier: try XCTUnwrap(Bundle(url: appURL)?.bundleIdentifier))
         app.launchEnvironment["CHAUFFEUR_SOCKET"] = socketPath
         app.launchArguments = ["-ApplePersistenceIgnoreState", "YES"]
     }
@@ -76,7 +76,7 @@ import ChauffeurCore
         XCTAssertEqual(app.windows.matching(NSPredicate(format: "title BEGINSWITH %@", "Window Fixture")).count, 4)
         let firstWindow = app.windows[projects[0].name]
         XCTAssertTrue(firstWindow.staticTexts["Terminal 1.1"].firstMatch.waitForExistence(timeout: 10))
-        let screenshot = XCTAttachment(screenshot: firstWindow.screenshot()); screenshot.name = "Project with split terminals"; screenshot.lifetime = .keepAlways; add(screenshot)
+        let screenshot = XCTAttachment(screenshot: firstWindow.screenshot()); screenshot.name = "Project with checkout session strip"; screenshot.lifetime = .keepAlways; add(screenshot)
         app.terminate()
         let detached = try await call("snapshot")
         XCTAssertEqual(before["health"]["runtimeID"], detached["health"]["runtimeID"])

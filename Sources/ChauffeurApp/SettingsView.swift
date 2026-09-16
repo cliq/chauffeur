@@ -31,7 +31,7 @@ struct SettingsView: View {
                         Text("Presets select existing CLI configuration directories. Edits affect new launches in every linked project.").font(.callout).foregroundStyle(.secondary)
                         List(model.presets.filter { $0.setID == set.id }) { preset in
                             VStack(alignment: .leading, spacing: 5) {
-                                HStack { Text(preset.name).fontWeight(.semibold); Text(preset.kind == .codex ? "Codex" : "Claude Code").foregroundStyle(.secondary); if preset.archived { Text("Archived").font(.caption) }; Spacer(); Button("Edit…") { editedPreset = preset }.accessibilityIdentifier("preset.edit-\(preset.id.uuidString)") }
+                                HStack { Text(preset.name).fontWeight(.semibold); Text(preset.kind.displayName).foregroundStyle(.secondary); if preset.archived { Text("Archived").font(.caption) }; Spacer(); Button("Edit…") { editedPreset = preset }.accessibilityIdentifier("preset.edit-\(preset.id.uuidString)") }
                                 Text(preset.configurationDirectory).font(.caption).textSelection(.enabled)
                                 Button("Chauffeur Skill…") { skillPreset = preset }
                                     .accessibilityIdentifier("preset-skill-\(preset.id.uuidString)")
@@ -52,6 +52,12 @@ struct SettingsView: View {
             Form {
                 Section("Background Service") {
                     ServiceHealthView()
+                    LabeledContent("Build", value: AppBuild.current.rawValue)
+                    if model.online, let identity = model.runtimeIdentity {
+                        LabeledContent(model.runtimeConnectionVerified ? "Verified runtime" : "Custom runtime") {
+                            Text(identity.executablePath).font(.caption).textSelection(.enabled)
+                        }
+                    }
                     HStack { Button("Restart Service") { model.restartService() }.disabled(model.isRestartingService); Button("Login Items Settings…") { model.openServiceSettings() } }
                     Text("Agents remain running when Chauffeur's windows close. A runtime restart reconciles surviving terminal processes.").font(.caption).foregroundStyle(.secondary)
                 }

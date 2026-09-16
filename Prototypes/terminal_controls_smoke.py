@@ -45,7 +45,7 @@ def wait_for(probe, description, timeout=30):
 with tempfile.TemporaryDirectory(prefix='chauffeur-terminal-controls-', dir='/tmp') as directory:
     root = Path(directory).resolve()
     app = root / 'Chauffeur.app'
-    shutil.copytree(repository / 'build/Build/Products/Debug/Chauffeur.app', app, symlinks=True)
+    shutil.copytree(repository / 'build/Build/Products/Debug/Chauffeur Debug.app', app, symlinks=True)
     identifier = 'dev.chauffeur.terminal-controls-probe.' + uuid.uuid4().hex
     socket_path = str(root / 'runtime/runtime.sock')
     info_path = app / 'Contents/Info.plist'
@@ -146,8 +146,8 @@ with tempfile.TemporaryDirectory(prefix='chauffeur-terminal-controls-', dir='/tm
             'folderID': folder_id, 'additionalFolderIDs': [], 'title': 'Second keyboard fixture',
             'allowSharedCheckout': True, 'coordinationEnabled': True, 'retryKey': uid()})
         second_log = input_directory / (second['id'] + '.bin')
-        call('saveWindow', {'record': {'id': project_id, 'tabs': [session_id, second['id']], 'selectedSessionID': session_id,
-            'sidebarVisible': True, 'wasOpen': True}})
+        call('saveWindow', {'record': {'id': project_id, 'selectedSessionID': session_id, 'selectedFolderID': folder_id,
+            'selectedWorktreePath': str(repo), 'sidebarMode': 'repositories', 'sidebarVisible': True, 'wasOpen': True}})
         subprocess.run([str(binary_dir / 'chauffeur-launcher'), str(repo)], capture_output=True, check=True)
         ready = wait_for(lambda: (s if (s := state())['online'] and s['ready'] else None), 'project window ready')
         app_pid = ready['processID']
@@ -197,10 +197,11 @@ with tempfile.TemporaryDirectory(prefix='chauffeur-terminal-controls-', dir='/tm
         wait_for(lambda: state()['selectedSession'] == session_id, 'previous session shortcut')
         def window_state():
             return next(w['value'] for w in call('snapshot')['store']['windows'] if w['value']['id'] == project_id)
-        ax('key', terminal_id, keyCode=2, modifiers=['command'])
-        wait_for(lambda: window_state().get('splitSessionID') == second['id'] and control(second_terminal), 'split shortcut')
-        ax('key', terminal_id, keyCode=2, modifiers=['command'])
-        wait_for(lambda: window_state().get('splitSessionID') is None, 'unsplit shortcut')
+        # Session switching stays inside the selected checkout; both fixtures share it.
+        wait_for(lambda: state()['selectedWorktree'] == str(repo) and state()['selectedFolder'] == folder_id, 'main checkout selected')
+        wait_for(lambda: window_state().get('selectedWorktreePath') == str(repo) and window_state().get('sidebarMode') == 'repositories', 'checkout selection persisted')
+        assert control('session.card.' + session_id) and control('session.card.' + second['id']), 'both session cards in the checkout strip'
+        assert not window_state().get('tabs') and window_state().get('splitSessionID') is None, 'legacy tab fields must stay empty'
         assert input_log.read_bytes() == before_history
         old_pid = app_pid
         ax('key', terminal_id, keyCode=12, modifiers=['command'])

@@ -32,7 +32,7 @@ Example: **Client 1 / Project 1**, **Client 1 / Project 2**, **Personal / Projec
 | Repository folder | Existing folder registered in the project; repositories support managed worktrees. |
 | Worktree | Separate checkout belonging to one repository, usable by one or more explicitly associated sessions. |
 | Session | Durable agent identity, conversation reference, terminal process, preset snapshot, and primary working directory. |
-| Project window | A view into the project and its sessions, with its own tabs and split layout. |
+| Project window | A view into the project's repositories, their checkouts, and the sessions running in each. |
 
 Each session has one primary working directory and may also access other repositories in its project. A worktree is created for one repository at a time. Additional repository paths do not automatically gain separate worktrees.
 
@@ -40,7 +40,7 @@ Each session belongs to one named group within its project, and delegated childr
 
 ## Window and terminal experience
 
-Each project gets a native macOS window with a repository/session sidebar, group filter, terminal tabs, an optional two-pane split, and a list of sessions needing attention. Project name, preset set, agent preset, group, and working directory remain easy to identify.
+Each project gets a native macOS window whose sidebar switches between a repository tree (main checkout and worktrees, with attention badges) and a flat session list with group filter and search. Selecting a checkout shows its sessions above one terminal, with actions to launch an agent or open a shell there. Project name, preset set, agent preset, group, and working directory remain easy to identify.
 
 Keyboard actions cover opening projects, starting sessions, switching terminals, and jumping to the next session needing input. Normal macOS window and Spaces controls determine desktop placement. Reopening an already open project focuses its existing window.
 

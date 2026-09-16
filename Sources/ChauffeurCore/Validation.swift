@@ -20,7 +20,7 @@ public enum Validation {
 
 public enum Paths {
     public static var applicationSupport: URL {
-        FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/Chauffeur", isDirectory: true)
+        AppBuild.current.applicationSupport
     }
     public static func canonical(_ path: String) -> String {
         let url = URL(fileURLWithPath: (path as NSString).expandingTildeInPath).standardizedFileURL
@@ -64,9 +64,14 @@ public enum LaunchPolicy {
     public static func environment(base: [String: String], preset: AgentPreset, sessionID: UUID, token: String) throws -> [String: String] {
         let directory = try Paths.directory(preset.configurationDirectory)
         var result = base.filter { key, _ in !deniedNames.contains(key) && !deniedPrefixes.contains(where: key.hasPrefix) }
-        result[preset.kind == .codex ? "CODEX_HOME" : "CLAUDE_CONFIG_DIR"] = directory
+        switch preset.kind {
+        case .codex: result["CODEX_HOME"] = directory
+        case .claude: result["CLAUDE_CONFIG_DIR"] = directory
+        case .shell: break
+        }
         result["CHAUFFEUR_SESSION_ID"] = sessionID.uuidString
-        result["CHAUFFEUR_SESSION_TOKEN"] = token
+        // A shell has no MCP integration, so it never receives a grant token.
+        if preset.kind.isAgent { result["CHAUFFEUR_SESSION_TOKEN"] = token }
         result["TERM"] = "xterm-256color"
         result["COLORTERM"] = "truecolor"
         return result
@@ -84,6 +89,10 @@ public enum LaunchPolicy {
     }
 
     public static func validateArguments(_ arguments: [String], kind: CLIKind) throws {
+        if kind == .shell {
+            for argument in arguments { try Validation.require(!argument.contains("\0") && !argument.contains("\n"), "Arguments cannot contain NUL or newlines") }
+            return
+        }
         let common: Set<String> = ["--", "--add-dir", "--worktree", "--resume", "--continue", "--session-id", "--fork-session", "--remote", "--remote-auth-token-env", "--cloud", "--teleport"]
         let codex: Set<String> = ["-C", "--cd", "-c", "--config", "--last", "--all"]
         let claude: Set<String> = ["-c", "-r", "-w", "--mcp-config", "--strict-mcp-config", "--settings", "--setting-sources", "--safe-mode", "--no-session-persistence", "--print", "-p", "--output-format", "--input-format", "--plugin-dir", "--plugin-url", "--environment", "--tmux"]

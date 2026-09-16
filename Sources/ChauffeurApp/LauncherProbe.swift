@@ -36,7 +36,7 @@ import ChauffeurCore
                     "selectedFolders": .object(Dictionary(uniqueKeysWithValues: NativeProbe.layouts.map { ($0.key.uuidString, $0.value.selectedFolderID.map { .string($0.uuidString) } ?? .null) })),
                     "choices": .array((model.folderSelection?.matches ?? []).map { .string($0.projectID.uuidString) }),
                     "error": model.error.map(JSONValue.string) ?? .null,
-                    "welcomeVisible": .bool(NSApp.windows.contains { $0.isVisible && $0.title == "Welcome to Chauffeur" })
+                    "welcomeVisible": .bool(NSApp.windows.contains { $0.isVisible && $0.title == "Welcome to \(AppBuild.current.displayName)" })
                 ])
                 try? JSONCoding.encode(result).write(to: root.appendingPathComponent("launcher-state.json"), options: .atomic)
                 try? await Task.sleep(for: .milliseconds(100))

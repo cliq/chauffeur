@@ -56,8 +56,10 @@ that change reflected in the revision label.
   historical references. Use **Archive** or **Remove** in the app rather than
   deleting referenced groups or folder entries from JSON.
 - New writes reject defaults from another set, preset moves between sets,
-  worktrees assigned to another folder, and known foreign window tabs. Session
-  membership stays fixed. Selected and split sessions must be valid window tabs.
+  worktrees assigned to another folder, and known foreign window tabs in legacy
+  records. Session membership stays fixed. A window's selected worktree path must
+  be absolute; its legacy `tabs` and `splitSessionID` fields are decoded and
+  emptied on the next write.
 - Metadata files and child metadata directories are not followed through
   symlinks. Repository and CLI configuration paths can still use their normal
   canonical-path resolution.

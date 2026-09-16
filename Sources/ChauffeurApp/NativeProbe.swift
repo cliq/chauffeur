@@ -1,5 +1,6 @@
 #if DEBUG
 import AppKit
+import Combine
 import ChauffeurCore
 
 /// Direct app integration probe, enabled only in Debug with an isolated socket.
@@ -8,10 +9,16 @@ import ChauffeurCore
     static var layouts: [UUID: ProjectLayout] = [:]
     static var openProject: ((UUID) -> Void)?
     private static var started = false
+    private static var errorObserver: AnyCancellable?
     static func start(model: AppModel) {
         guard !started, let path = ProcessInfo.processInfo.environment["CHAUFFEUR_NATIVE_PROBE_DIR"],
               model.socketPath == URL(fileURLWithPath: path).appendingPathComponent("runtime/runtime.sock").path else { return }
         started = true
+        // Surface presented app errors in the captured app log, since a modal
+        // alert leaves no other trace when a phase stalls.
+        errorObserver = model.$error.sink { message in
+            if let message { FileHandle.standardError.write(Data("[native-probe] app error: \(message)\n".utf8)) }
+        }
         Task {
             let root = URL(fileURLWithPath: path)
             let phase = ProcessInfo.processInfo.environment["CHAUFFEUR_NATIVE_PROBE_PHASE"] ?? "1"
@@ -25,17 +32,18 @@ import ChauffeurCore
                         model.online && layouts[project]?.window?.isVisible == true && layouts[project]?.state.selectedSessionID == session && model.pendingSessionRoute == nil
                     }
                     try await wait("cold-launch URL dismissed Welcome") {
-                        !NSApp.windows.contains { $0.isVisible && $0.title == "Welcome to Chauffeur" }
+                        !NSApp.windows.contains { $0.isVisible && $0.title == "Welcome to \(AppBuild.current.displayName)" }
                     }
-                    guard layouts.count == 1, layouts[project]?.state.tabs == [session] else {
-                        throw ChauffeurError("native_probe", "Cold-launch URL restored an unexpected project or tab")
+                    guard layouts.count == 1, layouts[project]?.state.selectedSessionID == session,
+                          layouts[project]?.state.selectedWorktreePath == model.session(session)?.launch.workingDirectory else {
+                        throw ChauffeurError("native_probe", "Cold-launch URL restored an unexpected project or checkout")
                     }
                     layouts[project]?.window?.performClose(nil)
                     try await wait("route project closed") { !model.openProjects.contains(project) }
                     let missing = SessionRoute(projectID: UUID(), sessionID: UUID())
                     _ = try await NSWorkspace.shared.open([missing.url], withApplicationAt: Bundle.main.bundleURL, configuration: NSWorkspace.OpenConfiguration())
                     try await wait("missing notification target presented an error") {
-                        model.error != nil && NSApp.windows.contains { $0.isVisible && $0.title == "Welcome to Chauffeur" }
+                        model.error != nil && NSApp.windows.contains { $0.isVisible && $0.title == "Welcome to \(AppBuild.current.displayName)" }
                     }
                     model.error = nil
                     await model.finishPendingWindowWrites()
@@ -59,10 +67,11 @@ import ChauffeurCore
                 let ordered = layouts.values.sorted { model.project($0.state.id)!.name < model.project($1.state.id)!.name }
                 for layout in ordered {
                     let original = layout.state
-                    for id in original.tabs {
-                        layout.select(id)
-                        try await wait("rendered fixture terminal \(id)") {
-                            guard let controller = layout.controllers[id] else { return false }
+                    guard let folder = model.project(layout.state.id)?.folders.first else { throw ChauffeurError("native_probe", "Fixture project has no folder") }
+                    for session in model.sessions(in: layout.state.id) {
+                        layout.selectSession(session.id, folderID: folder.id, path: session.launch.workingDirectory)
+                        try await wait("rendered fixture terminal \(session.id)") {
+                            guard let controller = layout.controllers[session.id] else { return false }
                             let text = screen(controller).replacingOccurrences(of: "\n", with: "")
                             return controller.connected && controller.terminal.window === layout.window && text.contains("Chauffeur fixture — 日本語 café")
                         }
@@ -70,12 +79,13 @@ import ChauffeurCore
                     // Restore selection without overwriting geometry saved while
                     // the real views were being laid out and resized.
                     layout.state.selectedSessionID = original.selectedSessionID
-                    layout.state.splitSessionID = original.splitSessionID
+                    layout.state.selectedFolderID = original.selectedFolderID
+                    layout.state.selectedWorktreePath = original.selectedWorktreePath
                 }
                 let first = ordered[0]
                 let selected = first.state.selectedSessionID!
-                try await wait("restored split terminals") {
-                    first.controllers[selected]?.connected == true && first.controllers[first.state.splitSessionID!]?.connected == true
+                try await wait("restored selected terminal") {
+                    first.controllers[selected]?.connected == true && first.controllers.values.filter(\.connected).count == 1
                 }
                 let controller = first.controllers[selected]!
                 if phase == "1" {
@@ -117,7 +127,7 @@ import ChauffeurCore
                     guard model.snapshot.store.windows.first(where: { $0.value.id == closingID })?.value.wasOpen == false else {
                         throw ChauffeurError("native_probe", "Closing a window did not save its closed state")
                     }
-                    let routedSession = closing.state.tabs.last!
+                    let routedSession = model.sessions(in: closingID).last!.id
                     closing.search = "does-not-match-any-session"
                     let route = SessionRoute(projectID: closingID, sessionID: routedSession)
                     let configuration = NSWorkspace.OpenConfiguration()

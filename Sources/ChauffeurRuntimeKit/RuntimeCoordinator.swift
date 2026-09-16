@@ -9,6 +9,7 @@ public actor RuntimeCoordinator {
     public let worktrees: WorktreeManager
     public let snapshots: SnapshotStore
     public let root: URL
+    private let identity: RuntimeIdentity?
     private let ctlPath: String
     private let baseEnvironment: [String: String]
     private var sessions: [UUID: Session] = [:]
@@ -50,8 +51,9 @@ public actor RuntimeCoordinator {
                            authorization: notificationHelperAvailable ? notificationAuthorization : .unavailable,
                            helperConnected: notificationHeartbeat.map { Date().timeIntervalSince($0) < 15 } ?? false)
     }
-    public init(root: URL, ctlPath: String, environment: [String: String], logs: RuntimeLogStore? = nil, id: UUID = UUID()) throws {
+    public init(root: URL, ctlPath: String, environment: [String: String], logs: RuntimeLogStore? = nil, id: UUID = UUID(), identity: RuntimeIdentity? = nil) throws {
         self.id = id
+        self.identity = identity
         self.logs = logs ?? (try? RuntimeLogStore(root: RuntimeLogStore.directory(for: root)))
         self.root = root; self.ctlPath = ctlPath; self.baseEnvironment = environment
         store = try FileStore(root: root)
@@ -92,7 +94,7 @@ public actor RuntimeCoordinator {
         logs?.append(RuntimeLogEntry(.runtimeReady, runtimeID: id))
     }
     public func health() -> JSONValue {
-        .object(["runtimeID": .string(id.uuidString), "version": .string(RuntimeVersion.current), "protocolVersion": .number(Double(WireProtocol.major)), "mcpEndpoint": endpoint.map(JSONValue.string) ?? .null, "liveSessions": .number(Double(sessions.values.filter { $0.state.isLive }.count)), "status": .string("running")])
+        .object(["runtimeID": .string(id.uuidString), "version": .string(RuntimeVersion.current), "protocolVersion": .number(Double(WireProtocol.major)), "mcpEndpoint": endpoint.map(JSONValue.string) ?? .null, "liveSessions": .number(Double(sessions.values.filter { $0.state.isLive }.count)), "status": .string("running"), "identity": identity.flatMap { try? .from($0) } ?? .null, "pid": .number(Double(ProcessInfo.processInfo.processIdentifier))])
     }
     public func snapshot() async throws -> JSONValue {
         let snapshot = await store.refresh()
@@ -476,10 +478,6 @@ public actor RuntimeCoordinator {
         try Task.checkCancellation()
         guard let project = snapshot.projects.first(where: { $0.value.id == request.projectID })?.value, !project.archived else { throw ChauffeurError("missing_project", "Select an active project") }
         guard project.groups.contains(where: { $0.id == request.groupID && !$0.archived }) else { throw ChauffeurError("missing_group", "Select an active group in this project") }
-        guard let set = snapshot.presetSets.first(where: { $0.value.id == project.presetSetID })?.value, !set.archived,
-              let preset = snapshot.presets.first(where: { $0.value.id == request.presetID && $0.value.setID == set.id && !$0.value.archived })?.value else {
-            throw ChauffeurError("missing_preset", "Project's preset set is empty or selected preset is unavailable")
-        }
         guard let folder = project.folders.first(where: { $0.id == request.folderID && $0.registered }) else { throw ChauffeurError("missing_folder", "Select a registered project folder") }
         var workingDirectory = folder.canonicalPath
         var selectedWorktree: Worktree?
@@ -488,13 +486,31 @@ public actor RuntimeCoordinator {
             workingDirectory = worktree.path
             selectedWorktree = worktree
         }
-        let additionalPaths = try request.additionalFolderIDs.filter { $0 != folder.id }.map { id in
+        let isShell = request.launchKind == .shell
+        let set: PresetSet, preset: AgentPreset
+        if isShell {
+            // A shell is not an agent preset. It runs the login shell in the
+            // checkout, has no configuration directory and never coordinates.
+            guard child == nil else { throw ChauffeurError("invalid_argument", "Delegated sessions must launch an agent") }
+            set = PresetSet(name: "Shell")
+            var shell = AgentPreset(setID: set.id, name: "Shell", kind: .shell, executable: baseEnvironment["SHELL"].flatMap { $0.hasPrefix("/") ? $0 : nil } ?? "/bin/zsh", configurationDirectory: workingDirectory)
+            shell.arguments = ["-l"]; shell.integration = .unavailable
+            preset = shell
+        } else {
+            guard let storedSet = snapshot.presetSets.first(where: { $0.value.id == project.presetSetID })?.value, !storedSet.archived,
+                  let storedPreset = snapshot.presets.first(where: { $0.value.id == request.presetID && $0.value.setID == storedSet.id && !$0.value.archived })?.value else {
+                throw ChauffeurError("missing_preset", "Project's preset set is empty or selected preset is unavailable")
+            }
+            set = storedSet; preset = storedPreset
+        }
+        let additionalPaths = try (isShell ? [] : request.additionalFolderIDs).filter { $0 != folder.id }.map { id in
             guard let extra = project.folders.first(where: { $0.id == id && $0.registered }) else { throw ChauffeurError("missing_folder", "Additional project folder is unavailable") }
             return try Paths.directory(extra.canonicalPath)
         }
-        try checkoutClaims.beginLaunch(sessionID, paths: [workingDirectory] + additionalPaths, worktreeID: request.worktreeID, allowSharedCheckout: request.allowSharedCheckout)
+        // Shells never claim a checkout: they neither block agents nor need sharing consent.
+        try checkoutClaims.beginLaunch(sessionID, paths: [workingDirectory] + additionalPaths, worktreeID: request.worktreeID, allowSharedCheckout: isShell || request.allowSharedCheckout, occupies: !isShell)
         defer { checkoutClaims.endLaunch(sessionID) }
-        let launch = LaunchSnapshot(preset: preset, set: set, executablePath: preset.executable, executableVersion: "unverified", workingDirectory: workingDirectory, additionalPaths: additionalPaths)
+        let launch = LaunchSnapshot(preset: preset, set: set, executablePath: preset.executable, executableVersion: isShell ? "shell" : "unverified", workingDirectory: workingDirectory, additionalPaths: additionalPaths)
         var session = Session(projectID: project.id, groupID: request.groupID, title: request.title, launch: launch, folderID: folder.id)
         session.id = sessionID; session.worktreeID = request.worktreeID; session.initialTask = request.task
         session.launchRequestFingerprint = fingerprint
@@ -528,23 +544,26 @@ public actor RuntimeCoordinator {
             session.launch.configurationPath = try Paths.directory(preset.configurationDirectory)
             session.launch.executablePath = try Paths.executable(preset.executable, environment: baseEnvironment)
             let sharing = sessions.values.filter { peer in
-                peer.id != session.id && peer.state.isLive && (peer.launch.workingDirectory == session.launch.workingDirectory
+                peer.id != session.id && peer.state.isLive && peer.launch.preset.kind.isAgent && (peer.launch.workingDirectory == session.launch.workingDirectory
                     || primaryIdentity.map { (peer.launch.gitWorktreeIdentities ?? []).contains($0) } == true)
             }
-            guard sharing.isEmpty || request.allowSharedCheckout else { throw ChauffeurError("shared_checkout", "Checkout is already used by: \(sharing.map(\.title).joined(separator: ", ")). Explicitly choose to share it", path: workingDirectory) }
-            let token = try await ledger.issueGrant(sessionID: session.id)
+            guard isShell || sharing.isEmpty || request.allowSharedCheckout else { throw ChauffeurError("shared_checkout", "Checkout is already used by: \(sharing.map(\.title).joined(separator: ", ")). Explicitly choose to share it", path: workingDirectory) }
+            let token = isShell ? "" : try await ledger.issueGrant(sessionID: session.id)
             try Task.checkCancellation()
             var environment = try LaunchPolicy.environment(base: baseEnvironment, preset: preset, sessionID: session.id, token: token)
             environment["CHAUFFEUR_SOCKET"] = root.appendingPathComponent("runtime/runtime.sock").path
-            let capabilities = try await CLIAdapter.capabilities(executable: session.launch.executablePath, kind: preset.kind, environment: environment)
-            try Task.checkCancellation()
-            session.launch.executableVersion = capabilities.version
-            if !additionalPaths.isEmpty && !capabilities.additionalDirectories { throw ChauffeurError("unsupported_directories", "This CLI does not support additional directories") }
-            if request.coordinationEnabled && (!capabilities.coordination || endpoint == nil) { throw ChauffeurError("integration_unavailable", capabilities.limitation ?? "MCP service is unavailable. Retry or explicitly select basic terminal mode") }
-            session.launch.preset.integration = request.coordinationEnabled ? .unverified : .unavailable
+            let coordination = !isShell && request.coordinationEnabled
             let integration = root.appendingPathComponent("runtime/integration/\(session.id)")
-            try FileManager.default.createDirectory(at: integration, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
-            let arguments = try CLIAdapter.arguments(session: session, endpoint: endpoint ?? "", ctlPath: ctlPath, integrationDirectory: integration, coordination: request.coordinationEnabled, resume: false)
+            if !isShell {
+                let capabilities = try await CLIAdapter.capabilities(executable: session.launch.executablePath, kind: preset.kind, environment: environment)
+                try Task.checkCancellation()
+                session.launch.executableVersion = capabilities.version
+                if !additionalPaths.isEmpty && !capabilities.additionalDirectories { throw ChauffeurError("unsupported_directories", "This CLI does not support additional directories") }
+                if coordination && (!capabilities.coordination || endpoint == nil) { throw ChauffeurError("integration_unavailable", capabilities.limitation ?? "MCP service is unavailable. Retry or explicitly select basic terminal mode") }
+                session.launch.preset.integration = coordination ? .unverified : .unavailable
+                try FileManager.default.createDirectory(at: integration, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+            }
+            let arguments = try CLIAdapter.arguments(session: session, endpoint: endpoint ?? "", ctlPath: ctlPath, integrationDirectory: integration, coordination: coordination, resume: false)
             try await persist(session)
             try Task.checkCancellation()
             let pane = try await terminals.spawn(session: session, payload: ExecPayload(executable: session.launch.executablePath, arguments: arguments, environment: environment, directory: session.launch.workingDirectory), scrollback: settings.scrollbackLines)
@@ -552,7 +571,7 @@ public actor RuntimeCoordinator {
             session.processID = pane.processID; session.terminalIdentity = pane.paneID; session.state = .activityUnknown
             try await persist(session)
             try Task.checkCancellation()
-            if child == nil {
+            if child == nil && !isShell {
                 do { try await store.rememberPreset(preset.id, projectID: project.id, setID: set.id) }
                 catch let error as ChauffeurError { record(error) }
                 catch { record(ChauffeurError("preset_preference", "The session started, but its preset choice could not be saved")) }
@@ -660,7 +679,8 @@ public actor RuntimeCoordinator {
         case "chauffeur_discover":
             let snapshot = await store.current()
             guard let project = snapshot.projects.first(where: { $0.value.id == caller.scope.projectID })?.value else { throw ChauffeurError("project_unavailable", "Project metadata is unavailable") }
-            let members = try await ledger.peers(caller)
+            // Shells share the group but cannot read an inbox.
+            let members = try await ledger.peers(caller).filter { $0.launch.preset.kind.isAgent }
             let current = members.first { $0.id == caller.sessionID }
             let peers = members.map { session -> JSONValue in
                 .object(["id": .string(session.id.uuidString), "title": .string(session.title), "status": .string(session.state.label), "workingDirectory": .string(session.launch.workingDirectory), "preset": .string(session.launch.preset.name), "parentID": session.parentID.map { .string($0.uuidString) } ?? .null])

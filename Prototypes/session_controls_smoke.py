@@ -45,7 +45,7 @@ def wait_for(probe, description, timeout=30):
 with tempfile.TemporaryDirectory(prefix='chauffeur-session-controls-', dir='/tmp') as directory:
     root = Path(directory).resolve()
     app = root / 'Chauffeur.app'
-    shutil.copytree(repository / 'build/Build/Products/Debug/Chauffeur.app', app, symlinks=True)
+    shutil.copytree(repository / 'build/Build/Products/Debug/Chauffeur Debug.app', app, symlinks=True)
     identifier = 'dev.chauffeur.session-controls-probe.' + uuid.uuid4().hex
     socket_path = str(root / 'runtime/runtime.sock')
     info_path = app / 'Contents/Info.plist'
@@ -200,7 +200,7 @@ with tempfile.TemporaryDirectory(prefix='chauffeur-session-controls-', dir='/tmp
         wait_for(lambda: str(unregistered[0]) in text_values() and len(error_buttons()) == 1, 'same error can be reported again after dismissal')
         ax('press', title='OK')
         wait_for(lambda: not error_buttons(), 'repeated error dismissed')
-        ax('closeWindow', title='Welcome to Chauffeur', role='AXWindow')
+        ax('closeWindow', title='Welcome to Chauffeur Debug', role='AXWindow')
         assert live_ids() == {session_id, second['id'], resistant['id']}
         ax('key', terminal_id, keyCode=53)
         # Details must keep the launch snapshot after the shared preset is edited.
@@ -237,7 +237,11 @@ with tempfile.TemporaryDirectory(prefix='chauffeur-session-controls-', dir='/tmp
                 'allowSharedCheckout': True, 'coordinationEnabled': False, 'retryKey': uid()}, expect_error=True)
         failures = [s for s in call('snapshot')['sessions'] if s['title'].startswith('Attention failure ')]
         assert len(failures) == 3 and all(s['state'] == 'failed' and not s.get('processID') for s in failures)
-        wait_for(lambda: 'Attention failure 2' in text_values(), 'failed launches visible')
+        # Failed launches stay visible as attention cards in the checkout strip.
+        wait_for(lambda: 'Attention failure 2' in text_values(), 'failed launches visible in the checkout strip')
+        # The search field lives in the sidebar's Sessions mode.
+        ax('press', title='Sessions', role='AXRadioButton', windowTitle='Session Controls A')
+        wait_for(lambda: any(c['placeholder'] == 'Search sessions' for c in controls()), 'Sessions mode search field')
         visited = []
         for _ in range(4):
             previous = window_state(project_id)['selectedSessionID']
@@ -260,8 +264,8 @@ with tempfile.TemporaryDirectory(prefix='chauffeur-session-controls-', dir='/tmp
         ax('press', title='Cancel')
         assert live_ids() == {second['id'], resistant['id']}
         ax('key', terminal_b, keyCode=31, modifiers=['command', 'shift'])
-        wait_for(lambda: any(c['role'] == 'AXWindow' and c['title'] == 'Welcome to Chauffeur' for c in controls()), 'open project window command')
-        ax('closeWindow', title='Welcome to Chauffeur', role='AXWindow')
+        wait_for(lambda: any(c['role'] == 'AXWindow' and c['title'] == 'Welcome to Chauffeur Debug' for c in controls()), 'open project window command')
+        ax('closeWindow', title='Welcome to Chauffeur Debug', role='AXWindow')
         ax('key', terminal_b, keyCode=53)  # Focus B without changing its input.
         stop_all()
         confirmation = text_values()
