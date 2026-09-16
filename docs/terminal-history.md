@@ -6,6 +6,23 @@ Use **History and Search** or **Command-F** to open a read-only capture with
 scrolling, selection and search. **Refresh** requests a new capture when the
 terminal still exists. Typing or pasting into history does not send agent input.
 
+## Keyboard and selection
+
+| Shortcut | Action |
+| --- | --- |
+| Command-A, Command-C | Select terminal output and copy it. Selection can change when a live program redraws; open History for a stable capture. |
+| Command-V | Paste into the focused live terminal, using bracketed paste when the CLI enables it. |
+| Command-F | Open saved history and its Find field. Search covers normal scrollback and the captured active screen. |
+| Command-Shift-] / Command-Shift-[ | Select the next / previous session tab. |
+| Command-D | Show or hide a second terminal pane. Two open session tabs are required to split. |
+| Control-C / Escape | Pass the key to the focused live CLI. The CLI decides whether to interrupt, cancel a prompt, or exit. |
+| Command-Q | Quit Chauffeur's UI while its agents keep running. |
+
+Live terminals and saved history expose distinct, focusable text areas to macOS
+Accessibility, with their displayed text and current selection. Reading the
+accessibility value is bounded to the displayed rows. It does not serialize the
+entire retained scrollback or make saved history editable.
+
 ## Saved captures
 
 The background runtime captures owned terminals roughly every five seconds and
@@ -63,3 +80,15 @@ existing tmux server, ended-pane retirement, and history after terminal/runtime
 loss. The native Debug probe checks normal-history and active-screen search,
 read-only input, and repeated UI quit/relaunch. Real CLI rendering acceptance
 remains tracked in [V1](decisions/V1-terminal-continuity.md).
+
+`Prototypes/terminal_controls_smoke.py` drives the signed Debug app through macOS
+Accessibility and keyboard events targeted only at the fixture app. Two fake
+CLI sessions record their received bytes. Checks cover Unicode typing, literal
+hyphens, Control-B, Escape and Control-C, native selection/copy, bracketed paste,
+searching normal history and the captured Unicode screen, and read-only history.
+Session switching and split shortcuts pass; interrupting one fixture leaves the
+other running. Command-Q followed by a native relaunch preserves its process and
+unsent input. Clipboard checks retain the previous clipboard in memory and
+restore it after the fixture operation. Reports and window captures are in
+`.build/terminal-controls-artifacts/`. This requires existing Accessibility access;
+it does not establish real-provider, link-opening, or full VoiceOver acceptance.

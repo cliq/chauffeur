@@ -17,7 +17,7 @@ func attribute(_ element: AXUIElement, _ name: String) -> Any? {
 }
 func describe(_ element: AXUIElement) -> [String: Any] {
     var result: [String: Any] = [:]
-    for (key, name) in [("identifier", kAXIdentifierAttribute), ("role", kAXRoleAttribute), ("label", kAXDescriptionAttribute), ("title", kAXTitleAttribute)] {
+    for (key, name) in [("identifier", kAXIdentifierAttribute), ("role", kAXRoleAttribute), ("label", kAXDescriptionAttribute), ("title", kAXTitleAttribute), ("placeholder", kAXPlaceholderValueAttribute), ("selectedText", kAXSelectedTextAttribute)] {
         result[key] = attribute(element, name) as? String ?? ""
     }
     result["value"] = attribute(element, kAXValueAttribute) as? String ?? ""
@@ -32,16 +32,71 @@ var queue = [application], elements: [AXUIElement] = []
 while !queue.isEmpty, elements.count < 1500 {
     let element = queue.removeFirst()
     guard !elements.contains(where: { CFEqual($0, element) }) else { continue }
+    // Window controls suffice for these fixtures. Avoid collecting system
+    // Recent Items or unrelated entries from the app's menu bar.
+    if attribute(element, kAXRoleAttribute) as? String == kAXMenuBarRole { continue }
     elements.append(element)
     queue.append(contentsOf: attribute(element, kAXChildrenAttribute) as? [AXUIElement] ?? [])
     if CFEqual(element, application) { queue.append(contentsOf: attribute(element, kAXWindowsAttribute) as? [AXUIElement] ?? []) }
 }
 let operation = request["operation"] as? String
+let pid = Int32(request["pid"] as! Int)
+func focus(_ element: AXUIElement) -> Bool {
+    NSRunningApplication(processIdentifier: pid)?.activate()
+    AXUIElementSetAttributeValue(application, kAXFrontmostAttribute as CFString, kCFBooleanTrue)
+    for _ in 0..<30 {
+        AXUIElementSetAttributeValue(element, kAXFocusedAttribute as CFString, kCFBooleanTrue)
+        if let current = attribute(application, kAXFocusedUIElementAttribute), CFEqual(current as CFTypeRef, element) { return true }
+        Thread.sleep(forTimeInterval: 0.05)
+    }
+    return false
+}
+func key(_ code: CGKeyCode, flags: CGEventFlags = [], text: String? = nil) {
+    let source = CGEventSource(stateID: .privateState)
+    for down in [true, false] {
+        let event = CGEvent(keyboardEventSource: source, virtualKey: code, keyDown: down)!
+        event.flags = flags
+        if let text {
+            let units = Array(text.utf16)
+            event.keyboardSetUnicodeString(stringLength: units.count, unicodeString: units)
+        }
+        event.postToPid(pid)
+    }
+    Thread.sleep(forTimeInterval: 0.08)
+}
+// Clipboard contents are held in memory only, then restored if the fixture's
+// value is still current. Concurrent clipboard changes are left alone.
+func clipboard(_ element: AXUIElement, paste: String?) -> [String: Any] {
+    let board = NSPasteboard.general
+    let previous = (board.pasteboardItems ?? []).map { item in
+        let copy = NSPasteboardItem()
+        for type in item.types { if let data = item.data(forType: type) { copy.setData(data, forType: type) } }
+        return copy
+    }
+    let expected = paste ?? (attribute(element, kAXSelectedTextAttribute) as? String ?? "")
+    guard !expected.isEmpty else { return ["error": "The fixture has no selected text"] }
+    if let paste { board.clearContents(); board.setString(paste, forType: .string) }
+    let changeCount = board.changeCount
+    key(paste == nil ? 8 : 9, flags: .maskCommand)
+    if paste == nil {
+        for _ in 0..<20 {
+            if board.changeCount != changeCount { break }
+            Thread.sleep(forTimeInterval: 0.05)
+        }
+    }
+    let copied = board.string(forType: .string)
+    let unchanged = paste != nil ? board.changeCount == changeCount : board.changeCount != changeCount
+    guard unchanged, copied == expected else { return ["error": "Clipboard did not contain the fixture's expected value"] }
+    board.clearContents()
+    if !previous.isEmpty { board.writeObjects(previous) }
+    return ["performed": true, "text": expected]
+}
 var result: Any
 if operation == "inspect" { result = elements.map(describe) }
 else {
     let matches = elements.filter { element in
         if let identifier = request["identifier"] as? String { return attribute(element, kAXIdentifierAttribute) as? String == identifier }
+        if let placeholder = request["placeholder"] as? String { return attribute(element, kAXPlaceholderValueAttribute) as? String == placeholder }
         if let title = request["title"] as? String {
             return (attribute(element, kAXRoleAttribute) as? String == kAXButtonRole)
                 && (attribute(element, kAXTitleAttribute) as? String == title || attribute(element, kAXDescriptionAttribute) as? String == title)
@@ -49,40 +104,26 @@ else {
         return false
     }
     if matches.count == 1, let element = matches.first {
-        let status: AXError
-        if operation == "press" { status = AXUIElementPerformAction(element, kAXPressAction as CFString) }
-        else if operation == "typeText", let value = request["value"] as? String {
-            NSRunningApplication(processIdentifier: Int32(request["pid"] as! Int))?.activate()
-            AXUIElementSetAttributeValue(application, kAXFrontmostAttribute as CFString, kCFBooleanTrue)
-            var hasFocus = false
-            for _ in 0..<30 {
-                AXUIElementSetAttributeValue(element, kAXFocusedAttribute as CFString, kCFBooleanTrue)
-                if let current = attribute(application, kAXFocusedUIElementAttribute), CFEqual(current as CFTypeRef, element) {
-                    hasFocus = true; break
-                }
-                Thread.sleep(forTimeInterval: 0.05)
+        if operation == "press" {
+            let status = AXUIElementPerformAction(element, kAXPressAction as CFString)
+            result = ["performed": status == .success, "status": status.rawValue]
+        } else if !focus(element) { result = ["error": "The requested control did not receive keyboard focus"] }
+        else if operation == "paste" || operation == "copy" {
+            result = clipboard(element, paste: operation == "paste" ? request["value"] as? String : nil)
+        } else if ["typeText", "insertText"].contains(operation), let value = request["value"] as? String {
+            if operation == "typeText" { key(0, flags: .maskCommand) }
+            if !value.isEmpty { key(0, text: value) }
+            else if operation == "typeText" { key(51) }
+            result = ["performed": true]
+        } else if operation == "key", let code = request["keyCode"] as? Int {
+            let names = request["modifiers"] as? [String] ?? []
+            var flags: CGEventFlags = []
+            for (name, flag) in [("command", CGEventFlags.maskCommand), ("shift", .maskShift), ("control", .maskControl), ("option", .maskAlternate)] {
+                if names.contains(name) { flags.insert(flag) }
             }
-            if hasFocus {
-                let source = CGEventSource(stateID: .privateState)
-                let pid = Int32(request["pid"] as! Int)
-                for down in [true, false] {
-                    let event = CGEvent(keyboardEventSource: source, virtualKey: 0, keyDown: down)!
-                    event.flags = .maskCommand
-                    event.postToPid(pid)
-                }
-                Thread.sleep(forTimeInterval: 0.05)
-                let text = Array(value.utf16)
-                for down in [true, false] {
-                    let event = CGEvent(keyboardEventSource: source, virtualKey: 0, keyDown: down)!
-                    event.flags = []
-                    event.keyboardSetUnicodeString(stringLength: text.count, unicodeString: text)
-                    event.postToPid(pid)
-                }
-                status = .success
-            } else { status = .cannotComplete }
-        }
-        else { status = .actionUnsupported }
-        result = ["performed": status == .success, "status": status.rawValue]
+            key(CGKeyCode(code), flags: flags)
+            result = ["performed": true]
+        } else { result = ["error": "Unsupported operation"] }
     } else { result = ["error": "Expected one matching control", "matches": matches.count] }
 }
 let data = try JSONSerialization.data(withJSONObject: result, options: [.sortedKeys])

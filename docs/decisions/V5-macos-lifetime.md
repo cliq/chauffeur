@@ -115,6 +115,15 @@ and clean removal preserving the branch pass. Reports and window captures are
 in `.build/worktree-controls-artifacts/`. This establishes those native worktree
 interactions; it does not establish the remaining terminal or notification checks.
 
+`Prototypes/terminal_controls_smoke.py` uses the same OS helper with two fixture
+terminals. Native Unicode input, selection/copy, bracketed paste, Control-B,
+Escape and Control-C, history search and read-only input, session switching and
+split shortcuts pass. Command-Q leaves the agent alive and a Launch Services
+relaunch restores its unsent input in the same process. The terminal's displayed
+text and selection are exposed through distinct live/history accessibility
+elements. This is fixture evidence, not a real-CLI or full VoiceOver audit; see
+[V1](V1-terminal-continuity.md) and [terminal history](../terminal-history.md).
+
 ## Notification implementation and partial evidence
 
 The signed app now includes an accessory notification app, a durable opt-in
@@ -135,8 +144,8 @@ Actual notification delivery and click handling still require native acceptance.
 
 ## Remaining gate evidence
 
-- Run remaining native terminal keyboard/copy/paste/find/link and accessibility
-  interactions. XCUITest still requires the previously requested system access.
+- Finish link-opening checks and repeat the native terminal interactions with
+  real CLIs. XCUITest still requires the previously requested system access.
 - Validate sleep/wake, remaining service-loss cases,
   banner delivery/clicks with the UI closed, and enabled-helper recovery/update.
 - Repeat lifetime scenarios with both real CLIs and their intended accounts.

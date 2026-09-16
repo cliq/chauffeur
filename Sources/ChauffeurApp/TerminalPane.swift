@@ -31,7 +31,8 @@ import ChauffeurCore
         terminal.font = .monospacedSystemFont(ofSize: 13, weight: .regular)
         terminal.getTerminal().changeScrollback(scrollback)
         terminal.applyAppearance()
-        terminal.setAccessibilityIdentifier("terminal-\(sessionID.uuidString)")
+        terminal.setAccessibilityIdentifier("\(readOnly ? "history" : "terminal")-\(sessionID.uuidString)")
+        terminal.setAccessibilityLabel(readOnly ? "Saved terminal history" : "Agent terminal")
     }
     func attach(socketPath: String) {
         guard !readOnly, reader == nil else { return }

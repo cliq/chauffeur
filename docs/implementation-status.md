@@ -57,6 +57,13 @@ unverified real-CLI or native behavior; deferred workload checks remain unverifi
   registration now coalesces to one record; the regression reproduced twelve
   records before the fix. Evidence: `.build/worktree-controls-artifacts/`.
   These changes await the next Release build; XCUITest remains unrun.
+- Native terminal keyboard and clipboard controls pass through macOS with two
+  fixture sessions: Unicode/literal input, Control-B/Escape/Control-C, selection
+  and copy, bracketed paste, Command-F history search, read-only history, session
+  switching/split shortcuts, and Command-Q/relaunch preserving process/input.
+  Terminals now expose distinct focusable live/history accessibility elements
+  with displayed text and selection. Evidence: `.build/terminal-controls-artifacts/`.
+  Real-provider and link-opening acceptance remain open; these changes await Release.
 - [Metadata integrity and preset defaults](metadata-and-presets.md): child
   ownership checks, path-bearing reference diagnostics, archived history
   preservation, service-owned preset revision increments, and a remembered
@@ -159,7 +166,7 @@ unverified real-CLI or native behavior; deferred workload checks remain unverifi
 | 1.9 Session details | Native details show the immutable launch snapshot and lifecycle/coordination records | Real-session interaction acceptance |
 | 2.1 Screen/history | tmux live state; bounded persisted snapshots, disk cleanup, native history/search | Real CLI native attach/search/copy/link verification and sustained rotation |
 | 2.2 Reconnect | Positive pane/process reconciliation; real Codex/Claude explicit native-ID resume and MCP reconnect | Remaining service-failure edge cases and full native acceptance |
-| 2.3–2.4 Quit/tabs/split | Native tabs/split, window-state writes, quit/stop-all and keyboard commands implemented | OS keyboard and focused real-CLI acceptance; direct normal/force-quit fixture implemented; final Spaces workload is in V2 |
+| 2.3–2.4 Quit/tabs/split | Native tabs/split, window-state writes, quit/stop-all and keyboard commands implemented; actual OS switching/split/quit shortcuts and reattachment pass with fixtures | Focused real-CLI acceptance; direct normal/force-quit fixture implemented; final Spaces workload is in V2 |
 | 2.5 Worktrees | Create/list/safe-remove; periodic external inventory; identity-based moves/replacements; pending launch/removal and metadata-write reservations; legacy migration fixtures and real Codex/Claude repository-relocation, replacement/resume, and removal checks; native manager controls and concurrent registration pass | Ship manager fixes in the next Release |
 | 2.6 Multiple repos | Explicit additional folder selection in launch API; primary main checkout excluded | Real CLI access test (shared-checkout warning and explicit additional-folder UI implemented) |
 | 2.7 Status/attention | Lifecycle records, real Codex/Claude completion IDs, permission attention hooks, unread/pending counts; optional durable notifications; native warm/cold URL routing and background helper startup; user enabled and authorized notifications | Actual OS delivery/click, enabled-helper recovery/update, and remaining native attention signals |

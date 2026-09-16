@@ -12,6 +12,7 @@ original = termios.tcgetattr(0)
 tty.setraw(0)
 counter = 0
 typed = b""
+needs_draw = True
 
 def draw(*_):
     size = os.get_terminal_size()
@@ -30,13 +31,20 @@ try:
         sys.stdout.write(f"fixture-history-{line:03d} 日本語 café\r\n")
     sys.stdout.flush()
     while True:
-        draw()
+        if needs_draw or not os.environ.get("CHAUFFEUR_FIXTURE_STABLE_SCREEN"):
+            draw()
+        needs_draw = False
         ready, _, _ = select.select([0], [], [], 0.1)
         if ready:
             value = os.read(0, 4096)
+            if path := os.environ.get("CHAUFFEUR_FIXTURE_INPUT"):
+                descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+                with os.fdopen(descriptor, "ab") as handle:
+                    handle.write(value)
             if value in (b"\x03", b"\x04"):
                 break
             typed += value
+            needs_draw = True
         counter += 1
 finally:
     sys.stdout.write("\x1b[?25h\x1b[?2004l\x1b[?1049l")

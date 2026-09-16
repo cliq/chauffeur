@@ -1,6 +1,7 @@
 # V1 — terminal continuity
 
-Status: fixture continuity passed; real CLI and AppKit rendering acceptance open.
+Status: fixture continuity and native keyboard/clipboard/history controls pass;
+real-CLI rendering acceptance remains open.
 
 ## Decision
 
@@ -33,6 +34,16 @@ handlers with async-signal-safe C calls before `exec`.
 The project layout owns attachment decisions. Stable session identities preserve
 views when split panes move, and cancelled attachments cannot feed late output
 into a newer view connection. See [V5](V5-macos-lifetime.md) for native probe scope.
+
+`Prototypes/terminal_controls_smoke.py` drives two fixture terminals through
+macOS keyboard events and Accessibility actions. It verifies Unicode and literal
+hyphens, Control-B/Escape/Control-C delivery, selection and copy, bracketed paste,
+Command-F search of normal history and the captured Unicode screen, read-only
+history, session switching/split shortcuts, and Command-Q/relaunch preserving the
+process and unsent input. The terminal previously had no element in the native
+accessibility tree; live and history views now expose distinct focusable text
+areas with displayed output and selection. Clipboard checks preserve the prior
+clipboard in memory. Private artifacts are in `.build/terminal-controls-artifacts/`.
 
 ## Remaining gate evidence
 
