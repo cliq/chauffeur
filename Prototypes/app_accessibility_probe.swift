@@ -110,22 +110,18 @@ func pointer(_ element: AXUIElement, operation: String) -> [String: Any] {
     let start = CGPoint(x: frame["x"]! + x, y: frame["y"]! + y)
     let flags = modifiers()
     let button: CGMouseButton = operation == "rightClick" ? .right : .left
-    // Mouse events require WindowServer hit testing. Verify the native window
-    // under the point belongs to the requested PID before posting system input.
+    // Verify the actual accessible element under the point belongs to the
+    // requested PID. Notification Center can own a transparent full-screen
+    // window, so a window-rectangle intersection alone is not a hit test.
     var hitOwner: Int?
     func targetIsVisible() -> Bool {
-        let windows = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? []
-        let target = windows.first { window in
-            // Include modal panels, but skip the pointer overlay itself; it
-            // follows the previous click and does not intercept mouse events.
-            guard (window[kCGWindowLayer as String] as? Int) != Int(CGWindowLevelForKey(.cursorWindow)),
-                  let bounds = window[kCGWindowBounds as String] as? NSDictionary,
-                  let rect = CGRect(dictionaryRepresentation: bounds) else { return false }
-            return rect.contains(start)
-        }
-        let owner = target?[kCGWindowOwnerPID as String] as? Int
-        hitOwner = owner
-        return owner == Int(pid)
+        var element: AXUIElement?
+        guard AXUIElementCopyElementAtPosition(AXUIElementCreateSystemWide(), Float(start.x), Float(start.y), &element) == .success,
+              let element else { return false }
+        var owner: pid_t = 0
+        guard AXUIElementGetPid(element, &owner) == .success else { return false }
+        hitOwner = Int(owner)
+        return owner == pid
     }
     for _ in 0..<30 {
         if targetIsVisible() { break }

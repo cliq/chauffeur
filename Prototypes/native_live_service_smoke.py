@@ -29,6 +29,10 @@ parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--registration-only', action='store_true')
 parser.add_argument('--sleep-wake', action='store_true',
     help='After live-session recovery, wait for the user to sleep and wake the Mac')
+parser.add_argument('--claude-profile', type=Path, default=repository / '.local/profile-isolation/claude-a',
+    help='Authorized private Claude configuration clone')
+parser.add_argument('--claude-credential-profile', type=Path,
+    help='Optional authorized matching original profile whose newer Keychain credential may be copied')
 options = parser.parse_args()
 assert not (options.registration_only and options.sleep_wake), 'Sleep/wake requires live sessions'
 
@@ -154,7 +158,7 @@ with tempfile.TemporaryDirectory(prefix='chauffeur-live-service-', dir='/tmp') a
         # The user's authorized test clones live in Documents. A newly signed
         # fixture app has its own macOS file-access consent, so use fresh private
         # copies alongside the test repositories, without changing that consent.
-        original = (repository / '.local/profile-isolation' / (kind + '-a')).resolve(strict=True)
+        original = (options.claude_profile if kind == 'claude' else repository / '.local/profile-isolation/codex-a').resolve(strict=True)
         profile = root / (kind + '-profile')
         shutil.copytree(original, profile, symlinks=False, ignore=shutil.ignore_patterns('*.sock', '*.lock', 'session_index.jsonl'))
         profile.chmod(0o700)
@@ -163,7 +167,8 @@ with tempfile.TemporaryDirectory(prefix='chauffeur-live-service-', dir='/tmp') a
                 return 'Claude Code-credentials-' + hashlib.sha256(str(path).encode()).hexdigest()[:8]
             service = credential_service(profile)
             assert subprocess.run(['security', 'find-generic-password', '-s', service], capture_output=True).returncode != 0
-            credential = subprocess.run(['security', 'find-generic-password', '-s', credential_service(original), '-w'], capture_output=True)
+            credential_profile = (options.claude_credential_profile or original).resolve(strict=True)
+            credential = subprocess.run(['security', 'find-generic-password', '-s', credential_service(credential_profile), '-w'], capture_output=True)
             assert credential.returncode == 0, 'Matching authorized Claude clone credential is unavailable'
             assert 'claudeAiOauth' in json.loads(credential.stdout)
             target = profile / '.credentials.json'
@@ -179,7 +184,8 @@ with tempfile.TemporaryDirectory(prefix='chauffeur-live-service-', dir='/tmp') a
 
     def ax(operation='inspect', **fields):
         if console_locked(): raise RuntimeError('Mac locked during the native check; unlock it before retrying')
-        result = subprocess.run([str(helper)], input=json.dumps({'pid': pid, 'operation': operation, **fields}), capture_output=True, text=True, check=True)
+        result = subprocess.run([str(helper)], input=json.dumps({'pid': pid, 'operation': operation, **fields}), capture_output=True, text=True)
+        assert result.returncode == 0, result.stdout.strip() or 'Native accessibility probe exited without a result'
         value = json.loads(result.stdout)
         if isinstance(value, dict): assert value.get('performed'), value
         return value
@@ -241,6 +247,10 @@ with tempfile.TemporaryDirectory(prefix='chauffeur-live-service-', dir='/tmp') a
         (artifacts / (stage + '-controls.private.json')).write_text(json.dumps(ax(), indent=2))
 
     def unchanged():
+        if sessions:
+            clients = subprocess.run(['tmux', '-S', str(root / 'runtime/tmux.sock'), 'list-clients', '-F', '#{client_utf8}'], capture_output=True, text=True)
+            assert clients.returncode == 0
+            assert all(flag == '1' for flag in clients.stdout.splitlines()), 'A native terminal attachment disabled UTF-8'
         for item in sessions:
             value, original = current(item), item['session']
             assert value['processID'] == original['processID']
@@ -269,26 +279,32 @@ with tempfile.TemporaryDirectory(prefix='chauffeur-live-service-', dir='/tmp') a
             if item['kind'] == 'codex' and 'Do you trust' in text and 'Yes, continue' in text:
                 key(item, 36); return False
             if item['kind'] == 'claude' and 'Yes, I trust this folder' in text:
-                if '❯ No, exit' in text: key(item, 125)
-                elif '❯ Yes, I trust this folder' in text: key(item, 36)
+                if re.search(r'^\s*[❯_]\s*No, exit\s*$', text, re.M): key(item, 125)
+                elif re.search(r'^\s*[❯_]\s*Yes, I trust this folder\s*$', text, re.M): key(item, 36)
                 else: raise AssertionError('Unexpected trust selection')
                 return False
         if item['kind'] == 'codex':
             return 'Ask Codex to do anything' in text and 'loading' not in text and 'Do you trust' not in text
-        return bool(re.search(r'^❯\s*(Try |$)', text, re.M)) and 'connecting' not in text.lower() and 'Yes, I trust' not in text
+        return bool(re.search(r'^[❯_]\s*(Try |$)', text, re.M)) and 'connecting' not in text.lower() and 'Yes, I trust' not in text
 
     def reply(item, stage):
+        if stage != 'READY':
+            wait(lambda: item['word'] in screen(item), item['kind'] + ' restored terminal before ' + stage)
         prefix = 'SERVICE_' + stage + '_'
-        marker = prefix + item['word']
+        marker = prefix + item['word'] + ' café 界'
         task = 'Do not use tools, read files, or run commands. '
         if stage == 'READY':
             task += 'Remember the service check word ' + item['word'] + '. Reply only ' + prefix + ' immediately followed by that word.'
         else:
             task += 'Reply only ' + prefix + ' immediately followed by the service check word from my first message.'
+        task += ' Then append exactly " café 界" to that same line.'
         assert marker not in task
         ax('insertText', identifier='terminal-' + item['session']['id'], windowIdentifier='project-' + item['projectID'], value=task)
         time.sleep(.5); key(item, 36)
-        wait(lambda: re.search(r'^\s*[●•⏺]?\s*' + re.escape(marker) + r'\s*$', screen(item), re.M)
+        # Native CLI glyphs can be exposed as underscores by the accessible
+        # terminal capture. The complete marker is absent from the input task,
+        # so recognizing it does not depend on any provider's visual prefix.
+        wait(lambda: marker in screen(item)
             and current(item)['state'] == 'turnFinished', item['kind'] + ' reply after ' + stage, 180)
         item['conversationID'] = current(item)['nativeConversationID']
         assert item['conversationID']
@@ -320,10 +336,18 @@ with tempfile.TemporaryDirectory(prefix='chauffeur-live-service-', dir='/tmp') a
         environment.update(CHAUFFEUR_SERVICE_PROBE_DIR=str(cleanup_dir), CHAUFFEUR_SERVICE_PROBE_ACTION='unregister', CHAUFFEUR_SERVICE_PROBE_SOCKET=str(socket_path))
         with (cleanup_dir / 'app.private.log').open('w') as log:
             process = subprocess.Popen([str(binaries / 'Chauffeur')], env=environment, stdout=log, stderr=log)
-            try: process.wait(timeout=45)
+            try:
+                process.wait(timeout=45)
+            except subprocess.TimeoutExpired:
+                # Registration status in the report is authoritative. Continue
+                # private-resource cleanup even if this one-shot UI stays open.
+                pass
             finally:
                 if process.poll() is None:
-                    process.terminate(); process.wait(timeout=5)
+                    process.terminate()
+                    try: process.wait(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        process.kill(); process.wait(timeout=5)
         subprocess.run(['tmux', '-S', str(root / 'runtime/tmux.sock'), 'kill-server'], capture_output=True)
         for service in staged_credentials:
             subprocess.run(['security', 'delete-generic-password', '-s', service], capture_output=True)

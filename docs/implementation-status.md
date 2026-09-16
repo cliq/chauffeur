@@ -22,7 +22,7 @@ unverified real-CLI or native behavior; deferred workload checks remain unverifi
   line/byte budgets, and survive terminal/runtime loss. Native history is
   read-only and searchable; completed-message cleanup preserves queued/received
   messages. See [retention and recovery](terminal-history.md).
-- Seventy Swift tests across eighteen suites: canonical paths/discovery, folder routing/launcher installation and relocation repair, per-child environment, argument validation and quoting,
+- Seventy-one Swift tests across eighteen suites: canonical paths/discovery, folder routing/launcher installation and relocation repair, per-child environment, argument validation and quoting,
   atomic file replacement/conflicts/corrupt files, durable group-scoped messages,
   grant revocation, retry keys, bounded single-level delegation, and safe Git
   worktree creation/removal.
@@ -64,6 +64,13 @@ unverified real-CLI or native behavior; deferred workload checks remain unverifi
   Terminals now expose distinct focusable live/history accessibility elements
   with displayed text and selection. Evidence: `.build/terminal-controls-artifacts/`.
   These changes are in the current Release; link/mouse and retention evidence follows below.
+- Native LaunchAgent testing reproduced Unicode being replaced by underscores
+  when the service had no UTF-8 locale. Terminal attachments now explicitly
+  enable tmux UTF-8 output. A real tmux/socket regression failed before the fix
+  and passes afterward; all 71 Swift tests pass. Both real native agents now
+  return `café 界` correctly through service recovery. Debug and Release builds
+  include the fix, with verified Developer ID signatures. Evidence:
+  `.build/unicode-before-fix.log` and `.build/unicode-swift-tests.log`.
 - Real Codex 0.154.0 (integration enabled) and Claude Code 2.1.273 (basic-terminal mode) runs pass native
   trust prompts, Unicode typing, clipboard, window/PTY resize, and history search
   in the signed Debug app. Normal and forced UI quit preserve each real CLI's

@@ -80,6 +80,16 @@ with the dead flag, protecting a newly resumed execution from delayed cleanup.
 
 ## Verification
 
+The real native LaunchAgent check exposed a missing-locale case: tmux treated
+its attached client as ASCII-only and replaced non-ASCII characters with
+underscores, even though its saved pane contained the original Unicode.
+Attachments now use tmux's explicit UTF-8 output mode. The
+`terminalAttachmentPreservesUnicodeWithoutLocaleVariables` regression launches
+a real fixture process and reads the same framed terminal output used by the
+app; it failed before the fix and passes afterward. Native Codex and Claude
+replies containing `café 界` also pass before and after service recovery.
+See the [tmux manual's UTF-8 option](https://man.openbsd.org/tmux#u).
+
 `swift test` covers Unicode and ANSI sanitization, byte/line bounds, durable file
 reopening and permissions, ended-first eviction, corrupt and symlinked files,
 and queued/received message preservation. `Prototypes/runtime_smoke.py` checks
