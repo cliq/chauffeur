@@ -23,7 +23,7 @@ import ChauffeurCore
         .defaultLaunchBehavior(.suppressed)
         .commands {
             CommandGroup(replacing: .newItem) {
-                Button("Open Project Window…") { openWindow(id: "welcome") }.keyboardShortcut("o", modifiers: [.command, .shift])
+                Button("Open Project…") { openWindow(id: "welcome") }.keyboardShortcut("o", modifiers: [.command, .shift])
                 Button("New Tab…") { command("new-tab") }.keyboardShortcut("t")
                 Button("New Session…") { NotificationCenter.default.post(name: .chauffeurCommand, object: "new-session") }.keyboardShortcut("n")
             }

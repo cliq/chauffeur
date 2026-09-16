@@ -60,6 +60,8 @@ import ChauffeurCore
             item.representedObject = entry.route.url
         }
         menu.addItem(.separator())
+        let chooser = menu.addItem(withTitle: "Open Project…", action: #selector(openProjectChooser), keyEquivalent: "")
+        chooser.target = self
         let open = menu.addItem(withTitle: "Open \(AppBuild.current.displayName)…", action: #selector(openApp), keyEquivalent: "")
         open.target = self
         let quit = menu.addItem(withTitle: "Quit \(AppBuild.current.displayName)", action: #selector(quitApp), keyEquivalent: "q")
@@ -79,6 +81,8 @@ import ChauffeurCore
     @objc private func quitApp() {
         for application in runningApps { application.terminate() }
     }
+
+    @objc private func openProjectChooser() { Task { await open(url: WelcomeRoute.url) } }
 
     @objc private func openApp() { Task { await open(url: nil) } }
 

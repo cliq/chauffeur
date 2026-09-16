@@ -44,16 +44,20 @@ struct WelcomeView: View {
                                     if sessions.contains(where: \.needsAttention) { Label("\(sessions.filter(\.needsAttention).count) need attention", systemImage: "bell.badge").foregroundStyle(.orange) }
                                 }.font(.caption)
                             }.frame(maxWidth: .infinity, alignment: .leading).padding(.vertical, 6).tag(project.id).contentShape(Rectangle()).accessibilityIdentifier("project-\(project.id.uuidString)")
-                                .onTapGesture(count: 2) { selectedProject = project.id; open(project.id) }
-                                .onTapGesture { selectedProject = project.id }
-                                .contextMenu {
-                                    Button("Open") { open(project.id) }
-                                    Button("Rename…") { editingProject = project }
-                                    Button(project.archived ? "Reopen Project" : "Archive Project") { let version = model.projectVersion(project.id); var changed = project; changed.archived.toggle(); model.perform { try await model.saveProject(changed, version: version) } }
-                                    Button("Reveal in Finder") { if let path = model.snapshot.store.projects.first(where: { $0.value.id == project.id })?.path { FilePanels.reveal(URL(fileURLWithPath: path).deletingLastPathComponent().path) } }
-                                }
                         }
-                    }.onSubmit { if let selectedProject { open(selectedProject) } }
+                    }
+                    // Native list activation keeps selection immediate while supporting double-click to open.
+                    .contextMenu(forSelectionType: UUID.self) { ids in
+                        if let id = ids.first, let project = projects.first(where: { $0.id == id }) {
+                            Button("Open") { open(project.id) }
+                            Button("Rename…") { editingProject = project }
+                            Button(project.archived ? "Reopen Project" : "Archive Project") { let version = model.projectVersion(project.id); var changed = project; changed.archived.toggle(); model.perform { try await model.saveProject(changed, version: version) } }
+                            Button("Reveal in Finder") { if let path = model.snapshot.store.projects.first(where: { $0.value.id == project.id })?.path { FilePanels.reveal(URL(fileURLWithPath: path).deletingLastPathComponent().path) } }
+                        }
+                    } primaryAction: { ids in
+                        if let id = ids.first { open(id) }
+                    }
+                    .onSubmit { if let selectedProject { open(selectedProject) } }
                     HStack { Spacer(); Button("Open Project") { if let selectedProject { open(selectedProject) } }.disabled(selectedProject == nil).keyboardShortcut(.defaultAction) }.padding()
                 }
             }

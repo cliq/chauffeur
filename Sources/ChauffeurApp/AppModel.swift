@@ -36,14 +36,24 @@ struct AppSnapshot: Decodable, Sendable {
     @Published var pendingSessionRoute: Navigation?
     @Published var pendingProjectRoute: ProjectNavigation?
     @Published var folderSelection: FolderSelection?
+    private var pendingWelcomeRoute = false
     private var pendingFolderRoute: FolderRoute?
     private(set) var skipAutomaticWindowRestore = false
-    var hasPendingNavigation: Bool { pendingSessionRoute != nil || pendingProjectRoute != nil || pendingFolderRoute != nil || folderSelection != nil || projectCreation != nil }
+    var hasPendingNavigation: Bool { pendingWelcomeRoute || pendingSessionRoute != nil || pendingProjectRoute != nil || pendingFolderRoute != nil || folderSelection != nil || projectCreation != nil }
     var openProjectWindow: ((UUID) -> Void)?
     var openWelcomeWindow: (() -> Void)?
     private var openedRouteID: UUID?
     func openSessionURL(_ url: URL) {
+        if url == WelcomeRoute.url {
+            skipAutomaticWindowRestore = true
+            pendingSessionRoute = nil; pendingProjectRoute = nil; pendingFolderRoute = nil
+            folderSelection = nil; projectCreation = nil
+            pendingWelcomeRoute = true
+            processPendingRoute()
+            return
+        }
         if let route = FolderRoute(url: url) {
+            pendingWelcomeRoute = false
             skipAutomaticWindowRestore = true
             pendingSessionRoute = nil; pendingProjectRoute = nil; folderSelection = nil; projectCreation = nil
             pendingFolderRoute = route
@@ -51,12 +61,18 @@ struct AppSnapshot: Decodable, Sendable {
             return
         }
         guard let route = SessionRoute(url: url) else { return }
+        pendingWelcomeRoute = false
         skipAutomaticWindowRestore = true
         pendingFolderRoute = nil; pendingProjectRoute = nil; folderSelection = nil; projectCreation = nil
         pendingSessionRoute = Navigation(route: route)
         processPendingRoute()
     }
     func processPendingRoute() {
+        if pendingWelcomeRoute, let openWelcomeWindow {
+            pendingWelcomeRoute = false
+            openWelcomeWindow()
+            NSApp.activate(ignoringOtherApps: true)
+        }
         processFolderRoute()
         guard online, let navigation = pendingSessionRoute, let openProjectWindow else { return }
         guard project(navigation.route.projectID) != nil, session(navigation.route.sessionID)?.projectID == navigation.route.projectID else {
