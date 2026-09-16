@@ -95,6 +95,12 @@ import ChauffeurCore
         let firstCard = window.buttons["session.card.\(sessions[0].id.uuidString)"]
         XCTAssertTrue(firstCard.waitForExistence(timeout: 10))
         firstCard.click()
+        let secondCard = window.buttons["session.card.\(sessions[1].id.uuidString)"]
+        app.typeKey(.tab, modifierFlags: .control)
+        XCTAssertTrue(secondCard.isSelected)
+        app.typeKey(.tab, modifierFlags: [.control, .shift])
+        XCTAssertTrue(firstCard.isSelected)
+
 
         app.typeKey("t", modifierFlags: .command)
         XCTAssertTrue(window.buttons["new-tab.terminal"].waitForExistence(timeout: 3))

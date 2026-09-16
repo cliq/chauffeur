@@ -514,6 +514,10 @@ struct ProjectWindow: View {
             // Keep prompt keystrokes out of the underlying terminal; allow Quit.
             return !(modifiers == .command && key == "q")
         }
+        if event.keyCode == 48 && (modifiers == .control || modifiers == [.control, .shift]) {
+            cycle(modifiers.contains(.shift) ? -1 : 1)
+            return true
+        }
         guard modifiers == .command else { return false }
         if key == "w" {
             if !event.isARepeat { closeCurrentTab() }
