@@ -186,7 +186,7 @@ struct ProjectWindow: View {
         let path = worktreeRecords.first { $0.id == session.worktreeID }?.path ?? session.launch.workingDirectory
         return (folder.id, path)
     }
-    private func attentionCount(in folder: ProjectFolder) -> Int { allSessions.filter { $0.folderID == folder.id && $0.needsAttention }.count }
+    private func attentionCount(in folder: ProjectFolder) -> Int { WorktreeSessions.attentionCount(allSessions.filter { $0.folderID == folder.id }) }
     private var canLaunch: Bool { model.online && project?.archived == false }
     private func canLaunch(in checkout: CheckoutRow) -> Bool { canLaunch && checkout.availability == .available }
 

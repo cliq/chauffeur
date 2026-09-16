@@ -26,5 +26,7 @@ public enum WorktreeSessions {
     }
     public static func live(_ sessions: [Session]) -> [Session] { sessions.filter(\.state.isLive) }
     public static func finished(_ sessions: [Session]) -> [Session] { sessions.filter { !$0.state.isLive } }
-    public static func attentionCount(_ sessions: [Session]) -> Int { sessions.filter(\.needsAttention).count }
+    /// Sessions a checkout badge counts: only live work still needs attention,
+    /// so a checkout left with finished sessions carries no badge.
+    public static func attentionCount(_ sessions: [Session]) -> Int { live(sessions).filter(\.needsAttention).count }
 }
