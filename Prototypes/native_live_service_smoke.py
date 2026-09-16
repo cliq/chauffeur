@@ -27,7 +27,10 @@ os.umask(0o077)
 repository = Path(__file__).resolve().parents[1]
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--registration-only', action='store_true')
+parser.add_argument('--sleep-wake', action='store_true',
+    help='After live-session recovery, wait for the user to sleep and wake the Mac')
 options = parser.parse_args()
+assert not (options.registration_only and options.sleep_wake), 'Sleep/wake requires live sessions'
 
 
 def console_locked():
@@ -44,6 +47,8 @@ artifacts.mkdir(mode=0o700, exist_ok=True)
 helper = repository / '.build/app-accessibility-probe'
 subprocess.run(['swiftc', str(repository / 'Prototypes/app_accessibility_probe.swift'), '-o', str(helper)], check=True)
 subprocess.run(['swiftc', str(repository / 'Prototypes/app_window_probe.swift'), '-o', str(repository / '.build/app-window-probe')], check=True)
+if options.sleep_wake:
+    subprocess.run(['swiftc', str(repository / 'Prototypes/system_sleep_observer.swift'), '-o', str(repository / '.build/system-sleep-observer')], check=True)
 source = repository / 'build/Build/Products/Debug/Chauffeur.app'
 release = repository / 'build/Build/Products/Release/Chauffeur.app'
 assert (source / 'Contents/MacOS/Chauffeur.debug.dylib').is_file()
@@ -143,7 +148,7 @@ with tempfile.TemporaryDirectory(prefix='chauffeur-live-service-', dir='/tmp') a
 
     sign_app()
     (artifacts / 'fixture.private.json').write_text(json.dumps({'app': str(app), 'root': str(root), 'identifier': identifier, 'label': label}, indent=2))
-    pid, sessions, staged_credentials = None, [], []
+    pid, sessions, staged_credentials, sleep_observer = None, [], [], None
 
     def stage_profile(kind):
         # The user's authorized test clones live in Documents. A newly signed
@@ -292,6 +297,10 @@ with tempfile.TemporaryDirectory(prefix='chauffeur-live-service-', dir='/tmp') a
 
     def cleanup():
         global pid
+        if sleep_observer is not None:
+            if sleep_observer.poll() is None:
+                sleep_observer.terminate()
+            sleep_observer.wait(timeout=10)
         if pid:
             try: quit_app()
             except Exception:
@@ -423,6 +432,37 @@ with tempfile.TemporaryDirectory(prefix='chauffeur-live-service-', dir='/tmp') a
         for item in sessions: reply(item, 'AFTER_UPDATE')
         capture('updated')
         summary['bundledHelperReplacement'] = True
+        if options.sleep_wake:
+            power_log = artifacts / 'sleep-wake.jsonl'
+            power_log.unlink(missing_ok=True)
+            sleep_observer = subprocess.Popen([str(repository / '.build/system-sleep-observer'), str(power_log)])
+
+            def power_events():
+                assert sleep_observer.poll() is None, 'System sleep observer exited'
+                try:
+                    return [json.loads(line) for line in power_log.read_text().splitlines()]
+                except FileNotFoundError:
+                    return []
+
+            wait(lambda: any(e['event'] == 'observerReady' for e in power_events()), 'system sleep observer')
+            capture('before-sleep')
+            print('READY_FOR_SLEEP: Both private agents have replied after service recovery. Sleep the Mac, then wake and unlock it.', flush=True)
+
+            def completed_sleep():
+                events = [e['event'] for e in power_events()]
+                return 'willSleep' in events and 'didWake' in events[events.index('willSleep') + 1:]
+
+            wait(completed_sleep, 'user-initiated system sleep/wake', 7200)
+            wait(lambda: not console_locked(), 'console unlock after wake', 7200)
+            wait(lambda: call('status').get('mcpEndpoint'), 'runtime after system wake')
+            unchanged()
+            for item in sessions:
+                wait(lambda: item['word'] in screen(item), item['kind'] + ' terminal after wake')
+                reply(item, 'AFTER_WAKE')
+            capture('after-wake')
+            summary['userInitiatedSleepWake'] = True
+            summary['nativeRepliesAfterWake'] = True
+            summary['systemPowerEvents'] = power_events()
         summary['sameProcessesAndConversations'] = bool(sessions)
         summary['nativeProviderRepliesAfterRecovery'] = bool(sessions)
         summary['versions'] = {item['kind']: item['session']['launch']['executableVersion'] for item in sessions}
@@ -447,6 +487,7 @@ for key in ['presets', 'presetSets']:
     assert default_before['store'][key] == default_after['store'][key]
 assert hashlib.sha256((release / 'Contents/MacOS/ChauffeurRuntime').read_bytes()).hexdigest() == release_hash
 summary.update(passed=True, defaultServiceAndRecordsUnchanged=True, releaseUnchanged=True,
-    scope='private SMAppService job; no sleep, permission changes, tools, messages or delegation')
+    scope='private SMAppService job; ' + ('user-initiated sleep/wake; ' if options.sleep_wake else 'no sleep; ')
+        + 'no permission changes, tools, messages or delegation')
 (artifacts / 'summary.json').write_text(json.dumps(summary, indent=2))
 print(json.dumps(summary, indent=2), flush=True)

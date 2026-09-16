@@ -191,6 +191,17 @@ avoids coupling the lifecycle test to Documents-folder consent for each unique
 test app. An earlier attempt with the Documents-based clones timed out in a
 Codex filesystem operation while macOS checked that fixture's file access.
 
+For a user-performed sleep cycle, run the full fixture with `--sleep-wake`.
+After both agents reply following helper replacement, it prints
+`READY_FOR_SLEEP` and waits for the user to sleep, wake, and unlock the Mac.
+`Prototypes/system_sleep_observer.swift` records actual macOS `willSleep` and
+`didWake` notifications; it neither requests sleep nor changes power settings.
+After wake, the fixture checks the same agent processes, terminal identities,
+launch snapshots, and conversations, then asks both providers to recall their
+original check word. The private power-event log and final report are written
+under `.local/live-service-native/`. Preparing this observer is not evidence
+that the sleep/wake acceptance has passed.
+
 ### Original empty-store probe
 
 With a Debug build signed using the same certificate as your Release build and
