@@ -1,219 +1,106 @@
-# Chauffeur
+<p align="center">
+  <img src="docs/images/icon.png" alt="Chauffeur" width="128" height="128">
+</p>
 
-A native macOS environment for running Codex and Claude Code across projects,
-profiles, worktrees, and isolated communication groups.
+<h1 align="center">Chauffeur</h1>
 
-**Personal-use Release ready for testing.** The current scoped implementation and
-focused native acceptance checks are complete, including real Codex/Claude
-service recovery and sleep/wake. The repository builds a SwiftUI/AppKit app,
-background runtime, shared core, and command-line helper. See the
-[implementation status](docs/implementation-status.md),
-[plan](docs/mvp-implementation-plan.md), and [PRD](docs/mvp-prd.md).
-Completion of Codex ↔ Claude messaging/delegation and final workload testing are
-planned for [V2](docs/v2-plan.md) and are outside the current goal.
+<p align="center">
+  Run Codex and Claude Code in a native macOS app.<br>
+  Keep projects, CLI profiles, and worktrees organized while your agents work.
+</p>
 
-The [app manual on Artifact Colab](https://artifacts.cliq.dev/d/DPu8kdqJdE) covers
-every implemented screen and workflow, with keyboard shortcuts and current
-limitations. It is private to its owner and accepted collaborators. The
-[self-contained HTML source](docs/manual.html) also opens locally in a browser.
+<p align="center">
+  <img src="docs/images/hero-dark.png" alt="Chauffeur in dark mode, with repositories and worktrees in the sidebar and a Claude Code session showing a diff" width="900">
+</p>
 
-For development continuity, start with the [next-session handoff](docs/handoff.md).
+Chauffeur is for working across several repositories or clients with Codex and
+Claude Code. Each project gets its own window, and each agent launches with the
+CLI profile you choose. The CLIs run in embedded terminals with their usual
+prompts, tools, and approvals.
 
-## Build the app
+- **Separate profiles for each client.** Save agent presets with their own
+  `CODEX_HOME` or `CLAUDE_CONFIG_DIR`, then organize them into teams.
+- **A window for each project.** Keep related repositories and sessions together,
+  or put projects on separate macOS Spaces.
+- **Worktrees from the sidebar.** Create a worktree and start an agent in one step.
+  Run multiple sessions on a checkout, open a shell, and remove worktrees when
+  you're done.
+- **Sessions keep running after you quit.** A background service keeps agents
+  running when you close a window or quit Chauffeur. Reopen the app to reconnect.
+- **Session status and notifications.** See when an agent finishes a turn or needs
+  input, where supported by the CLI. Open active projects from the menu bar.
+- **Searchable terminal history.** Press ⌘F to search saved output, including
+  sessions that have ended.
 
-Development requirements: macOS 15+, Xcode 26.3 / Swift 6.2, XcodeGen, Git,
-and tmux available in the user's login environment. The current app build targets
-Apple Silicon.
+## Build and run
+
+You'll need:
+
+- macOS 15 or newer on Apple Silicon
+- Git and tmux available in your login shell
+- Codex and/or Claude Code installed and signed in
+- Xcode 26.3 (Swift 6.2) and XcodeGen
+
+To build from source, copy the local signing configuration and set
+`DEVELOPMENT_TEAM` in it:
 
 ```sh
 cp Configuration/LocalSigning.xcconfig.example Configuration/LocalSigning.xcconfig
-# Set DEVELOPMENT_TEAM and any signing/bundle overrides in the local file.
+```
+
+Then build and open the app:
+
+```sh
 make build
 open 'build/Build/Products/Debug/Chauffeur Debug.app'
 ```
 
-`make build` (or just `make`) generates the Xcode project, builds the native app,
-embeds its runtime and helpers, and signs and verifies the complete bundle.
-Use `make release` for an optimized build at
-`build/Build/Products/Release/Chauffeur.app`. `make open` opens the generated Xcode
-project, `make test` runs Swift package tests, and `make test-ui` runs native UI tests.
+For an optimized build, run `make release` and open
+`build/Build/Products/Release/Chauffeur.app`. Debug and Release can run side by
+side with separate settings and sessions.
 
-Debug and Release can run side by side. Debug builds use `Chauffeur Debug.app`,
-the `.debug` bundle-ID suffix, the `dev.chauffeur.debug.runtime` service, and
-`~/Library/Application Support/Chauffeur Debug`. Release keeps `Chauffeur.app`,
-`dev.chauffeur.runtime`, and the existing `~/Library/Application Support/Chauffeur`
-store. Notifications, logs, URL schemes, preferences, and installed terminal
-commands are also separate (`chauffeur-debug` versus `chauffeur`).
+See [building and verifying](docs/building.md) for signing options and tests.
+If macOS asks you to allow the background service, follow the link to Login Items
+& Extensions in the app. See [service recovery](docs/service-recovery.md) if it
+won't start.
 
-Startup refreshes service registration after the app moves or its runtime changes.
-The app verifies the connected runtime's build, executable location/hash, and data
-directory before accepting its state. Runtime settings show the verified helper
-path. Explicit `CHAUFFEUR_SOCKET` connections bypass managed-service verification
-and are labeled as custom connections.
+## Set up your first project
 
-`Configuration/Base.xcconfig` defines the shared signing defaults and
-`APP_BUNDLE_ID` (`dev.cliq.chauffeur`). Both Debug and Release include the optional,
-gitignored `Configuration/LocalSigning.xcconfig`, following the same pattern as
-Claude Monitor. The app and UI-test bundle identifiers derive from `APP_BUNDLE_ID`.
-The default identity is Apple Development. To use an installed Developer ID
-certificate for a persistent background service, add these local overrides:
+1. In **Settings → Agent Presets**, add a team, such as *Personal* or a client
+   name. Add a preset for each agent you want to use, choosing its executable and
+   an existing CLI configuration directory. Set up profiles and sign in through
+   the CLI first.
+2. Create a project and choose its team. Select a parent folder to discover
+   repositories, or add repository folders individually.
+3. Open the project and start a session. Choose a group, an agent preset, and an
+   existing checkout or a new worktree. Add any other repositories the agent
+   needs access to.
 
-```xcconfig
-DEVELOPMENT_TEAM = YOUR_TEAM_ID
-CODE_SIGN_STYLE = Manual
-CODE_SIGN_IDENTITY = Developer ID Application: Your Name (YOUR_TEAM_ID)
-```
+Select a checkout in the sidebar to switch between its sessions or start another
+one. **Session Details** shows launch information and controls for stopping a
+session or resuming its conversation.
 
-For an ad-hoc build without a development team or certificate:
+Closing a window or quitting the app leaves sessions running. To end one, use
+**Stop Session**. **Resume Conversation** starts a new execution using the saved
+conversation ID and original preset.
 
-```sh
-make release XCODEBUILD_ARGS='CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY=-'
-```
+## Agent coordination
 
-Service update checks use the same certificate for Debug and Release builds.
-Ad-hoc builds remain useful for isolated fixture tests; changing ad-hoc helper
-signatures can trigger macOS launch-constraint failures. The Makefile uses Xcode's
-resolved identity for the app and every embedded helper. Builds are not notarized
-or published.
+Chauffeur includes an experimental MCP server for messages and delegation between
+sessions in a project group. Codex-to-Claude messaging and delegation are still
+being completed as part of [V2](docs/v2-plan.md).
 
-The build explicitly allows the pinned SwiftTerm build plugin, which generates
-Swift version metadata from that checkout's Git revision. Its plugin and generator
-sources were inspected before enabling this per-command build flag. Dependencies
-are pinned in `Package.resolved` and `project.yml`.
+The optional [coordination skill](docs/coordination-skill.md) teaches agents how
+to use these tools. Install it from **Settings → Agent Presets → Chauffeur
+Skill…**. It applies to all sessions using that CLI profile, including those
+started outside Chauffeur.
 
-The app registers its bundled per-user LaunchAgent with `SMAppService`. If macOS
-requires approval, the service health line links to Login Items & Extensions.
-See [service setup and recovery](docs/service-recovery.md) for startup issues,
-replacing a development build and the actual LaunchAgent acceptance probe.
-The final separate-Spaces workload is deferred to V2.
+Coordination and status reporting depend on the CLI version. Unsupported versions
+require an explicit basic-terminal launch, with coordination and status features
+unavailable. See [compatibility](docs/compatibility.md) for tested versions and
+known limits. Full release workload testing is also pending.
 
-Optional [session notifications](docs/notifications.md) run through an embedded
-background app and open the selected project/session, including a cold app launch.
-Enable them in Settings → Runtime; macOS notification permission is separate.
+## Documentation
 
-The [terminal launcher](docs/terminal-launcher.md) opens a project from a folder:
-install it in Settings → Runtime, then run `chauffeur` or `chauffeur /path/to/folder`.
-
-## Verify
-
-The Python integration fixtures require Python 3.11 or newer (including its
-standard-library TOML parser).
-
-```sh
-make test
-clang Prototypes/pty_signal_mask.c Sources/CChauffeur/CChauffeur.c \
-  -I Sources/CChauffeur/include -o .build/pty-signal-mask
-.build/pty-signal-mask
-python3 Prototypes/terminal_continuity.py
-python3 Prototypes/runtime_smoke.py
-python3 Prototypes/worktree_smoke.py
-python3 Prototypes/native_window_smoke.py
-python3 Prototypes/folder_launcher_smoke.py
-python3 Prototypes/release_startup_smoke.py
-python3 Prototypes/service_installation_smoke.py
-```
-
-Fixtures use temporary data, private tmux servers, and fake CLI processes. The
-native probe uses the built Debug app and stores reports/images under
-`.build/native-probe-artifacts/`. Xcode also includes `ChauffeurAppUITests` for
-OS-driven UI testing, which requires macOS automation access.
-Keep native test inputs and app-written reports in the temporary fixture directory,
-not in the source checkout: this repository may live under macOS's protected
-Documents folder. The test runner stages fake executables there and copies reports
-back afterward. Start test processes with that directory as their working directory.
-This avoids unnecessary Documents permission prompts for fresh test app identities;
-accessing real repositories in protected folders still requires normal permission.
-
-The launcher and Release startup checks use separately signed app copies and
-isolated runtimes; they require the development machine's Leonardo Lobato
-Developer ID certificate. The Release check verifies that the actual GUI opens.
-
-`python3 Prototypes/skill_installation.py` checks the real CLIs' skill metadata
-using fresh fixture profiles, with no inference prompt. See the
-[coordination skill guide](docs/coordination-skill.md) for scope and installation
-checks.
-
-The separate real-provider check requires two existing authenticated **test
-clones**, with unrelated hooks/plugins/MCP servers disabled. It sends six small
-fixture messages using the profiles' native model settings and grants one-time
-approval only to those exact tool calls:
-
-```sh
-python3 Prototypes/real_codex_integration.py \
-  --profile-a /path/to/private/codex-a --profile-b /path/to/private/codex-b
-python3 Prototypes/real_claude_integration.py \
-  --profile-a /path/to/private/claude-a --profile-b /path/to/private/claude-b
-```
-
-Redacted results and private failure artifacts are written under
-`.local/real-codex-artifacts/` and `.local/real-claude-artifacts/`. Claude's
-`--startup-only` option verifies native account displays and process configuration
-without an inference prompt. Do not include private terminal/history files in
-shared diagnostics. See [V3](docs/decisions/V3-mcp-and-status.md) for verified scope.
-
-## Start using a development build
-
-1. Open Settings and create a team, then add agent presets selecting existing
-   Codex or Claude Code configuration directories and their executables.
-2. Create a project, choose its team, and register folders or discover Git
-   repositories under a parent folder.
-3. Open a project and create a session. Choose a group, agent preset, checkout, and any
-   additional repository paths. Shared checkouts require an explicit choice.
-4. Select a repository's checkout in the sidebar to see its sessions, launch an
-   agent there, or open a shell. Session Details shows
-   launch paths, process identity, messages, delegations, and stop/resume actions.
-
-Optionally install the [Chauffeur coordination skill](docs/coordination-skill.md)
-from **Settings → Agent Presets → Chauffeur Skill…**. Installation applies to all
-sessions using that profile and can be removed from the same sheet.
-
-Closing a project window or quitting the UI keeps agents running.
-While the bundled service is running, a chauffeur-cap icon stays in the macOS
-menu bar. Click it to see projects with active sessions and reopen a project,
-selecting its last-selected live session (or its oldest live session). The menu
-updates every two seconds and remains available with notifications disabled.
-Its Quit command closes the main app while keeping sessions and the menu running.
-Standalone runtimes using a custom data directory do not show the menu.
-Stop Session ends an execution. Resume Conversation uses its recorded native ID
-and original profile; it creates a new execution.
-
-Real Codex and Claude checks cover two profiles each, shared-profile credentials,
-native completion, messages and scoped process ownership. Both supplied Claude
-profiles use the same account; the different-account Claude check was deferred
-by the user. Full coordination/tool acceptance remains in V2. Matching a candidate CLI version enables experimental
-integration; other versions offer explicit basic terminal mode. See
-[compatibility](docs/compatibility.md) and [V3](docs/decisions/V3-mcp-and-status.md).
-
-## Inspect the runtime
-
-```sh
-.build/debug/ChauffeurRuntime
-.build/debug/chauffeurctl status
-.build/debug/chauffeurctl diagnostics
-.build/debug/chauffeurctl snapshot
-.build/debug/chauffeurctl help
-```
-
-Run the helper in another terminal when starting the runtime directly. Use
-`--data-dir /absolute/path` on the runtime and
-`--socket /absolute/path/runtime/runtime.sock` on the helper to isolate development
-data. The default is `~/Library/Application Support/Chauffeur`; only one runtime
-can own it.
-
-Use **Settings → Runtime → Export Diagnostics…** for a private report, including
-cached state if the service is offline. Structured runtime logs rotate within a
-2 MiB budget. See [diagnostics and redaction](docs/diagnostics.md) for included
-fields, path privacy, storage locations, and limits.
-
-Chauffeur uses its own tmux socket. A runtime restart reconciles recorded
-pane/process identities; missing ownership becomes Interrupted. Metadata files
-are human-readable JSON. External changes reload independently of the UI, and
-stale saves report a conflict with the affected path.
-
-Use **History and Search** or **Command-F** for retained terminal output, including
-ended sessions. Settings controls line, disk and completed-message limits. See
-[terminal history and recovery](docs/terminal-history.md) for defaults, cleanup
-and service-loss behaviour.
-
-Worktree inventory refreshes in the background. See [worktrees and cleanup](docs/worktrees.md)
-for external moves, shared-checkout checks, safe removal, and recovery.
+The [app manual](docs/manual.html) covers the screens, workflows, and keyboard
+shortcuts. Open it locally in a browser.
