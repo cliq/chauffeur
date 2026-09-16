@@ -75,7 +75,16 @@ func key(_ code: CGKeyCode, flags: CGEventFlags = [], text: String? = nil) {
             let units = Array(text.utf16)
             event.keyboardSetUnicodeString(stringLength: units.count, unicodeString: units)
         }
-        event.postToPid(pid)
+        // Native file panels can host their controls in a separate macOS
+        // process. System routing reaches those controls after verified focus.
+        if request["systemKeyboard"] as? Bool == true {
+            guard NSWorkspace.shared.frontmostApplication?.processIdentifier == pid else {
+                print("{\"error\":\"Target app lost keyboard focus\"}"); exit(1)
+            }
+            event.post(tap: .cghidEventTap)
+        } else {
+            event.postToPid(pid)
+        }
     }
     Thread.sleep(forTimeInterval: 0.08)
 }

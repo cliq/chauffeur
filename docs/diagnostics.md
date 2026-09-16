@@ -86,5 +86,10 @@ not a transaction audit or terminal transcript.
   fixture grants/messages, checks lifecycle and error codes, and verifies that
   a broken log destination leaves the service running and its target unchanged.
 - The Debug native probe checks live, cached, and unavailable reports and writes
-  an export while four project windows host ten fixture terminals. The native
-  save dialog's OS-driven interaction remains part of XCUITest acceptance.
+  an export while four project windows host ten fixture terminals.
+- `Prototypes/release_startup_smoke.py --native-controls` verifies the signed
+  Release's actual Settings → Runtime → Export Diagnostics flow through macOS
+  Accessibility and keyboard events. Cancel dismisses the native panel; Save
+  uses a chosen temporary folder and produces a valid live report with 0600
+  permissions. Evidence: `.build/release-startup-artifacts/`. This OS-driven
+  check does not require XCUITest's separate Automation Mode permission.

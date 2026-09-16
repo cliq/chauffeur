@@ -49,21 +49,21 @@ unverified real-CLI or native behavior; deferred workload checks remain unverifi
   concurrent requests and runtime restarts. A direct native Debug fixture checks
   invalid-branch recovery, retained checkout after agent failure, a fresh launch
   reusing it, literal initial-task forwarding, and session selection. Evidence:
-  `.build/quick-session-artifacts/`. The supplied Release remains unchanged.
+  `.build/quick-session-artifacts/`. Included in the current signed Release.
 - Worktree-manager controls pass through actual macOS Accessibility actions and
   targeted keyboard input in an isolated signed Debug app. Checks cover creation,
   current destination preview, disabled controls while Git works, confirmation
   cancellation, external unregister, and safe managed removal. Concurrent
   registration now coalesces to one record; the regression reproduced twelve
   records before the fix. Evidence: `.build/worktree-controls-artifacts/`.
-  These changes await the next Release build; XCUITest remains unrun.
+  These changes are in the current Release; XCUITest remains unrun.
 - Native terminal keyboard and clipboard controls pass through macOS with two
   fixture sessions: Unicode/literal input, Control-B/Escape/Control-C, selection
   and copy, bracketed paste, Command-F history search, read-only history, session
   switching/split shortcuts, and Command-Q/relaunch preserving process/input.
   Terminals now expose distinct focusable live/history accessibility elements
   with displayed text and selection. Evidence: `.build/terminal-controls-artifacts/`.
-  These changes await Release; link/mouse and retention evidence follows below.
+  These changes are in the current Release; link/mouse and retention evidence follows below.
 - Real Codex 0.154.0 and Claude Code 2.1.273 basic-terminal runs now pass native
   trust prompts, Unicode typing, clipboard, window/PTY resize, and history search
   in the signed Debug app. Normal and forced UI quit preserve each real CLI's
@@ -80,7 +80,7 @@ unverified real-CLI or native behavior; deferred workload checks remain unverifi
   sustained Unicode/ANSI history rotation, six periodic detached captures,
   encoded byte limits, stable capture deduplication, same-process runtime
   recovery and history after tmux loss. These are focused terminal checks;
-  final workload/performance tests remain in V2. The link fix awaits Release.
+  final workload/performance tests remain in V2. The link fix is in the current Release.
 - [Metadata integrity and preset defaults](metadata-and-presets.md): child
   ownership checks, path-bearing reference diagnostics, archived history
   preservation, service-owned preset revision increments, and a remembered
@@ -109,7 +109,7 @@ unverified real-CLI or native behavior; deferred workload checks remain unverifi
   process creation pass. A real exited session's details and expanded launch
   snapshot also match its stored metadata. Evidence:
   `.build/session-controls-artifacts/` and `.local/session-details-native/`.
-  Normal Command-Q/terminal controls still pass; these app fixes await Release.
+  Normal Command-Q/terminal controls still pass; these fixes are in the current Release.
 - [Terminal folder routing](terminal-launcher.md) passes native cold/warm launch,
   folder selection, shared-project choice, repeated-route and service-loss layout
   recovery checks. Startup subscriptions wait for helper registration refresh;
@@ -147,7 +147,7 @@ unverified real-CLI or native behavior; deferred workload checks remain unverifi
   Explicit Codex read-only arguments with additional folders now produce an
   actionable preflight error, matching the native CLI's observed restriction.
   The signed Debug build, runtime/worktree socket fixtures, and native quick-session
-  probe pass. These recovery changes await the next Release build.
+  probe pass. These recovery changes are in the current Release.
 - Typed diagnostics export through Settings and `chauffeurctl`, with explicit
   live/cached/unavailable observations. Private structured logs rotate within
   2 MiB. Tests cover sensitive-field exclusion, hostile input, bounds, legacy
@@ -189,7 +189,26 @@ unverified real-CLI or native behavior; deferred workload checks remain unverifi
   `.local/notification-native/`. Transient banners and alternate Focus settings
   remain unverified. Notification and terminal-folder routes dismiss Welcome
   after opening their project, with native regression coverage. These changes
-  await the next Release build.
+  are in the current Release.
+
+## Current Release — 2026-09-16
+
+`build/Build/Products/Release/Chauffeur.app` now includes app/runtime changes
+through `9d9de27`, signed with Leonardo Lobato's Developer ID certificate. Deep,
+strict bundle-signature verification passes. The embedded `chauffeur-launcher`
+and GUI `Chauffeur` are distinct files.
+
+`Prototypes/release_startup_smoke.py --native-controls` verifies an actual visible
+cold launch, reopening with every window closed, normal Quit/cold relaunch with
+the fixture runtime surviving, and native diagnostics export cancellation/save.
+The OS save dialog writes a valid live report with private permissions. These
+checks use an isolated signed copy and macOS Accessibility/keyboard input;
+XCUITest remains unrun. Evidence: `.build/release-startup-artifacts/`.
+
+The user's Release was then relaunched at its original path and opened the saved
+Signos project. The service reconnects, and the existing session, message and
+preset records match the pre-launch snapshot. Private evidence:
+`.local/release-latest/`. The current Release is open for testing.
 
 ## Current-goal stage audit
 
@@ -200,18 +219,18 @@ unverified real-CLI or native behavior; deferred workload checks remain unverifi
 | 1.2 Runtime skeleton | Lock, peer-checked Unix socket, version handshake, health helper, verified bundled LaunchAgent registration/recovery; bounded structured logs with typed redaction | Remaining live-service release acceptance |
 | 1.3–1.7 Presets/projects/groups/welcome/windows | Native editors, cancellable discovery, relink/archive, welcome and project windows implemented; OS-driven window/search/new-session/attention commands pass | Remaining editor interaction checks; final four-Spaces workload is in V2 |
 | 1.8 Basic launch | Real Codex/Claude launch, filtered environment, private exec handoff, terminal input/resize/stop; cancellable launch/resume with terminal cleanup; Claude native account/process configuration checks | Full native account/status checks, distinct-Claude-account check, complete preflight |
-| 1.9 Session details | Native immutable context after preset edits, individual execution controls, and a real saved session's expanded launch snapshot match the stored record | Ship ended-execution help text in the next Release |
-| 2.1 Screen/history | tmux live state; bounded persisted snapshots, disk cleanup, native history/search; real Codex/Claude native attach, Unicode, clipboard and reply search; native link/mouse forwarding and 60,000-line retention/recovery pass | Ship hyperlink capability fix in the next Release |
+| 1.9 Session details | Native immutable context after preset edits, individual execution controls, and a real saved session's expanded launch snapshot match the stored record | — |
+| 2.1 Screen/history | tmux live state; bounded persisted snapshots, disk cleanup, native history/search; real Codex/Claude native attach, Unicode, clipboard and reply search; native link/mouse forwarding and 60,000-line retention/recovery pass | — |
 | 2.2 Reconnect | Positive pane/process reconciliation; real Codex/Claude explicit native-ID resume and MCP reconnect | Remaining service-failure edge cases and full native acceptance |
-| 2.3–2.4 Quit/tabs/split | Native tabs/split, window-state writes and OS keyboard commands pass; real Codex/Claude normal/forced UI quit preserve process and draft; native Stop All confirmation/cancellation, fixed targets, resistant-stop recovery and no-window operation pass | Ship control fixes in the next Release; final Spaces workload is in V2 |
-| 2.5 Worktrees | Create/list/safe-remove; periodic external inventory; identity-based moves/replacements; pending launch/removal and metadata-write reservations; legacy migration fixtures and real Codex/Claude repository-relocation, replacement/resume, and removal checks; native manager controls and concurrent registration pass | Ship manager fixes in the next Release |
+| 2.3–2.4 Quit/tabs/split | Native tabs/split, window-state writes and OS keyboard commands pass; real Codex/Claude normal/forced UI quit preserve process and draft; native Stop All confirmation/cancellation, fixed targets, resistant-stop recovery and no-window operation pass | Final Spaces workload is in V2 |
+| 2.5 Worktrees | Create/list/safe-remove; periodic external inventory; identity-based moves/replacements; pending launch/removal and metadata-write reservations; legacy migration fixtures and real Codex/Claude repository-relocation, replacement/resume, and removal checks; native manager controls and concurrent registration pass | — |
 | 2.6 Multiple repos | Explicit additional folder selection in launch API; primary main checkout excluded | Real CLI access test (shared-checkout warning and explicit additional-folder UI implemented) |
 | 2.7 Status/attention | Lifecycle records, real Codex/Claude completion IDs, permission attention hooks, unread/pending counts; optional durable notifications; actual Notification Center delivery/cold click and enabled-helper recovery/update pass | Remaining native attention signals; transient banners/alternate Focus settings unverified |
 | 2.8 Sleep/service loss | Runtime loop plus native wake reconnect, health/recovery actions; actual service termination/restart verified | Real sleep/wake and service lifecycle with live real sessions |
 | 2.9 Appearance setting | Implemented; System/Light/Dark, persistence, native window and terminal default-color checks pass | — |
-| 2.10 Terminal project launcher | Implemented Settings installer and folder routing; native cold/warm and Release startup checks pass; relocation repair and literal argument forwarding tested | Actual `/usr/local/bin/` installation requires macOS administrator authentication; ship the repair fix in the next Release build |
-| 2.11 Quick session on a new worktree | Implemented; concurrent/persisted retry tests and native sheet/fixture-agent launch pass | Ship in the next Release; real CLI/native acceptance remains tracked under 1.8 and 2.5 |
-| 4.1–4.5 Packaging/compatibility/retention/diagnostics/docs | Developer ID local builds; actual registration/update; retention settings/cleanup; diagnostics export; terminal, diagnostics and service recovery guides | Focused packaging/recovery acceptance; native save-dialog interaction; remaining recovery guide |
+| 2.10 Terminal project launcher | Implemented Settings installer and folder routing; native cold/warm and Release startup checks pass; relocation repair and literal argument forwarding tested | Actual `/usr/local/bin/` installation requires macOS administrator authentication |
+| 2.11 Quick session on a new worktree | Implemented; concurrent/persisted retry tests and native sheet/fixture-agent launch pass | Real CLI/native acceptance remains tracked under 1.8 and 2.5 |
+| 4.1–4.5 Packaging/compatibility/retention/diagnostics/docs | Developer ID local builds; actual registration/update; retention settings/cleanup; diagnostics export; terminal, diagnostics and service recovery guides | Remaining focused recovery acceptance and recovery guide |
 | 4.7 Complete app manual | Todo — requested by user, after app work | Document every feature and its usage; publish through Artifact Colab MCP |
 
 ## V2 — outside the current goal
