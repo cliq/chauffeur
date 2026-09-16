@@ -38,7 +38,10 @@ import ChauffeurCore
                     "ready": .bool(!openSheet.isEmpty),
                     "sheet": sheetState?() ?? .null,
                     "sheetWindow": sheet.map { .number(Double($0.windowNumber)) } ?? .null,
+                    "projectWindow": NativeProbe.layouts.values.first?.window.map { .number(Double($0.windowNumber)) } ?? .null,
                     "selectedSession": NativeProbe.layouts.values.first?.state.selectedSessionID.map { .string($0.uuidString) } ?? .null,
+                    "selectedWorktree": NativeProbe.layouts.values.first?.selectedWorktreePath.map(JSONValue.string) ?? .null,
+                    "sidebarVisible": .bool(NativeProbe.layouts.values.first?.state.sidebarVisible ?? false),
                     "error": model.error.map(JSONValue.string) ?? .null
                 ])
                 try? JSONCoding.encode(result).write(to: root.appendingPathComponent("quick-state.json"), options: .atomic)

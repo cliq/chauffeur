@@ -114,7 +114,7 @@ with tempfile.TemporaryDirectory(prefix='chauffeur-controls-', dir='/tmp') as di
     def screenshot(name):
         # State publication precedes SwiftUI's next native layout/display pass.
         time.sleep(0.5)
-        window = state()['sheetWindow']
+        window = state()['sheetWindow'] or state()['projectWindow']
         assert window
         subprocess.run(['/usr/sbin/screencapture', '-x', '-l', str(window), str(artifacts / (name + '.png'))], check=True)
 
@@ -207,6 +207,14 @@ with tempfile.TemporaryDirectory(prefix='chauffeur-controls-', dir='/tmp') as di
         def registered():
             return [item['value'] for item in call('snapshot')['store']['worktrees'] if item['value']['registered']]
         created = wait_for(lambda: next((item for item in registered() if item['managed']), None), 'managed worktree created')
+        wait_for(lambda: state()['selectedWorktree'] == created['path'], 'manager creation selects new worktree')
+        wait_for(lambda: control('worktrees.done')['enabled'], 'creation finished')
+        ax('press', 'worktrees.done')
+        wait_for(lambda: state()['sheetWindow'] is None, 'manager dismissed after creation')
+        wait_for(lambda: (c := control('repository.worktree.' + created['path'])) and c['value'] == 'Selected worktree', 'created worktree highlighted in sidebar')
+        screenshot('created-worktree-highlight')
+        command('openWorktrees', projectID=project_id, folderID=folder_id)
+        wait_for(lambda: state()['sheetWindow'] and control('worktrees.done')['enabled'], 'manager reopened')
         remove_id = 'worktrees.remove.' + created['id']
         wait_for(lambda: (v if (v := control(remove_id)) and v['enabled'] else None), 'managed remove control')
         assert control('worktrees.branch')['value'] == ''
@@ -243,6 +251,7 @@ with tempfile.TemporaryDirectory(prefix='chauffeur-controls-', dir='/tmp') as di
         ax('press', 'worktrees.done')
         wait_for(lambda: state()['sheetWindow'] is None, 'manager dismissed')
         report = {'passed': True, 'nativeAccessibilityActions': True, 'contextMenuRepositorySelection': True, 'repeatedRepositorySwitching': True, 'worktreeContextSelectsOwner': True, 'missingRepositoryFallback': True, 'invalidBranchRecovery': True,
+            'createdWorktreeHighlightedInSidebar': True,
             'createAndDestinationPreview': True, 'busyControlsDisabled': True, 'confirmationCancellation': True,
             'externalUnregisterPreservesFiles': True, 'dirtyRemovalPreservesFiles': True,
             'cleanRemovalPreservesBranch': True, 'OSAccessibilityControls': 'pass', 'XCUITest': 'not exercised'}

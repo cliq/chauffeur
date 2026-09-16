@@ -6,6 +6,7 @@ import ChauffeurCore
 @MainActor final class ProjectLayout: ObservableObject {
     @Published var state: WindowState
     @Published var selectedFolderID: UUID?
+    @Published var selectedWorktreePath: String?
     @Published var search = ""
     @Published var detailsVisible = false
     var controllers: [UUID: TerminalController] = [:]
@@ -54,6 +55,16 @@ struct ProjectWindow: View {
     }
     @State private var worktreeSheet: WorktreeSheet?
     @State private var collapsedRepositories = Set<UUID>()
+    private enum SidebarRowID: Hashable {
+        case repository(UUID)
+        case worktree(UUID, String)
+    }
+    private struct SidebarReveal: Identifiable {
+        let id = UUID()
+        let row: SidebarRowID
+    }
+    @State private var sidebarReveal: SidebarReveal?
+    @State private var pendingWorktree: Worktree?
     @FocusState private var searchFocused: Bool
     init(projectID: UUID) { self.projectID = projectID; _layout = StateObject(wrappedValue: ProjectLayout(projectID: projectID)) }
     private var project: Project? { model.project(projectID) }
@@ -90,10 +101,10 @@ struct ProjectWindow: View {
                         } label: { Label("Project Actions", systemImage: "ellipsis.circle") }
                     }
                 }
-                .sheet(isPresented: $launching) { SessionLaunchView(project: project, initialGroupID: layout.state.selectedGroupID, initialFolderID: layout.selectedFolderID, startsInNewWorktree: launchingInNewWorktree) { layout.select($0) } }
+                .sheet(isPresented: $launching) { SessionLaunchView(project: project, initialGroupID: layout.state.selectedGroupID, initialFolderID: layout.selectedFolderID, startsInNewWorktree: launchingInNewWorktree, worktreeCreated: revealCreatedWorktree) { layout.select($0) } }
                 .sheet(isPresented: $editingProject) { ProjectEditor(project: project) { _ in editingProject = false } }
                 .sheet(isPresented: $editingGroups) { GroupsEditor(project: project) }
-                .sheet(item: $worktreeSheet) { selection in WorktreesView(project: project, initialFolderID: selection.folderID) }
+                .sheet(item: $worktreeSheet) { selection in WorktreesView(project: project, initialFolderID: selection.folderID, worktreeCreated: revealCreatedWorktree) }
             } else {
                 VStack(spacing: 20) {
                     ContentUnavailableView(model.online ? "Project unavailable" : "Connecting…", systemImage: "folder.badge.questionmark", description: Text("Restore the project directory or choose another project. Existing agents remain in the background service."))
@@ -120,6 +131,13 @@ struct ProjectWindow: View {
                 guard layout.loaded else { return }
                 saveLayout(); layout.synchronizeTerminals(model: model)
             }
+            .onChange(of: layout.state.selectedSessionID) { _, id in
+                if let id { revealSessionCheckout(id) }
+                else { layout.selectedWorktreePath = nil }
+            }
+            .onChange(of: model.snapshot.store.worktrees.map(\.value.id)) { _, ids in
+                if let pendingWorktree, ids.contains(pendingWorktree.id) { self.pendingWorktree = nil }
+            }
             .onChange(of: model.snapshot.sessions) { _, _ in if layout.loaded { layout.synchronizeTerminals(model: model) } }
             .onReceive(NotificationCenter.default.publisher(for: .chauffeurCommand)) { notification in
                 guard layout.window?.isKeyWindow == true, let command = notification.object as? String else { return }
@@ -142,24 +160,33 @@ struct ProjectWindow: View {
                 ForEach(project.groups.filter { !$0.archived || $0.id == layout.state.selectedGroupID }) { group in Text(group.name).tag(Optional(group.id)) }
             }.padding(12)
             TextField("Search sessions", text: $layout.search).textFieldStyle(.roundedBorder).padding(.horizontal, 12).padding(.bottom, 8).focused($searchFocused)
-            List {
-                Section("Repositories") {
-                    ForEach(project.folders.filter(\.registered)) { folder in
-                        repositoryRow(folder, project: project)
+            ScrollViewReader { proxy in
+                List {
+                    Section("Repositories") {
+                        ForEach(project.folders.filter(\.registered)) { folder in
+                            repositoryRow(folder, project: project)
+                        }
+                        Button("Add Folder…", systemImage: "folder.badge.plus") {
+                            if let path = FilePanels.directory() { let version = model.projectVersion(project.id); var changed = project; changed.addFolder(ProjectFolder(path: path)); model.perform { try await model.saveProject(changed, version: version) } }
+                        }.buttonStyle(.plain)
                     }
-                    Button("Add Folder…", systemImage: "folder.badge.plus") {
-                        if let path = FilePanels.directory() { let version = model.projectVersion(project.id); var changed = project; changed.addFolder(ProjectFolder(path: path)); model.perform { try await model.saveProject(changed, version: version) } }
-                    }.buttonStyle(.plain)
-                }
-                if sessions.contains(where: \.needsAttention) {
-                    Section("Needs Attention") {
-                        ForEach(sessions.filter(\.needsAttention)) { session in sessionRow(session, project: project) }
+                    if sessions.contains(where: \.needsAttention) {
+                        Section("Needs Attention") {
+                            ForEach(sessions.filter(\.needsAttention)) { session in sessionRow(session, project: project) }
+                        }
                     }
+                    Section("Sessions") {
+                        ForEach(sessions) { session in sessionRow(session, project: project) }
+                    }
+                }.listStyle(.sidebar)
+                .task(id: sidebarReveal?.id) {
+                    guard let reveal = sidebarReveal else { return }
+                    // Let the newly inserted row and expanded repository lay out.
+                    await Task.yield()
+                    guard !Task.isCancelled, sidebarReveal?.id == reveal.id else { return }
+                    proxy.scrollTo(reveal.row, anchor: .center)
                 }
-                Section("Sessions") {
-                    ForEach(sessions) { session in sessionRow(session, project: project) }
-                }
-            }.listStyle(.sidebar)
+            }
             Text("Closing a tab or window keeps agents running.").font(.caption2).foregroundStyle(.secondary).padding(12)
         }.navigationSplitViewColumnWidth(min: 220, ideal: 260, max: 370)
     }
@@ -170,7 +197,11 @@ struct ProjectWindow: View {
         var id: String { path }
     }
     private func worktrees(for folder: ProjectFolder, project: Project) -> [SidebarWorktree] {
-        let records = model.snapshot.store.worktrees.map(\.value).filter { $0.projectID == project.id && $0.folderID == folder.id && $0.registered }
+        let stored = model.snapshot.store.worktrees.map(\.value)
+        var records = stored.filter { $0.projectID == project.id && $0.folderID == folder.id && $0.registered }
+        // Bridge the creation response until the next store snapshot arrives.
+        if let pendingWorktree, pendingWorktree.folderID == folder.id,
+           !stored.contains(where: { $0.id == pendingWorktree.id }) { records.append(pendingWorktree) }
         let inventory = model.snapshot.repositoryInventories?.first { $0.sourcePath == folder.canonicalPath || $0.sourcePaths?.contains(folder.canonicalPath) == true }
         var rows = records.map { SidebarWorktree(path: $0.path, branch: $0.branch, availability: $0.availability) }
         for entry in inventory?.entries ?? [] where !records.contains(where: { $0.path == entry.path || (entry.gitIdentity != nil && $0.gitIdentity == entry.gitIdentity) }) {
@@ -186,7 +217,8 @@ struct ProjectWindow: View {
                 Text("No worktrees").font(.caption).foregroundStyle(.secondary)
             }
             ForEach(trees) { tree in
-                Button { showWorktrees(folderID: folder.id) } label: {
+                let selected = layout.selectedFolderID == folder.id && layout.selectedWorktreePath == tree.path
+                Button { revealCheckout(folderID: folder.id, worktreePath: tree.path); showWorktrees(folderID: folder.id) } label: {
                     Label {
                         VStack(alignment: .leading, spacing: 2) {
                             Text(tree.branch.isEmpty ? "Detached HEAD" : tree.branch).lineLimit(1)
@@ -194,7 +226,13 @@ struct ProjectWindow: View {
                             if tree.availability != .available { Text(tree.availability.rawValue.capitalized).font(.caption).foregroundStyle(.orange) }
                         }
                     } icon: { Image(systemName: "arrow.triangle.branch") }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 6).padding(.vertical, 4)
+                    .background(selected ? Color.accentColor.opacity(0.2) : .clear, in: RoundedRectangle(cornerRadius: 6))
                 }.buttonStyle(.plain).help(tree.path).accessibilityIdentifier("repository.worktree.\(tree.path)")
+                    .accessibilityAddTraits(selected ? .isSelected : [])
+                    .accessibilityValue(selected ? "Selected worktree" : "")
+                    .id(SidebarRowID.worktree(folder.id, tree.path))
                     .contextMenu {
                         Button("Manage Worktrees…") { showWorktrees(folderID: folder.id) }
                         Button("Reveal in Finder") { FilePanels.reveal(tree.path) }.disabled(tree.availability != .available)
@@ -202,8 +240,9 @@ struct ProjectWindow: View {
             }
             Button("New Worktree & Session…", systemImage: "plus") { showLaunch(folderID: folder.id, newWorktree: true) }
                 .buttonStyle(.plain).font(.caption).disabled(!model.online || project.archived || folder.availability != .available)
+                .accessibilityIdentifier("repository.new-worktree.\(folder.id)")
         } label: {
-            Button { layout.selectedFolderID = folder.id } label: {
+            Button { layout.selectedFolderID = folder.id; layout.selectedWorktreePath = nil } label: {
                 Label { Text(folder.name).foregroundStyle(layout.selectedFolderID == folder.id ? Color.accentColor : Color.primary) } icon: { Image(systemName: FileManager.default.isReadableFile(atPath: folder.canonicalPath) ? "folder" : "folder.badge.questionmark") }
             }.buttonStyle(.plain).help(folder.selectedPath).accessibilityIdentifier("repository.\(folder.id)")
                 .contextMenu {
@@ -214,7 +253,25 @@ struct ProjectWindow: View {
                     Button("Relink / Edit Folder…") { editingProject = true }
                     Button("Reveal in Finder") { FilePanels.reveal(folder.selectedPath) }
                 }
-        }
+        }.id(SidebarRowID.repository(folder.id))
+    }
+    private func revealCreatedWorktree(_ tree: Worktree) {
+        guard tree.projectID == projectID, tree.registered else { return }
+        pendingWorktree = model.snapshot.store.worktrees.contains { $0.value.id == tree.id } ? nil : tree
+        revealCheckout(folderID: tree.folderID, worktreePath: tree.path)
+    }
+    private func revealCheckout(folderID: UUID, worktreePath: String?, showSidebar: Bool = true) {
+        layout.selectedFolderID = folderID
+        layout.selectedWorktreePath = worktreePath
+        collapsedRepositories.remove(folderID)
+        if showSidebar { layout.state.sidebarVisible = true }
+        sidebarReveal = SidebarReveal(row: worktreePath.map { .worktree(folderID, $0) } ?? .repository(folderID))
+    }
+    private func revealSessionCheckout(_ id: UUID) {
+        guard let session = model.session(id), session.projectID == projectID,
+              let folder = project?.folders.first(where: { $0.id == session.folderID && $0.registered }) else { return }
+        let path = model.snapshot.store.worktrees.first { $0.value.id == session.worktreeID }?.value.path ?? session.launch.workingDirectory
+        revealCheckout(folderID: folder.id, worktreePath: path == folder.canonicalPath ? nil : path, showSidebar: false)
     }
     private func showWorktrees(folderID: UUID?) {
         worktreeSheet = WorktreeSheet(folderID: folderID)
@@ -325,7 +382,11 @@ struct ProjectWindow: View {
         if let folderID { layout.selectedFolderID = folderID }
         launchingInNewWorktree = newWorktree; launching = true
     }
-    private func select(_ id: UUID) { layout.select(id); model.perform { _ = try await model.call("markRead", .object(["sessionID": .string(id.uuidString)])) } }
+    private func select(_ id: UUID) {
+        if layout.state.selectedSessionID == id { revealSessionCheckout(id) }
+        layout.select(id)
+        model.perform { _ = try await model.call("markRead", .object(["sessionID": .string(id.uuidString)])) }
+    }
     private func cycle(_ offset: Int) {
         guard !layout.state.tabs.isEmpty else { return }
         let current = layout.state.tabs.firstIndex { $0 == layout.state.selectedSessionID } ?? 0

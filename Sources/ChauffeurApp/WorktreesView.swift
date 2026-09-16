@@ -5,6 +5,7 @@ struct WorktreesView: View {
     @EnvironmentObject private var model: AppModel
     @Environment(\.dismiss) private var dismiss
     let project: Project
+    let worktreeCreated: (Worktree) -> Void
     @State private var folderID: UUID?
     @State private var branch = ""
     @State private var baseRef = "HEAD"
@@ -13,8 +14,9 @@ struct WorktreesView: View {
     @State private var failure: String?
     @State private var removing: Worktree?
     @State private var creation: WorktreeCreationRequest?
-    init(project: Project, initialFolderID: UUID? = nil) {
+    init(project: Project, initialFolderID: UUID? = nil, worktreeCreated: @escaping (Worktree) -> Void = { _ in }) {
         self.project = project
+        self.worktreeCreated = worktreeCreated
         _folderID = State(initialValue: project.folders.first { $0.id == initialFolderID && $0.registered }?.id
             ?? project.folders.first(where: \.registered)?.id)
     }
@@ -117,7 +119,8 @@ struct WorktreesView: View {
         }
         guard let request = creation else { return }
         run {
-            _ = try await model.call("createWorktree", .from(request))
+            let created = try await model.call("createWorktree", .from(request)).decode(Stored<Worktree>.self).value
+            worktreeCreated(created)
             creation = nil; branch = ""
             _ = try await model.call("refreshWorktrees")
         }

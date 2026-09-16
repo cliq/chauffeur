@@ -6,6 +6,12 @@ full path. Select a worktree to open its repository's manager, or use its contex
 menu to reveal it in Finder. Missing registered worktrees stay visible with their
 availability status. The repository row itself represents its registered checkout.
 
+Creating a worktree reveals the sidebar, expands its repository, scrolls the new
+row into view, and highlights it immediately. This applies to both creation
+flows, including when the agent fails to start. Selecting another session moves
+the highlight to that session's checkout; background inventory refreshes do not
+move the scroll position.
+
 Open **Manage Worktrees…** in a project window, choose a repository, and either register
 an existing Git worktree or create one with a branch and base ref. Creation shows
 the destination under Chauffeur's managed storage. The resolved base commit is
@@ -199,13 +205,16 @@ inaccessible checkout records remain visible for recovery.
   through the repository action in an isolated signed Debug app. A temporary Git
   repo and fixture agent verify invalid-branch recovery, retained worktree after
   agent failure, fresh launch into the same checkout, literal task forwarding,
-  and selection of the launched session. Screenshots and its report are saved
+  and selection of the launched session. With 22 existing Git worktrees, it also
+  verifies that creation reveals a hidden sidebar, expands a collapsed repository,
+  and scrolls the highlighted row into view. Screenshots and its report are saved
   in `.build/quick-session-artifacts/`.
 - `python3 Prototypes/worktree_controls_smoke.py` types into the manager and
   presses its native controls through macOS Accessibility and keyboard events
   targeted at the isolated app process. It verifies invalid-branch recovery,
   the current destination preview, disabled controls during a paused Git checkout,
-  confirmation cancellation, external unregister preserving files, dirty managed
+  highlighting the created checkout in the sidebar, confirmation cancellation,
+  external unregister preserving files, dirty managed
   removal refusal, and clean removal preserving the branch. Reports and screenshots
   are under `.build/worktree-controls-artifacts/`. It requires existing Accessibility
   permission and does not change macOS permissions or use XCUITest.

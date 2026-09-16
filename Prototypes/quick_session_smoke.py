@@ -94,7 +94,7 @@ with tempfile.TemporaryDirectory(prefix='chauffeur-quick-', dir='/tmp') as direc
     def screenshot(name):
         # State publication precedes SwiftUI's next native layout/display pass.
         time.sleep(0.5)
-        window = state()['sheetWindow']
+        window = state()['sheetWindow'] or state()['projectWindow']
         assert window
         subprocess.run(['/usr/sbin/screencapture', '-x', '-l', str(window), str(artifacts / (name + '.png'))], check=True)
 
@@ -103,11 +103,29 @@ with tempfile.TemporaryDirectory(prefix='chauffeur-quick-', dir='/tmp') as direc
         response = json.loads(result.stdout)
         assert response.get('performed'), response
 
+    def accessibility(operation, **fields):
+        result = subprocess.run([str(accessibility_helper)], input=json.dumps({'pid': app_pid, 'operation': operation, **fields}), text=True, capture_output=True, check=True)
+        return json.loads(result.stdout)
+
+    def controls():
+        return accessibility('inspect')
+
+    def control(identifier):
+        return next((c for c in controls() if c['identifier'] == identifier), None)
+
+    def ax(operation, **fields):
+        result = accessibility(operation, **fields)
+        assert result.get('performed'), result
+
     try:
         wait_for(lambda: call('status'), 'runtime ready')
         repo = root / 'repo 日本語'; repo.mkdir()
         for args in [['init', '-b', 'main'], ['config', 'core.hooksPath', '/dev/null'], ['config', 'commit.gpgsign', 'false'], ['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '--allow-empty', '-m', 'Initial']]:
             subprocess.run(['/usr/bin/git', '-C', str(repo), *args], capture_output=True, check=True)
+        # Enough existing worktrees to put the new, alphabetically later row
+        # below the viewport unless creation really scrolls it into view.
+        for index in range(22):
+            subprocess.run(['/usr/bin/git', '-C', str(repo), 'worktree', 'add', '-b', f'aa-existing-{index:02}', str(root / f'existing-{index:02}'), 'HEAD'], capture_output=True, check=True)
         other_repo = root / 'second repo'; other_repo.mkdir()
         for args in [['init', '-b', 'main'], ['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '--allow-empty', '-m', 'Initial']]:
             subprocess.run(['/usr/bin/git', '-C', str(other_repo), '-c', 'core.hooksPath=/dev/null', '-c', 'commit.gpgsign=false', *args], capture_output=True, check=True)
@@ -142,6 +160,15 @@ else:
         subprocess.run([str(binary_dir / 'chauffeur-launcher'), str(repo)], capture_output=True, check=True)
         ready = wait_for(lambda: (s if (s := state())['online'] and s['ready'] else None), 'project window ready')
         app_pid = ready['processID']
+        call('refreshWorktrees'); command('refresh')
+        items = controls()
+        parent = next(c for c in items if c['identifier'] == 'repository.' + folder_id)
+        disclosure = min((c for c in items if c['role'] == 'AXDisclosureTriangle'), key=lambda c: abs(c['frame']['y'] - parent['frame']['y']))
+        window = next(c for c in items if c['role'] == 'AXWindow')
+        ax('click', role='AXWindow', x=disclosure['frame']['x'] + disclosure['frame']['width'] / 2 - window['frame']['x'], y=disclosure['frame']['y'] + disclosure['frame']['height'] / 2 - window['frame']['y'])
+        wait_for(lambda: control('repository.new-worktree.' + folder_id) is None, 'repository collapsed')
+        ax('press', title='Hide Sidebar')
+        wait_for(lambda: not state()['sidebarVisible'], 'sidebar hidden before creation')
         command('open', projectID=project_id, folderID=folder_id)
         wait_for(lambda: state()['sheetWindow'] and state()['sheet'], 'new worktree sheet visible')
         assert state()['sheet']['presetID'] == default_id
@@ -177,6 +204,7 @@ else:
         command('launch')
         failed = wait_for(lambda: (s if (s := state())['sheet']['worktreeID'] and s['sheet']['failure'] and not s['sheet']['busy'] else None), 'worktree retained after failed agent')
         tree_id, tree_path = failed['sheet']['worktreeID'], failed['sheet']['path']
+        wait_for(lambda: state()['sidebarVisible'] and state()['selectedWorktree'] == tree_path, 'created worktree revealed despite agent failure')
         screenshot('retained-worktree')
         trees = call('snapshot')['store']['worktrees']
         assert len(trees) == 1 and trees[0]['value']['id'] == tree_id
@@ -194,6 +222,15 @@ else:
         assert len(snapshot['store']['worktrees']) == 1
         assert snapshot['store']['projects'][0]['value']['lastPresetID'] == preset_id
         assert live[0]['launch']['presetSetRevision'] == preset_set['value']['revision']
+        def highlighted_row_in_view():
+            items = controls()
+            row = next((c for c in items if c['identifier'] == 'repository.worktree.' + tree_path), None)
+            outline = next((c for c in items if c['role'] == 'AXOutline' and c['label'] == 'Sidebar'), None)
+            if not row or not outline or row['value'] != 'Selected worktree':
+                return False
+            return row['frame']['y'] >= outline['frame']['y'] and row['frame']['y'] + row['frame']['height'] <= outline['frame']['y'] + outline['frame']['height']
+        wait_for(highlighted_row_in_view, 'new worktree highlighted and scrolled fully into view')
+        screenshot('created-worktree-highlight')
         edited = next(p for p in snapshot['store']['presets'] if p['value']['id'] == preset_id)
         edited['value']['arguments'] = ['--model', 'fixture-model']
         call('savePreset', {'record': edited['value'], 'version': edited['version']})
@@ -224,6 +261,10 @@ else:
         assert state()['error'] is None
         summary = {'passed': True, 'nativeSheetOpenedFromRepository': True, 'nativeTitleDerivedBranch': True, 'manualOverridePreserved': True, 'clearingOverrideRestoresSuggestion': True, 'emptySanitizedTitleBlocked': True, 'invalidBranchPreviewBlocksCreation': True, 'invalidBranchDoesNotCreateCheckout': True, 'failedAgentRetainsWorktree': True, 'freshLaunchReusesSelectedWorktree': True, 'initialTaskPreserved': True, 'sessionSelectedAfterLaunch': True, 'worktreesCreated': 1, 'lastSuccessfulPresetSelected': True, 'failedLaunchDoesNotChangePreference': True, 'presetRevisionAdvanced': True, 'runningLaunchSnapshotUnchanged': True, 'emptySetSavedButCannotLaunch': True}
         summary['destinationFollowsRepository'] = True
+        summary['createdWorktreeRevealsHiddenSidebar'] = True
+        summary['createdWorktreeExpandsCollapsedRepository'] = True
+        summary['createdWorktreeHighlightedAndScrolledIntoView'] = True
+        summary['failedAgentStillHighlightsCreatedWorktree'] = True
         (artifacts / 'summary.json').write_text(json.dumps(summary, indent=2))
         print(json.dumps(summary, indent=2))
     finally:

@@ -188,7 +188,21 @@ agreement between preview and creation after destination collisions. Evidence:
 `.build/quick-session-artifacts/summary.json`.
 
 Both signed builds pass. The updated Release is in
-`build/Build/Products/Release/Chauffeur.app`; `/Applications/Chauffeur.app` was
-left running with the user's unsaved “test feature” worktree/session draft.
+`build/Build/Products/Release/Chauffeur.app`; the running
+`/Applications/Chauffeur.app` has not been replaced.
 The local worktree guide and HTML manual describe both fixes; the published
 manual has not been republished for this change.
+
+## CLI-72 — reveal and highlight created worktrees
+
+Both creation flows reveal the sidebar, expand the owning repository, scroll the
+new worktree into view, and highlight its row. The creation response bridges the
+row until the store snapshot arrives, including if the subsequent agent launch
+fails. Session selection updates the checkout highlight; periodic inventory
+updates do not issue scroll requests.
+
+Native checks use a hidden sidebar, a collapsed repository, and 22 existing Git
+worktrees to verify actual row visibility and selection after launch. The manager
+fixture also checks the row after creating without a session. Evidence is in
+`.build/quick-session-artifacts/` and `.build/worktree-controls-artifacts/`, including
+`created-worktree-highlight.png`. This fix is committed on main for CLI-72.

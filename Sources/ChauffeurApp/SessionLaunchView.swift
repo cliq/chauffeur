@@ -9,6 +9,7 @@ struct SessionLaunchView: View {
     let initialGroupID: UUID?
     let initialFolderID: UUID?
     var startsInNewWorktree = false
+    var worktreeCreated: (Worktree) -> Void = { _ in }
     let completion: (UUID) -> Void
     private enum Checkout: Hashable { case repository, existing(UUID), newWorktree }
     @StateObject private var operation = SessionLaunchOperation()
@@ -175,7 +176,10 @@ struct SessionLaunchView: View {
                 #endif
             }
             .onChange(of: operation.createdWorktree?.id) { _, _ in
-                if let created = operation.createdWorktree { checkout = .existing(created.id); shared = false }
+                if let created = operation.createdWorktree {
+                    checkout = .existing(created.id); shared = false
+                    worktreeCreated(created)
+                }
             }
             .task(id: destinationRequest) {
                 guard !Task.isCancelled else { return }

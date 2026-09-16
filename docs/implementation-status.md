@@ -279,6 +279,12 @@ runtime fingerprint matches the rebuilt bundle. The build log is
   destination updates with branch/repository changes, reports preview errors,
   and must validate before creation. Native typing, failed-launch recovery,
   retained-checkout reuse, and successful session launch pass.
+- [CLI-72](https://linear.app/cliqdev/issue/CLI-72/reveal-and-highlight-newly-created-worktrees-in-the-sidebar):
+  both creation flows reveal the sidebar, expand the repository, and scroll to a
+  highlighted worktree row. A native fixture with 22 existing worktrees verifies
+  this from a hidden sidebar and collapsed repository, including failed-agent
+  recovery. Manager-only creation also highlights its new row. Session selection
+  follows the checkout; background inventory refreshes do not scroll the list.
 - Swift validation: 76 tests in 20 suites pass. New coverage checks sanitization,
   invalid-branch preview rejection, and agreement between preview and actual
   creation when a destination path already exists.
