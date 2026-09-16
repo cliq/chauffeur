@@ -17,6 +17,8 @@ every implemented screen and workflow, with keyboard shortcuts and current
 limitations. It is private to its owner and accepted collaborators. The
 [self-contained HTML source](docs/manual.html) also opens locally in a browser.
 
+For development continuity, start with the [next-session handoff](docs/handoff.md).
+
 ## Build the app
 
 Development requirements: macOS 15+, Xcode 26.3 / Swift 6.2, XcodeGen, Git,
