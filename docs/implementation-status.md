@@ -268,12 +268,17 @@ runtime fingerprint matches the rebuilt bundle. Build and startup logs are
 The private native service fixture passes actual registration, UI quit, launchd
 crash recovery, the Runtime settings restart button, and bundled-helper
 replacement without changing the default service/store. Evidence:
-`.local/live-service-registration/summary.json`. Its real-session extension is
-implemented, with native profile selection and provider-reply assertions, but
-has not passed yet. The user unlocked the Mac, authorized the native launcher
-installer, and chose to perform sleep/wake once the private sessions are ready.
-The actual launcher installation and registered-folder invocation now pass.
-The full live-session service/sleep check is in progress. See
+`.local/live-service-registration/summary.json`. Its real-session extension now
+passes native profile selection, normal UI quit/reattachment, launchd crash
+recovery, Settings restart, and helper replacement with both providers. Native
+replies recall the original check word and preserve Unicode; the processes,
+conversation IDs, terminal identities, and launch snapshots remain unchanged.
+The actual launcher installation and registered-folder invocation also pass.
+The initial sleep cycle preserved both agent processes and conversations, but
+an inactive-window Accessibility timeout prevented checking replies afterward.
+The corrected probe activates the existing app before resolving its windows.
+Both private agents are ready for the user's repeat sleep/wake cycle; the final
+full-run summary and cleanup remain pending. See
 [private service acceptance](service-recovery.md#private-native-service-fixture).
 
 | Plan items | Current state | Still required |
@@ -306,11 +311,13 @@ The full live-session service/sleep check is in progress. See
 
 ## Next implementation order
 
-1. Finish the private native LaunchAgent check with live Codex and Claude
-   sessions. The registration-only check passes; the full script has not passed.
-2. Tell the user when both private sessions are ready, then verify their chosen
-   manual sleep/wake cycle through native power events and provider replies.
-   The terminal command's actual installation is complete.
+1. Complete the prepared private Codex/Claude sleep/wake check. All preceding
+   native service recovery steps pass. The user has been told both sessions are
+   ready; verify their manual cycle through native power events and provider
+   replies, then check cleanup and preservation of the default service/store.
+2. Verify the final signed Release's native startup and reopen the user's saved
+   project with its records preserved. The terminal command's actual
+   installation is complete.
 3. Resolve any failures, package/sign any resulting app changes, and update the
    manual's acceptance notes. The existing Release remains available to test.
 4. Publish the complete manual through Artifact Colab and verify the published

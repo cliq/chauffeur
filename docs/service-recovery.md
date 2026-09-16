@@ -178,9 +178,12 @@ The existing default runtime and saved records remain unchanged. Evidence:
 The full command without `--registration-only` additionally prepares real Codex
 and Claude sessions, selects their configuration folders through the native
 picker, and checks process/conversation continuity and provider replies after
-each recovery. **This full check has not passed yet.** Desktop testing paused
-when the Mac locked. The harness now refuses a locked console and cleans up if
-the screen locks during a run. No OS permission or lock setting is changed.
+each recovery. Both Codex 0.154.0 and Claude Code 2.1.273 now pass those
+live-session recovery steps, including recall of their original check word and
+Unicode replies. The run's initial and updated snapshots retain the same
+processes, conversations, terminal identities, and launch snapshots. The final
+sleep/wake step and cleanup report are still pending in the current run.
+The harness refuses a locked console and changes no OS permission or lock setting.
 
 The Debug-only `CHAUFFEUR_SERVICE_PROBE_SOCKET` chooses the private IPC socket
 without bypassing service registration. The fixture's plist supplies its unique
@@ -200,7 +203,12 @@ After wake, the fixture checks the same agent processes, terminal identities,
 launch snapshots, and conversations, then asks both providers to recall their
 original check word. The private power-event log and final report are written
 under `.local/live-service-native/`. Preparing this observer is not evidence
-that the sleep/wake acceptance has passed.
+that the sleep/wake acceptance has passed. An initial recorded cycle preserved
+the agent processes and conversation IDs, but the post-wake UI check timed out
+because the inactive app exposed no Accessibility windows. Activating the
+existing app restored its windows without relaunching it. The probe now activates
+the existing process and waits for its windows before resolving controls; a
+repeat cycle is pending to verify both provider replies after wake.
 
 ### Original empty-store probe
 

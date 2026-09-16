@@ -184,7 +184,8 @@ with tempfile.TemporaryDirectory(prefix='chauffeur-live-service-', dir='/tmp') a
 
     def ax(operation='inspect', **fields):
         if console_locked(): raise RuntimeError('Mac locked during the native check; unlock it before retrying')
-        result = subprocess.run([str(helper)], input=json.dumps({'pid': pid, 'operation': operation, **fields}), capture_output=True, text=True)
+        result = subprocess.run([str(helper)], input=json.dumps({'pid': pid, 'operation': operation,
+            'activateBeforeQuery': True, **fields}), capture_output=True, text=True)
         assert result.returncode == 0, result.stdout.strip() or 'Native accessibility probe exited without a result'
         value = json.loads(result.stdout)
         if isinstance(value, dict): assert value.get('performed'), value
@@ -478,10 +479,11 @@ with tempfile.TemporaryDirectory(prefix='chauffeur-live-service-', dir='/tmp') a
 
             wait(completed_sleep, 'user-initiated system sleep/wake', 7200)
             wait(lambda: not console_locked(), 'console unlock after wake', 7200)
+            ax('activateApplication')
             wait(lambda: call('status').get('mcpEndpoint'), 'runtime after system wake')
             unchanged()
             for item in sessions:
-                wait(lambda: item['word'] in screen(item), item['kind'] + ' terminal after wake')
+                wait(lambda: item['word'] in screen(item), item['kind'] + ' terminal after wake', 120)
                 reply(item, 'AFTER_WAKE')
             capture('after-wake')
             summary['userInitiatedSleepWake'] = True

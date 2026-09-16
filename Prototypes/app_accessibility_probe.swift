@@ -11,9 +11,30 @@ guard AXIsProcessTrusted() else {
 let request = try JSONSerialization.jsonObject(with: FileHandle.standardInput.readDataToEndOfFile()) as! [String: Any]
 let application = AXUIElementCreateApplication(Int32(request["pid"] as! Int))
 AXUIElementSetMessagingTimeout(application, 3)
+if request["operation"] as? String == "activateApplication" {
+    // After wake, an inactive app can expose no AX windows until activated.
+    // Activate this existing PID without opening or relaunching its bundle.
+    let app = NSRunningApplication(processIdentifier: Int32(request["pid"] as! Int))
+    let activated = app?.activate(options: [.activateAllWindows]) ?? false
+    print(activated ? "{\"performed\":true}" : "{\"performed\":false}")
+    exit(activated ? 0 : 1)
+}
 func attribute(_ element: AXUIElement, _ name: String) -> Any? {
     var value: CFTypeRef?
     return AXUIElementCopyAttributeValue(element, name as CFString, &value) == .success ? value : nil
+}
+if request["activateBeforeQuery"] as? Bool == true {
+    // Activation is asynchronous. After wake or an app switch, wait for this
+    // existing process to expose its windows before resolving any controls.
+    NSRunningApplication(processIdentifier: Int32(request["pid"] as! Int))?.activate(options: [.activateAllWindows])
+    let deadline = Date(timeIntervalSinceNow: 5)
+    repeat {
+        RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.05))
+        let windows = attribute(application, kAXWindowsAttribute) as? [AXUIElement] ?? []
+        if let identifier = request["windowIdentifier"] as? String {
+            if windows.contains(where: { attribute($0, kAXIdentifierAttribute) as? String == identifier }) { break }
+        } else if !windows.isEmpty { break }
+    } while Date() < deadline
 }
 func describe(_ element: AXUIElement) -> [String: Any] {
     var result: [String: Any] = [:]
