@@ -16,7 +16,9 @@ for _ in 0..<100 {
         ready = !windows.isEmpty && app.isFinishedLaunching && app.activationPolicy == .regular
         if ready { break }
     }
-    Thread.sleep(forTimeInterval: 0.2)
+    // NSWorkspace's launch state is refreshed on the run loop. Sleeping here
+    // can leave isFinishedLaunching cached as false for the entire deadline.
+    RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.2))
 }
 print(String(data: try JSONSerialization.data(withJSONObject: report, options: [.sortedKeys, .prettyPrinted]), encoding: .utf8)!)
 exit(ready ? 0 : 1)
