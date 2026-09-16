@@ -340,6 +340,15 @@ struct AppSnapshot: Decodable, Sendable {
             catch { self.error = error.localizedDescription; try? await refresh() }
         }
     }
+    /// Returns the worktree record ID for a checkout, registering the Git
+    /// worktree first when Chauffeur has no record yet. The main checkout has none.
+    func worktreeID(for row: CheckoutRow, project: Project) async throws -> UUID? {
+        if row.isMain { return nil }
+        if let id = row.worktreeID { return id }
+        let stored = try await call("registerWorktree", .object(["projectID": .string(project.id.uuidString), "folderID": .string(row.folderID.uuidString), "path": .string(row.path)])).decode(Stored<Worktree>.self)
+        try await refresh()
+        return stored.value.id
+    }
     /// Starts a login shell in a checkout as a service-backed session.
     func launchShell(project: Project, folder: ProjectFolder, worktreeID: UUID?, branch: String) async throws -> Session {
         guard let group = project.groups.first(where: { $0.isDefault && !$0.archived }) ?? project.groups.first(where: { !$0.archived }) else {

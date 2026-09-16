@@ -69,6 +69,7 @@ struct ProjectWindow: View {
     }
     @State private var sidebarReveal: SidebarReveal?
     @State private var pendingWorktree: Worktree?
+    @State private var deletingCheckout: CheckoutRow?
     @FocusState private var searchFocused: Bool
     init(projectID: UUID) { self.projectID = projectID; _layout = StateObject(wrappedValue: ProjectLayout(projectID: projectID)) }
     private var project: Project? { model.project(projectID) }
@@ -112,6 +113,9 @@ struct ProjectWindow: View {
                 .sheet(isPresented: $editingProject) { ProjectEditor(project: project) { _ in editingProject = false } }
                 .sheet(isPresented: $editingGroups) { GroupsEditor(project: project) }
                 .sheet(item: $worktreeSheet) { selection in WorktreesView(project: project, initialFolderID: selection.folderID, worktreeCreated: revealCreatedWorktree) }
+                .confirmationDialog("Delete \(deletingCheckout?.title ?? "worktree")?", isPresented: Binding(get: { deletingCheckout != nil }, set: { if !$0 { deletingCheckout = nil } }), titleVisibility: .visible) {
+                    Button("Delete Worktree", role: .destructive) { if let row = deletingCheckout { deleteWorktree(row) }; deletingCheckout = nil }
+                } message: { Text(deletionMessage(deletingCheckout)) }
             } else {
                 VStack(spacing: 20) {
                     ContentUnavailableView(model.online ? "Project unavailable" : "Connecting…", systemImage: "folder.badge.questionmark", description: Text("Restore the project directory or choose another project. Existing agents remain in the background service."))
@@ -158,39 +162,15 @@ struct ProjectWindow: View {
 
     // MARK: Checkouts
 
-    /// One selectable checkout row: the repository's main checkout or a worktree.
-    private struct SidebarCheckout: Identifiable {
-        let folderID: UUID
-        let path: String
-        let branch: String
-        let availability: Availability
-        let worktreeID: UUID?
-        let isMain: Bool
-        var id: String { path }
-        /// Unregistered Git worktrees cannot host sessions until they are registered.
-        var registered: Bool { isMain || worktreeID != nil }
-        var title: String { branch.isEmpty ? (isMain ? "Main checkout" : "Detached HEAD") : branch }
-    }
     private func inventory(for folder: ProjectFolder) -> RepositoryInventory? {
         model.snapshot.repositoryInventories?.first { $0.sourcePath == folder.canonicalPath || $0.sourcePaths?.contains(folder.canonicalPath) == true }
     }
-    private func checkouts(for folder: ProjectFolder, project: Project) -> [SidebarCheckout] {
-        var records = worktreeRecords.filter { $0.projectID == project.id && $0.folderID == folder.id && $0.registered }
-        // Bridge the creation response until the next store snapshot arrives.
-        if let pendingWorktree, pendingWorktree.folderID == folder.id,
-           !records.contains(where: { $0.id == pendingWorktree.id }) { records.append(pendingWorktree) }
-        let entries = inventory(for: folder)?.entries ?? []
-        let main = SidebarCheckout(folderID: folder.id, path: folder.canonicalPath, branch: entries.first { $0.path == folder.canonicalPath }?.branch ?? "", availability: folder.availability, worktreeID: nil, isMain: true)
-        var rows = records.map { SidebarCheckout(folderID: folder.id, path: $0.path, branch: $0.branch, availability: $0.availability, worktreeID: $0.id, isMain: false) }
-        for entry in entries where !records.contains(where: { $0.path == entry.path || (entry.gitIdentity != nil && $0.gitIdentity == entry.gitIdentity) }) {
-            rows.append(SidebarCheckout(folderID: folder.id, path: entry.path, branch: entry.branch, availability: entry.availability ?? .available, worktreeID: nil, isMain: false))
-        }
-        rows = rows.filter { $0.path != folder.canonicalPath }.sorted { $0.branch.localizedStandardCompare($1.branch) == .orderedAscending }
-        return [main] + rows
+    private func checkouts(for folder: ProjectFolder, project: Project) -> [CheckoutRow] {
+        CheckoutRows.rows(folder: folder, project: project, records: worktreeRecords, inventory: inventory(for: folder), sessions: allSessions, pending: pendingWorktree)
     }
-    private func checkout(folder: ProjectFolder, path: String, project: Project) -> SidebarCheckout {
+    private func checkout(folder: ProjectFolder, path: String, project: Project) -> CheckoutRow {
         checkouts(for: folder, project: project).first { Paths.canonical($0.path) == Paths.canonical(path) }
-            ?? SidebarCheckout(folderID: folder.id, path: path, branch: "", availability: .missing, worktreeID: nil, isMain: false)
+            ?? CheckoutRow(folderID: folder.id, path: path, branch: "", availability: .missing, worktreeID: nil, isMain: false, managed: false, sessions: sessions(in: folder, path: path))
     }
     private func sessions(in folder: ProjectFolder, path: String) -> [Session] {
         WorktreeSessions.sessions(allSessions, folder: folder, path: path, worktrees: worktreeRecords)
@@ -203,7 +183,7 @@ struct ProjectWindow: View {
     }
     private func attentionCount(in folder: ProjectFolder) -> Int { allSessions.filter { $0.folderID == folder.id && $0.needsAttention }.count }
     private var canLaunch: Bool { model.online && project?.archived == false }
-    private func canLaunch(in checkout: SidebarCheckout) -> Bool { canLaunch && checkout.registered && checkout.availability == .available }
+    private func canLaunch(in checkout: CheckoutRow) -> Bool { canLaunch && checkout.availability == .available }
 
     // MARK: Sidebar
 
@@ -286,7 +266,7 @@ struct ProjectWindow: View {
             }.buttonStyle(.plain).help(folder.selectedPath).accessibilityIdentifier("repository.\(folder.id)")
                 .contextMenu {
                     Button("Launch Agent…") { showLaunch(folderID: folder.id) }.disabled(!canLaunch)
-                    Button("Open Shell") { openShell(folderID: folder.id, path: folder.canonicalPath) }.disabled(!canLaunch || folder.availability != .available)
+                    Button("Open Shell") { openShell(in: rows[0], folder: folder) }.disabled(!canLaunch(in: rows[0]))
                     Button("New Worktree & Session…") { showLaunch(folderID: folder.id, newWorktree: true) }
                         .disabled(!canLaunch || folder.availability != .available)
                     Divider()
@@ -296,7 +276,7 @@ struct ProjectWindow: View {
                 }
         }.id(SidebarRowID.repository(folder.id))
     }
-    private func checkoutRow(_ row: SidebarCheckout, folder: ProjectFolder, project: Project) -> some View {
+    private func checkoutRow(_ row: CheckoutRow, folder: ProjectFolder, project: Project) -> some View {
         let sessions = sessions(in: folder, path: row.path)
         let live = WorktreeSessions.live(sessions).count
         let selected = layout.selectedFolderID == folder.id && layout.selectedWorktreePath.map { Paths.canonical($0) == Paths.canonical(row.path) } == true
@@ -306,8 +286,7 @@ struct ProjectWindow: View {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(row.title).lineLimit(1)
                         Text(row.isMain ? "Main checkout" : URL(fileURLWithPath: row.path).lastPathComponent).font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                        if row.availability != .available { Text(row.availability.rawValue.capitalized).font(.caption).foregroundStyle(.orange) }
-                        else if !row.registered { Text("Not registered").font(.caption).foregroundStyle(.orange) }
+                        if let status = row.statusLabel { Text(status).font(.caption).foregroundStyle(.secondary) }
                     }
                     Spacer(minLength: 4)
                     if live > 0 { Text("\(live)").font(.caption2).foregroundStyle(.secondary).help("\(live) live sessions") }
@@ -322,13 +301,20 @@ struct ProjectWindow: View {
             .accessibilityAddTraits(selected ? .isSelected : [])
             .accessibilityValue(selected ? "Selected worktree" : "")
             .id(SidebarRowID.worktree(folder.id, row.path))
-            .contextMenu {
-                Button("Launch Agent…") { showLaunch(folderID: folder.id, worktreeID: row.worktreeID) }.disabled(!canLaunch(in: row))
-                Button("Open Shell") { openShell(folderID: folder.id, path: row.path) }.disabled(!canLaunch(in: row))
-                Divider()
-                Button("Manage Worktrees…") { showWorktrees(folderID: folder.id) }
-                Button("Reveal in Finder") { FilePanels.reveal(row.path) }.disabled(row.availability != .available)
-            }
+            .contextMenu { checkoutMenu(row, folder: folder) }
+    }
+    @ViewBuilder private func checkoutMenu(_ row: CheckoutRow, folder: ProjectFolder) -> some View {
+        Button("Launch Agent…") { launchAgent(in: row, folder: folder) }.disabled(!canLaunch(in: row))
+        Button("Open Shell") { openShell(in: row, folder: folder) }.disabled(!canLaunch(in: row))
+        Divider()
+        Button("Manage Worktrees…") { showWorktrees(folderID: folder.id) }
+        Button("Reveal in Finder") { FilePanels.reveal(row.path) }.disabled(row.availability != .available)
+        if !row.isMain {
+            Divider()
+            Button("Delete Worktree…", role: .destructive) { deletingCheckout = row }
+                .disabled(!model.online || !row.liveSessions.isEmpty)
+                .help(row.liveSessions.isEmpty ? "" : "Stop its live sessions first")
+        }
     }
     private func sessionRow(_ session: Session, project: Project) -> some View {
         Button { selectSession(session.id) } label: {
@@ -362,11 +348,12 @@ struct ProjectWindow: View {
                     Text(row?.path ?? folder.canonicalPath).font(.system(.caption, design: .monospaced)).lineLimit(1).help(row?.path ?? folder.canonicalPath)
                     Text(row.map(\.title) ?? "\(folder.name) · all checkouts").font(.caption).foregroundStyle(.secondary)
                 }
+                let target = row ?? checkout(folder: folder, path: folder.canonicalPath, project: project)
                 HStack(spacing: 8) {
-                    Button("Launch Agent…") { showLaunch(folderID: folder.id, worktreeID: row?.worktreeID) }
-                        .disabled(row.map { !canLaunch(in: $0) } ?? !canLaunch).accessibilityIdentifier("checkout.launch")
-                    Button("Open Shell") { openShell(folderID: folder.id, path: row?.path ?? folder.canonicalPath) }
-                        .disabled(row.map { !canLaunch(in: $0) } ?? (!canLaunch || folder.availability != .available)).accessibilityIdentifier("checkout.shell")
+                    Button("Launch Agent…") { launchAgent(in: target, folder: folder) }
+                        .disabled(!canLaunch(in: target)).accessibilityIdentifier("checkout.launch")
+                    Button("Open Shell") { openShell(in: target, folder: folder) }
+                        .disabled(!canLaunch(in: target)).accessibilityIdentifier("checkout.shell")
                 }.controlSize(.small)
             } else if let session = model.session(layout.state.selectedSessionID) {
                 VStack(alignment: .trailing, spacing: 3) {
@@ -407,14 +394,17 @@ struct ProjectWindow: View {
             }.frame(maxWidth: .infinity, maxHeight: .infinity)
         }
     }
-    private func checkoutEmptyState(_ row: SidebarCheckout, folder: ProjectFolder, hasFinished: Bool) -> some View {
+    private func checkoutEmptyState(_ row: CheckoutRow, folder: ProjectFolder, hasFinished: Bool) -> some View {
         VStack(spacing: 16) {
-            ContentUnavailableView(hasFinished ? "No live sessions on this worktree" : "No sessions on this worktree", systemImage: "terminal",
-                                   description: Text(row.registered ? "Launch an agent or open a shell in \(row.title)." : "Register this worktree in Manage Worktrees before launching sessions in it."))
+            ContentUnavailableView(row.finished ? "This worktree is finished" : (hasFinished ? "No live sessions on this worktree" : "No sessions on this worktree"), systemImage: "terminal",
+                                   description: Text(row.finished ? "The checkout no longer exists. Its finished sessions stay available above until you delete the worktree." : "Launch an agent or open a shell in \(row.title)."))
             HStack(spacing: 12) {
-                Button("Launch Agent…") { showLaunch(folderID: folder.id, worktreeID: row.worktreeID) }.buttonStyle(.borderedProminent).disabled(!canLaunch(in: row)).accessibilityIdentifier("checkout.empty.launch")
-                Button("Open Shell") { openShell(folderID: folder.id, path: row.path) }.disabled(!canLaunch(in: row)).accessibilityIdentifier("checkout.empty.shell")
-                if !row.registered { Button("Manage Worktrees…") { showWorktrees(folderID: folder.id) } }
+                if row.finished {
+                    Button("Delete Worktree…", role: .destructive) { deletingCheckout = row }.disabled(!model.online || !row.liveSessions.isEmpty)
+                } else {
+                    Button("Launch Agent…") { launchAgent(in: row, folder: folder) }.buttonStyle(.borderedProminent).disabled(!canLaunch(in: row)).accessibilityIdentifier("checkout.empty.launch")
+                    Button("Open Shell") { openShell(in: row, folder: folder) }.disabled(!canLaunch(in: row)).accessibilityIdentifier("checkout.empty.shell")
+                }
             }
         }.frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -438,14 +428,14 @@ struct ProjectWindow: View {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(row.title).fontWeight(.medium)
                         Text(row.path).font(.system(.caption, design: .monospaced)).foregroundStyle(.secondary).lineLimit(1)
-                        if row.availability != .available { Text(row.availability.rawValue.capitalized).font(.caption).foregroundStyle(.orange) }
-                        else if !row.registered { Text("Not registered").font(.caption).foregroundStyle(.orange) }
+                        if let status = row.statusLabel { Text(status).font(.caption).foregroundStyle(.secondary) }
                     }
                     Spacer()
                     Text(live == 0 ? (sessions.isEmpty ? "No sessions" : "\(sessions.count) finished") : "\(live) live").font(.caption).foregroundStyle(.secondary)
                     badge(WorktreeSessions.attentionCount(sessions))
                     Button("Open") { selectCheckout(folderID: folder.id, path: row.path) }.controlSize(.small)
                 }.padding(.vertical, 4)
+                    .contextMenu { checkoutMenu(row, folder: folder) }
                     .accessibilityIdentifier("overview.checkout.\(row.path)")
             }
         }
@@ -482,27 +472,47 @@ struct ProjectWindow: View {
         selectCheckout(folderID: tree.folderID, path: tree.path)
         sidebarReveal = SidebarReveal(row: .worktree(tree.folderID, tree.path))
     }
+    private func deletionMessage(_ row: CheckoutRow?) -> String {
+        guard let row else { return "" }
+        let history = row.sessions.isEmpty ? "No session history is affected." : "\(row.sessions.count) finished session\(row.sessions.count == 1 ? "" : "s") and their saved terminal history are deleted."
+        if row.finished { return "The checkout is already gone.\n\(history)" }
+        return "Removes the checkout at \(row.path) from disk with git worktree remove. It must have no modified or untracked files. The branch is kept.\n\(history)"
+    }
     private func showWorktrees(folderID: UUID?) {
         worktreeSheet = WorktreeSheet(folderID: folderID)
     }
     private func showLaunch(folderID: UUID? = nil, worktreeID: UUID? = nil, newWorktree: Bool = false) {
-        var folderID = folderID, worktreeID = worktreeID
-        if folderID == nil, let folder = selectedFolder {
-            folderID = folder.id
-            if worktreeID == nil, !newWorktree, let path = layout.selectedWorktreePath, let project {
-                worktreeID = checkout(folder: folder, path: path, project: project).worktreeID
-            }
+        if folderID == nil, !newWorktree, let folder = selectedFolder, let project {
+            // The selected checkout may be a Git worktree Chauffeur has not recorded yet.
+            launchAgent(in: checkout(folder: folder, path: layout.selectedWorktreePath ?? folder.canonicalPath, project: project), folder: folder)
+            return
         }
-        launchSheet = LaunchSheet(folderID: folderID, worktreeID: worktreeID, newWorktree: newWorktree)
+        launchSheet = LaunchSheet(folderID: folderID ?? selectedFolder?.id, worktreeID: worktreeID, newWorktree: newWorktree)
     }
-    private func openShell(folderID: UUID, path: String) {
-        guard let project, let folder = project.folders.first(where: { $0.id == folderID && $0.registered }) else { return }
-        let row = checkout(folder: folder, path: path, project: project)
-        guard canLaunch(in: row) else { return }
+    /// Opens the launch sheet for a checkout, recording the worktree first if needed.
+    private func launchAgent(in row: CheckoutRow, folder: ProjectFolder) {
+        guard let project, canLaunch(in: row) else { return }
         model.perform {
-            let session = try await model.launchShell(project: project, folder: folder, worktreeID: row.worktreeID, branch: row.branch)
+            let worktreeID = try await model.worktreeID(for: row, project: project)
+            launchSheet = LaunchSheet(folderID: folder.id, worktreeID: worktreeID, newWorktree: false)
+        }
+    }
+    private func openShell(in row: CheckoutRow, folder: ProjectFolder) {
+        guard let project, canLaunch(in: row) else { return }
+        model.perform {
+            let worktreeID = try await model.worktreeID(for: row, project: project)
+            let session = try await model.launchShell(project: project, folder: folder, worktreeID: worktreeID, branch: row.branch)
             layout.selectSession(session.id, folderID: folder.id, path: row.path)
             collapsedRepositories.remove(folder.id)
+        }
+    }
+    private func deleteWorktree(_ row: CheckoutRow) {
+        guard let project else { return }
+        model.perform {
+            _ = try await model.call("deleteWorktree", .object(["projectID": .string(project.id.uuidString), "folderID": .string(row.folderID.uuidString), "path": .string(row.path)]))
+            if layout.selectedWorktreePath.map({ Paths.canonical($0) == Paths.canonical(row.path) }) == true {
+                layout.selectCheckout(folderID: row.folderID, path: nil, sessions: [])
+            }
         }
     }
     private func cycle(_ offset: Int) {

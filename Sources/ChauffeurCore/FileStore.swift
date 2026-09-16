@@ -291,6 +291,22 @@ public actor FileStore {
         let saved = try write(value, at: URL(fileURLWithPath: stored.path), expectedVersion: stored.version)
         snapshot.projects.removeAll { $0.value.id == projectID }; snapshot.projects.append(saved)
     }
+    /// Removes a finished session's record. Liveness is the runtime's decision.
+    public func delete(session id: UUID) throws {
+        _ = reload()
+        guard let stored = snapshot.sessions.first(where: { $0.value.id == id }) else { return }
+        try manager.removeItem(atPath: stored.path)
+        localChanges.insert(stored.path)
+        snapshot.sessions.removeAll { $0.value.id == id }
+    }
+    /// Removes a worktree record. Its checkout and sessions are handled by the runtime.
+    public func delete(worktree id: UUID) throws {
+        _ = reload()
+        guard let stored = snapshot.worktrees.first(where: { $0.value.id == id }) else { return }
+        try manager.removeItem(atPath: stored.path)
+        localChanges.insert(stored.path)
+        snapshot.worktrees.removeAll { $0.value.id == id }
+    }
     public func projectDirectory(_ id: UUID) throws -> URL {
         guard let record = snapshot.projects.first(where: { $0.value.id == id }) else { throw ChauffeurError("missing_project", "Project is missing. Restore or reopen its directory") }
         return URL(fileURLWithPath: record.path).deletingLastPathComponent()

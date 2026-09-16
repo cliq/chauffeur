@@ -200,7 +200,7 @@ with tempfile.TemporaryDirectory(prefix='chauffeur-controls-', dir='/tmp') as di
         ax('press', 'worktrees.create')
         wait_for(entered.exists, 'Git checkout hook entered')
         blocked_controls = controls()
-        for control_id in ['worktrees.done', 'worktrees.repository', 'worktrees.refresh', 'worktrees.branch', 'worktrees.base', 'worktrees.create', 'worktrees.register.' + str(external)]:
+        for control_id in ['worktrees.done', 'worktrees.repository', 'worktrees.refresh', 'worktrees.branch', 'worktrees.base', 'worktrees.create', 'worktrees.remove.' + str(external)]:
             assert not next(item for item in blocked_controls if item['identifier'] == control_id)['enabled'], control_id
         (artifacts / 'busy-controls.json').write_text(json.dumps(blocked_controls, indent=2))
         release.touch()
@@ -220,30 +220,34 @@ with tempfile.TemporaryDirectory(prefix='chauffeur-controls-', dir='/tmp') as di
         assert control('worktrees.branch')['value'] == ''
         assert not control('worktrees.create')['enabled']
         screenshot('managed-worktree')
-        # Register and unregister through the native controls and confirmation.
-        ax('press', 'worktrees.register.' + str(external))
-        registered_external = wait_for(lambda: next((item for item in registered() if item['path'] == str(external)), None), 'external worktree registered')
-        external_remove = 'worktrees.remove.' + registered_external['id']
-        wait_for(lambda: (v if (v := control(external_remove)) and v['enabled'] else None), 'external unregister control')
+        # External Git worktrees list without registration. Deleting one goes
+        # through git worktree remove, so untracked files refuse the deletion.
+        external_remove = 'worktrees.remove.' + str(external)
+        wait_for(lambda: (v if (v := control(external_remove)) and v['enabled'] else None), 'external delete control')
         ax('press', external_remove)
         (artifacts / 'confirmation-controls.json').write_text(json.dumps(controls(), indent=2))
         ax('press', title='Cancel')
-        assert any(item['id'] == registered_external['id'] for item in registered())
-        ax('press', external_remove)
-        ax('press', title='Unregister Worktree')
-        wait_for(lambda: not any(item['id'] == registered_external['id'] for item in registered()), 'external record unregistered')
         assert marker.read_text() == 'Keep external files'
+        ax('press', external_remove)
+        ax('press', title='Delete Worktree')
+        wait_for(lambda: control('worktrees.error'), 'dirty external deletion refused')
+        assert marker.read_text() == 'Keep external files'
+        marker.unlink()
+        ax('press', external_remove)
+        ax('press', title='Delete Worktree')
+        wait_for(lambda: not external.exists(), 'clean external worktree deleted')
+        wait_for(lambda: not control(external_remove), 'external row gone')
         # A dirty managed checkout must survive the native Remove confirmation.
         dirty = Path(created['path']) / 'untracked.txt'; dirty.write_text('Keep managed edits')
         wait_for(lambda: (v if (v := control(remove_id)) and v['enabled'] else None), 'remove ready')
         ax('press', remove_id)
-        ax('press', title='Remove Worktree')
+        ax('press', title='Delete Worktree')
         wait_for(lambda: control('worktrees.error'), 'dirty worktree error')
         assert dirty.read_text() == 'Keep managed edits'
         screenshot('dirty-removal-refused')
         dirty.unlink()
         ax('press', remove_id)
-        ax('press', title='Remove Worktree')
+        ax('press', title='Delete Worktree')
         wait_for(lambda: not any(item['id'] == created['id'] for item in registered()), 'clean worktree removed')
         assert not Path(created['path']).exists()
         git('show-ref', '--verify', 'refs/heads/fixture/native-controls')
@@ -253,7 +257,7 @@ with tempfile.TemporaryDirectory(prefix='chauffeur-controls-', dir='/tmp') as di
         report = {'passed': True, 'nativeAccessibilityActions': True, 'contextMenuRepositorySelection': True, 'repeatedRepositorySwitching': True, 'worktreeContextSelectsOwner': True, 'missingRepositoryFallback': True, 'invalidBranchRecovery': True,
             'createdWorktreeHighlightedInSidebar': True,
             'createAndDestinationPreview': True, 'busyControlsDisabled': True, 'confirmationCancellation': True,
-            'externalUnregisterPreservesFiles': True, 'dirtyRemovalPreservesFiles': True,
+            'dirtyExternalDeletionPreservesFiles': True, 'cleanExternalDeletionRemovesCheckout': True, 'dirtyRemovalPreservesFiles': True,
             'cleanRemovalPreservesBranch': True, 'OSAccessibilityControls': 'pass', 'XCUITest': 'not exercised'}
         (artifacts / 'summary.json').write_text(json.dumps(report, indent=2))
         print(json.dumps(report, indent=2))

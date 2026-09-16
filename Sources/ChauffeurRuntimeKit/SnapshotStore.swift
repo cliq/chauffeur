@@ -31,6 +31,13 @@ public actor SnapshotStore {
         }
         return file
     }
+    /// Deletes a session's saved history: only our named file and its folder.
+    public func delete(_ id: UUID) throws {
+        let file = try file(id)
+        if Self.exists(file) { try manager.removeItem(at: file) }
+        let directory = root.appendingPathComponent(id.uuidString)
+        if Self.exists(directory), try manager.contentsOfDirectory(atPath: directory.path).isEmpty { try manager.removeItem(at: directory) }
+    }
     public func read(_ id: UUID) throws -> TerminalSnapshot? {
         guard Self.exists(root.appendingPathComponent(id.uuidString)) else { return nil }
         let path = try file(id)

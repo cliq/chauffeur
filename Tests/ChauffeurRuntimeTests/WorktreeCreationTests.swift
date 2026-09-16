@@ -156,6 +156,71 @@ struct WorktreeCreationTests {
         #expect(stored.value.creationRequestFingerprint == nil)
         #expect(try JSONCoding.decode(Worktree.self, from: JSONCoding.encode(stored.value)).id == stored.value.id)
     }
+
+    @Test func deletingAWorktreeRemovesItsCheckoutRecordsAndFinishedHistory() async throws {
+        let fixture = try await Fixture.make(); defer { fixture.cleanup() }
+        let folder = fixture.project.folders[0]
+        let external = fixture.root.appendingPathComponent("external")
+        try #require(try await ProcessRunner.run("/usr/bin/git", ["-C", fixture.repo.path, "worktree", "add", "-b", "external", external.path, "HEAD"]).status == 0)
+        let params: JSONValue = .object(["projectID": .string(fixture.project.id.uuidString), "folderID": .string(folder.id.uuidString), "path": .string(external.path)])
+        // Launching records the worktree on demand; the missing CLI leaves a failed session behind.
+        let registered = try await fixture.runtime.handle(IPCRequest("registerWorktree", params: params)).decode(Stored<Worktree>.self).value
+        let launch = LaunchRequest(projectID: fixture.project.id, groupID: fixture.project.groups[0].id, presetID: fixture.preset.id, folderID: folder.id, title: "Doomed", worktreeID: registered.id, coordinationEnabled: false)
+        await #expect(throws: ChauffeurError.self) { _ = try await fixture.runtime.launch(launch) }
+        var snapshot = await fixture.runtime.store.reload()
+        #expect(snapshot.sessions.count == 1 && snapshot.sessions[0].value.state == .failed)
+        // Untracked files refuse the deletion and keep everything in place.
+        let marker = external.appendingPathComponent("keep.txt")
+        try Data("keep".utf8).write(to: marker)
+        var code: String?
+        do { _ = try await fixture.runtime.handle(IPCRequest("deleteWorktree", params: params)) } catch let error as ChauffeurError { code = error.code }
+        #expect(code == "dirty_worktree")
+        snapshot = await fixture.runtime.store.reload()
+        #expect(FileManager.default.fileExists(atPath: marker.path) && snapshot.sessions.count == 1 && snapshot.worktrees.count == 1)
+        try FileManager.default.removeItem(at: marker)
+        let result = try await fixture.runtime.handle(IPCRequest("deleteWorktree", params: params))
+        #expect(result["deletedCheckout"].bool == true && result["deletedSessions"].int == 1 && result["deletedRecords"].int == 1)
+        snapshot = await fixture.runtime.store.reload()
+        #expect(!FileManager.default.fileExists(atPath: external.path))
+        #expect(snapshot.sessions.isEmpty && snapshot.worktrees.isEmpty)
+        #expect(try await fixture.runtime.worktrees.inventory(at: fixture.repo.path).count == 1)
+        #expect(try await fixture.runtime.snapshot()["sessions"].array.isEmpty)
+        // The branch survives, as with any git worktree remove.
+        #expect(try await ProcessRunner.run("/usr/bin/git", ["-C", fixture.repo.path, "show-ref", "--verify", "refs/heads/external"]).status == 0)
+        // The main checkout can never be deleted this way.
+        let main: JSONValue = .object(["projectID": .string(fixture.project.id.uuidString), "folderID": .string(folder.id.uuidString), "path": .string(fixture.repo.path)])
+        await #expect(throws: ChauffeurError.self) { _ = try await fixture.runtime.handle(IPCRequest("deleteWorktree", params: main)) }
+    }
+
+    @Test func vanishedCheckoutsKeepRecordsOnlyWhileSessionsReferToThem() async throws {
+        let fixture = try await Fixture.make(); defer { fixture.cleanup() }
+        let folder = fixture.project.folders[0]
+        let unused = try await fixture.runtime.createWorktree(fixture.request).value
+        var withHistory = fixture.request; withHistory.branch = "task/history"; withHistory.retryKey = UUID()
+        let remembered = try await fixture.runtime.createWorktree(withHistory).value
+        let launch = LaunchRequest(projectID: fixture.project.id, groupID: fixture.project.groups[0].id, presetID: fixture.preset.id, folderID: folder.id, title: "Doomed", worktreeID: remembered.id, coordinationEnabled: false)
+        await #expect(throws: ChauffeurError.self) { _ = try await fixture.runtime.launch(launch) }
+        // Both directories disappear behind Chauffeur's back.
+        try FileManager.default.removeItem(atPath: unused.path)
+        try FileManager.default.removeItem(atPath: remembered.path)
+        _ = try await fixture.runtime.handle(IPCRequest("refreshWorktrees"))
+        let snapshot = await fixture.runtime.store.reload()
+        #expect(snapshot.worktrees.map(\.value.id) == [remembered.id])
+        #expect(snapshot.worktrees.first?.value.availability == .missing)
+        // Git still lists both as prunable until an explicit prune.
+        let stale = try await fixture.runtime.worktrees.inventory(at: fixture.repo.path).filter { $0.prunable }
+        #expect(stale.count == 2)
+        _ = try await fixture.runtime.handle(IPCRequest("pruneWorktrees", params: .object(["projectID": .string(fixture.project.id.uuidString), "folderID": .string(folder.id.uuidString)])))
+        #expect(try await fixture.runtime.worktrees.inventory(at: fixture.repo.path).count == 1)
+        // The remembered checkout is gone from Git too, but its history keeps the record.
+        let afterPrune = await fixture.runtime.store.reload()
+        #expect(afterPrune.worktrees.map(\.value.id) == [remembered.id] && afterPrune.sessions.count == 1)
+        // Deleting the finished worktree removes the history and the record.
+        let result = try await fixture.runtime.handle(IPCRequest("deleteWorktree", params: .object(["projectID": .string(fixture.project.id.uuidString), "folderID": .string(folder.id.uuidString), "path": .string(remembered.path)])))
+        #expect(result["deletedCheckout"].bool == false && result["deletedSessions"].int == 1)
+        let final = await fixture.runtime.store.reload()
+        #expect(final.worktrees.isEmpty && final.sessions.isEmpty)
+    }
 }
 
 private struct Fixture {

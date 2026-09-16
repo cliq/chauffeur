@@ -12,7 +12,7 @@ struct WorktreesView: View {
     @State private var destination = ""
     @State private var busy = false
     @State private var failure: String?
-    @State private var removing: Worktree?
+    @State private var removing: CheckoutRow?
     @State private var creation: WorktreeCreationRequest?
     init(project: Project, initialFolderID: UUID? = nil, worktreeCreated: @escaping (Worktree) -> Void = { _ in }) {
         self.project = project
@@ -26,9 +26,12 @@ struct WorktreesView: View {
         guard let folder else { return nil }
         return model.snapshot.repositoryInventories?.first { $0.sourcePath == folder.canonicalPath || $0.sourcePaths?.contains(folder.canonicalPath) == true }
     }
-    private var inventory: [GitWorktree] { observation?.entries ?? [] }
-    private var records: [Worktree] { model.snapshot.store.worktrees.map(\.value).filter { $0.projectID == project.id && $0.folderID == folderID && $0.registered } }
-    private var unregistered: [GitWorktree] { inventory.filter { entry in !records.contains { $0.path == entry.path || (entry.gitIdentity != nil && entry.gitIdentity == $0.gitIdentity) } } }
+    private var rows: [CheckoutRow] {
+        guard let folder else { return [] }
+        return CheckoutRows.rows(folder: folder, project: currentProject, records: model.snapshot.store.worktrees.map(\.value), inventory: observation, sessions: model.sessions(in: project.id))
+    }
+    private var worktreeRows: [CheckoutRow] { rows.filter { !$0.isMain } }
+    private var stale: [GitWorktree] { folder.map { CheckoutRows.staleEntries(folder: $0, inventory: observation, rows: rows) } ?? [] }
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             HStack { Text("Repository Worktrees").font(.title2); Spacer(); Button("Done") { dismiss() }.keyboardShortcut(.cancelAction).disabled(busy).accessibilityIdentifier("worktrees.done") }
@@ -39,36 +42,40 @@ struct WorktreesView: View {
                 }.disabled(busy).accessibilityIdentifier("worktrees.repository")
                 Button("Refresh Git Inventory") { refresh() }.disabled(folder == nil || busy).accessibilityIdentifier("worktrees.refresh")
             }
-            Text("\(records.count) registered · \(unregistered.count) other Git checkouts").font(.caption).foregroundStyle(.secondary)
+            Text("\(worktreeRows.count) worktrees" + (stale.isEmpty ? "" : " · \(stale.count) stale Git entries")).font(.caption).foregroundStyle(.secondary)
             ScrollView {
               VStack(alignment: .leading, spacing: 0) {
-                ForEach(records) { tree in
+                ForEach(worktreeRows) { row in
                     HStack(alignment: .top) {
                         VStack(alignment: .leading, spacing: 5) {
-                            Text(tree.branch.isEmpty ? "Detached HEAD" : tree.branch).fontWeight(.medium)
-                            Text(tree.path).font(.caption).textSelection(.enabled)
-                            Text("\(tree.managed ? "Chauffeur managed" : "External") · \(tree.availability.rawValue.capitalized)").font(.caption).foregroundStyle(.secondary)
-                            if inventory.first(where: { $0.path == tree.path })?.locked == true { Text("Locked in Git").font(.caption).foregroundStyle(.secondary) }
-                            let associated = model.snapshot.sessions.filter { session in
-                                session.worktreeID == tree.id || session.launch.workingDirectory == tree.path || session.launch.additionalPaths.contains(tree.path)
-                                    || tree.gitIdentity.map { (session.launch.gitWorktreeIdentities ?? []).contains($0) } == true
+                            Text(row.title).fontWeight(.medium)
+                            Text(row.path).font(.caption).textSelection(.enabled)
+                            Text([row.managed ? "Chauffeur managed" : "External", row.statusLabel ?? "Available"].joined(separator: " · ")).font(.caption).foregroundStyle(.secondary)
+                            if observation?.entries.first(where: { $0.path == row.path })?.locked == true { Text("Locked in Git").font(.caption).foregroundStyle(.secondary) }
+                            if !row.sessions.isEmpty {
+                                Text("Sessions: \(row.sessions.map(\.title).joined(separator: ", "))").font(.caption).lineLimit(2).help(row.sessions.map(\.title).joined(separator: ", "))
                             }
-                            if !associated.isEmpty { Text("Sessions: \(associated.map(\.title).joined(separator: ", "))").font(.caption).lineLimit(2).help(associated.map(\.title).joined(separator: ", ")) }
                         }
                         Spacer()
-                        Button(tree.managed ? "Remove…" : "Unregister") { removing = tree }.disabled(busy).accessibilityIdentifier("worktrees.remove.\(tree.id)")
+                        Button("Delete…") { removing = row }.disabled(busy || !row.liveSessions.isEmpty)
+                            .help(row.liveSessions.isEmpty ? "Delete the checkout and its session history" : "Stop its live sessions first")
+                            .accessibilityIdentifier("worktrees.remove.\(row.worktreeID?.uuidString ?? row.path)")
                     }.padding(10)
                     Divider()
                 }
-                ForEach(unregistered) { entry in
-                    HStack {
-                        VStack(alignment: .leading) { Text(entry.branch.isEmpty ? "Detached HEAD" : entry.branch); Text(entry.path).font(.caption).foregroundStyle(.secondary) }
+                if !stale.isEmpty {
+                    HStack(alignment: .top) {
+                        VStack(alignment: .leading, spacing: 5) {
+                            Text("Stale Git entries").fontWeight(.medium)
+                            ForEach(stale) { entry in Text(entry.path).font(.caption).foregroundStyle(.secondary) }
+                            Text("Git still lists these worktrees, but their directories are gone and no sessions refer to them.").font(.caption).foregroundStyle(.secondary)
+                        }
                         Spacer()
-                        Button("Register") { register(entry) }.disabled(busy || entry.availability != .available).accessibilityIdentifier("worktrees.register.\(entry.path)")
+                        Button("Prune") { prune() }.disabled(busy).accessibilityIdentifier("worktrees.prune")
                     }.padding(10)
                     Divider()
                 }
-                if records.isEmpty && inventory.isEmpty { Text("No worktrees available for this folder.").foregroundStyle(.secondary).padding(16) }
+                if worktreeRows.isEmpty && stale.isEmpty { Text("No worktrees for this repository.").foregroundStyle(.secondary).padding(16) }
               }.frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.trailing, NSScroller.scrollerWidth(for: .regular, scrollerStyle: .legacy))
                 .background(PersistentScrollbars())
@@ -90,7 +97,7 @@ struct WorktreesView: View {
                 else if observation.status == .notRepository { Text("This folder is not a Git repository.").font(.caption).foregroundStyle(.secondary) }
                 else { Text("Git inventory checked \(observation.observedAt, style: .relative) ago. Refreshes while the background service is running.").font(.caption).foregroundStyle(.secondary) }
             }
-            Text("Removal requires a clean app-managed worktree with no live sessions. Branches are preserved. External worktrees are only unregistered.").font(.caption).foregroundStyle(.secondary)
+            Text("Deleting a worktree removes its checkout with git worktree remove (it must be clean and have no live sessions) and its finished sessions' history. Branches are preserved.").font(.caption).foregroundStyle(.secondary)
         }.padding(24).frame(width: 760).interactiveDismissDisabled(busy)
             .onAppear { refresh() }
             .onChange(of: folderID) { _, _ in refresh() }
@@ -101,12 +108,19 @@ struct WorktreesView: View {
                 try? await Task.sleep(for: .milliseconds(250)); guard !Task.isCancelled else { return }
                 if let value = try? await model.call("previewWorktree", .object(["projectID": .string(project.id.uuidString), "folderID": .string(folderID.uuidString), "branch": .string(proposedBranch)])), !Task.isCancelled, self.folderID == folderID, branch == proposedBranch { destination = value["path"].string ?? "" }
             }
-            .confirmationDialog(removing?.managed == true ? "Remove this worktree?" : "Unregister this worktree?", isPresented: Binding(get: { removing != nil }, set: { if !$0 { removing = nil } }), titleVisibility: .visible) {
-                Button(removing?.managed == true ? "Remove Worktree" : "Unregister Worktree", role: .destructive) {
-                    if let removing { run { _ = try await model.call("removeWorktree", .object(["worktreeID": .string(removing.id.uuidString)])); _ = try await model.call("refreshWorktrees") } }
+            .confirmationDialog("Delete \(removing?.title ?? "worktree")?", isPresented: Binding(get: { removing != nil }, set: { if !$0 { removing = nil } }), titleVisibility: .visible) {
+                Button("Delete Worktree", role: .destructive) {
+                    if let removing, let folderID {
+                        run { _ = try await model.call("deleteWorktree", .object(["projectID": .string(project.id.uuidString), "folderID": .string(folderID.uuidString), "path": .string(removing.path)])) }
+                    }
                     removing = nil
                 }
-            } message: { Text("\(removing?.branch ?? "")\n\(removing?.path ?? "")") }
+            } message: {
+                if let removing {
+                    Text((removing.finished ? "The checkout is already gone." : "Removes \(removing.path) from disk. It must have no modified or untracked files; the branch is kept.")
+                         + (removing.sessions.isEmpty ? "" : "\n\(removing.sessions.count) finished session\(removing.sessions.count == 1 ? "" : "s") and their terminal history are deleted."))
+                }
+            }
     }
     private func refresh() {
         guard folder != nil else { return }
@@ -125,9 +139,9 @@ struct WorktreesView: View {
             _ = try await model.call("refreshWorktrees")
         }
     }
-    private func register(_ entry: GitWorktree) {
+    private func prune() {
         guard let folderID else { return }
-        run { _ = try await model.call("registerWorktree", .object(["projectID": .string(project.id.uuidString), "folderID": .string(folderID.uuidString), "path": .string(entry.path)])) }
+        run { _ = try await model.call("pruneWorktrees", .object(["projectID": .string(project.id.uuidString), "folderID": .string(folderID.uuidString)])) }
     }
     private func run(_ operation: @escaping @MainActor () async throws -> Void) {
         guard !busy else { return }

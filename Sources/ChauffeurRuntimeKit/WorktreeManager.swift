@@ -207,11 +207,16 @@ public actor WorktreeManager {
         result.gitIdentity = try? await identity(at: result.path)
         return result
     }
-    public func remove(_ worktree: Worktree, liveSessions: [Session]) async throws {
-        guard worktree.managed else { throw ChauffeurError("external_worktree", "External worktrees can only be unregistered") }
+    /// Removes a checkout with `git worktree remove`. External checkouts are
+    /// only deleted when the caller explicitly asks for it.
+    public func remove(_ worktree: Worktree, liveSessions: [Session], allowExternal: Bool = false) async throws {
         let path = Paths.canonical(worktree.path)
         let managedRoot = Paths.canonical(root.path) + "/"
-        guard path.hasPrefix(managedRoot) else { throw ChauffeurError("unmanaged_path", "Worktree is outside Chauffeur's managed directory", path: path) }
+        if !allowExternal {
+            guard worktree.managed else { throw ChauffeurError("external_worktree", "External worktrees can only be unregistered") }
+            guard path.hasPrefix(managedRoot) else { throw ChauffeurError("unmanaged_path", "Worktree is outside Chauffeur's managed directory", path: path) }
+        }
+        guard path != Paths.canonical(worktree.repositoryPath) else { throw ChauffeurError("main_checkout", "The main checkout cannot be removed", path: path) }
         guard !liveSessions.contains(where: { session in
             session.state.isLive && (session.worktreeID == worktree.id
                 || worktree.gitIdentity.map { (session.launch.gitWorktreeIdentities ?? []).contains($0) } == true
@@ -228,5 +233,9 @@ public actor WorktreeManager {
             throw ChauffeurError("dirty_worktree", "Worktree has modified or untracked files", path: path)
         }
         _ = try await git(worktree.repositoryPath, ["worktree", "remove", "--", path])
+    }
+    /// Drops Git's entries for worktrees whose directories no longer exist.
+    public func prune(repositoryPath: String) async throws {
+        _ = try await git(repositoryPath, ["worktree", "prune"])
     }
 }

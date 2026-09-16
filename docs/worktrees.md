@@ -6,10 +6,17 @@ shows its branch and directory name, a live-session count, and an orange badge
 when a session needs attention; hover for the full path. Select a checkout to show
 its sessions above the terminal, with **Launch Agent…** and **Open Shell** for
 that checkout in the header, the empty state, and the row's context menu. Select
-the repository row for an overview of all its checkouts. Unregistered Git
-worktrees appear as **Not registered** and cannot host sessions until registered
-through **Manage Worktrees…**. Missing registered worktrees stay visible with their
-availability status.
+the repository row for an overview of all its checkouts. Every worktree Git
+reports is listed and usable; Chauffeur records a worktree automatically the
+first time you launch an agent or open a shell in it. A checkout that Git no
+longer lists stays in the tree as **Finished** only while sessions still refer to
+it; records without sessions are dropped when their checkout disappears, and Git
+entries whose directory is gone are left for **Prune** in Manage Worktrees.
+
+Right-click a worktree and choose **Delete Worktree…** to remove its checkout
+with `git worktree remove` (the checkout must be clean and have no live sessions;
+the branch is kept) together with its finished sessions and their saved terminal
+history. On a Finished row the same action removes just the history.
 
 **Open Shell** starts your login shell in the checkout as a Chauffeur session. It
 keeps running when the window closes, appears in the checkout's session strip, and
@@ -22,8 +29,8 @@ flows, including when the agent fails to start. Selecting another session moves
 the highlight to that session's checkout; background inventory refreshes do not
 move the scroll position.
 
-Open **Manage Worktrees…** in a project window, choose a repository, and either register
-an existing Git worktree or create one with a branch and base ref. Creation shows
+Open **Manage Worktrees…** in a project window, choose a repository, and create a
+worktree with a branch and base ref, delete existing ones, or prune stale Git entries. Creation shows
 the destination under Chauffeur's managed storage. The resolved base commit is
 recorded separately from the branch's current state. A failed agent launch
 retains the checkout for another explicit launch.
@@ -34,7 +41,7 @@ worktree's context menu selects its owning repository. Each opening starts with
 its requested repository; an unavailable target falls back to the first
 registered project folder.
 
-The manager shows registered and other Git checkout counts above a bounded list
+The manager shows the worktree count and any stale Git entries above a bounded list
 with a persistent scrollbar. While Git is working, the repository picker, creation
 fields, list actions, and Done button are disabled. Failed operations leave the
 manager open with their error so you can correct the input and retry. Creation

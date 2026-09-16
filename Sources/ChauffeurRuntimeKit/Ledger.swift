@@ -165,6 +165,19 @@ public actor Ledger {
         }
         return token
     }
+    /// Deletes a finished session and everything the ledger holds for it,
+    /// including messages and delegations it took part in.
+    public func forget(sessionID: UUID) throws {
+        let id = sessionID.uuidString
+        try transaction {
+            try execute("DELETE FROM attention_notices WHERE session_id=?", [id])
+            try execute("DELETE FROM grants WHERE session_id=?", [id])
+            try execute("DELETE FROM message_tombstones WHERE sender_id=?", [id])
+            try execute("DELETE FROM messages WHERE sender_id=? OR recipient_id=?", [id, id])
+            try execute("DELETE FROM delegations WHERE parent_id=? OR child_id=?", [id, id])
+            try execute("DELETE FROM sessions WHERE id=?", [id])
+        }
+    }
     public func revoke(sessionID: UUID) throws { try execute("UPDATE grants SET revoked=1 WHERE session_id=?", [sessionID.uuidString]) }
     public func authenticate(_ token: String) throws -> Caller {
         guard !token.isEmpty, token.utf8.count <= 512,

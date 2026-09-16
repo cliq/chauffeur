@@ -22,6 +22,22 @@ cycle within the selected checkout. ⌘⇧A cycles attention sessions across the
 project and selects each one's checkout. Notification routes select the session
 and its checkout without changing the sidebar mode.
 
+## Registration is implicit
+
+Every worktree Git reports for a folder is listed and usable. Launch Agent and
+Open Shell register the Git worktree on demand through the existing idempotent
+`registerWorktree` call, so records exist only for checkouts Chauffeur has used or
+created. Reconciliation deletes a record whose checkout Git no longer lists when no
+session refers to it; a record with session history stays as a **Finished** row. Git
+entries whose directory is gone and that nothing refers to are hidden from the tree
+and offered for `git worktree prune` in Manage Worktrees.
+
+**Delete Worktree…** (`deleteWorktree`) removes the checkout with
+`git worktree remove`, including external checkouts, when it is clean and has no
+live sessions; then deletes the worktree records, the finished sessions that ran
+there, their ledger rows (including messages and delegations they took part in) and
+their saved terminal history. Manual Register and Unregister are gone from the UI.
+
 ## Persistence
 
 `WindowState` gains `sidebarMode`, `selectedFolderID` and `selectedWorktreePath`.

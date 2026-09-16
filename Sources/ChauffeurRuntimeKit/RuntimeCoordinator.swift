@@ -137,6 +137,15 @@ public actor RuntimeCoordinator {
                 ?? observations.first { $0.sourcePath == stored.value.repositoryPath }
                 ?? RepositoryInventory(sourcePath: stored.value.repositoryPath, status: .failed)
             let updated = await worktrees.reconciled(stored.value, inventory: observed)
+            if observed.status == .available, updated.availability == .missing, !worktreeRecordWrites.contains(updated.id),
+               !checkoutClaims.isRemoving(path: updated.path, worktreeID: updated.id),
+               sessionsUsing(path: updated.path, worktreeIDs: [updated.id], folderID: updated.folderID, in: knownSessions(snapshot)).isEmpty {
+                // Nothing refers to this checkout any more, so the record has no purpose.
+                do { try await store.delete(worktree: updated.id) }
+                catch let error as ChauffeurError { record(error) }
+                catch { record(ChauffeurError("worktree_unavailable", "Stale worktree record could not be removed", path: updated.path)) }
+                continue
+            }
             guard updated != stored.value else { continue }
             do { try await saveWorktree(updated, expectedVersion: stored.version) }
             catch let error as ChauffeurError where error.code == "edit_conflict" || error.code == "worktree_busy" { /* Next scan uses the new record; never overwrite an external edit or removal. */ }
@@ -371,6 +380,16 @@ public actor RuntimeCoordinator {
             return try .from(await ledger.cancelMessage(messageID, caller: Caller(sessionID: message.senderID, scope: message.scope)))
         case "worktreeInventory": return try .from(await worktrees.inventory(at: params.requiredString("path")))
         case "refreshWorktrees": await reconcileWorktrees(); return try .from(repositoryInventories)
+        case "deleteWorktree":
+            let result = try await deleteWorktree(projectID: params.uuid("projectID"), folderID: params.uuid("folderID"), path: params.requiredString("path"))
+            await reconcileWorktrees()
+            return result
+        case "pruneWorktrees":
+            let snapshot = await store.current(), projectID = try params.uuid("projectID"), folderID = try params.uuid("folderID")
+            guard let folder = snapshot.projects.first(where: { $0.value.id == projectID })?.value.folders.first(where: { $0.id == folderID && $0.registered }) else { throw ChauffeurError("missing_folder", "Select a registered project folder") }
+            try await worktrees.prune(repositoryPath: folder.canonicalPath)
+            await reconcileWorktrees()
+            return try .from(repositoryInventories)
         case "previewWorktree":
             let snapshot = await store.current(), projectID = try params.uuid("projectID"), folderID = try params.uuid("folderID")
             guard let folder = snapshot.projects.first(where: { $0.value.id == projectID })?.value.folders.first(where: { $0.id == folderID && $0.registered }) else { throw ChauffeurError("missing_folder", "Select a registered repository") }
@@ -407,6 +426,64 @@ public actor RuntimeCoordinator {
         case "reconcile": try await reconcile(); return health()
         default: throw ChauffeurError("unknown_method", "Unknown runtime method")
         }
+    }
+    /// Stored session records plus live ones the store may not have saved yet.
+    private func knownSessions(_ snapshot: StoreSnapshot) -> [Session] {
+        var byID = Dictionary(uniqueKeysWithValues: snapshot.sessions.map { ($0.value.id, $0.value) })
+        for session in sessions.values { byID[session.id] = session }
+        return Array(byID.values)
+    }
+    /// Sessions whose history belongs to a checkout: by worktree record, or by
+    /// working directory for sessions launched before the record existed.
+    private func sessionsUsing(path: String, worktreeIDs: Set<UUID>, folderID: UUID, in sessions: [Session]) -> [Session] {
+        let canonical = Paths.canonical(path)
+        return sessions.filter { session in
+            session.folderID == folderID && (session.worktreeID.map(worktreeIDs.contains) == true
+                || (session.worktreeID == nil && Paths.canonical(session.launch.workingDirectory) == canonical))
+        }
+    }
+    /// Deletes a checkout, its records, and the history of its finished sessions.
+    /// The checkout is removed from disk only when Git still lists it there.
+    private func deleteWorktree(projectID: UUID, folderID: UUID, path requested: String) async throws -> JSONValue {
+        let snapshot = await store.reload()
+        guard let folder = snapshot.projects.first(where: { $0.value.id == projectID })?.value.folders.first(where: { $0.id == folderID && $0.registered }) else { throw ChauffeurError("missing_folder", "Select a registered project folder") }
+        let path = Paths.canonical(requested)
+        guard path != folder.canonicalPath else { throw ChauffeurError("main_checkout", "The main checkout cannot be deleted", path: path) }
+        let inventory = try await worktrees.inventory(at: folder.canonicalPath)
+        let entry = inventory.first { $0.path == path }
+        let records = snapshot.worktrees.filter { record in
+            record.value.projectID == projectID && record.value.folderID == folderID
+                && (Paths.canonical(record.value.path) == path || (entry?.gitIdentity != nil && record.value.gitIdentity == entry?.gitIdentity))
+        }
+        let recordIDs = Set(records.map(\.value.id))
+        let affected = sessionsUsing(path: path, worktreeIDs: recordIDs, folderID: folderID, in: knownSessions(snapshot).filter { $0.projectID == projectID })
+        guard !affected.contains(where: { $0.state.isLive || launching.contains($0.id) }) else {
+            throw ChauffeurError("active_worktree", "Stop sessions using this worktree before deleting it", path: path)
+        }
+        let removalID = records.first?.value.id ?? UUID()
+        try checkoutClaims.beginRemoval(removalID, path: path, worktreeIDs: recordIDs, gitIdentity: entry?.gitIdentity, sessions: Array(sessions.values))
+        defer { checkoutClaims.endRemoval(removalID) }
+        var deletedCheckout = false
+        if let entry {
+            if entry.availability ?? .available == .available {
+                let repositoryID = try await worktrees.repositoryID(at: folder.canonicalPath)
+                var target = records.first?.value ?? Worktree(projectID: projectID, folderID: folderID, repositoryID: repositoryID, path: path, repositoryPath: folder.canonicalPath, branch: entry.branch, baseCommit: entry.commit, managed: false)
+                target.path = path; target.repositoryPath = folder.canonicalPath; target.gitIdentity = target.gitIdentity ?? entry.gitIdentity
+                try await worktrees.remove(target, liveSessions: Array(sessions.values), allowExternal: true)
+                deletedCheckout = true
+            } else {
+                // The directory is already gone; only Git's stale entry remains.
+                try await worktrees.prune(repositoryPath: folder.canonicalPath)
+            }
+        }
+        for session in affected {
+            try await ledger.forget(sessionID: session.id)
+            try? await snapshots.delete(session.id)
+            try await store.delete(session: session.id)
+            sessions.removeValue(forKey: session.id)
+        }
+        for record in records { try await store.delete(worktree: record.value.id) }
+        return .object(["path": .string(path), "deletedCheckout": .bool(deletedCheckout), "deletedSessions": .number(Double(affected.count)), "deletedRecords": .number(Double(records.count))])
     }
     private func registerWorktree(_ key: WorktreeRegistration) async throws -> Stored<Worktree> {
         let snapshot = await store.reload()
