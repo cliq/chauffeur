@@ -1,9 +1,46 @@
 import AppKit
+import ChauffeurCore
 @preconcurrency import SwiftTerm
 
 /// Updates default terminal colors without replacing the terminal or its buffer.
 final class ThemedTerminalView: TerminalView {
     private var appliedAppearance: NSAppearance.Name?
+    var acceptsFileDrops = false {
+        didSet {
+            if acceptsFileDrops { registerForDraggedTypes([.fileURL]) }
+            else { unregisterDraggedTypes() }
+        }
+    }
+
+    private func droppedFiles(_ sender: NSDraggingInfo) -> [URL] {
+        (sender.draggingPasteboard.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL]) ?? []
+    }
+
+    override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+        acceptsFileDrops && !droppedFiles(sender).isEmpty ? .copy : []
+    }
+
+    override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
+        draggingEntered(sender)
+    }
+
+    override func prepareForDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        acceptsFileDrops && !droppedFiles(sender).isEmpty
+    }
+
+    override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        guard acceptsFileDrops else { return false }
+        let files = droppedFiles(sender)
+        guard !files.isEmpty else { return false }
+        // Honor bracketed paste without touching the system clipboard. Quote
+        // each path, including spaces, apostrophes, and shell metacharacters.
+        let paths = ArgumentText.format(files.map(\.path)) + " "
+        let paste = getTerminal().bracketedPasteMode
+            ? "\u{1b}[200~" + paths + "\u{1b}[201~" : paths
+        send(txt: paste)
+        window?.makeFirstResponder(self)
+        return true
+    }
     /// Set when a tab change asks for keyboard focus before the view is shown.
     var focusesWhenAttached = false
     override func isAccessibilityElement() -> Bool { true }

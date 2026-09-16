@@ -28,6 +28,7 @@ import ChauffeurCore
         self.sessionID = sessionID
         self.readOnly = readOnly
         terminal.terminalDelegate = self
+        terminal.acceptsFileDrops = !readOnly
         terminal.font = .monospacedSystemFont(ofSize: 13, weight: .regular)
         terminal.getTerminal().changeScrollback(scrollback)
         terminal.applyAppearance()
