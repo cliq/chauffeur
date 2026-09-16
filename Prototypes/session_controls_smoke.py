@@ -189,9 +189,9 @@ with tempfile.TemporaryDirectory(prefix='chauffeur-session-controls-', dir='/tmp
             assert live_ids() == original_live
             # Regression: a cancelled quit must not starve asynchronous editor saves.
             ax('press', title='Settings…', role='AXMenuItem', includeMenus=True)
-            wait_for(lambda: any(c['title'] == 'Presets' for c in controls()), 'settings opened')
-            ax('press', title='Presets')
-            ax('press', title='Add Set…')
+            wait_for(lambda: any(c['title'] == 'Agent Presets' for c in controls()), 'settings opened')
+            ax('press', title='Agent Presets')
+            ax('press', title='Add Team…')
             wait_for(lambda: control('preset-set.name'), 'preset editor')
             ax('typeText', 'preset-set.name', value='After cancelled quit')
             ax('press', 'preset-set.save')

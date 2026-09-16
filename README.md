@@ -153,18 +153,18 @@ shared diagnostics. See [V3](docs/decisions/V3-mcp-and-status.md) for verified s
 
 ## Start using a development build
 
-1. Open Settings and create a preset set, then add presets selecting existing
+1. Open Settings and create a team, then add agent presets selecting existing
    Codex or Claude Code configuration directories and their executables.
-2. Create a project, choose its preset set, and register folders or discover Git
+2. Create a project, choose its team, and register folders or discover Git
    repositories under a parent folder.
-3. Open a project and create a session. Choose a group, preset, checkout, and any
+3. Open a project and create a session. Choose a group, agent preset, checkout, and any
    additional repository paths. Shared checkouts require an explicit choice.
 4. Select a repository's checkout in the sidebar to see its sessions, launch an
    agent there, or open a shell. Session Details shows
    launch paths, process identity, messages, delegations, and stop/resume actions.
 
 Optionally install the [Chauffeur coordination skill](docs/coordination-skill.md)
-from **Settings → Presets → Chauffeur Skill…**. Installation applies to all
+from **Settings → Agent Presets → Chauffeur Skill…**. Installation applies to all
 sessions using that profile and can be removed from the same sheet.
 
 Closing a project window or quitting the UI keeps agents running.

@@ -7,6 +7,9 @@ struct SettingsView: View {
     @State private var newSet = false
     @State private var editedSet: PresetSet?
     @State private var newPreset = false
+    @State private var deletingSet: Stored<PresetSet>?
+    @State private var confirmingSetDeletion = false
+    @State private var deleting = false
     @State private var editedPreset: AgentPreset?
     @State private var skillPreset: AgentPreset?
     @State private var retention = RetentionSettings()
@@ -14,39 +17,44 @@ struct SettingsView: View {
         TabView {
             HSplitView {
                 VStack(alignment: .leading, spacing: 0) {
-                    Text("Preset Sets").font(.headline).padding(.horizontal, 12).padding(.vertical, 10)
+                    Text("Teams").font(.headline).padding(.horizontal, 12).padding(.vertical, 10)
                     List(selection: $selectedSet) {
                         ForEach(model.presetSets) { set in
                             HStack { Text(set.name); if set.archived { Text("Archived").font(.caption).foregroundStyle(.secondary) } }.tag(set.id)
-                                .contextMenu { Button("Edit Preset Set…") { editedSet = set } }
+                                .contextMenu {
+                                    Button("Edit Team…") { editedSet = set }
+                                    Button("Delete Team…", role: .destructive) { confirmDelete(set) }.disabled(deleting || !model.online)
+                                }
                         }
                     }.listStyle(.sidebar).frame(maxHeight: .infinity)
                     Divider()
-                    HStack { Button("Add Set…") { newSet = true }; if let selectedSet, let set = model.presetSets.first(where: { $0.id == selectedSet }) { Button("Edit…") { editedSet = set }.accessibilityIdentifier("preset-set.edit") } }.padding(12)
+                    HStack { Button("Add Team…") { newSet = true }; if let selectedSet, let set = model.presetSets.first(where: { $0.id == selectedSet }) { Button("Edit…") { editedSet = set }.accessibilityIdentifier("preset-set.edit")
+                        Button(role: .destructive) { confirmDelete(set) } label: { Image(systemName: "trash") }
+                            .help("Delete Team…").accessibilityLabel("Delete Team…").accessibilityIdentifier("preset-set.delete").disabled(deleting || !model.online) } }.padding(12)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }.frame(minWidth: 200, idealWidth: 220, maxWidth: 280, maxHeight: .infinity, alignment: .topLeading)
                 VStack(alignment: .leading, spacing: 14) {
                     if let selectedSet, let set = model.presetSets.first(where: { $0.id == selectedSet }) {
                         HStack { Text(set.name).font(.title2); Spacer(); Text("Revision \(set.revision)").foregroundStyle(.secondary) }
-                        Text("Presets select existing CLI configuration directories. Edits affect new launches in every linked project.").font(.callout).foregroundStyle(.secondary)
+                        Text("Agent presets select existing CLI configuration directories. Edits affect new launches in every linked project.").font(.callout).foregroundStyle(.secondary)
                         List(model.presets.filter { $0.setID == set.id }) { preset in
                             VStack(alignment: .leading, spacing: 5) {
                                 HStack { Text(preset.name).fontWeight(.semibold); Text(preset.kind.displayName).foregroundStyle(.secondary); if preset.archived { Text("Archived").font(.caption) }; Spacer(); Button("Edit…") { editedPreset = preset }.accessibilityIdentifier("preset.edit-\(preset.id.uuidString)") }
                                 Text(preset.configurationDirectory).font(.caption).textSelection(.enabled)
                                 Button("Chauffeur Skill…") { skillPreset = preset }
                                     .accessibilityIdentifier("preset-skill-\(preset.id.uuidString)")
-                                if model.presets.filter({ Paths.canonical($0.configurationDirectory) == Paths.canonical(preset.configurationDirectory) }).count > 1 { Label("Configuration directory shared by multiple presets", systemImage: "person.2").font(.caption).foregroundStyle(.secondary) }
-                                if set.defaultPresetID == preset.id { Text("Default preset").font(.caption).foregroundStyle(.tint) }
+                                if model.presets.filter({ Paths.canonical($0.configurationDirectory) == Paths.canonical(preset.configurationDirectory) }).count > 1 { Label("Configuration directory shared by multiple agent presets", systemImage: "person.2").font(.caption).foregroundStyle(.secondary) }
+                                if set.defaultPresetID == preset.id { Text("Default agent preset").font(.caption).foregroundStyle(.tint) }
                             }.padding(.vertical, 6)
                         }
-                        Button("Add Preset…") { newPreset = true }.disabled(set.archived)
+                        Button("Add Agent Preset…") { newPreset = true }.disabled(set.archived)
                     } else {
-                        ContentUnavailableView("Choose a preset set", systemImage: "person.crop.rectangle.stack", description: Text("Create sets such as Personal or Client 1, then add Codex and Claude Code presets."))
+                        ContentUnavailableView("Choose a team", systemImage: "person.crop.rectangle.stack", description: Text("Create teams such as Personal or Client 1, then add Codex and Claude Code agent presets."))
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
                     }
                 }.padding(20).frame(minWidth: 450, maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             }.frame(maxWidth: .infinity, maxHeight: .infinity)
-                .tabItem { Label("Presets", systemImage: "person.crop.rectangle.stack") }
+                .tabItem { Label("Agent Presets", systemImage: "person.crop.rectangle.stack") }
             AppearanceSettingsView()
                 .tabItem { Label("Appearance", systemImage: "circle.lefthalf.filled") }
             Form {
@@ -84,12 +92,40 @@ struct SettingsView: View {
             }.formStyle(.grouped).tabItem { Label("Runtime", systemImage: "gearshape.2") }
         }.frame(minWidth: 740, idealWidth: 830, maxWidth: .infinity, minHeight: 480, idealHeight: 550, maxHeight: .infinity)
             .onAppear { selectedSet = selectedSet ?? model.presetSets.first?.id; retention = model.snapshot.settings }
+            .confirmationDialog("Delete \(deletingSet?.value.name ?? "team")?", isPresented: $confirmingSetDeletion, titleVisibility: .visible) {
+                Button("Delete Team", role: .destructive) { deleteSet() }
+                Button("Cancel", role: .cancel) { deletingSet = nil }
+            } message: {
+                Text("Deletes this team and its agent preset definitions. Existing CLI configuration folders and session history are preserved.")
+            }
             .sheet(isPresented: $newSet) { PresetSetEditor { id in selectedSet = id; newSet = false } }
             .sheet(item: $editedSet) { set in PresetSetEditor(presetSet: set) { id in selectedSet = id; editedSet = nil } }
             .sheet(isPresented: $newPreset) { if let selectedSet { PresetEditor(setID: selectedSet) } }
             .sheet(item: $editedPreset) { preset in PresetEditor(setID: preset.setID, preset: preset) }
             .sheet(item: $skillPreset) { preset in CoordinationSkillView(preset: preset) }
     }
+    private func confirmDelete(_ set: PresetSet) {
+        let projects = model.projects.filter { $0.presetSetID == set.id }
+        guard projects.isEmpty else {
+            model.error = "Switch these projects to another team before deleting: " + projects.map(\.name).sorted().joined(separator: ", ")
+            return
+        }
+        deletingSet = model.snapshot.store.presetSets.first { $0.value.id == set.id }
+        confirmingSetDeletion = deletingSet != nil
+    }
+    private func deleteSet() {
+        guard let target = deletingSet, !deleting else { return }
+        deleting = true
+        Task {
+            defer { deleting = false; deletingSet = nil }
+            do {
+                _ = try await model.call("deletePresetSet", .object(["setID": .string(target.value.id.uuidString), "version": .string(target.version)]))
+                try await model.refresh()
+                if selectedSet == target.value.id { selectedSet = model.presetSets.first?.id }
+            } catch { model.error = error.localizedDescription }
+        }
+    }
+
 }
 
 struct AppearanceSettingsView: View {
@@ -120,11 +156,11 @@ struct PresetSetEditor: View {
     @State private var saving = false
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
-            Text(presetSet == nil ? "Create Preset Set" : "Edit Preset Set").font(.title2)
+            Text(presetSet == nil ? "Create Team" : "Edit Team").font(.title2)
             Form {
                 TextField("Name", text: $name).accessibilityIdentifier("preset-set.name")
                 if let presetSet {
-                    Picker("Default preset", selection: $defaultID) {
+                    Picker("Default agent preset", selection: $defaultID) {
                         Text("None").tag(UUID?.none)
                         ForEach(model.presets.filter { $0.setID == presetSet.id && !$0.archived }) { preset in Text(preset.name).tag(Optional(preset.id)) }
                     }.accessibilityIdentifier("preset-set.default-preset")
@@ -163,7 +199,7 @@ struct PresetEditor: View {
         VStack(alignment: .leading, spacing: 16) {
             Text(preset == nil ? "Create Agent Preset" : "Edit Agent Preset").font(.title2)
             Form {
-                TextField("Preset name", text: $name).accessibilityIdentifier("preset.name")
+                TextField("Agent preset name", text: $name).accessibilityIdentifier("preset.name")
                 Picker("Agent", selection: $kind) { Text("Codex").tag(CLIKind.codex); Text("Claude Code").tag(CLIKind.claude) }
                     .onChange(of: kind) { _, value in if executable == "codex" || executable == "claude" { executable = value == .codex ? "codex" : "claude" } }
                 HStack { TextField("Executable", text: $executable).accessibilityIdentifier("preset.executable"); Button("Choose…") { if let path = FilePanels.executable() { executable = path } }.accessibilityIdentifier("preset.choose-executable") }
@@ -183,7 +219,7 @@ struct PresetEditor: View {
             if let failure { Text(failure).foregroundStyle(.red) }
             HStack {
                 Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction); Spacer()
-                Button("Save Preset") {
+                Button("Save Agent Preset") {
                     var value = preset ?? AgentPreset(setID: setID, name: name, kind: kind, executable: executable, configurationDirectory: directory)
                     value.name = name; value.kind = kind; value.executable = executable; value.configurationDirectory = (directory as NSString).expandingTildeInPath
                     value.archived = archived; value.integration = .unverified

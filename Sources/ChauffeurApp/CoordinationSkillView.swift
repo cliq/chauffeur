@@ -18,7 +18,7 @@ struct CoordinationSkillView: View {
             Text("Chauffeur Coordination Skill").font(.title2)
             Text(preset.name).font(.headline)
             Text("Optional guidance for discovering peers, checking messages, delegating work, and reporting results. Sessions get their current project and group from Chauffeur.")
-            Text("Installation applies to every session and preset using this configuration directory, including sessions started outside Chauffeur.")
+            Text("Installation applies to every session and agent preset using this configuration directory, including sessions started outside Chauffeur.")
                 .font(.callout).foregroundStyle(.secondary)
             if let installation {
                 VStack(alignment: .leading, spacing: 8) {
@@ -57,7 +57,7 @@ struct CoordinationSkillView: View {
             .alert("Remove the Chauffeur skill?", isPresented: $confirmRemoval) {
                 Button("Cancel", role: .cancel) {}
                 Button("Remove Skill", role: .destructive) { change("removeSkill") }
-            } message: { Text("Remove the unchanged Chauffeur guidance from \(installation?.path ?? preset.configurationDirectory). This affects every preset using this directory.") }
+            } message: { Text("Remove the unchanged Chauffeur guidance from \(installation?.path ?? preset.configurationDirectory). This affects every agent preset using this directory.") }
     }
 
     private func refresh() async {

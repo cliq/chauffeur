@@ -113,7 +113,7 @@ with tempfile.TemporaryDirectory(prefix='chauffeur-editors-', dir='/tmp') as dir
         wait_for(lambda: not control('Open'), 'native panel completed')
 
     def choose_popup(title, option):
-        identifiers = {'Default preset': 'preset-set.default-preset', 'Preset set': 'project.preset-set'}
+        identifiers = {'Default agent preset': 'preset-set.default-preset', 'Team': 'project.preset-set'}
         if control(identifier=identifiers[title])['value'] == option:
             return
         press(identifier=identifiers[title])
@@ -125,8 +125,8 @@ with tempfile.TemporaryDirectory(prefix='chauffeur-editors-', dir='/tmp') as dir
 
     def settings():
         press('Settings…', role='AXMenuItem', includeMenus=True)
-        wait_for(lambda: control('Presets'), 'Settings window')
-        press('Presets')
+        wait_for(lambda: control('Agent Presets'), 'Settings window')
+        press('Agent Presets')
 
     def welcome():
         press('Open Project Window…', role='AXMenuItem', includeMenus=True)
@@ -158,7 +158,7 @@ with tempfile.TemporaryDirectory(prefix='chauffeur-editors-', dir='/tmp') as dir
         subprocess.run(['git', '-C', str(path), '-c', 'core.hooksPath=/dev/null', '-c', 'commit.gpgsign=false', *arguments], capture_output=True, check=True)
 
     def create_set(name):
-        press('Add Set…')
+        press('Add Team…')
         wait_for(lambda: control(identifier='preset-set.name'), 'set editor')
         assert not control('Save')['enabled']
         type_text(name, identifier='preset-set.name')
@@ -177,16 +177,26 @@ with tempfile.TemporaryDirectory(prefix='chauffeur-editors-', dir='/tmp') as dir
         assert not control('Create New Project…')['enabled']
         settings()
         personal = create_set('Personal fixture')
+        disposable = create_set('Delete fixture')
+        press(identifier='preset-set.delete')
+        wait_for(lambda: control('Delete Team'), 'set deletion confirmation')
+        press('Cancel', allow_modal=True)
+        assert any(s['id'] == disposable['id'] for s in records('presetSets'))
+        press(identifier='preset-set.delete')
+        wait_for(lambda: control('Delete Team'), 'set deletion confirmation again')
+        press('Delete Team', allow_modal=True)
+        wait_for(lambda: not any(s['id'] == disposable['id'] for s in records('presetSets')), 'preset set deleted')
+        summary['presetSetDeleteCancelAndConfirm'] = True
         client = create_set('Client fixture')
         summary['nativePresetSetCreation'] = True
         print('Preset sets created', flush=True)
 
-        press('Add Preset…')
+        press('Add Agent Preset…')
         wait_for(lambda: control(identifier='preset.name'), 'preset editor')
-        assert not control('Save Preset')['enabled']
+        assert not control('Save Agent Preset')['enabled']
         type_text('Native fixture', identifier='preset.name')
         type_text(str(root / 'missing-profile'), identifier='preset.configuration-directory')
-        press('Save Preset')
+        press('Save Agent Preset')
         wait_for(lambda: 'Directory is missing' in text(), 'invalid directory error')
         assert records('presets') == []
         profile = root / '.profile-fixture'; profile.mkdir()
@@ -195,11 +205,11 @@ with tempfile.TemporaryDirectory(prefix='chauffeur-editors-', dir='/tmp') as dir
         choose_path(fixture_cli, identifier='preset.choose-executable')
         assert control(identifier='preset.executable')['value'] == str(fixture_cli)
         ax('typeText', title='Launch arguments', role='AXTextArea', value='--model "unfinished')
-        press('Save Preset')
+        press('Save Agent Preset')
         wait_for(lambda: 'quote' in text().lower(), 'argument validation')
         assert records('presets') == []
         ax('typeText', title='Launch arguments', role='AXTextArea', value='--model "fixture model" --yolo')
-        press('Save Preset')
+        press('Save Agent Preset')
         preset = wait_for(lambda: next(iter(records('presets')), None), 'preset saved')
         wait_for(lambda: not any(c['role'] == 'AXSheet' for c in ax()), 'preset editor closed')
         assert preset['setID'] == client['id'], 'Preset must belong to the selected set'
@@ -212,7 +222,7 @@ with tempfile.TemporaryDirectory(prefix='chauffeur-editors-', dir='/tmp') as dir
 
         press(identifier='preset-set.edit')
         wait_for(lambda: control(identifier='preset-set.name'), 'set edit')
-        choose_popup('Default preset', 'Native fixture')
+        choose_popup('Default agent preset', 'Native fixture')
         press('Save')
         wait_for(lambda: next(s for s in records('presetSets') if s['id'] == client['id']).get('defaultPresetID') == preset['id'], 'default preset saved')
         ax('closeWindow', identifier='com_apple_SwiftUI_Settings_window')
@@ -220,7 +230,7 @@ with tempfile.TemporaryDirectory(prefix='chauffeur-editors-', dir='/tmp') as dir
         press('Create New Project…')
         wait_for(lambda: control(identifier='project.name'), 'project editor')
         type_text('Native Project A', identifier='project.name')
-        choose_popup('Preset set', 'Client fixture')
+        choose_popup('Team', 'Client fixture')
         press('Start Empty')
         press('Save Project')
         project = wait_for(lambda: next((p for p in records('projects') if p['name'] == 'Native Project A'), None), 'empty project saved')
@@ -278,7 +288,7 @@ with tempfile.TemporaryDirectory(prefix='chauffeur-editors-', dir='/tmp') as dir
         press('Create New Project…')
         wait_for(lambda: control(identifier='project.name'), 'second project editor')
         type_text('Native Project B', identifier='project.name')
-        choose_popup('Preset set', 'Client fixture')
+        choose_popup('Team', 'Client fixture')
         choose_path(parent, title='Choose Parent Folder…')
         wait_for(lambda: control(identifier='project.candidate-linked'), 'discovered Git worktree')
         assert control(identifier='project.candidate-alpha') and control(identifier='project.candidate-beta')
@@ -333,7 +343,7 @@ with tempfile.TemporaryDirectory(prefix='chauffeur-editors-', dir='/tmp') as dir
         press('Create New Project…')
         wait_for(lambda: control(identifier='project.name'), 'third project editor')
         type_text('Native Project C', identifier='project.name')
-        choose_popup('Preset set', 'Personal fixture')
+        choose_popup('Team', 'Personal fixture')
         press('Start Empty')
         choose_path(unrelated, title='Add Folder…')
         press('Save Project')

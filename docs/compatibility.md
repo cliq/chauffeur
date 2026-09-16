@@ -33,9 +33,9 @@ coordination/status. Missing `--add-dir` support rejects a multi-directory launc
 Missing native conversation IDs disable resume; no global resume selector is used.
 
 Codex 0.154.0 rejects `--add-dir` with a read-only sandbox. Chauffeur reports an
-explicit `-s read-only` or `--sandbox read-only` preset combined with additional
+explicit `-s read-only` or `--sandbox read-only` agent preset combined with additional
 folders before inspecting or spawning the CLI (including `=read-only` forms).
-Remove additional folders or explicitly choose `workspace-write` in the preset.
+Remove additional folders or explicitly choose `workspace-write` in the agent preset.
 Native configuration and managed policy can also affect effective permissions;
 the CLI still enforces them. Chauffeur does not silently increase permissions.
 

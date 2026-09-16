@@ -19,8 +19,8 @@ struct SessionDetailsView: View {
                     detail("Group", project.groups.first { $0.id == session.groupID }?.name ?? "Unavailable")
                     detail(session.launch.preset.kind.isAgent ? "Agent" : "Kind", session.launch.preset.kind.displayName)
                     if session.launch.preset.kind.isAgent {
-                        detail("Preset", session.launch.preset.name)
-                        detail("Preset set", "\(session.launch.presetSetName) · revision \(session.launch.presetSetRevision)")
+                        detail("Agent Preset", session.launch.preset.name)
+                        detail("Team", "\(session.launch.presetSetName) · revision \(session.launch.presetSetRevision)")
                         detail("Configuration directory", session.launch.configurationPath)
                     }
                     detail("Working directory", session.launch.workingDirectory)

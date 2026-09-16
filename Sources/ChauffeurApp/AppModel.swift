@@ -151,7 +151,7 @@ struct AppSnapshot: Decodable, Sendable {
     var presets: [AgentPreset] { snapshot.store.presets.map(\.value) }
     func project(_ id: UUID) -> Project? { projects.first { $0.id == id } }
     func sessions(in projectID: UUID) -> [Session] { snapshot.sessions.filter { $0.projectID == projectID } }
-    func setName(_ id: UUID) -> String { presetSets.first { $0.id == id }?.name ?? "Unresolved preset set" }
+    func setName(_ id: UUID) -> String { presetSets.first { $0.id == id }?.name ?? "Unresolved team" }
     func session(_ id: UUID?) -> Session? { snapshot.sessions.first { $0.id == id } }
 
     func start() {

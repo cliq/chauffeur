@@ -394,7 +394,7 @@ struct ProjectWindow: View {
             TerminalPane(session: selected, controller: layout.controller(for: selected.id, scrollback: model.snapshot.settings.scrollbackLines)).frame(minWidth: 240).id(selected.id)
         } else {
             VStack(spacing: 16) {
-                ContentUnavailableView("Choose a repository or worktree", systemImage: "arrow.triangle.branch", description: Text("Select a checkout in the sidebar to see its sessions, or launch an agent using this project's presets."))
+                ContentUnavailableView("Choose a repository or worktree", systemImage: "arrow.triangle.branch", description: Text("Select a checkout in the sidebar to see its sessions, or launch an agent using this project's agent presets."))
                 Button("New Session…") { showLaunch() }.buttonStyle(.borderedProminent).disabled(!canLaunch)
             }.frame(maxWidth: .infinity, maxHeight: .infinity)
         }

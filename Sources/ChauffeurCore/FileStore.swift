@@ -144,7 +144,7 @@ public actor FileStore {
             let set = read(PresetSet.self, metadata, into: &result.presetSets)
             for file in files(directory.appendingPathComponent("presets"), errors: &errors) {
                 read(AgentPreset.self, file, into: &result.presets) { value in
-                    try Validation.require(value.setID == set?.id, "Preset does not belong to its containing preset set")
+                    try Validation.require(value.setID == set?.id, "Agent preset does not belong to its containing team")
                 }
             }
         }
@@ -184,7 +184,7 @@ public actor FileStore {
         let existing = snapshot.presetSets.first { $0.value.id == value.id }
         let url = existing.map { URL(fileURLWithPath: $0.path) } ?? uniqueDirectory(parent: root.appendingPathComponent("preset-sets"), name: value.name).appendingPathComponent("preset-set.json")
         if let id = value.defaultPresetID {
-            try reference(snapshot.presets.contains { $0.value.id == id && $0.value.setID == value.id }, "Choose a default preset from this set", at: url)
+            try reference(snapshot.presets.contains { $0.value.id == id && $0.value.setID == value.id }, "Choose a default agent preset from this team", at: url)
         }
         var value = value
         if let existing {
@@ -197,11 +197,11 @@ public actor FileStore {
     }
     @discardableResult public func save(_ value: AgentPreset, expectedVersion: String? = nil) throws -> Stored<AgentPreset> {
         _ = reload()
-        guard let set = snapshot.presetSets.first(where: { $0.value.id == value.setID }) else { throw ChauffeurError("missing_set", "Preset set is unresolved") }
+        guard let set = snapshot.presetSets.first(where: { $0.value.id == value.setID }) else { throw ChauffeurError("missing_set", "Team is unresolved") }
         let existing = snapshot.presets.first { $0.value.id == value.id }
         let parent = URL(fileURLWithPath: set.path).deletingLastPathComponent().appendingPathComponent("presets")
         let url = existing.map { URL(fileURLWithPath: $0.path) } ?? uniqueFile(parent: parent, name: value.name)
-        try reference(existing == nil || existing?.value.setID == value.setID, "A preset cannot move between sets. Create a new preset instead", at: url)
+        try reference(existing == nil || existing?.value.setID == value.setID, "An agent preset cannot move between teams. Create a new agent preset instead", at: url)
         try value.validate()
         try checkVersion(at: url, expectedVersion: expectedVersion)
         if existing?.value != value {
@@ -220,10 +220,10 @@ public actor FileStore {
         let existing = snapshot.projects.first { $0.value.id == value.id }
         let url = existing.map { URL(fileURLWithPath: $0.path) } ?? uniqueDirectory(parent: root.appendingPathComponent("projects"), name: value.name).appendingPathComponent("project.json")
         var value = value
-        try reference(snapshot.presetSets.contains { $0.value.id == value.presetSetID } || existing?.value.presetSetID == value.presetSetID, "Choose an existing preset set", at: url)
+        try reference(snapshot.presetSets.contains { $0.value.id == value.presetSetID } || existing?.value.presetSetID == value.presetSetID, "Choose an existing team", at: url)
         if let previous = existing?.value, previous.presetSetID != value.presetSetID, value.lastPresetID == previous.lastPresetID { value.lastPresetID = nil }
         if let id = value.lastPresetID {
-            try reference(snapshot.presets.contains { $0.value.id == id && $0.value.setID == value.presetSetID } || (existing?.value.lastPresetID == id && existing?.value.presetSetID == value.presetSetID), "Last-used preset must belong to the project's set", at: url)
+            try reference(snapshot.presets.contains { $0.value.id == id && $0.value.setID == value.presetSetID } || (existing?.value.lastPresetID == id && existing?.value.presetSetID == value.presetSetID), "Last-used agent preset must belong to the project's set", at: url)
         }
         if let previous = existing?.value {
             let removedGroups = Set(previous.groups.map(\.id)).subtracting(value.groups.map(\.id))
@@ -291,6 +291,25 @@ public actor FileStore {
         let saved = try write(value, at: URL(fileURLWithPath: stored.path), expectedVersion: stored.version)
         snapshot.projects.removeAll { $0.value.id == projectID }; snapshot.projects.append(saved)
     }
+    /// Session launch snapshots are self-contained; only current project assignments
+    /// prevent deletion. Configuration directories referenced by presets are untouched.
+    public func deletePresetSet(_ id: UUID, expectedVersion: String) throws {
+        _ = reload()
+        guard let stored = snapshot.presetSets.first(where: { $0.value.id == id }) else {
+            throw ChauffeurError("missing_set", "Team no longer exists")
+        }
+        let url = URL(fileURLWithPath: stored.path)
+        try checkVersion(at: url, expectedVersion: expectedVersion)
+        let projects = snapshot.projects.filter { $0.value.presetSetID == id }
+        guard projects.isEmpty else {
+            throw ChauffeurError("preset_set_in_use", "Switch these projects to another team before deleting: " + projects.map { $0.value.name }.sorted().joined(separator: ", "))
+        }
+        let directory = url.deletingLastPathComponent()
+        try manager.removeItem(at: directory)
+        localChanges.insert(directory.path)
+        snapshot.presetSets.removeAll { $0.value.id == id }
+        snapshot.presets.removeAll { $0.value.setID == id }
+    }
     /// Removes a finished session's record. Liveness is the runtime's decision.
     public func delete(session id: UUID) throws {
         _ = reload()
@@ -329,7 +348,7 @@ public actor FileStore {
         } else if expectedVersion != nil { throw ChauffeurError("edit_conflict", "File was removed. Reload before saving", path: url.path) }
     }
     private func nextRevision(_ revision: Int) throws -> Int {
-        try Validation.require(revision < Int.max, "Preset set revision has reached its maximum")
+        try Validation.require(revision < Int.max, "Team revision has reached its maximum")
         return revision + 1
     }
     private func reference(_ valid: Bool, _ message: String, at url: URL) throws {

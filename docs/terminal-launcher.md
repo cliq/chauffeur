@@ -16,7 +16,7 @@ folder and opens its project window, selecting that repository in the sidebar.
 Worktrees observed through Git inventory are included. If multiple projects
 share the closest matching folder, a project chooser appears. An unregistered
 folder opens Create Project with that folder already added and its name filled
-in. Review the preset set and save to create the project, or cancel. Opening a
+in. Review the team and save to create the project, or cancel. Opening a
 project does not launch an agent. On a cold launch, only the requested project opens; repeated commands
 reuse an existing window. Other windows already open remain open.
 
@@ -57,6 +57,6 @@ native macOS administrator prompt. `/usr/local/bin/chauffeur` is a root-owned
 executable with mode 0755 and points to that Release's `chauffeur-launcher`.
 The installed command's help and relative-folder invocation both pass; running
 it from a registered repository opens Signos while preserving existing session,
-message and preset records and the same runtime. Private evidence:
+message and agent preset records and the same runtime. Private evidence:
 `.local/launcher-native/summary.json`. Relocation repair and literal forwarding
 also pass in private writable destinations.

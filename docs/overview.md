@@ -12,26 +12,26 @@ The two primary problems are choosing the correct personal or client configurati
 
 ## Everyday workflow
 
-1. Maintain preset sets such as **Personal**, **Client 1**, and **Client 2**. Each contains named Codex and/or Claude Code presets pointing to existing CLI configuration directories.
-2. Create a project, select a preset set, and either select repositories discovered under a folder or start empty and add folders from anywhere later.
+1. Maintain teams such as **Personal**, **Client 1**, and **Client 2**. Each contains named Codex and/or Claude Code agent presets pointing to existing CLI configuration directories.
+2. Create a project, select a team, and either select repositories discovered under a folder or start empty and add folders from anywhere later.
 3. Open the project in its own window. Place each project window on the desired macOS desktop.
 4. Choose a repository, an existing checkout or a new worktree, and an agent preset. Work directly in the CLI's terminal interface.
 5. Run several sessions, see which need attention, and let agents message peers or delegate a specific task to another visible session in the same agent group.
 6. Close windows or quit Chauffeur while agents continue. Reopen a project to reconnect to its running sessions.
 
-Example: **Client 1 / Project 1**, **Client 1 / Project 2**, **Personal / Project 1**, and **Client 2 / Project 1** each have a window. The first two share the Client 1 preset set while keeping separate session lists and agent communication.
+Example: **Client 1 / Project 1**, **Client 1 / Project 2**, **Personal / Project 1**, and **Client 2 / Project 1** each have a window. The first two share the Client 1 team while keeping separate session lists and agent communication.
 
 ## Core model
 
 | Concept | Responsibility |
 | --- | --- |
-| Preset set | Reusable collection of agent presets, shared by reference across projects. |
+| Team | Reusable collection of agent presets, shared by reference across projects. |
 | Agent preset | CLI type, existing configuration directory, and launch defaults. |
-| Project | Named collection of folders, selected preset set, and session/worktree records. |
+| Project | Named collection of folders, selected team, and session/worktree records. |
 | Agent group | Named team of sessions within a project, with its own MCP communication boundary. A project can contain several groups. |
 | Repository folder | Existing folder registered in the project; repositories support managed worktrees. |
 | Worktree | Separate checkout belonging to one repository, usable by one or more explicitly associated sessions. |
-| Session | Durable agent identity, conversation reference, terminal process, preset snapshot, and primary working directory. |
+| Session | Durable agent identity, conversation reference, terminal process, agent preset snapshot, and primary working directory. |
 | Project window | A view into the project's repositories, their checkouts, and the sessions running in each. |
 
 Each session has one primary working directory and may also access other repositories in its project. A worktree is created for one repository at a time. Additional repository paths do not automatically gain separate worktrees.
@@ -40,17 +40,17 @@ Each session belongs to one named group within its project, and delegated childr
 
 ## Window and terminal experience
 
-Each project gets a native macOS window whose sidebar switches between a repository tree (main checkout and worktrees, with attention badges) and a flat session list with group filter and search. Selecting a checkout shows its sessions above one terminal, with actions to launch an agent or open a shell there. Project name, preset set, agent preset, group, and working directory remain easy to identify.
+Each project gets a native macOS window whose sidebar switches between a repository tree (main checkout and worktrees, with attention badges) and a flat session list with group filter and search. Selecting a checkout shows its sessions above one terminal, with actions to launch an agent or open a shell there. Project name, team, agent preset, group, and working directory remain easy to identify.
 
 Keyboard actions cover opening projects, starting sessions, switching terminals, and jumping to the next session needing input. Normal macOS window and Spaces controls determine desktop placement. Reopening an already open project focuses its existing window.
 
 ## Configuration and communication
 
-Presets reference directories the user already maintains. The MVP does not create CLI configuration directories or manage sign-in. Changes to shared presets affect new sessions; existing sessions retain their recorded launch configuration. Native configuration files remain owned by the user and CLI.
+Agent Presets reference directories the user already maintains. The MVP does not create CLI configuration directories or manage sign-in. Changes to shared agent presets affect new sessions; existing sessions retain their recorded launch configuration. Native configuration files remain owned by the user and CLI.
 
-Chauffeur runs one local Model Context Protocol (MCP) server for all Codex and Claude Code sessions. It owns agent-group membership, routes messages, and launches delegated sessions. Every connection is associated with a session and its group; agents discover and communicate with members of that group only. Shared preset sets and configuration directories never merge group mailboxes.
+Chauffeur runs one local Model Context Protocol (MCP) server for all Codex and Claude Code sessions. It owns agent-group membership, routes messages, and launches delegated sessions. Every connection is associated with a session and its group; agents discover and communicate with members of that group only. Shared teams and configuration directories never merge group mailboxes.
 
-A Chauffeur skill explains how to use the MCP tools. CLI-specific adapters configure each agent's connection to the shared server without storing a mutable “current group” in a shared preset directory. The MCP tools provide communication; the skill supplies workflow guidance.
+A Chauffeur skill explains how to use the MCP tools. CLI-specific adapters configure each agent's connection to the shared server without storing a mutable “current group” in a shared agent preset directory. The MCP tools provide communication; the skill supplies workflow guidance.
 
 The background service owns agent processes and terminals independently of project windows. Closing a window or quitting the UI detaches the view. Reboot, logout, or service failure requires recovery and is distinct from reconnecting to a process that is still running.
 

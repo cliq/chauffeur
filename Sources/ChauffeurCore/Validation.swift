@@ -84,7 +84,7 @@ public enum LaunchPolicy {
                 || ((argument == "--sandbox" || argument == "-s") && preset.arguments.dropFirst(index + 1).first == "read-only")
         }
         guard !readOnly else {
-            throw ChauffeurError("unsupported_directories", "Codex's read-only sandbox cannot add writable folders. Remove the additional folders or select workspace-write in the preset's launch arguments")
+            throw ChauffeurError("unsupported_directories", "Codex's read-only sandbox cannot add writable folders. Remove the additional folders or select workspace-write in the agent preset's launch arguments")
         }
     }
 

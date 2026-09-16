@@ -41,9 +41,9 @@ struct SessionLaunchView: View {
     private var presetSet: PresetSet? { model.presetSets.first { $0.id == currentProject.presetSetID } }
     private var presets: [AgentPreset] { presetSet?.archived == false ? model.presets.filter { $0.setID == currentProject.presetSetID && !$0.archived } : [] }
     private var unavailablePresetsMessage: String {
-        guard let presetSet else { return "This project's preset set is missing. Choose an available set in Project Settings." }
-        if presetSet.archived { return "This preset set is archived. Reopen it in Settings → Presets or choose another set in Project Settings." }
-        return "This preset set has no active presets. Add one in Settings → Presets before launching."
+        guard let presetSet else { return "This project's team is missing. Choose an available team in Project Settings." }
+        if presetSet.archived { return "This team is archived. Reopen it in Settings → Agent Presets or choose another team in Project Settings." }
+        return "This team has no active agent presets. Add one in Settings → Agent Presets before launching."
     }
     private var preset: AgentPreset? { presets.first { $0.id == presetID } }
     private var folder: ProjectFolder? { currentProject.folders.first { $0.id == folderID && $0.registered } }
@@ -208,7 +208,7 @@ struct SessionLaunchView: View {
                 ForEach(currentProject.groups.filter { !$0.archived }) { group in Text(group.name).tag(Optional(group.id)) }
             }
             Picker("Agent preset", selection: $presetID) {
-                Text("Choose a preset").tag(UUID?.none)
+                Text("Choose an agent preset").tag(UUID?.none)
                 ForEach(presets) { preset in Text("\(preset.name) · \(preset.kind.displayName)").tag(Optional(preset.id)) }
             }
             if presets.isEmpty {

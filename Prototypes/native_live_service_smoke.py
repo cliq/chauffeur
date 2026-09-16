@@ -215,7 +215,7 @@ with tempfile.TemporaryDirectory(prefix='chauffeur-live-service-', dir='/tmp') a
         ax('press', title='Open')
         wait(lambda: not control(title='Open'), 'native folder panel closed')
         assert control(identifier='preset.configuration-directory')['value'] == str(item['profile'])
-        ax('press', title='Save Preset')
+        ax('press', title='Save Agent Preset')
         wait(lambda: not control(identifier='preset.name'), 'preset saved')
 
     def open_app():
@@ -396,8 +396,8 @@ with tempfile.TemporaryDirectory(prefix='chauffeur-live-service-', dir='/tmp') a
                     'groupID': group_id, 'checkout': checkout, 'profile': profile, 'word': uuid.uuid4().hex[:12].upper()})
             open_app()
             ax('press', title='Settings…', role='AXMenuItem', includeMenus=True)
-            wait(lambda: control(title='Presets'), 'Settings presets')
-            ax('press', title='Presets')
+            wait(lambda: control(title='Agent Presets'), 'Settings presets')
+            ax('press', title='Agent Presets')
             for item in prepared:
                 wait(lambda: control(identifier='preset.edit-' + item['presetID']), 'fixture preset')
                 select_profile(item)

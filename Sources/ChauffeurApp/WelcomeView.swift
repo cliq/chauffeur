@@ -26,8 +26,8 @@ struct WelcomeView: View {
                     Text("Chauffeur").font(.system(size: 32, weight: .semibold))
                     Text("Version \(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.1.0") · \(AppBuild.current.rawValue)").foregroundStyle(.secondary)
                     Button("Create New Project…", systemImage: "plus") { model.projectCreation = AppModel.ProjectCreation() }.buttonStyle(.borderedProminent).disabled(!model.online || model.presetSets.filter { !$0.archived }.isEmpty)
-                    Button("Manage Presets…") { openSettings() }
-                    if model.presetSets.isEmpty { Text("Add a preset set in Settings to create your first project.").font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.center) }
+                    Button("Manage Agent Presets…") { openSettings() }
+                    if model.presetSets.isEmpty { Text("Add a team in Settings to create your first project.").font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.center) }
                 }.padding(32).frame(width: 290)
                 Divider()
                 VStack(alignment: .leading, spacing: 8) {

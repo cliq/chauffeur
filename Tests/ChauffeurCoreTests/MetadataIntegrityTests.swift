@@ -3,6 +3,41 @@ import Testing
 @testable import ChauffeurCore
 
 struct MetadataIntegrityTests {
+    @Test func presetSetDeletionPreservesProfilesAndHistoryAndRejectsLinkedProjects() async throws {
+        let fixture = try await MetadataFixture.make(); defer { fixture.cleanup() }
+        let session = try await fixture.store.save(fixture.session())
+        let before = try Data(contentsOf: URL(fileURLWithPath: session.path))
+        let profile = fixture.root.appendingPathComponent("external-profile.txt")
+        try Data("keep".utf8).write(to: profile)
+        let current = try #require(await fixture.store.reload().presetSets.first)
+        do {
+            try await fixture.store.deletePresetSet(fixture.set.id, expectedVersion: current.version)
+            Issue.record("Deleted a set still assigned to a project")
+        } catch let error as ChauffeurError { #expect(error.code == "preset_set_in_use") }
+        var project = fixture.project.value; project.archived = true
+        let archived = try await fixture.store.save(project, expectedVersion: fixture.project.version)
+        do {
+            try await fixture.store.deletePresetSet(fixture.set.id, expectedVersion: current.version)
+            Issue.record("Deleted a set still assigned to an archived project")
+        } catch let error as ChauffeurError { #expect(error.code == "preset_set_in_use") }
+        let replacement = try await fixture.store.save(PresetSet(name: "Replacement"))
+        project.presetSetID = replacement.value.id
+        try await fixture.store.save(project, expectedVersion: archived.version)
+        var changed = current.value; changed.name = "Changed after confirmation"
+        let updated = try await fixture.store.save(changed, expectedVersion: current.version)
+        do {
+            try await fixture.store.deletePresetSet(fixture.set.id, expectedVersion: current.version)
+            Issue.record("Deleted a concurrently edited set")
+        } catch let error as ChauffeurError { #expect(error.code == "edit_conflict") }
+        try await fixture.store.deletePresetSet(fixture.set.id, expectedVersion: updated.version)
+        let snapshot = await fixture.store.reload()
+        #expect(snapshot.presetSets.map(\.value.id) == [replacement.value.id])
+        #expect(snapshot.presets.isEmpty)
+        #expect(snapshot.errors.isEmpty)
+        #expect(try Data(contentsOf: URL(fileURLWithPath: session.path)) == before)
+        #expect(try String(contentsOf: profile, encoding: .utf8) == "keep")
+    }
+
     @Test func childRecordsMustMatchTheirContainingSetAndProject() async throws {
         let fixture = try await MetadataFixture.make(); defer { fixture.cleanup() }
         let session = try await fixture.store.save(fixture.session())

@@ -325,7 +325,7 @@ public actor RuntimeCoordinator {
         case "skillStatus", "installSkill", "removeSkill":
             let presetID = try params.uuid("presetID")
             let snapshot = await store.reload()
-            guard let preset = snapshot.presets.first(where: { $0.value.id == presetID })?.value else { throw ChauffeurError("missing_preset", "Preset no longer exists") }
+            guard let preset = snapshot.presets.first(where: { $0.value.id == presetID })?.value else { throw ChauffeurError("missing_preset", "Agent preset no longer exists") }
             if skillInstaller == nil { skillInstaller = SkillInstaller(skill: try CoordinationSkill.bundled()) }
             let installer = skillInstaller!
             if request.method == "skillStatus" { return try .from(await installer.status(directory: preset.configurationDirectory)) }
@@ -340,6 +340,9 @@ public actor RuntimeCoordinator {
             catch let error as ChauffeurError where error.code == "snapshot_unavailable" || error.code == "terminal_inventory" { }
             if let saved = try await snapshots.read(sessionID) { return try .from(saved) }
             throw ChauffeurError("snapshot_unavailable", "No saved terminal history is available for this session")
+        case "deletePresetSet":
+            try await store.deletePresetSet(params.uuid("setID"), expectedVersion: params.requiredString("version"))
+            return .object(["deleted": .bool(true)])
         case "savePresetSet": return try .from(await store.save(params["record"].decode(PresetSet.self), expectedVersion: params["version"].string))
         case "savePreset": return try .from(await store.save(params["record"].decode(AgentPreset.self), expectedVersion: params["version"].string))
         case "saveProject": return try .from(await store.save(params["record"].decode(Project.self), expectedVersion: params["version"].string))
@@ -566,7 +569,7 @@ public actor RuntimeCoordinator {
         let isShell = request.launchKind == .shell
         let set: PresetSet, preset: AgentPreset
         if isShell {
-            // A shell is not an agent preset. It runs the login shell in the
+            // A shell is not an preset. It runs the login shell in the
             // checkout, has no configuration directory and never coordinates.
             guard child == nil else { throw ChauffeurError("invalid_argument", "Delegated sessions must launch an agent") }
             set = PresetSet(name: "Shell")
@@ -576,7 +579,7 @@ public actor RuntimeCoordinator {
         } else {
             guard let storedSet = snapshot.presetSets.first(where: { $0.value.id == project.presetSetID })?.value, !storedSet.archived,
                   let storedPreset = snapshot.presets.first(where: { $0.value.id == request.presetID && $0.value.setID == storedSet.id && !$0.value.archived })?.value else {
-                throw ChauffeurError("missing_preset", "Project's preset set is empty or selected preset is unavailable")
+                throw ChauffeurError("missing_preset", "Project's team is empty or selected agent preset is unavailable")
             }
             set = storedSet; preset = storedPreset
         }
@@ -651,7 +654,7 @@ public actor RuntimeCoordinator {
             if child == nil && !isShell {
                 do { try await store.rememberPreset(preset.id, projectID: project.id, setID: set.id) }
                 catch let error as ChauffeurError { record(error) }
-                catch { record(ChauffeurError("preset_preference", "The session started, but its preset choice could not be saved")) }
+                catch { record(ChauffeurError("preset_preference", "The session started, but its agent preset choice could not be saved")) }
             }
             try Task.checkCancellation()
             return session
@@ -792,7 +795,7 @@ public actor RuntimeCoordinator {
                 let snapshot = await store.current()
                 guard let project = snapshot.projects.first(where: { $0.value.id == caller.scope.projectID })?.value,
                       let folder = project.folders.first(where: { $0.id == delegation.folderID && $0.registered }) else { throw ChauffeurError("missing_folder", "Delegation folder is unavailable in this project") }
-                guard snapshot.presets.contains(where: { $0.value.id == delegation.presetID && $0.value.setID == project.presetSetID && !$0.value.archived }) else { throw ChauffeurError("missing_preset", "Delegation preset is unavailable in this project's set") }
+                guard snapshot.presets.contains(where: { $0.value.id == delegation.presetID && $0.value.setID == project.presetSetID && !$0.value.archived }) else { throw ChauffeurError("missing_preset", "Delegation agent preset is unavailable in this project's set") }
                 delegation.state = .launching; try await ledger.updateDelegation(delegation)
                 if !delegation.shareCheckout {
                     let worktree = try await worktrees.create(projectID: project.id, folder: folder, branch: "chauffeur/\(String(delegation.id.uuidString.prefix(12)).lowercased())", baseRef: "HEAD")

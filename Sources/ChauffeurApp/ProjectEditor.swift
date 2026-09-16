@@ -25,8 +25,8 @@ struct ProjectEditor: View {
             Text(project == nil ? "Create Project" : "Project Settings").font(.title2)
             Form {
                 TextField("Project name", text: $name).accessibilityIdentifier("project.name")
-                Picker("Preset set", selection: $setID) {
-                    Text("Choose a preset set").tag(UUID?.none)
+                Picker("Team", selection: $setID) {
+                    Text("Choose a team").tag(UUID?.none)
                     ForEach(model.presetSets.filter { !$0.archived || $0.id == setID }) { set in Text(set.name).tag(Optional(set.id)) }
                 }.accessibilityIdentifier("project.preset-set")
             }
@@ -53,7 +53,7 @@ struct ProjectEditor: View {
                     }.disabled(selected.isEmpty)
                 }
             }
-            Text("Folder registration preserves repositories and worktrees on disk. Running sessions retain their launch paths and presets.").font(.caption).foregroundStyle(.secondary)
+            Text("Folder registration preserves repositories and worktrees on disk. Running sessions retain their launch paths and agent presets.").font(.caption).foregroundStyle(.secondary)
             if !discoveryErrors.isEmpty { Text(discoveryErrors.map { $0.errorDescription ?? $0.message }.joined(separator: "\n")).font(.caption).foregroundStyle(.orange).lineLimit(4) }
             if let failure { Text(failure).foregroundStyle(.red).font(.callout) }
             HStack { Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction); Spacer(); Button(saving ? "Saving…" : "Save Project") { save() }.buttonStyle(.borderedProminent).keyboardShortcut(.defaultAction).disabled(saving || name.trimmingCharacters(in: .whitespaces).isEmpty || setID == nil || discovering) }
