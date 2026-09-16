@@ -22,7 +22,7 @@ unverified real-CLI or native behavior; deferred workload checks remain unverifi
   line/byte budgets, and survive terminal/runtime loss. Native history is
   read-only and searchable; completed-message cleanup preserves queued/received
   messages. See [retention and recovery](terminal-history.md).
-- Sixty-nine Swift tests: canonical paths/discovery, folder routing/launcher installation and relocation repair, per-child environment, argument validation and quoting,
+- Seventy Swift tests across eighteen suites: canonical paths/discovery, folder routing/launcher installation and relocation repair, per-child environment, argument validation and quoting,
   atomic file replacement/conflicts/corrupt files, durable group-scoped messages,
   grant revocation, retry keys, bounded single-level delegation, and safe Git
   worktree creation/removal.
@@ -110,6 +110,17 @@ unverified real-CLI or native behavior; deferred workload checks remain unverifi
   by the user. Both basic-mode sessions report Activity unknown. No model prompts
   are sent. Evidence: `.local/profiles-native-{codex,claude}/` and
   `Prototypes/native_profile_selection.py`.
+- Native status checks pass with Codex 0.154.0 and Claude Code 2.1.273. Each
+  makes one authenticated read-only discovery call with native one-time approval,
+  reports completion with a conversation ID, and exits normally through `/exit`.
+  Claude shows Needs attention for permission requests and clears it after tool
+  use. A reproduced false idle-attention state is fixed by filtering notification
+  types; a 70-second native idle check and a matcher regression pass. Codex's
+  approval detection remains unavailable and displays Activity unknown. No
+  messaging/delegation is exercised. Evidence:
+  `.local/attention-native-{codex,claude}/` and
+  `Prototypes/native_attention_smoke.py`. The fix and Claude 2.1.273 candidate
+  integration are in Debug, awaiting the next Release.
 - [Appearance settings](appearance.md) offer System, Light, and Dark with saved
   app-wide selection. Four isolated native app launches verify persistence,
   window/terminal default colors, cursor contrast, newly created terminals, and
@@ -249,18 +260,18 @@ startup logs are `.build/release-editor-build.log` and
 
 | Plan items | Current state | Still required |
 | --- | --- | --- |
-| Stage 0 V1–V5 | Decision documents; native CLI terminal continuity, bounded history and two-window profile/account displays; real scoped-stop evidence; actual LaunchAgent lifecycle | Remaining status and focused macOS checks; distinct-Claude-account check deferred by user; coordination and final Spaces workload are in V2 |
+| Stage 0 V1–V5 | Decision documents; native CLI terminal continuity, bounded history, two-window profile/account displays and focused status checks; real scoped-stop evidence; actual LaunchAgent lifecycle | Remaining focused macOS recovery checks; distinct-Claude-account check deferred by user; coordination and final Spaces workload are in V2 |
 | 1.1 Records/store | Atomic writes, reference/ownership diagnostics, external-edit conflicts, preset revision tracking, last-used preference, empty-set UI/runtime checks, and targeted filesystem watching with recovery pass | — |
 | 1.2 Runtime skeleton | Lock, peer-checked Unix socket, version handshake, health helper, verified bundled LaunchAgent registration/recovery; bounded structured logs with typed redaction | Remaining live-service release acceptance |
 | 1.3–1.7 Presets/projects/groups/welcome/windows | Native preset/project/group editors, file panels, validation, discovery, relink/archive/reopen, cancellation, stale-save rejection and Welcome handoff pass; OS-driven window/search/new-session/attention commands pass | Final four-Spaces workload is in V2 |
-| 1.8 Basic launch | Real Codex/Claude launch and two-window profile/account displays; filtered child environments, preflight failures, native input/resize/stop and immutable launch details; cancellable launch/resume with terminal cleanup | Distinct-Claude-account check deferred by user; remaining semantic attention acceptance tracked under 2.7 |
+| 1.8 Basic launch | Real Codex/Claude launch and two-window profile/account displays; filtered child environments, preflight failures, native input/resize/stop and immutable launch details; cancellable launch/resume with terminal cleanup | Distinct-Claude-account check deferred by user |
 | 1.9 Session details | Native immutable context after preset edits, individual execution controls, and a real saved session's expanded launch snapshot match the stored record | — |
 | 2.1 Screen/history | tmux live state; bounded persisted snapshots, disk cleanup, native history/search; real Codex/Claude native attach, Unicode, clipboard and reply search; native link/mouse forwarding and 60,000-line retention/recovery pass | — |
 | 2.2 Reconnect | Positive pane/process reconciliation; real Codex/Claude explicit native-ID resume and MCP reconnect | Remaining service-failure edge cases and full native acceptance |
 | 2.3–2.4 Quit/tabs/split | Native tabs/split, window-state writes and OS keyboard commands pass; real Codex/Claude normal/forced UI quit preserve process and draft; native Stop All confirmation/cancellation, fixed targets, resistant-stop recovery and no-window operation pass | Final Spaces workload is in V2 |
 | 2.5 Worktrees | Create/list/safe-remove; periodic external inventory; identity-based moves/replacements; pending launch/removal and metadata-write reservations; legacy migration fixtures and real Codex/Claude repository-relocation, replacement/resume, and removal checks; native manager controls and concurrent registration pass | — |
 | 2.6 Multiple repos | Explicit additional-folder UI and shared-checkout warning; real Codex/Claude read/write at primary worktree and selected additional path, with spaces; main checkout and sibling worktree remain unchanged | — |
-| 2.7 Status/attention | Lifecycle records, real Codex/Claude completion IDs, permission attention hooks, unread/pending counts; optional durable notifications; actual Notification Center delivery/cold click and enabled-helper recovery/update pass | Remaining native attention signals; transient banners/alternate Focus settings unverified |
+| 2.7 Status/attention | Native approval/completion/normal-exit labels and conversation IDs pass; Claude clears permission attention after tool use and stays finished while idle; unread/pending counts and optional durable notifications; actual Notification Center delivery/cold click and enabled-helper recovery/update pass | Codex approval detection unavailable; real API-error hooks, transient banners/alternate Focus settings unverified |
 | 2.8 Sleep/service loss | Runtime loop plus native wake reconnect, health/recovery actions; actual service termination/restart; real Codex/Claude survive standalone Release runtime crash with same process/conversation and successful tool use afterward | Real sleep/wake and native LaunchAgent lifecycle with live real sessions |
 | 2.9 Appearance setting | Implemented; System/Light/Dark, persistence, native window and terminal default-color checks pass | — |
 | 2.10 Terminal project launcher | Implemented Settings installer and folder routing; native cold/warm and Release startup checks pass; relocation repair and literal argument forwarding tested | Actual `/usr/local/bin/` installation requires macOS administrator authentication |

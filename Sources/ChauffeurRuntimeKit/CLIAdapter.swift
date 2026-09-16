@@ -17,7 +17,7 @@ public enum CLIAdapter {
         let help = try await ProcessRunner.run(executable, ["--help"], environment: environment)
         guard help.status == 0 else { throw ChauffeurError("help_failed", "Executable does not report its supported options", path: executable) }
         let text = version.output.trimmingCharacters(in: .whitespacesAndNewlines)
-        let baseline = kind == .codex ? text == "codex-cli 0.154.0" : text == "2.1.272 (Claude Code)"
+        let baseline = kind == .codex ? text == "codex-cli 0.154.0" : ["2.1.272 (Claude Code)", "2.1.273 (Claude Code)"].contains(text)
         return CLICapabilities(version: String(text.prefix(200)), coordination: baseline, statusSignals: baseline, additionalDirectories: help.output.contains("--add-dir"), resume: help.output.contains("resume"), limitation: baseline ? (kind == .codex ? "Turn completion via notify; approval/input detection is unavailable" : nil) : "CLI version has not passed coordination/status compatibility checks. Basic terminal mode remains available")
     }
     public static func arguments(session: Session, endpoint: String, ctlPath: String, integrationDirectory: URL, coordination: Bool, resume: Bool) throws -> [String] {
@@ -51,9 +51,18 @@ public enum CLIAdapter {
                 let configPath = integrationDirectory.appendingPathComponent("mcp.json")
                 try JSONCoding.encode(config).write(to: configPath, options: .atomic)
                 var hooks: [String: JSONValue] = [:]
-                for (hook, event) in [("SessionStart", "running"), ("UserPromptSubmit", "running"), ("Stop", "turn-finished"), ("Notification", "needs-attention"), ("PermissionRequest", "needs-attention")] {
+                for (hook, event) in [("SessionStart", "running"), ("UserPromptSubmit", "running"),
+                                      ("PostToolUse", "running"), ("PostToolUseFailure", "running"),
+                                      ("Stop", "turn-finished"), ("StopFailure", "needs-attention"),
+                                      ("Notification", "needs-attention"), ("PermissionRequest", "needs-attention")] {
                     let command = [ctlPath, "event", "--session", session.id.uuidString, event].map(shellQuote).joined(separator: " ")
-                    hooks[hook] = .array([.object(["hooks": .array([.object(["type": .string("command"), "command": .string(command), "timeout": .number(5)])])])])
+                    var group: [String: JSONValue] = ["hooks": .array([.object(["type": .string("command"), "command": .string(command), "timeout": .number(5)])])]
+                    if hook == "Notification" {
+                        // Idle reminders and successful authentication are not
+                        // blocked input. Keep completion until a real signal.
+                        group["matcher"] = .string("^(permission_prompt|elicitation_dialog|elicitation_url_dialog)$")
+                    }
+                    hooks[hook] = .array([.object(group)])
                 }
                 let settings = integrationDirectory.appendingPathComponent("settings.json")
                 try JSONCoding.encode(JSONValue.object(["hooks": .object(hooks)])).write(to: settings, options: .atomic)

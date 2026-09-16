@@ -13,7 +13,7 @@ not a completed real-provider support matrix.
 | Hummingbird | 2.26.0 | Actual loopback MCP requests exercised with fixture credentials |
 | Codex | 0.154.0 | Three real sessions/two profiles; authenticated messages, native approvals/completion, scoped stop, explicit resume and runtime reconnect pass. Native UI input/clipboard/resize/history and normal/forced UI quit preserve the process and draft |
 | Claude Code | 2.1.272 | Three real sessions/two profiles; native account/process configuration, authenticated messages, permission/completion hooks, scoped stop, explicit resume and runtime reconnect pass; both profiles report the same account |
-| Claude Code | 2.1.273 | Basic-terminal launch/resume and checkout recovery pass; native UI input/clipboard/resize/history and normal/forced UI quit preserve the process and draft. Coordination and status-hook compatibility remain unverified |
+| Claude Code | 2.1.273 | Basic-terminal launch/resume and checkout recovery pass; native UI input/clipboard/resize/history and normal/forced UI quit preserve the process and draft. Native permission/completion hooks, read-only MCP discovery and normal exit pass; full coordination remains unverified |
 
 `Prototypes/native_profile_selection.py` verifies two concurrent native project
 windows per current CLI in the signed Release app. Native `/status` account
@@ -43,8 +43,8 @@ the CLI still enforces them. Chauffeur does not silently increase permissions.
 replacement primary/additional Git metadata, restored-checkout resume with actual
 conversation recall, live-removal refusal, and clean removal preserving the
 branch. It passed with Codex 0.154.0 and Claude Code 2.1.273 in basic-terminal
-mode, using authorized private profile clones. This does not establish hook or
-coordination compatibility for Claude 2.1.273.
+mode, using authorized private profile clones. Hook evidence is recorded
+separately below; full coordination remains unverified.
 
 `Prototypes/real_repository_access.py` also passes on these versions using the
 signed Release runtime. Real tools read and write the selected primary worktree
@@ -64,7 +64,16 @@ sustained bounded-history rotation have separate fixture evidence in
 [implementation status](implementation-status.md). Final workload coverage is
 deferred to V2.
 
-Codex's proposed status path is turn completion through `notify`. It does not
+`Prototypes/native_attention_smoke.py` passes with Codex 0.154.0 and Claude Code
+2.1.273 in an isolated signed Debug app. Each session makes one authenticated,
+read-only discovery call with native one-time approval. The app shows Claude's
+permission request as **Needs attention**, clears it after tool use, and shows
+**Turn finished** after the reply. Completion remains finished after the idle
+notification interval. Both CLIs provide native conversation IDs and report
+**Exited** after `/exit`. No messages or delegation are exercised. Claude
+2.1.273 now has the candidate integration path, still labelled unverified.
+
+Codex's status path is turn completion through `notify`. It does not
 prove approval or input status; these remain unknown when no supported event is
 available. Claude uses launch-scoped hooks, which may be affected by native trust
 or managed policy. Silence and output volume never set completion.

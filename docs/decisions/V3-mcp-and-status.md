@@ -79,6 +79,34 @@ without an inference prompt. Reports omit account identifiers and credential
 values; terminal/history artifacts under `.local/real-claude-artifacts/` are
 private and may contain native account displays.
 
+## Focused native status evidence — 2026-09-16
+
+`Prototypes/native_attention_smoke.py` passes with Codex 0.154.0 and Claude Code
+2.1.273 in separate isolated signed Debug app runs. Each uses one authorized
+profile clone and a temporary project. Native keyboard input requests exactly
+one read-only `chauffeur_discover` call; the probe checks its displayed name and
+one-time approval selection before approving it. The authenticated runtime log
+confirms that call and no other tool use.
+
+Claude's permission request appears as **Needs attention** in the app, tool
+completion clears attention, and the final reply records **Turn finished** with
+its native conversation ID. Codex also records completion and its conversation
+ID; its approval prompt remains **Activity unknown**, the documented limitation.
+Native `/exit` yields **Exited** and exit status zero for both CLIs. Detailed
+private evidence is under `.local/attention-native-{codex,claude}/`.
+
+The initial Claude run reproduced a false attention state after a completed turn
+sat idle. Its catch-all notification hook is now restricted to permission and
+elicitation requests; a matching regression test rejects idle/authentication/
+completion notifications. Post-tool hooks clear permission attention. The native
+Claude check stays finished for 70 seconds with no input. Hook meanings follow
+the [Claude hooks reference](https://code.claude.com/docs/en/hooks). API-error
+`StopFailure` handling is configured but has not been induced in a real session.
+
+These are focused status and discovery checks. They add Claude 2.1.273 to the
+candidate integration baseline; they do not complete messaging/delegation or
+change its unverified label. Those remaining coordination checks are in V2.
+
 ## Remaining gate evidence
 
 Further evidence remains required for all tools, controlled pre-existing MCP
