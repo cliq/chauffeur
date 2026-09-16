@@ -3,7 +3,8 @@
 Status: fixture continuity and native keyboard/clipboard/history controls pass.
 Real Codex and Claude Code pass native prompts, Unicode, clipboard, resize,
 history search, and normal/forced UI quit with the same process and draft.
-Link/mouse behavior and sustained scrollback rotation remain open.
+Native links, mouse input and sustained bounded history rotation also pass with
+isolated fixtures. Final workload/performance acceptance remains in V2.
 
 ## Decision
 
@@ -65,14 +66,35 @@ Accessibility. They now become spaces, while wide-glyph continuation cells are
 omitted. The native fixture explicitly draws a cursor-positioned gap and checks
 that it reads as spaces without NUL characters.
 
-## Remaining gate evidence
+## Link, mouse and retention evidence
 
 Bounded versioned captures are now persisted, with global disk-budget cleanup,
 normal-history plus alternate-screen capture, and a native read-only search
 view. See [terminal history](../terminal-history.md) for the retention policy and
 fixture evidence.
 
-Remaining checks include native link opening, CLI cursor/mouse behavior beyond
-the observed prompts/input, and sustained scrollback rotation. The real runs
-above use two short text-only turns and do not establish those cases or final
-workload performance. V1 is not yet fully passed.
+`Prototypes/terminal_pointer_smoke.py` drives actual native mouse events against
+the signed Debug app. Shift-drag selection and copy work without sending input,
+including while the fixture CLI tracks the mouse. Press, release, drag, and
+wheel-up/down events reach that CLI with their SGR mouse encoding. Command-click
+opens both ordinary URLs and OSC 8 labeled links through the real OS URL handler;
+a unique local HTTP listener verifies the resulting browser request. No provider
+account or default runtime is involved. Evidence:
+`.build/terminal-pointer-artifacts/`.
+
+The OSC 8 check failed before the fix: tmux's default `xterm-256color` client
+features did not include hyperlinks. Every attachment now passes `-T hyperlinks`,
+which enables SwiftTerm's supported link capability without changing an agent's
+environment or requiring a new tmux server.
+
+`Prototypes/history_rotation_smoke.py` writes 60,000 plain/styled Unicode lines
+with the UI detached and observes six advancing periodic archives. The tmux
+history and encoded captures stay within their configured line/byte bounds;
+unchanged captures retain their timestamp. The same fixture process survives a
+runtime restart, and saved output survives tmux loss. See
+[retention verification](../terminal-history.md#verification).
+
+Together with the real CLI reattachment checks above, this establishes the V1
+terminal continuity gate for the recorded versions and tmux ownership approach.
+The provider runs use two short text-only turns. These checks do not establish
+the deferred final workload/performance results or exhaustive provider UI behavior.

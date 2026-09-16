@@ -67,6 +67,68 @@ func key(_ code: CGKeyCode, flags: CGEventFlags = [], text: String? = nil) {
     }
     Thread.sleep(forTimeInterval: 0.08)
 }
+func modifiers() -> CGEventFlags {
+    let names = request["modifiers"] as? [String] ?? []
+    var flags: CGEventFlags = []
+    for (name, flag) in [("command", CGEventFlags.maskCommand), ("shift", .maskShift), ("control", .maskControl), ("option", .maskAlternate)] {
+        if names.contains(name) { flags.insert(flag) }
+    }
+    return flags
+}
+func pointer(_ element: AXUIElement, operation: String) -> [String: Any] {
+    let frame = describe(element)["frame"] as! [String: CGFloat]
+    guard let x = request["x"] as? Double, let y = request["y"] as? Double,
+          x >= 0, y >= 0, x < frame["width"]!, y < frame["height"]! else { return ["error": "Pointer must be inside the requested control"] }
+    let start = CGPoint(x: frame["x"]! + x, y: frame["y"]! + y)
+    let flags = modifiers()
+    // Mouse events require WindowServer hit testing. Verify the native window
+    // under the point belongs to the requested PID before posting system input.
+    func targetIsVisible() -> Bool {
+        let windows = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? []
+        let target = windows.first { window in
+            guard (window[kCGWindowLayer as String] as? Int) == 0,
+                  let bounds = window[kCGWindowBounds as String] as? NSDictionary,
+                  let rect = CGRect(dictionaryRepresentation: bounds) else { return false }
+            return rect.contains(start)
+        }
+        return target?[kCGWindowOwnerPID as String] as? Int == Int(pid)
+    }
+    for _ in 0..<30 {
+        if targetIsVisible() { break }
+        RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.05))
+    }
+    guard targetIsVisible() else { return ["error": "Another application covers the requested control"] }
+    func post(_ type: CGEventType, at point: CGPoint) {
+        let event = CGEvent(mouseEventSource: nil, mouseType: type, mouseCursorPosition: point, mouseButton: .left)!
+        event.flags = flags
+        event.setIntegerValueField(.mouseEventClickState, value: 1)
+        event.post(tap: .cghidEventTap)
+        Thread.sleep(forTimeInterval: 0.08)
+    }
+    if operation == "scroll" {
+        guard let lines = request["lines"] as? Int32, abs(lines) <= 100 else { return ["error": "Invalid scroll distance"] }
+        post(.mouseMoved, at: start)
+        let event = CGEvent(scrollWheelEvent2Source: nil, units: .line, wheelCount: 1, wheel1: lines, wheel2: 0, wheel3: 0)!
+        event.location = start; event.flags = flags; event.post(tap: .cghidEventTap)
+        Thread.sleep(forTimeInterval: 0.1)
+    } else if operation == "drag" {
+        guard let endX = request["endX"] as? Double, let endY = request["endY"] as? Double,
+              endX >= 0, endY >= 0, endX < frame["width"]!, endY < frame["height"]! else { return ["error": "Drag must stay inside the requested control"] }
+        let end = CGPoint(x: frame["x"]! + endX, y: frame["y"]! + endY)
+        post(.leftMouseDown, at: start)
+        post(.leftMouseDragged, at: start)
+        for step in 1...10 {
+            let fraction = CGFloat(step) / 10
+            post(.leftMouseDragged, at: CGPoint(x: start.x + (end.x - start.x) * fraction, y: start.y + (end.y - start.y) * fraction))
+        }
+        post(.leftMouseUp, at: end)
+    } else {
+        post(.mouseMoved, at: start)
+        post(.leftMouseDown, at: start)
+        post(.leftMouseUp, at: start)
+    }
+    return ["performed": true]
+}
 // Clipboard contents are held in memory only, then restored if the fixture's
 // value is still current. Concurrent clipboard changes are left alone.
 func clipboard(_ element: AXUIElement, paste: String?) -> [String: Any] {
@@ -118,6 +180,7 @@ else {
             let status = AXUIElementSetAttributeValue(element, kAXSizeAttribute as CFString, AXValueCreate(.cgSize, &size)!)
             result = ["performed": status == .success, "status": status.rawValue]
         } else if !focus(element) { result = ["error": "The requested control did not receive keyboard focus"] }
+        else if ["click", "drag", "scroll"].contains(operation) { result = pointer(element, operation: operation!) }
         else if operation == "paste" || operation == "copy" {
             result = clipboard(element, paste: operation == "paste" ? request["value"] as? String : nil)
         } else if ["typeText", "insertText"].contains(operation), let value = request["value"] as? String {
@@ -126,12 +189,7 @@ else {
             else if operation == "typeText" { key(51) }
             result = ["performed": true]
         } else if operation == "key", let code = request["keyCode"] as? Int {
-            let names = request["modifiers"] as? [String] ?? []
-            var flags: CGEventFlags = []
-            for (name, flag) in [("command", CGEventFlags.maskCommand), ("shift", .maskShift), ("control", .maskControl), ("option", .maskAlternate)] {
-                if names.contains(name) { flags.insert(flag) }
-            }
-            key(CGKeyCode(code), flags: flags)
+            key(CGKeyCode(code), flags: modifiers())
             result = ["performed": true]
         } else { result = ["error": "Unsupported operation"] }
     } else { result = ["error": "Expected one matching control", "matches": matches.count] }

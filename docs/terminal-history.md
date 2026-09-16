@@ -17,6 +17,8 @@ terminal still exists. Typing or pasting into history does not send agent input.
 | Command-D | Show or hide a second terminal pane. Two open session tabs are required to split. |
 | Control-C / Escape | Pass the key to the focused live CLI. The CLI decides whether to interrupt, cancel a prompt, or exit. |
 | Command-Q | Quit Chauffeur's UI while its agents keep running. |
+| Command-click | Open an ordinary URL or an explicit terminal hyperlink in its associated app. |
+| Shift-drag | Select output locally when the CLI or tmux is handling mouse input. |
 
 Live terminals and saved history expose distinct, focusable text areas to macOS
 Accessibility, with their displayed text and current selection. Reading the
@@ -93,7 +95,14 @@ other running. Command-Q followed by a native relaunch preserves its process and
 unsent input. Clipboard checks retain the previous clipboard in memory and
 restore it after the fixture operation. Reports and window captures are in
 `.build/terminal-controls-artifacts/`. This requires existing Accessibility access;
-it does not establish real-provider, link-opening, or full VoiceOver acceptance.
+it does not establish real-provider or full VoiceOver acceptance.
+
+`Prototypes/terminal_pointer_smoke.py` verifies native Shift-drag selection/copy,
+mouse press/release/drag and both scroll-wheel directions through the real tmux
+attachment. It also Command-clicks ordinary and OSC 8 links, verifying actual
+browser requests to a private local test server. This reproduced tmux dropping
+OSC 8 targets before the attachment began advertising hyperlink support. Evidence
+is in `.build/terminal-pointer-artifacts/`.
 
 `Prototypes/real_terminal_controls.py` adds real Codex 0.154.0 and Claude Code
 2.1.273 basic-terminal evidence. Native trust prompts, Unicode input and paste,
@@ -101,5 +110,13 @@ selection/copy, OS window resize, normal and forced UI quit, and reattachment
 with the same process and unsent draft pass. Each provider's two generated
 Unicode replies can be searched and copied from History at capture time; the
 complete search text is absent from the prompts. Reports and screenshots remain
-private under `.local/terminal-native-{codex,claude}/`. Link/mouse behavior and
-sustained scrollback rotation remain separate checks.
+private under `.local/terminal-native-{codex,claude}/`.
+
+`Prototypes/history_rotation_smoke.py` runs one isolated fixture through 36,000
+plain Unicode lines and 24,000 heavily styled lines, with no attached UI. Six
+periodic captures advance through the 10,000-line tmux history limit. The styled
+capture trims to 823,288 encoded bytes within a 1 MiB budget, preserves Unicode
+and ANSI styling, and does not rewrite unchanged output. Restarting the runtime
+keeps the same process and capture; losing tmux retains readable saved history.
+Evidence is in `.build/history-rotation-artifacts/`. This is a focused retention
+check, not the deferred multi-session workload/performance test.

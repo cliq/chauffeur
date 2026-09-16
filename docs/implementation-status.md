@@ -63,7 +63,7 @@ unverified real-CLI or native behavior; deferred workload checks remain unverifi
   switching/split shortcuts, and Command-Q/relaunch preserving process/input.
   Terminals now expose distinct focusable live/history accessibility elements
   with displayed text and selection. Evidence: `.build/terminal-controls-artifacts/`.
-  Link/mouse and sustained rotation acceptance remain open; these changes await Release.
+  These changes await Release; link/mouse and retention evidence follows below.
 - Real Codex 0.154.0 and Claude Code 2.1.273 basic-terminal runs now pass native
   trust prompts, Unicode typing, clipboard, window/PTY resize, and history search
   in the signed Debug app. Normal and forced UI quit preserve each real CLI's
@@ -71,6 +71,16 @@ unverified real-CLI or native behavior; deferred workload checks remain unverifi
   reattachment. Searches use generated reply text absent from the prompts.
   Blank terminal cells exposed as NUL characters are now mapped to spaces, with
   a native cursor-gap regression. Evidence: `.local/terminal-native-{codex,claude}/`.
+- Native Command-click opens ordinary and OSC 8 labeled links through the actual
+  OS URL handler. The OSC 8 check reproduced tmux dropping link targets until its
+  attachment advertised hyperlink support. Native drag selection/copy, Shift
+  selection while the CLI tracks the mouse, and press/release/drag/wheel events
+  pass through the signed Debug app and tmux. Evidence:
+  `.build/terminal-pointer-artifacts/`. A separate 60,000-line fixture verifies
+  sustained Unicode/ANSI history rotation, six periodic detached captures,
+  encoded byte limits, stable capture deduplication, same-process runtime
+  recovery and history after tmux loss. These are focused terminal checks;
+  final workload/performance tests remain in V2. The link fix awaits Release.
 - [Metadata integrity and preset defaults](metadata-and-presets.md): child
   ownership checks, path-bearing reference diagnostics, archived history
   preservation, service-owned preset revision increments, and a remembered
@@ -173,13 +183,13 @@ unverified real-CLI or native behavior; deferred workload checks remain unverifi
 
 | Plan items | Current state | Still required |
 | --- | --- | --- |
-| Stage 0 V1–V5 | Decision documents; fixtures; real default-route Codex credential/stop evidence; actual LaunchAgent lifecycle | Remaining profile, terminal, status, and focused macOS checks; coordination and final Spaces workload are in V2 |
+| Stage 0 V1–V5 | Decision documents; V1 terminal continuity with real native CLI reattachment and bounded fixture history; real default-route Codex credential/stop evidence; actual LaunchAgent lifecycle | Remaining profile, status, and focused macOS checks; coordination and final Spaces workload are in V2 |
 | 1.1 Records/store | Atomic writes, reference/ownership diagnostics, external-edit conflicts, preset revision tracking, last-used preference, empty-set UI/runtime checks, and targeted filesystem watching with recovery pass | — |
 | 1.2 Runtime skeleton | Lock, peer-checked Unix socket, version handshake, health helper, verified bundled LaunchAgent registration/recovery; bounded structured logs with typed redaction | Remaining live-service release acceptance |
 | 1.3–1.7 Presets/projects/groups/welcome/windows | Native editors, cancellable discovery, relink/archive, welcome and project windows implemented | Remaining editor/window interaction checks; final four-Spaces workload is in V2 |
 | 1.8 Basic launch | Real Codex/Claude launch, filtered environment, private exec handoff, terminal input/resize/stop; cancellable launch/resume with terminal cleanup; Claude native account/process configuration checks | Full native account/status checks, distinct-Claude-account check, complete preflight |
 | 1.9 Session details | Native details show the immutable launch snapshot and lifecycle/coordination records | Real-session interaction acceptance |
-| 2.1 Screen/history | tmux live state; bounded persisted snapshots, disk cleanup, native history/search; real Codex/Claude native attach, Unicode, clipboard and reply search pass | Native link/mouse verification and sustained rotation |
+| 2.1 Screen/history | tmux live state; bounded persisted snapshots, disk cleanup, native history/search; real Codex/Claude native attach, Unicode, clipboard and reply search; native link/mouse forwarding and 60,000-line retention/recovery pass | Ship hyperlink capability fix in the next Release |
 | 2.2 Reconnect | Positive pane/process reconciliation; real Codex/Claude explicit native-ID resume and MCP reconnect | Remaining service-failure edge cases and full native acceptance |
 | 2.3–2.4 Quit/tabs/split | Native tabs/split, window-state writes, quit/stop-all and keyboard commands implemented; OS switching/split/quit shortcuts pass with fixtures; real Codex/Claude normal and forced UI quit preserve process and draft through reattachment | Remaining window-command and Stop All confirmation interactions; final Spaces workload is in V2 |
 | 2.5 Worktrees | Create/list/safe-remove; periodic external inventory; identity-based moves/replacements; pending launch/removal and metadata-write reservations; legacy migration fixtures and real Codex/Claude repository-relocation, replacement/resume, and removal checks; native manager controls and concurrent registration pass | Ship manager fixes in the next Release |
