@@ -15,25 +15,24 @@ enum NotificationHelper {
         var refreshed = false
         var reportedLaunchFailure = false
         while !Task.isCancelled {
-            if (try? await runtime.shouldLaunchNotificationHelper()) == true {
-                let running = NSRunningApplication.runningApplications(withBundleIdentifier: AppBuild.current.notificationIdentifier).filter { !$0.isTerminated }
-                if !refreshed {
-                    // Refresh the helper after a service/app update. Otherwise an
-                    // old helper can route a click into the previous app bundle.
-                    for application in running { application.terminate() }
-                    refreshed = true
-                }
-                if running.isEmpty {
-                    let configuration = NSWorkspace.OpenConfiguration()
-                    configuration.activates = false
-                    do {
-                        _ = try await NSWorkspace.shared.openApplication(at: helper, configuration: configuration)
-                        reportedLaunchFailure = false
-                    } catch {
-                        if !reportedLaunchFailure {
-                            await runtime.record(ChauffeurError("notification_helper", "Could not start the notification helper. Reopen Chauffeur or reinstall its app bundle"))
-                            reportedLaunchFailure = true
-                        }
+            // The helper also owns the service menu, independently of notification opt-in.
+            let running = NSRunningApplication.runningApplications(withBundleIdentifier: AppBuild.current.notificationIdentifier).filter { !$0.isTerminated }
+            if !refreshed {
+                // Refresh the helper after a service/app update. Otherwise an
+                // old helper can route a click into the previous app bundle.
+                for application in running { application.terminate() }
+                refreshed = true
+            }
+            if running.isEmpty {
+                let configuration = NSWorkspace.OpenConfiguration()
+                configuration.activates = false
+                do {
+                    _ = try await NSWorkspace.shared.openApplication(at: helper, configuration: configuration)
+                    reportedLaunchFailure = false
+                } catch {
+                    if !reportedLaunchFailure {
+                        await runtime.record(ChauffeurError("notification_helper", "Could not start the notification helper. Reopen Chauffeur or reinstall its app bundle"))
+                        reportedLaunchFailure = true
                     }
                 }
             }

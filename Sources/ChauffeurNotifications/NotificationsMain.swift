@@ -16,11 +16,27 @@ import ChauffeurCore
 @MainActor final class NotificationDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDelegate {
     private let center = UNUserNotificationCenter.current()
     private var worker: Task<Void, Never>?
+    private var menuWorker: Task<Void, Never>?
+    private let serviceMenu = ServiceMenu()
+    private struct MenuSnapshot: Decodable {
+        let store: StoreSnapshot
+        let sessions: [Session]
+    }
     private var requestingAuthorization = false
     private let socket = Paths.applicationSupport.appendingPathComponent("runtime/runtime.sock").path
 
     func applicationWillFinishLaunching(_ notification: Notification) { center.delegate = self }
     func applicationDidFinishLaunching(_ notification: Notification) {
+        menuWorker = Task {
+            while !Task.isCancelled {
+                do {
+                    let snapshot = try await call("snapshot").decode(MenuSnapshot.self)
+                    serviceMenu.update(ActiveProject.entries(projects: snapshot.store.projects.map(\.value),
+                        sessions: snapshot.sessions, windows: snapshot.store.windows.map(\.value)))
+                } catch { serviceMenu.disconnect() }
+                do { try await Task.sleep(for: .seconds(2)) } catch { return }
+            }
+        }
         worker = Task {
             while !Task.isCancelled {
                 do { try await poll() }
@@ -28,6 +44,11 @@ import ChauffeurCore
                 try? await Task.sleep(for: .seconds(2))
             }
         }
+    }
+    func applicationWillTerminate(_ notification: Notification) {
+        worker?.cancel()
+        menuWorker?.cancel()
+        serviceMenu.disconnect()
     }
     private func call(_ method: String, _ params: JSONValue = .object([:])) async throws -> JSONValue {
         try await RuntimeClient.call(IPCRequest(method, params: params), socketPath: socket)
@@ -47,10 +68,10 @@ import ChauffeurCore
         guard work.enabled else {
             center.removeAllPendingNotificationRequests()
             center.removeAllDeliveredNotifications()
-            NSApp.terminate(nil); return
+            return
         }
         if authorization == .notDetermined && !requestingAuthorization {
-            // The runtime starts this app only after the user enables notifications.
+            // Menu bar availability does not opt the user into notifications.
             requestingAuthorization = true
             _ = try await center.requestAuthorization(options: [.alert])
             return

@@ -25,7 +25,9 @@ an execution, or send terminal input. Missing records show an availability error
 ## Background operation
 
 The app embeds a signed accessory application, `ChauffeurNotifications.app`.
-The default background service starts it through Launch Services after opt-in.
+The default background service starts it through Launch Services to show the
+menu bar icon, even when notifications are disabled. Notification permission is
+requested only after opt-in.
 It can receive runtime alerts while Chauffeur itself is closed. Apple documents
 that a launch agent cannot directly use standard User Notifications; see
 [Apple's launch-agent guidance](https://developer.apple.com/forums/thread/804854).
@@ -39,7 +41,7 @@ notification identifier per session when retrying delivery after a crash.
 OS acceptance is not proof that the user saw a banner.
 
 Disabling notifications clears the outbox; the helper removes its pending and
-delivered notifications and exits. Re-enabling does not replay the old queue.
+delivered notifications while keeping the service menu available. Re-enabling does not replay the old queue.
 The macOS permission grant remains in System Settings. The runtime refreshes the
 helper after service/app updates so a click opens the current containing app.
 Only project/session UUIDs travel in the navigation URL. The main app validates

@@ -161,6 +161,12 @@ from **Settings → Presets → Chauffeur Skill…**. Installation applies to al
 sessions using that profile and can be removed from the same sheet.
 
 Closing a project window or quitting the UI keeps agents running.
+While the bundled service is running, a chauffeur-cap icon stays in the macOS
+menu bar. Click it to see projects with active sessions and reopen a project,
+selecting its last-selected live session (or its oldest live session). The menu
+updates every two seconds and remains available with notifications disabled.
+Its Quit command closes the main app while keeping sessions and the menu running.
+Standalone runtimes using a custom data directory do not show the menu.
 Stop Session ends an execution. Resume Conversation uses its recorded native ID
 and original profile; it creates a new execution.
 
