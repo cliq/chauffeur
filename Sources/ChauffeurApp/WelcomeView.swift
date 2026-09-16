@@ -43,8 +43,9 @@ struct WelcomeView: View {
                                     Label("\(sessions.filter { $0.state.isLive }.count) running", systemImage: "terminal")
                                     if sessions.contains(where: \.needsAttention) { Label("\(sessions.filter(\.needsAttention).count) need attention", systemImage: "bell.badge").foregroundStyle(.orange) }
                                 }.font(.caption)
-                            }.padding(.vertical, 6).tag(project.id).contentShape(Rectangle()).accessibilityIdentifier("project-\(project.id.uuidString)")
-                                .onTapGesture(count: 2) { open(project.id) }
+                            }.frame(maxWidth: .infinity, alignment: .leading).padding(.vertical, 6).tag(project.id).contentShape(Rectangle()).accessibilityIdentifier("project-\(project.id.uuidString)")
+                                .onTapGesture(count: 2) { selectedProject = project.id; open(project.id) }
+                                .onTapGesture { selectedProject = project.id }
                                 .contextMenu {
                                     Button("Open") { open(project.id) }
                                     Button("Rename…") { editingProject = project }
