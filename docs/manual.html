@@ -164,6 +164,8 @@
       <h3>Open and close tabs</h3>
       <p>Press <kbd>⌘T</kbd> for a quick choice: <kbd>T</kbd> immediately opens a terminal in the selected checkout; <kbd>A</kbd> opens agent setup. You may keep Command held for the second key. <kbd>Esc</kbd> cancels the picker. Use <kbd>⌃Tab</kbd> and <kbd>⌃⇧Tab</kbd> to move to the next and previous open tabs in that checkout. Opening a tab or moving to another one gives its terminal the keyboard, so you can type to the agent immediately.</p>
       <p><kbd>⌘W</kbd> closes the current tab without stopping its session. If the selected checkout has no open tabs, it closes the window. Closing the last tab leaves the window open; press <kbd>⌘W</kbd> again to close it. Reopen a closed session from the Sessions sidebar.</p>
+      <h3>Move through the sidebar</h3>
+      <p><kbd>⌘↓</kbd> and <kbd>⌘↑</kbd> move the sidebar selection without leaving the terminal, and reveal the sidebar when it is hidden. In <strong>Repositories</strong> mode they step through each repository and its checkouts, skipping the checkouts of a collapsed repository; in <strong>Sessions</strong> mode they step through the listed sessions. The selection wraps at both ends, and the terminal of the session you land on takes the keyboard.</p>
       <h3>Groups</h3>
       <ol>
         <li>Choose <strong>… → Manage Groups…</strong> in a project window.</li>
@@ -381,6 +383,7 @@ chauffeur -- ./-example</code></pre>
         <tr><td><kbd>⌘⇧0</kbd></td><td>Welcome to Chauffeur</td></tr>
         <tr><td><kbd>⌘K</kbd></td><td>Reveal the sidebar in Sessions mode and focus session search</td></tr>
         <tr><td><kbd>⌘⇧]</kbd> / <kbd>⌘⇧[</kbd></td><td>Next / previous session in the selected checkout</td></tr>
+        <tr><td><kbd>⌘↓</kbd> / <kbd>⌘↑</kbd></td><td>Next / previous sidebar item: checkout or session, depending on sidebar mode</td></tr>
         <tr><td><kbd>⌘F</kbd></td><td>Open terminal history and Find</td></tr>
         <tr><td><kbd>⌘⇧A</kbd></td><td>Next attention item in the current view</td></tr>
         <tr><td><kbd>⌘A</kbd>, <kbd>⌘C</kbd>, <kbd>⌘V</kbd></td><td>Select terminal output, copy, paste</td></tr>

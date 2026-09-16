@@ -30,6 +30,8 @@ import ChauffeurCore
             CommandMenu("Session") {
                 Button("Next Session") { command("next") }.keyboardShortcut("]", modifiers: [.command, .shift])
                 Button("Previous Session") { command("previous") }.keyboardShortcut("[", modifiers: [.command, .shift])
+                Button("Next Sidebar Item") { command("sidebar-next") }.keyboardShortcut(.downArrow, modifiers: .command)
+                Button("Previous Sidebar Item") { command("sidebar-previous") }.keyboardShortcut(.upArrow, modifiers: .command)
                 Button("Search Sessions…") { command("search-sessions") }.keyboardShortcut("k")
                 Button("Find in Terminal…") { command("find") }.keyboardShortcut("f")
                 Button("Next Attention Item") { command("attention") }.keyboardShortcut("a", modifiers: [.command, .shift])

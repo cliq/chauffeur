@@ -176,6 +176,8 @@ struct ProjectWindow: View {
                 case "find": if let id = layout.state.selectedSessionID { layout.controllers[id]?.find() }
                 case "next": cycle(1)
                 case "previous": cycle(-1)
+                case "sidebar-next": navigateSidebar(1)
+                case "sidebar-previous": navigateSidebar(-1)
                 case "attention": nextAttention()
                 default: break
                 }
@@ -627,6 +629,35 @@ struct ProjectWindow: View {
         guard !ordered.isEmpty else { return }
         let current = ordered.firstIndex { $0.id == layout.state.selectedSessionID } ?? -offset.signum()
         selectSession(ordered[((current + offset) % ordered.count + ordered.count) % ordered.count].id)
+    }
+    /// The sidebar rows ⌘↑/⌘↓ moves through in Repositories mode: every
+    /// registered repository followed by its checkouts, collapsed ones aside.
+    private func sidebarRows(_ project: Project) -> [(folderID: UUID, path: String?)] {
+        project.folders.filter(\.registered).flatMap { folder -> [(folderID: UUID, path: String?)] in
+            let repository = [(folderID: folder.id, path: String?.none)]
+            guard !collapsedRepositories.contains(folder.id) else { return repository }
+            return repository + checkouts(for: folder, project: project).map { (folderID: folder.id, path: String?($0.path)) }
+        }
+    }
+    /// Moves the sidebar selection without leaving the terminal: the selected
+    /// checkout or session changes and its terminal takes the keyboard.
+    private func navigateSidebar(_ offset: Int) {
+        guard let project else { return }
+        layout.state.sidebarVisible = true
+        if layout.state.sidebarMode == .sessions {
+            let ordered = sessions
+            guard !ordered.isEmpty else { return }
+            let current = ordered.firstIndex { $0.id == layout.state.selectedSessionID } ?? -offset.signum()
+            selectSession(ordered[((current + offset) % ordered.count + ordered.count) % ordered.count].id)
+            return
+        }
+        let rows = sidebarRows(project)
+        guard !rows.isEmpty else { return }
+        let selected = layout.selectedWorktreePath.map { Paths.canonical($0) }
+        let current = rows.firstIndex { $0.folderID == layout.selectedFolderID && $0.path.map { Paths.canonical($0) } == selected } ?? -offset.signum()
+        let row = rows[((current + offset) % rows.count + rows.count) % rows.count]
+        selectCheckout(folderID: row.folderID, path: row.path)
+        sidebarReveal = SidebarReveal(row: row.path.map { .worktree(row.folderID, $0) } ?? .repository(row.folderID))
     }
     private func nextAttention() {
         let attention = (layout.state.sidebarMode == .sessions ? sessions : allSessions).filter(\.needsAttention)
