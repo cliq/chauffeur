@@ -21,6 +21,7 @@ import ChauffeurCore
         let appURL = URL(fileURLWithPath: applicationPath)
         runtime = Process(); runtime.executableURL = appURL.appendingPathComponent("Contents/MacOS/ChauffeurRuntime")
         runtime.arguments = ["--data-dir", root.path]
+        runtime.currentDirectoryURL = root
         runtime.standardOutput = FileHandle.nullDevice; runtime.standardError = FileHandle.nullDevice
         try runtime.run()
         let deadline = ContinuousClock.now.advanced(by: .seconds(20))
@@ -34,7 +35,10 @@ import ChauffeurCore
         let sourceRoot = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
         let config = root.appendingPathComponent("existing fixture profile")
         try FileManager.default.createDirectory(at: config, withIntermediateDirectories: true)
-        let preset = AgentPreset(setID: set.id, name: "Fake Codex", kind: .codex, executable: sourceRoot.appendingPathComponent("Prototypes/fake_cli.py").path, configurationDirectory: config.path)
+        for name in ["fake_cli.py", "fake_tui.py"] {
+            try FileManager.default.copyItem(at: sourceRoot.appendingPathComponent("Prototypes/\(name)"), to: root.appendingPathComponent(name))
+        }
+        let preset = AgentPreset(setID: set.id, name: "Fake Codex", kind: .codex, executable: root.appendingPathComponent("fake_cli.py").path, configurationDirectory: config.path)
         _ = try await call("savePreset", .object(["record": try .from(preset)]))
         for index in 1...4 {
             var project = Project(name: "Window Fixture \(index)", presetSetID: set.id)

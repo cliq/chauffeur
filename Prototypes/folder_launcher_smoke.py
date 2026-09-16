@@ -61,7 +61,7 @@ with tempfile.TemporaryDirectory(prefix='chauffeur-launcher-', dir='/tmp') as di
     launcher.parent.mkdir()
     launcher.symlink_to(binary_dir / 'chauffeur-launcher')
     runtime_log = (artifacts / 'runtime.log').open('w')
-    runtime = subprocess.Popen([str(binary_dir / 'ChauffeurRuntime'), '--data-dir', str(root)], stdout=runtime_log, stderr=runtime_log)
+    runtime = subprocess.Popen([str(binary_dir / 'ChauffeurRuntime'), '--data-dir', str(root)], cwd=root, stdout=runtime_log, stderr=runtime_log)
     pids = set()
     def exact(connection, count):
         data = bytearray()
@@ -128,7 +128,7 @@ with tempfile.TemporaryDirectory(prefix='chauffeur-launcher-', dir='/tmp') as di
         command('hideSidebar', projectID=b)
         time.sleep(0.5)
         assert state().get('error') is None, state().get('error')
-        runtime = subprocess.Popen([str(binary_dir / 'ChauffeurRuntime'), '--data-dir', str(root)], stdout=runtime_log, stderr=runtime_log)
+        runtime = subprocess.Popen([str(binary_dir / 'ChauffeurRuntime'), '--data-dir', str(root)], cwd=root, stdout=runtime_log, stderr=runtime_log)
         wait_for(lambda: state()['online'])
         wait_for(lambda: any(w['value']['id'] == b and not w['value']['sidebarVisible'] for w in call('snapshot')['store']['windows']))
         assert state().get('error') is None

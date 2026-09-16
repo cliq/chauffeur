@@ -58,8 +58,13 @@ struct SettingsView: View {
                             Text(identity.executablePath).font(.caption).textSelection(.enabled)
                         }
                     }
-                    HStack { Button("Restart Service") { model.restartService() }.disabled(model.isRestartingService); Button("Login Items Settings…") { model.openServiceSettings() } }
-                    Text("Agents remain running when Chauffeur's windows close. A runtime restart reconciles surviving terminal processes.").font(.caption).foregroundStyle(.secondary)
+                    HStack {
+                        Button("Restart Service") { model.restartService() }.disabled(model.isRestartingService || model.isStoppingService)
+                        Button(model.isStoppingService ? "Stopping…" : "Quit Service") { model.stopService() }
+                            .disabled(!model.canStopService).accessibilityIdentifier("service.stop")
+                        Button("Login Items Settings…") { model.openServiceSettings() }
+                    }
+                    Text("Quitting the service keeps agents running but pauses updates and coordination. Start it again here or reopen Chauffeur to reconnect.").font(.caption).foregroundStyle(.secondary)
                 }
                 NotificationSettingsSection()
                 TerminalLauncherSettings()
@@ -112,6 +117,7 @@ struct PresetSetEditor: View {
     @State private var archived = false
     @State private var version: String?
     @State private var failure: String?
+    @State private var saving = false
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
             Text(presetSet == nil ? "Create Preset Set" : "Edit Preset Set").font(.title2)
@@ -127,11 +133,13 @@ struct PresetSetEditor: View {
             }
             if let failure { Text(failure).foregroundStyle(.red) }
             HStack {
-                Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction); Spacer()
-                Button("Save") {
+                Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction).disabled(saving); Spacer()
+                Button(saving ? "Saving…" : "Save") {
+                    guard !saving else { return }
+                    saving = true; failure = nil
                     var value = presetSet ?? PresetSet(name: name); value.name = name; value.defaultPresetID = defaultID; value.archived = archived
-                    Task { do { try await model.save("savePresetSet", value, version: version); completion(value.id); dismiss() } catch { failure = error.localizedDescription } }
-                }.keyboardShortcut(.defaultAction).disabled(name.trimmingCharacters(in: .whitespaces).isEmpty)
+                    Task { defer { saving = false }; do { try await model.save("savePresetSet", value, version: version); completion(value.id); dismiss() } catch { failure = error.localizedDescription } }
+                }.keyboardShortcut(.defaultAction).disabled(saving || name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty).accessibilityIdentifier("preset-set.save")
             }
         }.padding(24).frame(width: 470)
             .onAppear { name = presetSet?.name ?? ""; defaultID = presetSet?.defaultPresetID; archived = presetSet?.archived ?? false; version = model.snapshot.store.presetSets.first { $0.value.id == presetSet?.id }?.version }

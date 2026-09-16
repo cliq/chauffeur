@@ -114,7 +114,7 @@ struct ServiceHealthView: View {
             }
             Spacer()
             if !model.online {
-                Button("Start Service") { model.registerService(forceRestart: true); model.reconnect() }.font(.caption)
+                Button("Start Service") { model.registerService(forceRestart: true); model.reconnect() }.font(.caption).disabled(model.isStoppingService || model.isRestartingService)
                 Button("System Settings…") { model.openServiceSettings() }.font(.caption)
             }
         }

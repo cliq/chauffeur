@@ -24,10 +24,17 @@ import ChauffeurCore
             }
             let deadline = ContinuousClock.now.advanced(by: .seconds(20))
             while (!model.online || model.isRestartingService || model.snapshot.health["mcpEndpoint"].string == nil || !NSApp.windows.contains(where: \.isVisible)) && ContinuousClock.now < deadline && ProcessInfo.processInfo.environment["CHAUFFEUR_SERVICE_PROBE_ACTION"] != "unregister" { try? await Task.sleep(for: .milliseconds(100)) }
+            if ProcessInfo.processInfo.environment["CHAUFFEUR_SERVICE_PROBE_ACTION"] == "stop" {
+                model.stopService()
+                while model.isStoppingService { try? await Task.sleep(for: .milliseconds(100)) }
+                // Observe for several subscription retries: stopping must stick.
+                try? await Task.sleep(for: .seconds(2))
+            }
             let result: JSONValue = .object([
                 "initialStatus": model.initialServiceStatus.map { .number(Double($0)) } ?? .null,
                 "status": .string(model.serviceStatus), "online": .bool(model.online),
                 "runtimeVerified": .bool(model.runtimeConnectionVerified),
+                "stopped": .bool(model.isServiceStopped),
                 "message": .string(model.serviceMessage), "registrationError": model.serviceRegistrationError.map(JSONValue.string) ?? .null,
                 "health": model.snapshot.health,
                 "visibleWindows": .number(Double(NSApp.windows.filter(\.isVisible).count)),

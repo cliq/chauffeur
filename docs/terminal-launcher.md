@@ -25,8 +25,8 @@ reuse an existing window. Other windows already open remain open.
 The installed command is a short shell script that executes
 `Contents/MacOS/chauffeur-launcher` inside the app and passes all arguments
 unchanged. Its ownership marker lets Chauffeur replace its own command after
-the app moves, even if the old app no longer exists. Reinstall it from Settings
-in the new location. Existing unrelated commands are preserved; an earlier
+the app moves, even if the old app no longer exists. Use **Reinstall Terminal Command…** in Settings → Runtime after updating
+or moving the app. The action remains available when the command is already installed. Existing unrelated commands are preserved; an earlier
 symlink installation can be upgraded while its original app is still present.
 
 The distinct embedded filename is required: on a case-insensitive volume, embedding

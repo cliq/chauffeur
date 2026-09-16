@@ -37,6 +37,9 @@ def wait_for(probe, description, timeout=25):
 
 with tempfile.TemporaryDirectory(prefix='chauffeur-editors-', dir='/tmp') as directory:
     root = Path(directory).resolve()
+    fixture_cli = root / 'fake_cli.py'
+    for fixture in ('fake_cli.py', 'fake_tui.py'):
+        shutil.copy2(repository / 'Prototypes' / fixture, root / fixture)
     app = root / 'Chauffeur.app'
     shutil.copytree(repository / 'build/Build/Products/Debug/Chauffeur Debug.app', app, symlinks=True)
     identifier = 'dev.chauffeur.editor-probe.' + uuid.uuid4().hex
@@ -52,7 +55,7 @@ with tempfile.TemporaryDirectory(prefix='chauffeur-editors-', dir='/tmp') as dir
     with (artifacts / 'sign.log').open('w') as log:
         subprocess.run(['codesign', '--force', '--sign', identities[0], '--preserve-metadata=entitlements,flags,runtime', str(app)], stdout=log, stderr=log, check=True)
     runtime_log = (artifacts / 'runtime.log').open('w')
-    runtime = subprocess.Popen([str(app / 'Contents/MacOS/ChauffeurRuntime'), '--data-dir', str(root)], stdout=runtime_log, stderr=runtime_log)
+    runtime = subprocess.Popen([str(app / 'Contents/MacOS/ChauffeurRuntime'), '--data-dir', str(root)], cwd=root, stdout=runtime_log, stderr=runtime_log)
     pid = None
     summary = {}
 
@@ -159,7 +162,8 @@ with tempfile.TemporaryDirectory(prefix='chauffeur-editors-', dir='/tmp') as dir
         wait_for(lambda: control(identifier='preset-set.name'), 'set editor')
         assert not control('Save')['enabled']
         type_text(name, identifier='preset-set.name')
-        press('Save')
+        button = control('Save')
+        ax('click', title='Save', x=button['frame']['width'] / 2, y=button['frame']['height'] / 2)
         saved = wait_for(lambda: next((s for s in records('presetSets') if s['name'] == name), None), 'preset set saved')
         wait_for(lambda: not any(c['role'] == 'AXSheet' for c in ax()), 'set editor closed')
         return saved
@@ -169,7 +173,7 @@ with tempfile.TemporaryDirectory(prefix='chauffeur-editors-', dir='/tmp') as dir
         subprocess.run(['open', '-n', str(app)], check=True)
         probe = subprocess.run(['swift', str(repository / 'Prototypes/app_window_probe.swift'), str(app)], capture_output=True, text=True, check=True)
         pid = json.loads(probe.stdout)['pid']
-        wait_for(lambda: 'Background service running' in text(), 'app connected')
+        wait_for(lambda: 'Custom service running' in text(), 'app connected')
         assert not control('Create New Project…')['enabled']
         settings()
         personal = create_set('Personal fixture')
@@ -188,8 +192,8 @@ with tempfile.TemporaryDirectory(prefix='chauffeur-editors-', dir='/tmp') as dir
         profile = root / '.profile-fixture'; profile.mkdir()
         choose_path(profile, identifier='preset.choose-configuration-directory')
         assert control(identifier='preset.configuration-directory')['value'] == str(profile)
-        choose_path(repository / 'Prototypes/fake_cli.py', identifier='preset.choose-executable')
-        assert control(identifier='preset.executable')['value'] == str(repository / 'Prototypes/fake_cli.py')
+        choose_path(fixture_cli, identifier='preset.choose-executable')
+        assert control(identifier='preset.executable')['value'] == str(fixture_cli)
         ax('typeText', title='Launch arguments', role='AXTextArea', value='--model "unfinished')
         press('Save Preset')
         wait_for(lambda: 'quote' in text().lower(), 'argument validation')

@@ -19,7 +19,7 @@ import uuid
 repository = Path(__file__).resolve().parents[1]
 products = repository / 'build/Build/Products'
 debug = products / 'Debug/Chauffeur Debug.app'
-release = products / 'Release/Chauffeur.app'
+release = Path(os.environ.get('CHAUFFEUR_TEST_RELEASE_APP', products / 'Release/Chauffeur.app'))
 artifacts = repository / '.local/service-installation-artifacts'
 artifacts.mkdir(parents=True, exist_ok=True, mode=0o700)
 signing = (products / 'Debug/Chauffeur.signing-identity').read_text().strip()
@@ -101,23 +101,26 @@ with tempfile.TemporaryDirectory(prefix='chauffeur-install-', dir='/tmp') as tem
     (app / launch_plist).write_bytes(plistlib.dumps(config))
     subprocess.run(['codesign', '--force', '--sign', signing, '--preserve-metadata=entitlements,flags,runtime', str(app)], check=True)
 
-    def probe(name, connection=socket_path, unregister=False, expected_online=True):
-        directory = artifacts / name
-        directory.mkdir(exist_ok=True)
+    def probe(name, connection=socket_path, unregister=False, expected_online=True, stop=False):
+        directory = root / 'probe-reports' / name
+        directory.mkdir(parents=True, exist_ok=True)
         report = directory / 'service-probe.json'
         report.unlink(missing_ok=True)
         environment = {key: value for key, value in os.environ.items() if not key.startswith('CHAUFFEUR_')}
         environment.update(CHAUFFEUR_SERVICE_PROBE_DIR=str(directory), CHAUFFEUR_SERVICE_PROBE_SOCKET=str(connection))
         if unregister:
             environment['CHAUFFEUR_SERVICE_PROBE_ACTION'] = 'unregister'
+        if stop:
+            environment['CHAUFFEUR_SERVICE_PROBE_ACTION'] = 'stop'
         with (directory / 'app.log').open('w') as log:
-            process = subprocess.Popen([str(app / 'Contents/MacOS/Chauffeur')], env=environment, stdout=log, stderr=log)
+            process = subprocess.Popen([str(app / 'Contents/MacOS/Chauffeur')], env=environment, cwd=root, stdout=log, stderr=log)
             try:
                 assert process.wait(timeout=40) == 0, f'{name}: app failed'
             finally:
                 if process.poll() is None:
                     process.terminate()
                     process.wait(timeout=10)
+        shutil.copytree(directory, artifacts / name, dirs_exist_ok=True)
         result = json.loads(report.read_text())
         assert result['registrationError'] is None and result['error'] is None, result
         if not unregister:
@@ -145,9 +148,16 @@ with tempfile.TemporaryDirectory(prefix='chauffeur-install-', dir='/tmp') as tem
         stable = probe('unchanged-relaunch')
         assert stable['health']['runtimeID'] == relocated['health']['runtimeID'], 'Unchanged app unnecessarily restarted its service'
 
+        stopped = probe('stop', expected_online=False, stop=True)
+        assert stopped['stopped'] and stopped['status'] == 'notRegistered', stopped
+        assert subprocess.run(['launchctl', 'print', job], capture_output=True).returncode != 0
+        resumed = probe('start-after-stop')
+        assert resumed['health']['runtimeID'] != stable['health']['runtimeID']
+        stable = resumed
+
         release_root = root / 'release-data'
         release_log = (artifacts / 'release-runtime.log').open('w')
-        release_process = subprocess.Popen([str(release / 'Contents/MacOS/ChauffeurRuntime'), '--data-dir', str(release_root)], stdout=release_log, stderr=release_log)
+        release_process = subprocess.Popen([str(release / 'Contents/MacOS/ChauffeurRuntime'), '--data-dir', str(release_root)], cwd=root, stdout=release_log, stderr=release_log)
         release_socket = release_root / 'runtime/runtime.sock'
         foreign = wait_ready(release_socket)
         assert foreign['identity']['build'] == 'Release'
@@ -157,7 +167,7 @@ with tempfile.TemporaryDirectory(prefix='chauffeur-install-', dir='/tmp') as tem
         rejected = probe('reject-foreign-runtime', connection=release_socket, expected_online=False)
         assert 'different app build or location' in rejected['message'], rejected
         assert call(release_socket)['runtimeID'] == foreign['runtimeID'], 'Identity recovery changed the foreign runtime'
-        summary = {'passed': True, 'separateBuildIdentities': True, 'moveRefreshesRegistration': True, 'unchangedLaunchKeepsRuntime': True, 'foreignRuntimeRejected': True}
+        summary = {'passed': True, 'separateBuildIdentities': True, 'moveRefreshesRegistration': True, 'unchangedLaunchKeepsRuntime': True, 'foreignRuntimeRejected': True, 'quitServiceStaysStopped': True, 'reopenStartsService': True}
         (artifacts / 'summary.json').write_text(json.dumps(summary, indent=2) + '\n')
         print(json.dumps(summary, indent=2))
     finally:

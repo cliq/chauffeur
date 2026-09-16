@@ -99,6 +99,9 @@ struct AppSnapshot: Decodable, Sendable {
     @Published var serviceMessage = "Connecting to background service…"
     @Published private(set) var serviceRegistrationError: String?
     @Published private(set) var isRestartingService = false
+    @Published private(set) var isStoppingService = false
+    @Published private(set) var isServiceStopped = false
+    var canStopService: Bool { !usesCustomSocket && !isRestartingService && !isStoppingService && !isServiceStopped && (online || service.status == .enabled || service.status == .requiresApproval) }
     @Published private(set) var isExportingDiagnostics = false
     private(set) var snapshotReceivedAt: Date?
     private var serviceDiagnosticError: NSError?
@@ -165,7 +168,7 @@ struct AppSnapshot: Decodable, Sendable {
         observation = Task { [weak self] in
             while !Task.isCancelled {
                 guard let self else { return }
-                if isRestartingService { try? await Task.sleep(for: .milliseconds(100)); continue }
+                if isRestartingService || isStoppingService || isServiceStopped { try? await Task.sleep(for: .milliseconds(100)); continue }
                 let generation = connectionGeneration
                 do {
                     let socket = try SocketConnection(path: socketPath)
@@ -178,7 +181,7 @@ struct AppSnapshot: Decodable, Sendable {
                         if let failure = response.error { throw failure }
                         guard let result = response.result else { continue }
                         let received = try await Task.detached { try result.decode(AppSnapshot.self) }.value
-                        guard generation == connectionGeneration, !isRestartingService else { break }
+                        guard generation == connectionGeneration, !isRestartingService, !isStoppingService, !isServiceStopped else { break }
                         if !usesCustomSocket {
                             guard let expected = expectedRuntimeIdentity else {
                                 throw ChauffeurError("runtime_identity_unavailable", "Cannot verify the bundled runtime. Rebuild or reinstall Chauffeur")
@@ -217,7 +220,8 @@ struct AppSnapshot: Decodable, Sendable {
     }
     func registerService(forceRestart: Bool = false) {
         guard ProcessInfo.processInfo.environment["CHAUFFEUR_SOCKET"] == nil else { reconnect(); return }
-        guard !isRestartingService else { return }
+        guard !isRestartingService, !isStoppingService else { return }
+        isServiceStopped = false
         if initialServiceStatus == nil { initialServiceStatus = service.status.rawValue }
         do {
             // An embedded agent without a background-task record may report
@@ -247,6 +251,31 @@ struct AppSnapshot: Decodable, Sendable {
         @unknown default: return "unknown"
         }
     }
+    func stopService() {
+        guard canStopService else { return }
+        isStoppingService = true
+        Task {
+            defer { isStoppingService = false }
+            await finishPendingWindowWrites()
+            connectionGeneration += 1
+            connection?.close()
+            online = false
+            serviceMessage = "Stopping background service…"
+            do {
+                // Unregister instead of killing the process: launchd must not
+                // immediately relaunch the service's KeepAlive job.
+                try await service.unregister()
+                isServiceStopped = true
+                serviceRegistrationError = nil; serviceDiagnosticError = nil
+                serviceMessage = "Background service stopped"
+            } catch {
+                serviceRegistrationError = "Background service could not stop: \(error.localizedDescription)"
+                serviceDiagnosticError = error as NSError
+                serviceMessage = serviceRegistrationError!
+                self.error = serviceRegistrationError
+            }
+        }
+    }
     func restartService() {
         guard beginServiceRestart() else { return }
         Task {
@@ -265,7 +294,8 @@ struct AppSnapshot: Decodable, Sendable {
     }
     private func beginServiceRestart() -> Bool {
         guard ProcessInfo.processInfo.environment["CHAUFFEUR_SOCKET"] == nil else { reconnect(); return false }
-        guard !isRestartingService else { return false }
+        guard !isRestartingService, !isStoppingService else { return false }
+        isServiceStopped = false
         // Set this synchronously, before startup can subscribe to the old helper.
         isRestartingService = true
         connectionGeneration += 1
@@ -295,7 +325,7 @@ struct AppSnapshot: Decodable, Sendable {
         let generation = connectionGeneration
         let result = try await call("snapshot")
         let received = try await Task.detached { try result.decode(AppSnapshot.self) }.value
-        guard generation == connectionGeneration, !isRestartingService else { return }
+        guard generation == connectionGeneration, !isRestartingService, !isStoppingService, !isServiceStopped else { return }
         snapshot = received
         snapshotReceivedAt = Date()
         online = true

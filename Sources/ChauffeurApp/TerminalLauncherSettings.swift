@@ -5,6 +5,7 @@ import ChauffeurCore
 struct TerminalLauncherSettings: View {
     @State private var installed = false
     @State private var failure: String?
+    @State private var installationSucceeded = false
     private var executable: URL { Bundle.main.bundleURL.appendingPathComponent("Contents/MacOS/chauffeur-launcher") }
     var body: some View {
         Section("Terminal Command") {
@@ -12,10 +13,12 @@ struct TerminalLauncherSettings: View {
             HStack {
                 Text(TerminalLauncherInstallation.destination.path).font(.system(.caption, design: .monospaced)).textSelection(.enabled)
                 Spacer()
-                Button(installed ? "Installed" : "Install Terminal Command…") { install() }.disabled(installed)
+                Button(installed ? "Reinstall Terminal Command…" : "Install Terminal Command…") { install() }
+                    .accessibilityIdentifier("terminal-command.install")
             }
+            if installationSucceeded { Text("Terminal command is ready for this app.").foregroundStyle(.secondary).font(.caption) }
             if let failure { Text(failure).foregroundStyle(.red).font(.caption) }
-            Text("Installing may require administrator access. If you move Chauffeur, install the command again from its new location.")
+            Text("Installing may require administrator access. After updating or moving Chauffeur, reinstall the command from this app.")
                 .font(.caption).foregroundStyle(.secondary)
         }.onAppear { refresh() }
     }
@@ -23,7 +26,7 @@ struct TerminalLauncherSettings: View {
         installed = TerminalLauncherInstallation.isInstalled(executable: executable)
     }
     private func install() {
-        failure = nil
+        failure = nil; installationSucceeded = false
         do {
             if FileManager.default.isWritableFile(atPath: TerminalLauncherInstallation.destination.deletingLastPathComponent().path) {
                 try TerminalLauncherInstallation.install(executable: executable)
@@ -38,6 +41,7 @@ struct TerminalLauncherSettings: View {
                 if let error { throw ChauffeurError("launcher_install", error[NSAppleScript.errorMessage] as? String ?? "Terminal command installation was cancelled") }
             }
             refresh()
+            installationSucceeded = installed
             if !installed { failure = "The terminal command was not installed. Try again from this app’s current location." }
         } catch { failure = error.localizedDescription }
     }

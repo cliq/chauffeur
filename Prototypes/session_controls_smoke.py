@@ -44,6 +44,8 @@ def wait_for(probe, description, timeout=30):
 
 with tempfile.TemporaryDirectory(prefix='chauffeur-session-controls-', dir='/tmp') as directory:
     root = Path(directory).resolve()
+    for fixture in ('fake_cli.py', 'fake_tui.py'):
+        shutil.copy2(repository / 'Prototypes' / fixture, root / fixture)
     app = root / 'Chauffeur.app'
     shutil.copytree(repository / 'build/Build/Products/Debug/Chauffeur Debug.app', app, symlinks=True)
     identifier = 'dev.chauffeur.session-controls-probe.' + uuid.uuid4().hex
@@ -60,7 +62,7 @@ with tempfile.TemporaryDirectory(prefix='chauffeur-session-controls-', dir='/tmp
         subprocess.run(['codesign', '--force', '--sign', identities[0], '--preserve-metadata=entitlements,flags,runtime', str(app)], stdout=log, stderr=log, check=True)
     binary_dir = app / 'Contents/MacOS'
     runtime_log = (artifacts / 'runtime.log').open('w')
-    runtime = subprocess.Popen([str(binary_dir / 'ChauffeurRuntime'), '--data-dir', str(root)], stdout=runtime_log, stderr=runtime_log)
+    runtime = subprocess.Popen([str(binary_dir / 'ChauffeurRuntime'), '--data-dir', str(root)], cwd=root, stdout=runtime_log, stderr=runtime_log)
     app_pid = None
 
     def exact(connection, count):
@@ -134,7 +136,7 @@ with tempfile.TemporaryDirectory(prefix='chauffeur-session-controls-', dir='/tmp
     try:
         wait_for(lambda: call('status'), 'runtime ready')
         repo = root / 'terminal repository'; repo.mkdir()
-        cli = repository / 'Prototypes/fake_cli.py'
+        cli = root / 'fake_cli.py'
         set_id, preset_id, project_id, folder_id, group_id = [uid() for _ in range(5)]
         now = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
         call('savePresetSet', {'record': {'id': set_id, 'name': 'Controls fixture', 'revision': 1, 'archived': False}})
@@ -176,6 +178,42 @@ with tempfile.TemporaryDirectory(prefix='chauffeur-session-controls-', dir='/tmp
         terminal_b = 'terminal-' + resistant['id']
         wait_for(lambda: control(terminal_id) and 'Chauffeur fixture' in control(terminal_id)['value'], 'first terminal ready')
         ax('key', terminal_id, keyCode=53)
+        if '--quit-only' in sys.argv:
+            original_live = live_ids()
+            def request_quit():
+                ax('press', title='Quit Chauffeur', role='AXMenuItem', includeMenus=True)
+                wait_for(lambda: 'Keep All Sessions Running & Quit' in text_values(), 'quit choice shown')
+            request_quit()
+            ax('press', title='Cancel')
+            wait_for(lambda: 'Keep All Sessions Running & Quit' not in text_values(), 'quit cancelled')
+            assert live_ids() == original_live
+            # Regression: a cancelled quit must not starve asynchronous editor saves.
+            ax('press', title='Settings…', role='AXMenuItem', includeMenus=True)
+            wait_for(lambda: any(c['title'] == 'Presets' for c in controls()), 'settings opened')
+            ax('press', title='Presets')
+            ax('press', title='Add Set…')
+            wait_for(lambda: control('preset-set.name'), 'preset editor')
+            ax('typeText', 'preset-set.name', value='After cancelled quit')
+            ax('press', 'preset-set.save')
+            wait_for(lambda: any(r['value']['name'] == 'After cancelled quit' for r in call('snapshot')['store']['presetSets']), 'editor saves after cancelled quit')
+            ax('closeWindow', identifier='com_apple_SwiftUI_Settings_window')
+            for title in ['Session Controls A', 'Session Controls B']:
+                ax('closeWindow', title=title, role='AXWindow')
+            request_quit()  # Standalone prompt with no project windows.
+            ax('press', title='Review Sessions')
+            wait_for(lambda: any(c['role'] == 'AXWindow' and c['title'].startswith('Session Controls') for c in controls()), 'review opens a project')
+            wait_for(lambda: any(c['identifier'].startswith('terminal-') and c['identifier'][9:] in original_live for c in controls()), 'review shows an active terminal')
+            assert live_ids() == original_live
+            request_quit()
+            ax('press', title='Keep All Sessions Running & Quit')
+            wait_for(lambda: subprocess.run(['/bin/kill', '-0', str(app_pid)], capture_output=True).returncode != 0, 'keep-running quits app')
+            assert live_ids() == original_live
+            assert call('status')['runtimeID'] == session['runtimeID']
+            report = {'passed': True, 'cancelPreservesSessions': True, 'saveAfterCancelledQuit': True,
+                      'reviewOpensActiveSessionWithoutWindows': True, 'keepRunningQuitsUIOnly': True}
+            (artifacts / 'quit-summary.json').write_text(json.dumps(report, indent=2))
+            print(json.dumps(report, indent=2), flush=True)
+            sys.exit(0)
         # One shared error must not create a sheet in every project and Welcome
         # window. Repeated errors coalesce while distinct errors remain queued.
         unregistered = [root / ('unregistered-' + name) for name in ['one', 'two']]
@@ -316,7 +354,7 @@ with tempfile.TemporaryDirectory(prefix='chauffeur-session-controls-', dir='/tmp
         (artifacts / 'destructive-action-status.json').write_text(json.dumps({'stop': stop_action, 'force': force_action}, indent=2))
         (artifacts / 'summary.json').write_text(json.dumps(report, indent=2))
         print(json.dumps(report, indent=2))
-    except BaseException:
+    except Exception:
         try:
             (artifacts / 'failed-controls.json').write_text(json.dumps(controls(), indent=2))
             screenshot('failed')

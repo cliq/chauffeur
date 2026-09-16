@@ -43,3 +43,43 @@ import SwiftUI
         }
     }
 }
+
+/// A nonblocking quit prompt. The standalone fallback must not enter runModal:
+/// editor saves and terminal input still need the normal application run loop.
+@MainActor final class QuitConfirmation: NSObject, NSWindowDelegate {
+    enum Choice { case keepRunning, review, cancel }
+    private let alert = NSAlert()
+    private var completion: ((Choice) -> Void)?
+
+    func show(sessionCount: Int, completion: @escaping (Choice) -> Void) {
+        self.completion = completion
+        alert.messageText = "Quit Chauffeur?"
+        alert.informativeText = "\(sessionCount) active session\(sessionCount == 1 ? "" : "s") will keep running in the background. Review opens an active session without quitting."
+        alert.addButton(withTitle: "Keep All Sessions Running & Quit")
+        alert.addButton(withTitle: "Review Sessions")
+        alert.addButton(withTitle: "Cancel").keyEquivalent = "\u{1b}"
+        NSApp.activate(ignoringOtherApps: true)
+        if let window = NSApp.keyWindow ?? NSApp.mainWindow, window.isVisible, window.attachedSheet == nil {
+            alert.beginSheetModal(for: window) { [self] response in
+                finish(response == .alertFirstButtonReturn ? .keepRunning : response == .alertSecondButtonReturn ? .review : .cancel)
+            }
+        } else {
+            alert.layout()
+            alert.window.delegate = self
+            for (index, button) in alert.buttons.enumerated() {
+                button.tag = index; button.target = self; button.action = #selector(choose(_:))
+            }
+            alert.window.center()
+            alert.window.makeKeyAndOrderFront(nil)
+        }
+    }
+    @objc private func choose(_ button: NSButton) {
+        alert.window.orderOut(nil)
+        finish(button.tag == 0 ? .keepRunning : button.tag == 1 ? .review : .cancel)
+    }
+    func windowShouldClose(_ sender: NSWindow) -> Bool { finish(.cancel); return true }
+    private func finish(_ choice: Choice) {
+        let callback = completion; completion = nil
+        callback?(choice)
+    }
+}

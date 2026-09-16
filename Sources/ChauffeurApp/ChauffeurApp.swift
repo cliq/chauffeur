@@ -67,6 +67,8 @@ import ChauffeurCore
 @MainActor final class AppDelegate: NSObject, NSApplicationDelegate {
     let model = AppModel()
     private var errors: AppErrorPresenter?
+    private var preparingToQuit = false
+    private var quitConfirmation: QuitConfirmation?
     func applicationDidFinishLaunching(_ notification: Notification) {
         errors = AppErrorPresenter(model: model)
         model.start()
@@ -76,15 +78,42 @@ import ChauffeurCore
     }
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        guard !model.isTerminating else { return .terminateLater }
-        model.isTerminating = true
+        if model.isTerminating { return .terminateNow }
+        guard !preparingToQuit else { return .terminateCancel }
+        preparingToQuit = true
+        // Return to the normal run loop before presenting UI or awaiting work.
+        // AppKit's terminateLater loop can starve main-actor tasks.
         Task {
-            // External quit requests (including the service menu) must also
-            // preserve pending window selections before terminating.
-            await model.finishPendingWindowWrites()
-            sender.reply(toApplicationShouldTerminate: true)
+            let active = model.snapshot.sessions.filter { $0.state.isLive }
+            guard !active.isEmpty else { await finishQuitting(sender); return }
+            let prompt = QuitConfirmation()
+            quitConfirmation = prompt
+            prompt.show(sessionCount: active.count) { [weak self] choice in
+                guard let self else { return }
+                self.quitConfirmation = nil
+                switch choice {
+                case .keepRunning:
+                    Task { await self.finishQuitting(sender) }
+                case .review:
+                    self.preparingToQuit = false
+                    // Re-read the snapshot: a session may finish while the prompt is open.
+                    let available = self.model.snapshot.sessions.filter { $0.state.isLive && self.model.project($0.projectID) != nil }
+                    if let session = available.first(where: \.needsAttention) ?? available.first {
+                        self.model.openSessionURL(SessionRoute(projectID: session.projectID, sessionID: session.id).url)
+                    } else {
+                        self.model.openWelcomeWindow?()
+                    }
+                case .cancel:
+                    self.preparingToQuit = false
+                }
+            }
         }
-        return .terminateLater
+        return .terminateCancel
+    }
+    private func finishQuitting(_ sender: NSApplication) async {
+        await model.finishPendingWindowWrites()
+        model.isTerminating = true
+        sender.terminate(nil)
     }
 }
 extension Notification.Name { static let chauffeurCommand = Notification.Name("ChauffeurCommand") }

@@ -117,6 +117,13 @@ Fixtures use temporary data, private tmux servers, and fake CLI processes. The
 native probe uses the built Debug app and stores reports/images under
 `.build/native-probe-artifacts/`. Xcode also includes `ChauffeurAppUITests` for
 OS-driven UI testing, which requires macOS automation access.
+Keep native test inputs and app-written reports in the temporary fixture directory,
+not in the source checkout: this repository may live under macOS's protected
+Documents folder. The test runner stages fake executables there and copies reports
+back afterward. Start test processes with that directory as their working directory.
+This avoids unnecessary Documents permission prompts for fresh test app identities;
+accessing real repositories in protected folders still requires normal permission.
+
 The launcher and Release startup checks use separately signed app copies and
 isolated runtimes; they require the development machine's Leonardo Lobato
 Developer ID certificate. The Release check verifies that the actual GUI opens.
