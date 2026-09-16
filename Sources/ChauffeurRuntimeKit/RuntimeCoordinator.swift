@@ -275,6 +275,13 @@ public actor RuntimeCoordinator {
                 try await ledger.revoke(sessionID: session.id)
             }
             if sessions[session.id] != session { session.updatedAt = Date(); try await persist(session) }
+            // Natural successful exits follow the same retention policy as closing
+            // a tab. Explicit stop/close requests own their cleanup; failures stay
+            // available so the user can inspect what went wrong.
+            if session.state == .exited, !settings.keepFinishedSessions,
+               !stopRequests.contains(session.id) {
+                try await deleteFinishedSession(session.id)
+            }
         }
         let pending = try await ledger.allMessages().filter { [.queued, .received].contains($0.state) }
         for var session in Array(sessions.values) where !launching.contains(session.id) {

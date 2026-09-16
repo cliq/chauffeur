@@ -72,6 +72,8 @@ struct LaunchCancellationTests {
 
     @Test(arguments: ["directory", "symlink", "missing"]) func rejectedResumePreservesEndedTerminalAndNonGitFolderIdentity(replacement: String) async throws {
         let fixture = try await LaunchFixture.make(); defer { fixture.cleanup() }
+        var settings = RetentionSettings(); settings.keepFinishedSessions = true
+        _ = try await fixture.runtime.handle(IPCRequest("saveSettings", params: .from(settings)))
         let checkout = fixture.path("checkout"), backup = fixture.path("original-checkout"), other = fixture.path("other")
         try FileManager.default.createDirectory(at: checkout, withIntermediateDirectories: true)
         let project = try #require(await fixture.runtime.store.current().projects.first)
@@ -222,6 +224,8 @@ struct LaunchCancellationTests {
 
     @Test func stopDuringHandoffCleansUpAndDoesNotPoisonExplicitResume() async throws {
         let fixture = try await LaunchFixture.make(); defer { fixture.cleanup() }
+        var settings = RetentionSettings(); settings.keepFinishedSessions = true
+        _ = try await fixture.runtime.handle(IPCRequest("saveSettings", params: .from(settings)))
         try Data().write(to: fixture.path("block-handoff"))
         let launch = Task { try await fixture.runtime.launch(fixture.request) }
         try await fixture.wait { FileManager.default.fileExists(atPath: fixture.path("handoff-entered").path) }
@@ -305,6 +309,29 @@ struct ShellSessionTests {
         #expect(await fixture.runtime.store.current().sessions.allSatisfy { $0.value.id != session.id })
         #expect(try await fixture.runtime.snapshots.read(session.id) == nil)
         #expect(try await fixture.runtime.snapshot()["sessions"].decode([Session].self).allSatisfy { $0.id != session.id })
+    }
+
+    @Test(arguments: [false, true], [0, 1])
+    func shellExitHonorsRetention(keep: Bool, exitStatus: Int) async throws {
+        let fixture = try await LaunchFixture.make(); defer { fixture.cleanup() }
+        var settings = RetentionSettings(); settings.keepFinishedSessions = keep
+        _ = try await fixture.runtime.handle(IPCRequest("saveSettings", params: .from(settings)))
+        let request = LaunchRequest.shell(projectID: fixture.request.projectID, groupID: fixture.request.groupID, folderID: fixture.request.folderID, title: "Shell")
+        let session = try await fixture.runtime.launch(request)
+        await fixture.runtime.maintainHistory()
+        try fixture.sendKeys(sessionID: session.id, "exit \(exitStatus)")
+        try await fixture.wait { try await fixture.runtime.terminals.inventory().first?.dead == true }
+        try await fixture.runtime.reconcile()
+        let remaining = try await fixture.runtime.snapshot()["sessions"].decode([Session].self)
+        if keep || exitStatus != 0 {
+            #expect(remaining.first { $0.id == session.id }?.state == (exitStatus == 0 ? .exited : .failed))
+        } else {
+            #expect(!remaining.contains { $0.id == session.id })
+            #expect(try await fixture.runtime.terminals.inventory().isEmpty)
+            await fixture.runtime.maintainHistory()
+            #expect(try await fixture.runtime.snapshots.read(session.id) == nil)
+            #expect(await fixture.runtime.store.current().sessions.isEmpty)
+        }
     }
 
     @Test func shellSessionsRunTheLoginShellWithoutClaimingTheCheckout() async throws {

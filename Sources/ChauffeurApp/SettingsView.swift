@@ -79,7 +79,7 @@ struct SettingsView: View {
                 Section("Retention and Delegation") {
                     Toggle("Keep finished sessions", isOn: $retention.keepFinishedSessions)
                         .accessibilityIdentifier("settings.keep-finished-sessions")
-                    Text("When off, closing an agent or shell tab stops the session and deletes its saved history. When on, closed sessions remain in Finished until you delete them.").font(.caption).foregroundStyle(.secondary)
+                    Text("When off, successfully exited sessions and closed tabs are removed with their saved history. Failed sessions remain available for diagnosis. When on, finished sessions remain until you delete them.").font(.caption).foregroundStyle(.secondary)
                     TextField("Scrollback lines", value: $retention.scrollbackLines, format: .number)
                     TextField("Snapshot budget (bytes)", value: $retention.snapshotBudgetBytes, format: .number)
                     TextField("Completed message history (days)", value: $retention.completedMessageDays, format: .number)
