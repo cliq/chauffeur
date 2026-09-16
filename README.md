@@ -3,16 +3,19 @@
 A native macOS environment for running Codex and Claude Code across projects,
 profiles, worktrees, and isolated communication groups.
 
-**Implementation in progress.** The repository builds a SwiftUI/AppKit app,
-background runtime, shared core, and command-line helper. Real CLI integration
-and release acceptance remain open. See the [implementation status](docs/implementation-status.md),
+**Personal-use Release ready for testing.** The current scoped implementation and
+focused native acceptance checks are complete, including real Codex/Claude
+service recovery and sleep/wake. The repository builds a SwiftUI/AppKit app,
+background runtime, shared core, and command-line helper. See the
+[implementation status](docs/implementation-status.md),
 [plan](docs/mvp-implementation-plan.md), and [PRD](docs/mvp-prd.md).
 Completion of Codex ↔ Claude messaging/delegation and final workload testing are
 planned for [V2](docs/v2-plan.md) and are outside the current goal.
 
-The [app manual draft](docs/manual.html) covers every implemented screen and
-workflow, with keyboard shortcuts and current limitations. Open the HTML file
-in a browser; Artifact Colab publication follows the remaining app checks.
+The [app manual on Artifact Colab](https://artifacts.cliq.dev/d/DPu8kdqJdE) covers
+every implemented screen and workflow, with keyboard shortcuts and current
+limitations. It is private to its owner and accepted collaborators. The
+[self-contained HTML source](docs/manual.html) also opens locally in a browser.
 
 ## Build the app
 
@@ -49,7 +52,7 @@ The app registers its bundled per-user LaunchAgent with `SMAppService`. If macOS
 requires approval, the service health line links to Login Items & Extensions.
 See [service setup and recovery](docs/service-recovery.md) for startup issues,
 replacing a development build and the actual LaunchAgent acceptance probe.
-Separate-Spaces acceptance remains open.
+The final separate-Spaces workload is deferred to V2.
 
 Optional [session notifications](docs/notifications.md) run through an embedded
 background app and open the selected project/session, including a cold app launch.
@@ -128,8 +131,8 @@ and original profile; it creates a new execution.
 
 Real Codex and Claude checks cover two profiles each, shared-profile credentials,
 native completion, messages and scoped process ownership. Both supplied Claude
-profiles use the same account; distinct-account selection and the remaining
-native account/tool cases are pending. Matching a candidate CLI version enables experimental
+profiles use the same account; the different-account Claude check was deferred
+by the user. Full coordination/tool acceptance remains in V2. Matching a candidate CLI version enables experimental
 integration; other versions offer explicit basic terminal mode. See
 [compatibility](docs/compatibility.md) and [V3](docs/decisions/V3-mcp-and-status.md).
 

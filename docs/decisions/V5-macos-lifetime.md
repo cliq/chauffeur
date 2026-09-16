@@ -1,6 +1,6 @@
 # V5 — macOS lifetime
 
-Status: native app and fixture lifetime implemented; full macOS acceptance open.
+Status: focused native lifetime acceptance passes; final Spaces workload deferred to V2.
 
 ## Implementation
 
@@ -54,9 +54,9 @@ This exposed and corrected several startup issues:
   missing Homebrew/system search paths and records an issue when it must use
   the inherited environment. The runtime fixture also exercises this fallback.
 
-The service probe contains no CLI sessions and does not prove the remaining
-sleep/wake or live real-session LaunchAgent gates. The final Spaces workload is
-deferred to V2. See
+The original service probe contains no CLI sessions. The private live-session
+check below supplies sleep/wake and LaunchAgent recovery evidence. The final
+Spaces workload is deferred to V2. See
 [service recovery](../service-recovery.md) for setup and development updates.
 
 A newer private native fixture now passes registration, UI quit, launchd crash
@@ -64,10 +64,15 @@ recovery, the actual Settings restart button, and bundled-helper replacement
 without touching the default store or service. It uses the production
 `SMAppService` path with a unique test job and Debug-only private socket override.
 Run `Prototypes/native_live_service_smoke.py --registration-only`; evidence is
-under `.local/live-service-registration/`. Its live Codex/Claude extension is
-implemented but has not passed; the Mac locked during desktop checks. The fixture
-now checks console lock state before running and cleans up on interruption.
-This does not supersede the outstanding live-session or sleep/wake gates.
+under `.local/live-service-registration/`. Its full `--sleep-wake` extension now
+passes with Codex 0.154.0 and Claude Code 2.1.273. Both agents retain process,
+terminal, conversation and launch identities through UI quit, launchd recovery,
+the Settings restart, helper replacement and a user-performed sleep/wake cycle.
+Native replies after every recovery recall the original word and preserve
+`café 界`. The observer records actual sleep/wake events; the probe activates the
+existing app after unlock before resolving its Accessibility windows. Cleanup
+unregisters the private service, and the default service/store and Release stay
+unchanged. Evidence: `.local/live-service-native/summary.json`.
 
 The separate `Prototypes/notification_native_smoke.py --use-default-service`
 check now verifies an actual Notification Center alert using an existing read
@@ -202,16 +207,16 @@ The native Notification Center delivery/click and helper recovery/update checks
 described above subsequently passed. Transient banner presentation and alternate
 Focus settings remain unverified; the actual cold-launch route is covered.
 
-## Remaining gate evidence
+## Verification boundaries
 
-- Validate actual sleep/wake and native LaunchAgent lifecycle with live real CLI
-  sessions. Standalone runtime crashes and UI quit/force-quit/reattachment pass
-  for both current CLIs.
+- Actual sleep/wake and native LaunchAgent lifecycle pass with both current
+  real CLIs. Standalone runtime crashes and UI quit/force-quit/reattachment also
+  have separate passing evidence.
 - XCUITest remains unrun because of system automation access. Native OS-driven
   checks have their own direct evidence; their results do not claim XCUITest ran.
 - Transient banners and alternate Focus settings remain unverified. Actual
   Notification Center delivery, cold click, and helper recovery/update pass.
 
-The full V5 gate remains open.
+The focused current-goal V5 checks are complete within these boundaries.
 The four-window/four-Spaces workload is deferred to V2 and does not block the
 current goal.

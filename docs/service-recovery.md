@@ -181,8 +181,10 @@ picker, and checks process/conversation continuity and provider replies after
 each recovery. Both Codex 0.154.0 and Claude Code 2.1.273 now pass those
 live-session recovery steps, including recall of their original check word and
 Unicode replies. The run's initial and updated snapshots retain the same
-processes, conversations, terminal identities, and launch snapshots. The final
-sleep/wake step and cleanup report are still pending in the current run.
+processes, conversations, terminal identities, and launch snapshots. The complete
+`--sleep-wake` run also passes, including native replies after wake, private-job
+cleanup, and unchanged default service, saved records, and Release bundle.
+Evidence: `.local/live-service-native/summary.json`.
 The harness refuses a locked console and changes no OS permission or lock setting.
 
 The Debug-only `CHAUFFEUR_SERVICE_PROBE_SOCKET` chooses the private IPC socket
@@ -202,13 +204,13 @@ After both agents reply following helper replacement, it prints
 After wake, the fixture checks the same agent processes, terminal identities,
 launch snapshots, and conversations, then asks both providers to recall their
 original check word. The private power-event log and final report are written
-under `.local/live-service-native/`. Preparing this observer is not evidence
-that the sleep/wake acceptance has passed. An initial recorded cycle preserved
-the agent processes and conversation IDs, but the post-wake UI check timed out
-because the inactive app exposed no Accessibility windows. Activating the
-existing app restored its windows without relaunching it. The probe now activates
-the existing process and waits for its windows before resolving controls; a
-repeat cycle is pending to verify both provider replies after wake.
+under `.local/live-service-native/`. The passing run recorded sleep at
+06:46:06 UTC and wake at 06:46:44 UTC on 2026-09-16. Both agents then recalled
+their original check word and returned `café 界` through the native terminal,
+retaining their process and conversation identities. The probe activates the
+existing app and waits for its Accessibility windows before resolving controls;
+this handles macOS exposing no windows for an inactive app immediately after wake.
+It does not relaunch the app or agents as part of wake recovery.
 
 ### Original empty-store probe
 

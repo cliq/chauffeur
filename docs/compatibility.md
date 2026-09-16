@@ -78,6 +78,13 @@ prove approval or input status; these remain unknown when no supported event is
 available. Claude uses launch-scoped hooks, which may be affected by native trust
 or managed policy. Silence and output volume never set completion.
 
+The private native LaunchAgent lifecycle check also passes with Codex 0.154.0
+and Claude Code 2.1.273: normal UI quit, launchd crash recovery, the Settings
+restart button, bundled-helper replacement, and a real user-performed sleep/wake
+cycle. Both providers reply afterward with the original conversation context,
+unchanged process/terminal identities, and correct Unicode output. See
+[service recovery](service-recovery.md#private-native-service-fixture).
+
 The default Codex and Claude launch routes have real credential and scoped-stop evidence.
 Full tool coverage and cross-provider acceptance remain open. See
 [V3](decisions/V3-mcp-and-status.md). Both baseline CLIs pass native metadata

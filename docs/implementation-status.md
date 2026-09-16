@@ -3,8 +3,10 @@
 This tracks the [implementation plan and current goal scope](mvp-implementation-plan.md#current-goal-scope).
 On 2026-09-15, the user moved completion of Codex ↔ Claude messaging/delegation
 and final workload testing to [V2](v2-plan.md). They do not block the current goal.
-Other unfinished requirements remain in scope. Fixture evidence does not establish
-unverified real-CLI or native behavior; deferred workload checks remain unverified.
+The current scoped implementation and focused acceptance checks are complete as
+of 2026-09-16. The manual is published through Artifact Colab. The documented
+degraded behavior and deferred checks below remain explicit; fixture evidence
+does not establish unverified real-CLI or native behavior.
 
 ## Current executable evidence
 
@@ -15,7 +17,8 @@ unverified real-CLI or native behavior; deferred workload checks remain unverifi
 - A Debug app probe exercises four windows and ten rendered fixture terminals,
   Unicode input, resize, reattach, close/reopen and normal/forced UI termination.
   XCUITest is blocked before execution by macOS Automation Mode authentication.
-  Full native acceptance remains open; see V5 for current evidence.
+  Focused native acceptance uses direct macOS controls; see V5 for its evidence
+  and the remaining verification boundaries.
 - A focused C regression proves PTY children reset inherited blocked signals and
   ignored handlers before exec; it failed before the signal-inheritance fix.
 - Versioned terminal captures persist normal history and active screens, enforce
@@ -245,7 +248,7 @@ unverified real-CLI or native behavior; deferred workload checks remain unverifi
 ## Current Release — 2026-09-16
 
 `build/Build/Products/Release/Chauffeur.app` now includes app/runtime changes
-through `ba2983f`, signed with Leonardo Lobato's Developer ID certificate. Deep,
+through `f9a5cec`, signed with Leonardo Lobato's Developer ID certificate. Deep,
 strict bundle-signature verification passes. The embedded `chauffeur-launcher`
 and GUI `Chauffeur` are distinct files.
 
@@ -259,48 +262,47 @@ XCUITest remains unrun. Evidence: `.build/release-startup-artifacts/`.
 The user's Release was then relaunched at its original path and opened the saved
 Signos project. The service reconnects, and the existing session, message and
 preset records match the pre-launch snapshot. Private evidence:
-`.local/release-current/`. The current Release is open for testing. The registered
-runtime fingerprint matches the rebuilt bundle. Build and startup logs are
-`.build/release-current-build.log` and `.build/release-current-startup.log`.
+`.local/release-final/`. The current Release is open for testing. The registered
+runtime fingerprint matches the rebuilt bundle. The build log is
+`.build/unicode-release-build.log`; startup and default-store verification are
+`.build/release-final-startup.log` and
+`.build/release-final-default-verification.log`.
 
 ## Current-goal stage audit
 
-The private native service fixture passes actual registration, UI quit, launchd
-crash recovery, the Runtime settings restart button, and bundled-helper
-replacement without changing the default service/store. Evidence:
-`.local/live-service-registration/summary.json`. Its real-session extension now
-passes native profile selection, normal UI quit/reattachment, launchd crash
-recovery, Settings restart, and helper replacement with both providers. Native
-replies recall the original check word and preserve Unicode; the processes,
+The full private native service fixture passes with Codex 0.154.0 and Claude Code
+2.1.273: actual registration, native profile selection, UI quit/reattachment,
+launchd crash recovery, the Runtime settings restart button, bundled-helper
+replacement, and a user-performed sleep/wake cycle. The power observer recorded
+sleep at 06:46:06 UTC and wake at 06:46:44 UTC on 2026-09-16. Native replies after
+each recovery recall the original check word and preserve Unicode; processes,
 conversation IDs, terminal identities, and launch snapshots remain unchanged.
-The actual launcher installation and registered-folder invocation also pass.
-The initial sleep cycle preserved both agent processes and conversations, but
-an inactive-window Accessibility timeout prevented checking replies afterward.
-The corrected probe activates the existing app before resolving its windows.
-Both private agents are ready for the user's repeat sleep/wake cycle; the final
-full-run summary and cleanup remain pending. See
+Cleanup unregisters the private job and removes temporary profiles/credentials.
+The default service/store and Release bundle remain unchanged. Evidence:
+`.local/live-service-native/summary.json`. The actual launcher installation and
+registered-folder invocation also pass. See
 [private service acceptance](service-recovery.md#private-native-service-fixture).
 
-| Plan items | Current state | Still required |
+| Plan items | Current state | Limits or deferred coverage |
 | --- | --- | --- |
-| Stage 0 V1–V5 | Decision documents; native CLI terminal continuity, bounded history, two-window profile/account displays and focused status checks; real scoped-stop evidence; actual LaunchAgent lifecycle | Remaining focused macOS recovery checks; distinct-Claude-account check deferred by user; coordination and final Spaces workload are in V2 |
+| Stage 0 V1–V5 | Decision documents; native CLI terminal continuity, bounded history, two-window profile/account displays and focused status checks; real scoped-stop evidence; live LaunchAgent lifecycle and actual sleep/wake pass | Distinct-Claude-account check deferred by user; coordination and final Spaces workload are in V2 |
 | 1.1 Records/store | Atomic writes, reference/ownership diagnostics, external-edit conflicts, preset revision tracking, last-used preference, empty-set UI/runtime checks, and targeted filesystem watching with recovery pass | — |
-| 1.2 Runtime skeleton | Lock, peer-checked Unix socket, version handshake, health helper, verified bundled LaunchAgent registration/recovery; bounded structured logs with typed redaction | Remaining live-service release acceptance |
+| 1.2 Runtime skeleton | Lock, peer-checked Unix socket, version handshake, health helper, verified bundled LaunchAgent registration/recovery with real sessions; bounded structured logs with typed redaction | — |
 | 1.3–1.7 Presets/projects/groups/welcome/windows | Native preset/project/group editors, file panels, validation, discovery, relink/archive/reopen, cancellation, stale-save rejection and Welcome handoff pass; OS-driven window/search/new-session/attention commands pass | Final four-Spaces workload is in V2 |
 | 1.8 Basic launch | Real Codex/Claude launch and two-window profile/account displays; filtered child environments, preflight failures, native input/resize/stop and immutable launch details; cancellable launch/resume with terminal cleanup | Distinct-Claude-account check deferred by user |
 | 1.9 Session details | Native immutable context after preset edits, individual execution controls, and a real saved session's expanded launch snapshot match the stored record | — |
 | 2.1 Screen/history | tmux live state; bounded persisted snapshots, disk cleanup, native history/search; real Codex/Claude native attach, Unicode, clipboard and reply search; native link/mouse forwarding and 60,000-line retention/recovery pass | — |
-| 2.2 Reconnect | Positive pane/process reconciliation; real Codex/Claude explicit native-ID resume and MCP reconnect | Live native LaunchAgent recovery and actual sleep/wake under 2.8 |
+| 2.2 Reconnect | Positive pane/process reconciliation; real Codex/Claude explicit native-ID resume and MCP reconnect; live native LaunchAgent recovery and actual sleep/wake pass | — |
 | 2.3–2.4 Quit/tabs/split | Native tabs/split, window-state writes and OS keyboard commands pass; real Codex/Claude normal/forced UI quit preserve process and draft; native Stop All confirmation/cancellation, fixed targets, resistant-stop recovery and no-window operation pass | Final Spaces workload is in V2 |
 | 2.5 Worktrees | Create/list/safe-remove; periodic external inventory; identity-based moves/replacements; pending launch/removal and metadata-write reservations; legacy migration fixtures and real Codex/Claude repository-relocation, replacement/resume, and removal checks; native manager controls and concurrent registration pass | — |
 | 2.6 Multiple repos | Explicit additional-folder UI and shared-checkout warning; real Codex/Claude read/write at primary worktree and selected additional path, with spaces; main checkout and sibling worktree remain unchanged | — |
 | 2.7 Status/attention | Native approval/completion/normal-exit labels and conversation IDs pass; Claude clears permission attention after tool use and stays finished while idle; unread/pending counts and optional durable notifications; actual Notification Center delivery/cold click and enabled-helper recovery/update pass | Codex approval detection unavailable; real API-error hooks, transient banners/alternate Focus settings unverified |
-| 2.8 Sleep/service loss | Runtime loop plus native wake reconnect, health/recovery actions; actual service termination/restart; real Codex/Claude survive standalone Release runtime crash with same process/conversation and successful tool use afterward | Real sleep/wake and native LaunchAgent lifecycle with live real sessions |
+| 2.8 Sleep/service loss | Real Codex/Claude retain process and conversation through standalone runtime crash, native launchd crash, Settings restart, bundled-helper replacement, and actual sleep/wake; both reply afterward | No promise of progress while macOS sleeps |
 | 2.9 Appearance setting | Implemented; System/Light/Dark, persistence, native window and terminal default-color checks pass | — |
 | 2.10 Terminal project launcher | Implemented Settings installer and folder routing; native cold/warm and Release startup checks pass; relocation repair and literal argument forwarding tested; actual administrator-authenticated `/usr/local/bin/chauffeur` installation opens a registered project and preserves records | — |
-| 2.11 Quick session on a new worktree | Implemented; concurrent/persisted retry tests and native sheet/fixture-agent launch pass | Real CLI/native acceptance remains tracked under 1.8 and 2.5 |
-| 4.1–4.5 Packaging/compatibility/retention/diagnostics/docs | Developer ID local builds; actual registration/update; retention settings/cleanup; diagnostics export; terminal, diagnostics and service recovery guides | Remaining focused recovery acceptance under 2.8 |
-| 4.7 Complete app manual | [Complete local draft](manual.html), covering all implemented features, shortcuts and V2 limits; light/dark/mobile layout and internal links verified | Update pending acceptance results, then publish through Artifact Colab MCP after app work |
+| 2.11 Quick session on a new worktree | Implemented; concurrent/persisted retry tests and native sheet/fixture-agent launch pass; real CLI launch/worktree behavior covered under 1.8 and 2.5 | — |
+| 4.1–4.5 Packaging/compatibility/retention/diagnostics/docs | Developer ID local builds; actual registration/update; retention settings/cleanup; native diagnostics export; terminal, diagnostics and service recovery guides; final Release startup and saved-project preservation pass | Local personal build; not notarized or publicly distributed |
+| 4.7 Complete app manual | [Published manual](https://artifacts.cliq.dev/d/DPu8kdqJdE) and [local HTML](manual.html), covering all implemented features, shortcuts and V2 limits; light/dark/mobile layout and internal links verified; fetched publication matches source | Private Artifact Colab document |
 
 ## V2 — outside the current goal
 
@@ -309,20 +311,16 @@ full-run summary and cleanup remain pending. See
 | Complete Codex ↔ Claude messaging/delegation | Stage 3.1–3.7, F7, coordination portions of V3/V4 | Partially implemented; remaining completion and acceptance moved to [V2](v2-plan.md) |
 | Final workload testing | Stage 4.6, full PRD §9 workload | Not run; ten real sessions, four Spaces, performance measurements, complete F1–F7 sweep, and three workdays moved to [V2](v2-plan.md#final-workload-testing) |
 
-## Next implementation order
+## Current-goal completion
 
-1. Complete the prepared private Codex/Claude sleep/wake check. All preceding
-   native service recovery steps pass. The user has been told both sessions are
-   ready; verify their manual cycle through native power events and provider
-   replies, then check cleanup and preservation of the default service/store.
-2. Verify the final signed Release's native startup and reopen the user's saved
-   project with its records preserved. The terminal command's actual
-   installation is complete.
-3. Resolve any failures, package/sign any resulting app changes, and update the
-   manual's acceptance notes. The existing Release remains available to test.
-4. Publish the complete manual through Artifact Colab and verify the published
-   artifact. The local draft has 17 sections, no external assets, and checked
-   light/dark/mobile previews under `.local/manual-preview/`.
+The current implementation scope, focused native recovery acceptance, final
+signed Release verification, launcher installation, and manual publication are
+complete. The app is open at its original Release path with the saved project
+restored. Seventy-one Swift tests pass across eighteen suites; no app/runtime
+source changed after that run and the signed builds.
 
-The goal remains active until all current-scope work is complete and its required
-checks pass. V2 items are excluded from that completion decision.
+The manual has 17 sections and no external assets, with checked light/dark/mobile
+previews under `.local/manual-preview/`. Artifact Colab document `DPu8kdqJdE`,
+version 1, is private and its fetched HTML matches the local source exactly.
+V2 work and the explicitly documented verification limits above are excluded
+from this completion decision.
