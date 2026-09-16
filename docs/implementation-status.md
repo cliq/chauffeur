@@ -120,7 +120,7 @@ unverified real-CLI or native behavior; deferred workload checks remain unverifi
   messaging/delegation is exercised. Evidence:
   `.local/attention-native-{codex,claude}/` and
   `Prototypes/native_attention_smoke.py`. The fix and Claude 2.1.273 candidate
-  integration are in Debug, awaiting the next Release.
+  integration are included in the current signed Release.
 - [Appearance settings](appearance.md) offer System, Light, and Dark with saved
   app-wide selection. Four isolated native app launches verify persistence,
   window/terminal default colors, cursor contrast, newly created terminals, and
@@ -147,7 +147,7 @@ unverified real-CLI or native behavior; deferred workload checks remain unverifi
   again after dismissal. Session/stop/window/attention controls still pass, with
   every fixture agent preserved through error dismissal. Evidence:
   `.build/app-errors-before-fix.log` and `.build/app-errors-session-controls.log`.
-  This fix is in the signed Debug build, awaiting the next Release.
+  This fix is included in the current signed Release.
 - Release startup now verifies an actual visible GUI window in an isolated copy.
   Fixed a case-insensitive filename collision where embedding `chauffeur`
   overwrote `Chauffeur`; the embedded launcher is now `chauffeur-launcher`, with
@@ -238,7 +238,7 @@ unverified real-CLI or native behavior; deferred workload checks remain unverifi
 ## Current Release — 2026-09-16
 
 `build/Build/Products/Release/Chauffeur.app` now includes app/runtime changes
-through `7062126`, signed with Leonardo Lobato's Developer ID certificate. Deep,
+through `ba2983f`, signed with Leonardo Lobato's Developer ID certificate. Deep,
 strict bundle-signature verification passes. The embedded `chauffeur-launcher`
 and GUI `Chauffeur` are distinct files.
 
@@ -252,9 +252,9 @@ XCUITest remains unrun. Evidence: `.build/release-startup-artifacts/`.
 The user's Release was then relaunched at its original path and opened the saved
 Signos project. The service reconnects, and the existing session, message and
 preset records match the pre-launch snapshot. Private evidence:
-`.local/release-editor/`. The current Release is open for testing. Build and
-startup logs are `.build/release-editor-build.log` and
-`.build/release-editor-startup.log`.
+`.local/release-current/`. The current Release is open for testing. The registered
+runtime fingerprint matches the rebuilt bundle. Build and startup logs are
+`.build/release-current-build.log` and `.build/release-current-startup.log`.
 
 ## Current-goal stage audit
 
