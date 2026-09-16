@@ -2,7 +2,9 @@ import Foundation
 import Darwin
 
 public enum TerminalLauncherInstallation {
-    public static let destination = URL(fileURLWithPath: "/usr/local/bin/chauffeur")
+    public static let destination = URL(fileURLWithPath: "/usr/local/bin/\(AppBuild.current.commandName)")
+    // Keep the legacy ownership marker stable so installed commands remain
+    // repairable after the app's bundle identifier changes.
     private static let marker = "#!/bin/sh\n# Managed by Chauffeur (dev.chauffeur.app).\n"
 
     private static func script(executable: URL) -> Data {

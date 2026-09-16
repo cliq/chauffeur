@@ -5,7 +5,7 @@ public struct FolderRoute: Equatable, Sendable {
     public init(path: String) { self.path = path }
     public init?(url: URL) {
         guard let parts = URLComponents(url: url, resolvingAgainstBaseURL: false),
-              parts.scheme == "chauffeur", parts.host == "open", parts.user == nil,
+              parts.scheme == AppBuild.current.urlScheme, parts.host == "open", parts.user == nil,
               parts.password == nil, parts.port == nil, parts.fragment == nil,
               parts.path.isEmpty, let items = parts.queryItems, items.count == 1,
               items[0].name == "path", let path = items[0].value,
@@ -14,7 +14,7 @@ public struct FolderRoute: Equatable, Sendable {
     }
     public var url: URL {
         var parts = URLComponents()
-        parts.scheme = "chauffeur"; parts.host = "open"
+        parts.scheme = AppBuild.current.urlScheme; parts.host = "open"
         parts.queryItems = [URLQueryItem(name: "path", value: path)]
         return parts.url!
     }

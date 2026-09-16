@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor">
+  <title>Chauffeur hat</title>
+  <desc>A classic peaked chauffeur cap with a broad crown, two buttons on the band, and a curved visor.</desc>
+  <path d="M48 138L26 105Q21 97 29 89C51 69 87 58 128 58C169 58 205 69 227 89Q235 97 230 105L208 138C162 125 94 125 48 138Z"/>
+  <path fill-rule="evenodd" d="M50 148Q128 128 206 148V164Q128 146 50 164ZM64 153a3.5 3.5 0 1 0 7 0a3.5 3.5 0 1 0-7 0ZM185 153a3.5 3.5 0 1 0 7 0a3.5 3.5 0 1 0-7 0Z"/>
+  <path d="M48 175Q128 155 208 175C195 199 161 216 128 216C95 216 61 199 48 175Z"/>
+</svg>

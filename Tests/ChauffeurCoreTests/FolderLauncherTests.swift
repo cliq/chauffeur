@@ -13,7 +13,7 @@ struct FolderLauncherTests {
             #expect(FolderRoute(url: FolderRoute(path: path).url)?.path == path)
         }
         for value in ["https://open?path=/x", "chauffeur://open/x?path=/x", "chauffeur://user@open?path=/x", "chauffeur://open:80?path=/x", "chauffeur://open?path=/x#fragment", "chauffeur://open?path=relative", "chauffeur://open?path=/x&path=/y", "chauffeur://open?path=/x&command=run", "chauffeur://open?path=%00", "chauffeur://open"] {
-            #expect(FolderRoute(url: URL(string: value)!) == nil)
+            #expect(FolderRoute(url: URL(string: value.replacingOccurrences(of: "chauffeur:", with: AppBuild.current.urlScheme + ":"))!) == nil)
         }
     }
     @Test func closestAncestorAndSharedProjectsAreResolvedWithoutPrefixCollisions() throws {

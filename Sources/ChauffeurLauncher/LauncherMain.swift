@@ -7,21 +7,21 @@ import ChauffeurCore
         do {
             var arguments = Array(CommandLine.arguments.dropFirst())
             if arguments == ["--help"] || arguments == ["-h"] {
-                print("Usage: chauffeur [FOLDER]\nOpens the project containing FOLDER (default: current directory).\nUse -- before a folder name beginning with a dash.\n\nchauffeur --install   Install /usr/local/bin/chauffeur")
+                print("Usage: \(AppBuild.current.commandName) [FOLDER]\nOpens the project containing FOLDER (default: current directory).\nUse -- before a folder name beginning with a dash.\n\n\(AppBuild.current.commandName) --install   Install \(TerminalLauncherInstallation.destination.path)")
                 return
             }
             let executable = try executableURL()
             let app = executable.deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
             guard app.pathExtension == "app", FileManager.default.isExecutableFile(atPath: app.appendingPathComponent("Contents/MacOS/Chauffeur").path) else {
-                throw ChauffeurError("launcher_app", "Run the terminal command bundled inside Chauffeur.app")
+                throw ChauffeurError("launcher_app", "Run the terminal command bundled inside \(AppBuild.current.displayName).app")
             }
             if arguments == ["--install"] {
                 try TerminalLauncherInstallation.install(executable: executable)
-                print("Installed /usr/local/bin/chauffeur")
+                print("Installed \(TerminalLauncherInstallation.destination.path)")
                 return
             }
             if arguments.first == "--" { arguments.removeFirst() }
-            else if arguments.first?.hasPrefix("-") == true { throw ChauffeurError("usage", "Unknown option. Run chauffeur --help") }
+            else if arguments.first?.hasPrefix("-") == true { throw ChauffeurError("usage", "Unknown option. Run \(AppBuild.current.commandName) --help") }
             guard arguments.count <= 1 else { throw ChauffeurError("usage", "Pass one folder, quoting paths that contain spaces") }
             let input = ((arguments.first ?? FileManager.default.currentDirectoryPath) as NSString).expandingTildeInPath
             let path = try Paths.directory(URL(fileURLWithPath: input, relativeTo: URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)).standardizedFileURL.path)

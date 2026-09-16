@@ -59,7 +59,7 @@ def wait_for(probe, description, timeout=30):
 with tempfile.TemporaryDirectory(prefix='chauffeur-real-terminal-', dir='/tmp') as directory:
     root = Path(directory).resolve()
     app = root / 'Chauffeur.app'
-    shutil.copytree(repository / 'build/Build/Products/Debug/Chauffeur.app', app, symlinks=True)
+    shutil.copytree(repository / 'build/Build/Products/Debug/Chauffeur Debug.app', app, symlinks=True)
     identifier = 'dev.chauffeur.real-terminal-probe.' + uuid.uuid4().hex
     socket_path = str(root / 'runtime/runtime.sock')
     info_path = app / 'Contents/Info.plist'

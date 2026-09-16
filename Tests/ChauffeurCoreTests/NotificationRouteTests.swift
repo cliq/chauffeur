@@ -8,7 +8,7 @@ struct NotificationRouteTests {
         #expect(SessionRoute(url: route.url) == route)
         for text in [route.url.absoluteString + "?socket=/tmp/other", route.url.absoluteString + "#fragment",
                      route.url.absoluteString + "/", route.url.absoluteString.replacingOccurrences(of: "session/", with: "user@session/"),
-                     route.url.absoluteString.replacingOccurrences(of: "chauffeur:", with: "https:"),
+                     route.url.absoluteString.replacingOccurrences(of: AppBuild.current.urlScheme + ":", with: "https:"),
                      "chauffeur://session//\(route.sessionID)", "chauffeur://session/../../etc"] {
             #expect(SessionRoute(url: try #require(URL(string: text))) == nil)
         }

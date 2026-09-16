@@ -88,11 +88,12 @@ unverified transient banner/Focus behavior.
 
 ## Native fixture evidence
 
-`Scripts/build-app.sh` and `Scripts/build-app.sh Release` succeed.
+The Debug and Release builds succeed (now `make build` and `make release`).
 `codesign --verify --deep --strict` validates the local app and its embedded
 binaries. Release app/helpers are Developer ID signed with hardened runtime and
-timestamps; the app has not been notarized or published. The default script also
-supports ad-hoc signing for isolated fixtures. Xcode disables hardened runtime
+timestamps; the app has not been notarized or published. The Makefile also
+supports ad-hoc signing for isolated fixtures through `XCODEBUILD_ARGS` overrides.
+Xcode disables hardened runtime
 for the ad-hoc Debug app; the Release app retains it.
 
 `Prototypes/native_window_smoke.py` passes against the actual Debug app with an

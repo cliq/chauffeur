@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <title>Chauffeur app icon concept</title>
+  <desc>An ivory chauffeur cap on a softly shaded copper rounded square.</desc>
+  <defs>
+    <linearGradient id="copper" x1="0" y1="0" x2="0.8" y2="1">
+      <stop stop-color="#d89263"/>
+      <stop offset="0.52" stop-color="#b65b2c"/>
+      <stop offset="1" stop-color="#854023"/>
+    </linearGradient>
+    <linearGradient id="edge" x1="0" y1="0" x2="0" y2="1">
+      <stop stop-color="#fff" stop-opacity="0.34"/>
+      <stop offset="1" stop-color="#fff" stop-opacity="0.02"/>
+    </linearGradient>
+    <linearGradient id="ivory" x1="0" y1="0" x2="0" y2="1">
+      <stop stop-color="#fffdf6"/>
+      <stop offset="1" stop-color="#f3e4d1"/>
+    </linearGradient>
+  </defs>
+  <rect x="52" y="52" width="920" height="920" rx="208" fill="url(#copper)"/>
+  <rect x="54" y="54" width="916" height="916" rx="206" fill="none" stroke="url(#edge)" stroke-width="4"/>
+  <g transform="translate(110 91) scale(3.140625)" fill="url(#ivory)">
+    <path d="M48 138L26 105Q21 97 29 89C51 69 87 58 128 58C169 58 205 69 227 89Q235 97 230 105L208 138C162 125 94 125 48 138Z"/>
+    <path fill-rule="evenodd" d="M50 148Q128 128 206 148V164Q128 146 50 164ZM64 153a3.5 3.5 0 1 0 7 0a3.5 3.5 0 1 0-7 0ZM185 153a3.5 3.5 0 1 0 7 0a3.5 3.5 0 1 0-7 0Z"/>
+    <path d="M48 175Q128 155 208 175C195 199 161 216 128 216C95 216 61 199 48 175Z"/>
+  </g>
+</svg>

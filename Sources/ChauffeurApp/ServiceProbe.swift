@@ -27,6 +27,7 @@ import ChauffeurCore
             let result: JSONValue = .object([
                 "initialStatus": model.initialServiceStatus.map { .number(Double($0)) } ?? .null,
                 "status": .string(model.serviceStatus), "online": .bool(model.online),
+                "runtimeVerified": .bool(model.runtimeConnectionVerified),
                 "message": .string(model.serviceMessage), "registrationError": model.serviceRegistrationError.map(JSONValue.string) ?? .null,
                 "health": model.snapshot.health,
                 "visibleWindows": .number(Double(NSApp.windows.filter(\.isVisible).count)),

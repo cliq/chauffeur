@@ -17,9 +17,15 @@ struct WelcomeView: View {
         VStack(spacing: 0) {
             HStack(spacing: 0) {
                 VStack(spacing: 18) {
-                    Image(systemName: "steeringwheel").font(.system(size: 72, weight: .light)).foregroundStyle(.tint)
+                    Image("ChauffeurHat")
+                        .renderingMode(.template)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: 92, height: 76)
+                        .foregroundStyle(.tint)
+                        .accessibilityHidden(true)
                     Text("Chauffeur").font(.system(size: 32, weight: .semibold))
-                    Text("Version \(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.1.0")").foregroundStyle(.secondary)
+                    Text("Version \(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.1.0") · \(AppBuild.current.rawValue)").foregroundStyle(.secondary)
                     Button("Create New Project…", systemImage: "plus") { creatingProject = true }.buttonStyle(.borderedProminent).disabled(!model.online || model.presetSets.filter { !$0.archived }.isEmpty)
                     Button("Manage Presets…") { openSettings() }
                     if model.presetSets.isEmpty { Text("Add a preset set in Settings to create your first project.").font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.center) }
@@ -103,7 +109,7 @@ struct ServiceHealthView: View {
             }
             Spacer()
             if !model.online {
-                Button("Start Service") { model.registerService(); model.reconnect() }.font(.caption)
+                Button("Start Service") { model.registerService(forceRestart: true); model.reconnect() }.font(.caption)
                 Button("System Settings…") { model.openServiceSettings() }.font(.caption)
             }
         }

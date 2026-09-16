@@ -8,9 +8,9 @@ struct TerminalLauncherSettings: View {
     private var executable: URL { Bundle.main.bundleURL.appendingPathComponent("Contents/MacOS/chauffeur-launcher") }
     var body: some View {
         Section("Terminal Command") {
-            Text("Run chauffeur from a project folder, or pass a folder path, to open its project.")
+            Text("Run \(AppBuild.current.commandName) from a project folder, or pass a folder path, to open its project.")
             HStack {
-                Text("/usr/local/bin/chauffeur").font(.system(.caption, design: .monospaced)).textSelection(.enabled)
+                Text(TerminalLauncherInstallation.destination.path).font(.system(.caption, design: .monospaced)).textSelection(.enabled)
                 Spacer()
                 Button(installed ? "Installed" : "Install Terminal Command…") { install() }.disabled(installed)
             }

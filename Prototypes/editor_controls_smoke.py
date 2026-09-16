@@ -38,7 +38,7 @@ def wait_for(probe, description, timeout=25):
 with tempfile.TemporaryDirectory(prefix='chauffeur-editors-', dir='/tmp') as directory:
     root = Path(directory).resolve()
     app = root / 'Chauffeur.app'
-    shutil.copytree(repository / 'build/Build/Products/Debug/Chauffeur.app', app, symlinks=True)
+    shutil.copytree(repository / 'build/Build/Products/Debug/Chauffeur Debug.app', app, symlinks=True)
     identifier = 'dev.chauffeur.editor-probe.' + uuid.uuid4().hex
     socket_path = root / 'runtime/runtime.sock'
     plist = app / 'Contents/Info.plist'

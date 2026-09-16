@@ -8,3 +8,6 @@ xcuserdata/
 .local/
 __pycache__/
 *.pyc
+
+# Local signing overrides — each contributor keeps their own.
+Configuration/LocalSigning.xcconfig

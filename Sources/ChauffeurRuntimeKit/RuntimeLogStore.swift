@@ -15,7 +15,7 @@ public final class RuntimeLogStore: @unchecked Sendable {
 
     public static func directory(for dataRoot: URL) -> URL {
         if Paths.canonical(dataRoot.path) == Paths.canonical(Paths.applicationSupport.path) {
-            return FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Logs/Chauffeur")
+            return FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Logs/\(AppBuild.current.displayName)")
         }
         return dataRoot.appendingPathComponent("runtime/logs")
     }

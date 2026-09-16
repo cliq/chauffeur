@@ -20,7 +20,7 @@ import time
 import uuid
 
 repository = Path(__file__).resolve().parents[1]
-binary = repository / 'build/Build/Products/Debug/Chauffeur.app/Contents/MacOS/ChauffeurRuntime'
+binary = repository / 'build/Build/Products/Debug/Chauffeur Debug.app/Contents/MacOS/ChauffeurRuntime'
 artifacts = repository / '.build/history-rotation-artifacts'
 artifacts.mkdir(exist_ok=True)
 (artifacts / 'summary.json').unlink(missing_ok=True)

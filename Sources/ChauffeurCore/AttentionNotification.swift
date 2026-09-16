@@ -7,14 +7,14 @@ public struct SessionRoute: Codable, Sendable, Equatable {
     public init(projectID: UUID, sessionID: UUID) { self.projectID = projectID; self.sessionID = sessionID }
     public init?(url: URL) {
         guard let parts = URLComponents(url: url, resolvingAgainstBaseURL: false),
-              parts.scheme == "chauffeur", parts.host == "session", parts.user == nil,
+              parts.scheme == AppBuild.current.urlScheme, parts.host == "session", parts.user == nil,
               parts.password == nil, parts.port == nil, parts.query == nil, parts.fragment == nil else { return nil }
         let path = parts.percentEncodedPath.split(separator: "/", omittingEmptySubsequences: false)
         guard path.count == 3, path[0].isEmpty,
               let projectID = UUID(uuidString: String(path[1])), let sessionID = UUID(uuidString: String(path[2])) else { return nil }
         self.init(projectID: projectID, sessionID: sessionID)
     }
-    public var url: URL { URL(string: "chauffeur://session/\(projectID.uuidString)/\(sessionID.uuidString)")! }
+    public var url: URL { URL(string: "\(AppBuild.current.urlScheme)://session/\(projectID.uuidString)/\(sessionID.uuidString)")! }
 }
 
 public enum AttentionReason: String, Codable, Sendable {

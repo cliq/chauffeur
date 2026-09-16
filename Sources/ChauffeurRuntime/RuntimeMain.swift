@@ -30,6 +30,7 @@ import ChauffeurRuntimeKit
             guard _NSGetExecutablePath(&executableBytes, &executableSize) == 0 else { throw ChauffeurError("missing_helper", "Cannot locate the running runtime executable") }
             let executablePath = String(decoding: executableBytes.prefix { $0 != 0 }.map { UInt8(bitPattern: $0) }, as: UTF8.self)
             let executable = URL(fileURLWithPath: executablePath).resolvingSymlinksInPath()
+            let identity = try RuntimeIdentity(executable: executable, dataRoot: root)
             let ctl = executable.deletingLastPathComponent().appendingPathComponent("chauffeurctl").path
             guard FileManager.default.isExecutableFile(atPath: ctl) else { throw ChauffeurError("missing_helper", "Install chauffeurctl beside ChauffeurRuntime", path: ctl) }
             var environment = ProcessInfo.processInfo.environment
@@ -49,7 +50,7 @@ import ChauffeurRuntimeKit
             var searchPaths = (environment["PATH"] ?? "").split(separator: ":").map(String.init)
             for path in ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin", "/usr/sbin", "/sbin"] where !searchPaths.contains(path) { searchPaths.append(path) }
             environment["PATH"] = searchPaths.joined(separator: ":")
-            let runtime = try RuntimeCoordinator(root: root, ctlPath: ctl, environment: environment, logs: logs, id: runtimeID)
+            let runtime = try RuntimeCoordinator(root: root, ctlPath: ctl, environment: environment, logs: logs, id: runtimeID, identity: identity)
             if !loginEnvironmentLoaded { await runtime.record(ChauffeurError("login_environment_unavailable", "Could not load the login-shell environment. Using inherited environment and standard executable search paths; select full CLI paths if needed")) }
             let server = try IPCServer(root: root, runtime: runtime)
             try await runtime.start()

@@ -33,12 +33,14 @@ V2 merely because this is a new session.
 Build only when code changes require it:
 
 ```sh
-CHAUFFEUR_SIGN_IDENTITY='Developer ID Application: Leonardo Lobato' \
-  Scripts/build-app.sh Release
+make release
 open build/Build/Products/Release/Chauffeur.app
 ```
 
-Use the same certificate for Debug builds when testing native service updates.
+Signing is configured in `Configuration/Base.xcconfig` and the gitignored
+`Configuration/LocalSigning.xcconfig`. The local overrides select team
+`5Z876YNVCP` and the Leonardo Lobato Developer ID certificate for both Debug and
+Release. Use `make build` for Debug builds when testing native service updates.
 Run builds sequentially and leave app/runtime sources stable while they run.
 Do not override build-product directories in a way that overwrites the Release.
 
@@ -162,9 +164,20 @@ settings remain unverified. XCUITest did not run because macOS automation setup
 blocked it; passing native tests used direct macOS Accessibility/keyboard input.
 See [compatibility](compatibility.md) and [V5](decisions/V5-macos-lifetime.md).
 
-No additional current-goal implementation is queued. Use the user's next test
-feedback to select the next fix, or [the V2 plan](v2-plan.md) if they ask to begin
-that phase.
+Manual feedback from 2026-09-16 is tracked in the
+[Chauffeur Linear project](https://linear.app/cliqdev/project/chauffeur-5eb89d352aa9):
+CLI-59 through CLI-68 track the original feedback. CLI-65 and CLI-68 are committed
+separately on main (`f8d69c5` and `f9eb8e9`) and marked completed in Linear (the
+team's completed state is named Hired); the other eight remain in Todo. The user confirmed
+that blank agent preset names use the agent's name, repository discovery groups
+worktrees/nested repositories under main repositories, and discovered worktrees
+should not require manual registration. The tickets include acceptance criteria
+and the supplied screenshots; ticket creation does not mark these fixes as done.
+
+CLI-69 through CLI-71 cover the Git ref picker, branch naming patterns, and agent
+memory investigation in [the V2 plan](v2-plan.md). They are in Backlog with the
+`v2` label and V2 milestone. Existing messaging/delegation and workload-testing
+deferrals remain unchanged.
 
 ## CLI-65 — worktree repository selection
 

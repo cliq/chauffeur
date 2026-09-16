@@ -1,0 +1,11 @@
+// Copy to LocalSigning.xcconfig (gitignored) and fill in your values.
+// DEVELOPMENT_TEAM: Your Apple Developer Team ID (Xcode > Settings > Accounts).
+DEVELOPMENT_TEAM = YOUR_TEAM_ID
+
+// Optional: override the shared app bundle identifier.
+// APP_BUNDLE_ID = com.yourcompany.chauffeur
+
+// For a persistent local service, use the same certificate in Debug and Release.
+// To use an installed Developer ID certificate instead of Apple Development:
+// CODE_SIGN_STYLE = Manual
+// CODE_SIGN_IDENTITY = Developer ID Application: Your Name (YOUR_TEAM_ID)

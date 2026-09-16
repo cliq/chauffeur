@@ -60,7 +60,7 @@ origin = 'http://127.0.0.1:' + str(server.server_port)
 with tempfile.TemporaryDirectory(prefix='chauffeur-terminal-pointer-', dir='/tmp') as directory:
     root = Path(directory).resolve()
     app = root / 'Chauffeur.app'
-    shutil.copytree(repository / 'build/Build/Products/Debug/Chauffeur.app', app, symlinks=True)
+    shutil.copytree(repository / 'build/Build/Products/Debug/Chauffeur Debug.app', app, symlinks=True)
     identifier = 'dev.chauffeur.terminal-pointer-probe.' + uuid.uuid4().hex
     socket_path = str(root / 'runtime/runtime.sock')
     info_path = app / 'Contents/Info.plist'

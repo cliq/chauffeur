@@ -17,11 +17,30 @@ Each session still receives its own filtered environment and selected profile.
 
 ## Restarting
 
-Opening a changed development build refreshes its service registration
-automatically. Use **Settings → Runtime → Restart Service** when the service is
+Opening a changed or moved app refreshes its service registration automatically,
+including moving the same build from its build folder to `/Applications`.
+Registration is recorded only after the runtime reports the expected executable
+path, executable hash, Debug/Release build, and data directory. A mismatched
+runtime triggers one registration refresh per app launch; a persistent mismatch
+stays disconnected with an explicit error. **Settings → Runtime** shows the
+verified runtime path. **Start Service** also refreshes an enabled but stale job.
+
+Debug uses `Chauffeur Debug.app`, a separate `.debug` bundle identifier, the
+`dev.chauffeur.debug.runtime` job, and `~/Library/Application Support/Chauffeur Debug`.
+Release retains `Chauffeur.app`, `dev.chauffeur.runtime`, and the existing
+`~/Library/Application Support/Chauffeur` store. Their preferences, notifications,
+logs, URL schemes, and terminal commands are independent. An explicit
+`CHAUFFEUR_SOCKET` override remains a custom connection and is not marked verified.
+
+Use **Settings → Runtime → Restart Service** when the service is
 unavailable. This unregisters the existing job, waits for
 macOS to finish stopping it, registers the current bundle, and reconnects the UI.
 Registration failures are shown with their original macOS error.
+
+`Prototypes/service_installation_smoke.py` checks relocation of an unchanged signed
+app, reuse of the runtime on an unchanged relaunch, distinct build metadata, and
+rejection of a Release runtime by the Debug app. It uses a unique service label
+and empty temporary stores. Evidence is under `.local/service-installation-artifacts/`.
 
 The runtime has its own tmux socket. Restarting it reconciles surviving session
 processes; it does not replay tasks. Missing terminal ownership is recorded as
@@ -107,19 +126,21 @@ Terminal inventory and saved-screen metadata use printable separators so they
 work with a minimal login environment and the C locale. Unreadable inventory
 produces a service error; it is not interpreted as proof that all agents exited.
 
-Keep the app bundle at its registered path while its service is in use. Use
-`CHAUFFEUR_SIGN_IDENTITY` with an existing certificate for persistent service
-builds. The launch constraint requires that signing team and helper identifier.
+After moving the app, open it at the new location to refresh its service. Use
+`Configuration/LocalSigning.xcconfig` to select a development team and an existing
+certificate for persistent service builds. The launch constraint requires that
+signing team and helper identifier.
 Ad-hoc builds instead bind to the exact helper code hash and can encounter macOS
-constraint failures when helper versions change. The build script generates the
+constraint failures when helper versions change. The embedding script generates the
 constraint before signing the outer app. The app fingerprints both the plist and
-helper, and refreshes registration for a changed build. This uses macOS's
+helper plus its canonical location, and refreshes registration for a changed or
+moved build. This uses macOS's
 [documented LaunchAgent constraint mechanism](https://developer.apple.com/videos/play/wwdc2023/10266/).
 
 The embedding script signs temporary copies and atomically replaces helper files.
 It avoids modifying executable files in place, which can conflict with the
 kernel's cached signature; see Apple's [Updating Mac Software](https://developer.apple.com/documentation/security/updating-mac-software).
-The build script then signs and verifies the completed app, including when only
+The Makefile then signs and verifies the completed app, including when only
 an embedded helper changed and Xcode skipped signing the outer bundle.
 
 ## Inspecting health

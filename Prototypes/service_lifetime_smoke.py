@@ -21,16 +21,16 @@ parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument("--use-default-service", action="store_true", required=True)
 parser.add_argument("--replace-test-registration", action="store_true",
                     help="Replace an existing empty-store Chauffeur test registration")
-parser.add_argument("--app", type=Path, default=repository / "build/Build/Products/Debug/Chauffeur.app")
+parser.add_argument("--app", type=Path, default=repository / "build/Build/Products/Debug/Chauffeur Debug.app")
 parser.add_argument("--artifacts", type=Path, default=repository / ".build/service-lifetime-artifacts")
 args = parser.parse_args()
 app = args.app.resolve()
 assert (app / "Contents/MacOS/Chauffeur.debug.dylib").is_file(), "Build the Debug app first"
-root = Path.home() / "Library/Application Support/Chauffeur"
+root = Path.home() / "Library/Application Support/Chauffeur Debug"
 for name in ("projects", "preset-sets"):
     directory = root / name
     assert not directory.exists() or not any(directory.iterdir()), "Use an empty default store for this check"
-job = f"gui/{os.getuid()}/dev.chauffeur.runtime"
+job = f"gui/{os.getuid()}/dev.chauffeur.debug.runtime"
 
 
 def job_info():

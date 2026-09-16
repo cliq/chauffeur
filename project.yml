@@ -1,6 +1,6 @@
 name: Chauffeur
 options:
-  bundleIdPrefix: dev.chauffeur
+  bundleIdPrefix: dev.cliq.chauffeur
   deploymentTarget:
     macOS: "15.0"
 packages:
@@ -13,15 +13,25 @@ settings:
   base:
     SWIFT_VERSION: "6.0"
     MACOSX_DEPLOYMENT_TARGET: "15.0"
-    CODE_SIGN_STYLE: Manual
-    CODE_SIGN_IDENTITY: "-"
     ENABLE_APP_SANDBOX: NO
     ENABLE_HARDENED_RUNTIME: YES
     ENABLE_USER_SCRIPT_SANDBOXING: NO
+  configs:
+    Debug:
+      CHAUFFEUR_BUNDLE_SUFFIX: .debug
+      CHAUFFEUR_DISPLAY_NAME: Chauffeur Debug
+      CHAUFFEUR_URL_SCHEME: chauffeur-debug
+    Release:
+      CHAUFFEUR_BUNDLE_SUFFIX: ""
+      CHAUFFEUR_DISPLAY_NAME: Chauffeur
+      CHAUFFEUR_URL_SCHEME: chauffeur
 targets:
   ChauffeurApp:
     type: application
     platform: macOS
+    configFiles:
+      Debug: Configuration/Base.xcconfig
+      Release: Configuration/Base.xcconfig
     sources:
       - Sources/ChauffeurApp
     dependencies:
@@ -34,14 +44,16 @@ targets:
       properties:
         CFBundleURLTypes:
           - CFBundleURLName: dev.chauffeur.session
-            CFBundleURLSchemes: [chauffeur]
+            CFBundleURLSchemes: ["$(CHAUFFEUR_URL_SCHEME)"]
     settings:
       base:
         PRODUCT_NAME: Chauffeur
-        PRODUCT_BUNDLE_IDENTIFIER: dev.chauffeur.app
+        WRAPPER_NAME: $(CHAUFFEUR_DISPLAY_NAME).app
+        PRODUCT_BUNDLE_IDENTIFIER: $(APP_BUNDLE_ID)$(CHAUFFEUR_BUNDLE_SUFFIX)
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
         GENERATE_INFOPLIST_FILE: YES
-        INFOPLIST_KEY_CFBundleDisplayName: Chauffeur
+        INFOPLIST_KEY_CFBundleDisplayName: $(CHAUFFEUR_DISPLAY_NAME)
         INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.developer-tools
         INFOPLIST_KEY_NSPrincipalClass: NSApplication
         MARKETING_VERSION: 0.1.0
@@ -56,9 +68,13 @@ targets:
           - "$(TARGET_BUILD_DIR)/$(CONTENTS_FOLDER_PATH)/MacOS/chauffeur-launcher"
           - "$(TARGET_BUILD_DIR)/$(CONTENTS_FOLDER_PATH)/Library/ChauffeurNotifications.app"
           - "$(TARGET_BUILD_DIR)/$(CONTENTS_FOLDER_PATH)/Library/LaunchAgents/dev.chauffeur.runtime.plist"
+          - "$(TARGET_BUILD_DIR)/Chauffeur.signing-identity"
   ChauffeurAppUITests:
     type: bundle.ui-testing
     platform: macOS
+    configFiles:
+      Debug: Configuration/Base.xcconfig
+      Release: Configuration/Base.xcconfig
     sources:
       - Tests/ChauffeurAppUITests
     dependencies:
@@ -67,7 +83,7 @@ targets:
         product: ChauffeurCore
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: dev.chauffeur.app.uitests
+        PRODUCT_BUNDLE_IDENTIFIER: $(APP_BUNDLE_ID)$(CHAUFFEUR_BUNDLE_SUFFIX).uitests
         GENERATE_INFOPLIST_FILE: YES
         TEST_TARGET_NAME: ChauffeurApp
         ENABLE_HARDENED_RUNTIME: NO
@@ -85,4 +101,4 @@ schemes:
       targets:
         - ChauffeurAppUITests
       environmentVariables:
-        CHAUFFEUR_TEST_APP: "$(BUILT_PRODUCTS_DIR)/Chauffeur.app"
+        CHAUFFEUR_TEST_APP: "$(BUILT_PRODUCTS_DIR)/$(CHAUFFEUR_DISPLAY_NAME).app"

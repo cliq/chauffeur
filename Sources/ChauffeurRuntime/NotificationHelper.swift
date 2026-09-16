@@ -16,7 +16,7 @@ enum NotificationHelper {
         var reportedLaunchFailure = false
         while !Task.isCancelled {
             if (try? await runtime.shouldLaunchNotificationHelper()) == true {
-                let running = NSRunningApplication.runningApplications(withBundleIdentifier: "dev.chauffeur.notifications").filter { !$0.isTerminated }
+                let running = NSRunningApplication.runningApplications(withBundleIdentifier: AppBuild.current.notificationIdentifier).filter { !$0.isTerminated }
                 if !refreshed {
                     // Refresh the helper after a service/app update. Otherwise an
                     // old helper can route a click into the previous app bundle.

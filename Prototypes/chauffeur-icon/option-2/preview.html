@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Chauffeur — hat icon preview</title>
+  <style>
+    :root { color-scheme: light; font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif; color: #29231f; background: #f4f1ed; }
+    * { box-sizing: border-box; }
+    body { margin: 0; padding: 44px 48px 32px; }
+    main { max-width: 1120px; margin: auto; }
+    header { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 26px; }
+    .eyebrow { margin: 0 0 10px; color: #886c59; font-size: 11px; font-weight: 600; letter-spacing: 1.8px; text-transform: uppercase; }
+    h1 { font-size: 30px; letter-spacing: -0.9px; font-weight: 600; margin: 0; }
+    .badge { font-size: 12px; color: #7c6d61; border: 1px solid #d7cdc4; padding: 6px 11px; border-radius: 20px; }
+    .grid { display: grid; grid-template-columns: 0.9fr 1.1fr; gap: 20px; }
+    .card { background: #fcfaf7; border: 1px solid #e3dbd3; border-radius: 20px; overflow: hidden; }
+    .label { margin: 0; font-size: 11px; font-weight: 600; letter-spacing: 1.5px; text-transform: uppercase; color: #8b796b; }
+    .app { min-height: 448px; padding: 24px; display: flex; align-items: center; flex-direction: column; }
+    .app .label { align-self: flex-start; }
+    .hero-icon { width: 268px; height: 268px; margin-top: 8px; filter: drop-shadow(0 15px 16px #642d1720); }
+    .app-name { margin-top: 3px; font-size: 18px; font-weight: 600; letter-spacing: -0.4px; }
+    .sizes { display: flex; align-items: center; justify-content: center; gap: 25px; margin-top: 23px; }
+    .size { display: flex; align-items: center; justify-content: flex-end; flex-direction: column; gap: 7px; height: 71px; }
+    .size span { font-size: 10px; color: #9b8c80; }
+    .right { display: flex; flex-direction: column; gap: 20px; }
+    .welcome { padding: 22px 24px 25px; height: 310px; }
+    .window { display: grid; grid-template-columns: 1fr 1fr; margin-top: 18px; height: 221px; border: 1px solid #dcd6cf; border-radius: 11px; overflow: hidden; box-shadow: 0 5px 15px #33211607; }
+    .pane { display: flex; flex-direction: column; align-items: center; justify-content: center; background: #f5f4f2; color: #282421; }
+    .dark { background: #292725; color: #f5f1eb; border-left: 1px solid #dcd6cf; }
+    .hat { width: 84px; height: 84px; flex-shrink: 0; background: #b65b2c; -webkit-mask: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNTYgMjU2IiBmaWxsPSJjdXJyZW50Q29sb3IiPgogIDx0aXRsZT5DaGF1ZmZldXIgaGF0IOKAlCBvcHRpb24gMjwvdGl0bGU+CiAgPGRlc2M+QSBjZW50ZXJlZCBjaGF1ZmZldXIgY2FwIGZhY2luZyBhbG1vc3QgZm9yd2FyZCwgd2l0aCBhIHN1YnRsZSBmaWZ0ZWVuLWRlZ3JlZSBhbmdsZSB0byB0aGUgbGVmdC48L2Rlc2M+CiAgPGcgaWQ9ImhhdC1nZW9tZXRyeSIgdHJhbnNmb3JtPSJ0cmFuc2xhdGUoMjUxLjc3OCAyLjY2Mykgc2NhbGUoLTEgMSkiPgogICAgPGRlZnM+PGNsaXBQYXRoIGlkPSJoYXQtdmlzb3ItY2xpcCI+PHBhdGggZD0iTTAgMTU0LjE3OEw0My41MDkgMTU0LjE3OEM0My41MDkgMTcwLjc1MyA3Ny4zMDggMTgzLjQ0MCAxMTkuMDAwIDE4Mi41MTZDMTYwLjY5MiAxODEuNTkzIDE5NC40OTEgMTY3LjQwOCAxOTQuNDkxIDE1MC44MzRMMjU2IDE1MC44MzRWMjU2SDBaIi8+PC9jbGlwUGF0aD48L2RlZnM+CiAgICA8cGF0aCBkPSJNMjAuMDQ3IDkzLjkyM0MyMC4wNDcgODAuNzg2IDM4LjkwOCA2Ny45OTEgNjkuNTI0IDYwLjM1NkMxMDAuMTQwIDUyLjcyMiAxMzcuODYwIDUxLjQwOCAxNjguNDc2IDU2LjkxMUMxOTkuMDkyIDYyLjQxMyAyMTcuOTUzIDczLjg5NSAyMTcuOTUzIDg3LjAzMkwxOTQuNDkxIDEyMC4yNjNDMTk0LjQ5MSAxMzYuODM3IDE2MC42OTIgMTUxLjAyMiAxMTkuMDAwIDE1MS45NDVDNzcuMzA4IDE1Mi44NjkgNDMuNTA5IDE0MC4xODIgNDMuNTA5IDEyMy42MDdaIi8+CiAgICA8cGF0aCBmaWxsLXJ1bGU9ImV2ZW5vZGQiIGQ9Ik0xOTQuNDkxIDEyNy40NTNDMTk0LjQ5MSAxNDQuMDI3IDE2MC42OTIgMTU4LjIxMiAxMTkuMDAwIDE1OS4xMzZDNzcuMzA4IDE2MC4wNTkgNDMuNTA5IDE0Ny4zNzIgNDMuNTA5IDEzMC43OThMNDMuNTA5IDE0NS4xNzhDNDMuNTA5IDE2MS43NTMgNzcuMzA4IDE3NC40NDAgMTE5LjAwMCAxNzMuNTE2QzE2MC42OTIgMTcyLjU5MyAxOTQuNDkxIDE1OC40MDggMTk0LjQ5MSAxNDEuODM0Wk0xOTEuNzEwIDE0MC42NjlhMS4yNjAgMy42IDAgMSAwIDIuNTIwIDBhMS4yNjAgMy42IDAgMSAwIC0yLjUyMCAwWk01Ny42NjUgMTU2LjI5OWEyLjI0MCAzLjYgMCAxIDAgNC40ODAgMGEyLjI0MCAzLjYgMCAxIDAgLTQuNDgwIDBaIi8+CiAgICA8cGF0aCBjbGlwLXBhdGg9InVybCgjaGF0LXZpc29yLWNsaXApIiBkPSJNMTkzLjM3NiAxNDUuNTU1QzIxNC4xMDMgMTc5LjQ2NCAxOTcuNjA2IDIxMC44NjUgMTU2LjUyOSAyMTUuNjg5QzExNS40NTIgMjIwLjUxNCA2NS4zNTAgMTk2LjkzNyA0NC42MjQgMTYzLjAyOFoiLz4KICA8L2c+Cjwvc3ZnPgo=") center / contain no-repeat; mask: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNTYgMjU2IiBmaWxsPSJjdXJyZW50Q29sb3IiPgogIDx0aXRsZT5DaGF1ZmZldXIgaGF0IOKAlCBvcHRpb24gMjwvdGl0bGU+CiAgPGRlc2M+QSBjZW50ZXJlZCBjaGF1ZmZldXIgY2FwIGZhY2luZyBhbG1vc3QgZm9yd2FyZCwgd2l0aCBhIHN1YnRsZSBmaWZ0ZWVuLWRlZ3JlZSBhbmdsZSB0byB0aGUgbGVmdC48L2Rlc2M+CiAgPGcgaWQ9ImhhdC1nZW9tZXRyeSIgdHJhbnNmb3JtPSJ0cmFuc2xhdGUoMjUxLjc3OCAyLjY2Mykgc2NhbGUoLTEgMSkiPgogICAgPGRlZnM+PGNsaXBQYXRoIGlkPSJoYXQtdmlzb3ItY2xpcCI+PHBhdGggZD0iTTAgMTU0LjE3OEw0My41MDkgMTU0LjE3OEM0My41MDkgMTcwLjc1MyA3Ny4zMDggMTgzLjQ0MCAxMTkuMDAwIDE4Mi41MTZDMTYwLjY5MiAxODEuNTkzIDE5NC40OTEgMTY3LjQwOCAxOTQuNDkxIDE1MC44MzRMMjU2IDE1MC44MzRWMjU2SDBaIi8+PC9jbGlwUGF0aD48L2RlZnM+CiAgICA8cGF0aCBkPSJNMjAuMDQ3IDkzLjkyM0MyMC4wNDcgODAuNzg2IDM4LjkwOCA2Ny45OTEgNjkuNTI0IDYwLjM1NkMxMDAuMTQwIDUyLjcyMiAxMzcuODYwIDUxLjQwOCAxNjguNDc2IDU2LjkxMUMxOTkuMDkyIDYyLjQxMyAyMTcuOTUzIDczLjg5NSAyMTcuOTUzIDg3LjAzMkwxOTQuNDkxIDEyMC4yNjNDMTk0LjQ5MSAxMzYuODM3IDE2MC42OTIgMTUxLjAyMiAxMTkuMDAwIDE1MS45NDVDNzcuMzA4IDE1Mi44NjkgNDMuNTA5IDE0MC4xODIgNDMuNTA5IDEyMy42MDdaIi8+CiAgICA8cGF0aCBmaWxsLXJ1bGU9ImV2ZW5vZGQiIGQ9Ik0xOTQuNDkxIDEyNy40NTNDMTk0LjQ5MSAxNDQuMDI3IDE2MC42OTIgMTU4LjIxMiAxMTkuMDAwIDE1OS4xMzZDNzcuMzA4IDE2MC4wNTkgNDMuNTA5IDE0Ny4zNzIgNDMuNTA5IDEzMC43OThMNDMuNTA5IDE0NS4xNzhDNDMuNTA5IDE2MS43NTMgNzcuMzA4IDE3NC40NDAgMTE5LjAwMCAxNzMuNTE2QzE2MC42OTIgMTcyLjU5MyAxOTQuNDkxIDE1OC40MDggMTk0LjQ5MSAxNDEuODM0Wk0xOTEuNzEwIDE0MC42NjlhMS4yNjAgMy42IDAgMSAwIDIuNTIwIDBhMS4yNjAgMy42IDAgMSAwIC0yLjUyMCAwWk01Ny42NjUgMTU2LjI5OWEyLjI0MCAzLjYgMCAxIDAgNC40ODAgMGEyLjI0MCAzLjYgMCAxIDAgLTQuNDgwIDBaIi8+CiAgICA8cGF0aCBjbGlwLXBhdGg9InVybCgjaGF0LXZpc29yLWNsaXApIiBkPSJNMTkzLjM3NiAxNDUuNTU1QzIxNC4xMDMgMTc5LjQ2NCAxOTcuNjA2IDIxMC44NjUgMTU2LjUyOSAyMTUuNjg5QzExNS40NTIgMjIwLjUxNCA2NS4zNTAgMTk2LjkzNyA0NC42MjQgMTYzLjAyOFoiLz4KICA8L2c+Cjwvc3ZnPgo=") center / contain no-repeat; }
+    .dark .hat { background: #eb9e70; }
+    .welcome-name { font-weight: 600; font-size: 23px; letter-spacing: -0.5px; margin-top: 4px; }
+    .version { font-size: 10px; color: #96908a; margin-top: 6px; }
+    .fake-button { margin-top: 17px; padding: 5px 11px; font-size: 10px; background: #b65b2c; color: white; border-radius: 5px; box-shadow: inset 0 0 0 1px #0000000a; }
+    .dark .fake-button { background: #eb9e70; color: #322217; }
+    .marks { height: 118px; display: flex; align-items: center; justify-content: space-between; padding: 22px 24px; }
+    .marks .label { line-height: 1.6; max-width: 120px; }
+    .mark { background: #29231f; width: 62px; height: 62px; }
+    .mark.copper { background: #b65b2c; }
+    .reverse { display: grid; place-items: center; background: #302a25; border-radius: 12px; width: 72px; height: 72px; }
+    .reverse .mark { background: #fcf7ed; width: 58px; height: 58px; }
+    footer { display: flex; justify-content: space-between; gap: 20px; margin-top: 21px; color: #8b796b; font-size: 12px; line-height: 1.6; }
+    footer a { color: #9d542f; text-decoration: none; border-bottom: 1px solid #c5a58f; }
+    @media (max-width: 760px) { body { padding: 24px 18px; } header { gap: 12px; } h1 { font-size: 25px; } .grid { grid-template-columns: 1fr; } footer { flex-direction: column; gap: 5px; } }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <div><p class="eyebrow">Chauffeur / Icon study</p><h1>A gentler angle.</h1></div>
+      <span class="badge">Option 2 · 15° left</span>
+    </header>
+    <div class="grid">
+      <section class="card app" aria-label="App icon preview">
+        <p class="label">App icon</p>
+        <img class="hero-icon" src="app-icon.svg" alt="Centered ivory chauffeur hat facing left on a warm copper app icon">
+        <div class="app-name">Chauffeur</div>
+        <div class="sizes" aria-label="Icon at smaller sizes">
+          <div class="size"><img src="app-icon.svg" width="48" height="48" alt="48 pixel icon"><span>48</span></div>
+          <div class="size"><img src="app-icon.svg" width="32" height="32" alt="32 pixel icon"><span>32</span></div>
+          <div class="size"><img src="app-icon.svg" width="16" height="16" alt="16 pixel icon"><span>16</span></div>
+        </div>
+      </section>
+      <div class="right">
+        <section class="card welcome" aria-label="Welcome screen concept, light and dark">
+          <p class="label">Welcome screen · Light &amp; dark</p>
+          <div class="window">
+            <div class="pane">
+              <div class="hat" role="img" aria-label="Copper chauffeur hat"></div>
+              <div class="welcome-name">Chauffeur</div><div class="version">Version 0.1.0</div>
+              <div class="fake-button">＋ Create New Project…</div>
+            </div>
+            <div class="pane dark">
+              <div class="hat" role="img" aria-label="Peach chauffeur hat"></div>
+              <div class="welcome-name">Chauffeur</div><div class="version">Version 0.1.0</div>
+              <div class="fake-button">＋ Create New Project…</div>
+            </div>
+          </div>
+        </section>
+        <section class="card marks" aria-label="Single color vector mark">
+          <p class="label">The same mark<br>in one color</p>
+          <div class="hat mark" role="img" aria-label="Black hat"></div>
+          <div class="hat mark copper" role="img" aria-label="Copper hat"></div>
+          <div class="reverse"><div class="hat mark" role="img" aria-label="White hat on dark background"></div></div>
+        </section>
+      </div>
+    </div>
+    <footer>
+      <span>Almost front-facing, with a subtle turn to the left. Uses the app’s existing copper palette.</span>
+      <span><a href="chauffeur-hat.svg">Hat SVG</a> &nbsp;·&nbsp; <a href="app-icon.svg">App icon SVG</a></span>
+    </footer>
+  </main>
+</body>
+</html>

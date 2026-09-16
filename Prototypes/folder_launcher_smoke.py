@@ -19,7 +19,7 @@ import time
 import uuid
 
 repository = Path(__file__).resolve().parents[1]
-source_app = repository / 'build/Build/Products/Debug/Chauffeur.app'
+source_app = repository / 'build/Build/Products/Debug/Chauffeur Debug.app'
 assert not (source_app / 'Contents/MacOS/Chauffeur').samefile(source_app / 'Contents/MacOS/chauffeur-launcher'), 'Launcher must not replace the app executable'
 artifacts = repository / '.build/folder-launcher-artifacts'
 artifacts.mkdir(exist_ok=True)

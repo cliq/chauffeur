@@ -53,7 +53,7 @@ subprocess.run(['swiftc', str(repository / 'Prototypes/app_accessibility_probe.s
 subprocess.run(['swiftc', str(repository / 'Prototypes/app_window_probe.swift'), '-o', str(repository / '.build/app-window-probe')], check=True)
 if options.sleep_wake:
     subprocess.run(['swiftc', str(repository / 'Prototypes/system_sleep_observer.swift'), '-o', str(repository / '.build/system-sleep-observer')], check=True)
-source = repository / 'build/Build/Products/Debug/Chauffeur.app'
+source = repository / 'build/Build/Products/Debug/Chauffeur Debug.app'
 release = repository / 'build/Build/Products/Release/Chauffeur.app'
 assert (source / 'Contents/MacOS/Chauffeur.debug.dylib').is_file()
 for bundle in [source, release]:
@@ -139,10 +139,14 @@ with tempfile.TemporaryDirectory(prefix='chauffeur-live-service-', dir='/tmp') a
     configuration['StandardOutPath'] = str(artifacts / 'runtime.private.log')
     configuration['StandardErrorPath'] = str(artifacts / 'runtime-error.private.log')
     plist.write_bytes(plistlib.dumps(configuration))
-    # Start with the Release helper, then replace it with the newly built Debug
-    # helper at the same bundle path to exercise real registration refresh.
-    for name in ['ChauffeurRuntime', 'chauffeurctl']:
-        shutil.copy2(release / 'Contents/MacOS' / name, binaries / name)
+    # Keep the build channel consistent with the Debug UI. An alternate valid
+    # signature gives this private helper different bytes without using Release.
+    subprocess.run(['codesign', '--force', '--timestamp=none', '--sign',
+        'Developer ID Application: Leonardo Lobato',
+        '--preserve-metadata=identifier,entitlements,flags,runtime',
+        str(binaries / 'ChauffeurRuntime')], check=True)
+    initial_helper_hash = hashlib.sha256((binaries / 'ChauffeurRuntime').read_bytes()).hexdigest()
+    assert initial_helper_hash != hashlib.sha256((source / 'Contents/MacOS/ChauffeurRuntime').read_bytes()).hexdigest()
 
     def sign_app():
         with (artifacts / 'sign.log').open('a') as log:
@@ -448,7 +452,7 @@ with tempfile.TemporaryDirectory(prefix='chauffeur-live-service-', dir='/tmp') a
             temporary = binaries / (name + '.replacement')
             shutil.copy2(source / 'Contents/MacOS' / name, temporary)
             os.replace(temporary, binaries / name)
-        assert hashlib.sha256((binaries / 'ChauffeurRuntime').read_bytes()).hexdigest() != release_hash
+        assert hashlib.sha256((binaries / 'ChauffeurRuntime').read_bytes()).hexdigest() != initial_helper_hash
         sign_app()
         open_app()
         updated = wait(lambda: (s if (s := call('status'))['runtimeID'] != restarted['runtimeID'] and s.get('mcpEndpoint') else None), 'updated helper registration')

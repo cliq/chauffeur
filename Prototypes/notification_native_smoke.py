@@ -19,7 +19,7 @@ import time
 repository = Path(__file__).resolve().parents[1]
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--use-default-service', action='store_true', required=True)
-parser.add_argument('--app', type=Path, default=repository / 'build/Build/Products/Debug/Chauffeur.app')
+parser.add_argument('--app', type=Path, default=repository / 'build/Build/Products/Debug/Chauffeur Debug.app')
 parser.add_argument('--artifacts', type=Path, default=repository / '.local/notification-native-repeat')
 args = parser.parse_args()
 os.umask(0o077)
@@ -156,7 +156,7 @@ assert not window(call('snapshot'))['wasOpen'], 'Project unexpectedly open befor
 ax(target[0], 'press', identifier=target[1]['identifier'])
 pid = wait_for(lambda: one_pid(app_executable), 'notification cold launch')
 wait_for(lambda: any(c['role'] == 'AXWindow' and c['title'] == project['name'] for c in ax(pid)), 'project window')
-wait_for(lambda: not any(c['role'] == 'AXWindow' and c['title'] == 'Welcome to Chauffeur' for c in ax(pid)), 'Welcome dismissed after routing')
+wait_for(lambda: not any(c['role'] == 'AXWindow' and c['title'].startswith('Welcome to Chauffeur') for c in ax(pid)), 'Welcome dismissed after routing')
 after = wait_for(lambda: (snapshot if window(snapshot := call('snapshot'))['wasOpen']
                          and window(snapshot).get('selectedSessionID') == session['id'] else None), 'session selected')
 unchanged(after)
