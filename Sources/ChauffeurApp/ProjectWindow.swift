@@ -90,6 +90,12 @@ struct ProjectWindow: View {
     @State private var sidebarReveal: SidebarReveal?
     @State private var pendingWorktree: Worktree?
     @State private var deletingCheckout: CheckoutRow?
+    private struct TabClosure {
+        let session: Session
+        let command: String?
+    }
+    @State private var closingTab: TabClosure?
+    @State private var checkingTab = false
     @FocusState private var searchFocused: Bool
     init(projectID: UUID) { self.projectID = projectID; _layout = StateObject(wrappedValue: ProjectLayout(projectID: projectID)) }
     private var project: Project? { model.project(projectID) }
@@ -136,6 +142,10 @@ struct ProjectWindow: View {
                 .confirmationDialog("Delete \(deletingCheckout?.title ?? "worktree")?", isPresented: Binding(get: { deletingCheckout != nil }, set: { if !$0 { deletingCheckout = nil } }), titleVisibility: .visible) {
                     Button("Delete Worktree", role: .destructive) { if let row = deletingCheckout { deleteWorktree(row) }; deletingCheckout = nil }
                 } message: { Text(deletionMessage(deletingCheckout)) }
+                .confirmationDialog("Close \(closingTab?.session.title ?? "session")?", isPresented: Binding(get: { closingTab != nil }, set: { if !$0 { closingTab = nil } }), titleVisibility: .visible) {
+                    Button("Close Tab") { if let closing = closingTab { closeTab(closing.session) }; closingTab = nil }
+                    Button("Cancel", role: .cancel) { closingTab = nil }
+                } message: { Text(closeMessage(closingTab)) }
             } else {
                 VStack(spacing: 20) {
                     ContentUnavailableView(model.online ? "Project unavailable" : "Connecting…", systemImage: "folder.badge.questionmark", description: Text("Restore the project directory or choose another project. Existing agents remain in the background service."))
@@ -471,21 +481,38 @@ struct ProjectWindow: View {
     private func openSessions(in folder: ProjectFolder, path: String) -> [Session] {
         sessions(in: folder, path: path).filter { !layout.closedSessionIDs.contains($0.id) }
     }
+    private var openTabs: [Session] {
+        if let folder = selectedFolder, let path = layout.selectedWorktreePath { return openSessions(in: folder, path: path) }
+        return model.session(layout.state.selectedSessionID).map { [$0] } ?? []
+    }
+    /// Closing a tab keeps its session running, so confirm before hiding work in
+    /// progress. A shell waiting at its own prompt closes without asking.
     private func closeCurrentTab() {
-        let tabs: [Session]
-        if let folder = selectedFolder, let path = layout.selectedWorktreePath {
-            tabs = openSessions(in: folder, path: path)
-        } else {
-            tabs = model.session(layout.state.selectedSessionID).map { [$0] } ?? []
-        }
+        guard closingTab == nil, !checkingTab else { return }
+        let tabs = openTabs
         guard !tabs.isEmpty else { layout.window?.performClose(nil); return }
-        let index = tabs.firstIndex { $0.id == layout.state.selectedSessionID } ?? 0
-        let closing = tabs[index]
-        layout.closedSessionIDs.insert(closing.id)
-        layout.controllers.removeValue(forKey: closing.id)?.detach()
-        let remaining = tabs.filter { $0.id != closing.id }
+        let closing = tabs[tabs.firstIndex { $0.id == layout.state.selectedSessionID } ?? 0]
+        guard closing.state.isLive else { closeTab(closing); return }
+        guard !closing.launch.preset.kind.isAgent else { closingTab = TabClosure(session: closing, command: nil); return }
+        checkingTab = true
+        Task {
+            let activity = await model.terminalActivity(closing.id)
+            checkingTab = false
+            if activity.idle { closeTab(closing) } else { closingTab = TabClosure(session: closing, command: activity.command) }
+        }
+    }
+    private func closeTab(_ session: Session) {
+        layout.closedSessionIDs.insert(session.id)
+        layout.controllers.removeValue(forKey: session.id)?.detach()
+        let tabs = openTabs
+        guard let index = tabs.firstIndex(where: { $0.id == session.id }) else { return }
+        let remaining = tabs.filter { $0.id != session.id }
         layout.state.selectedSessionID = remaining.isEmpty ? nil : remaining[min(index, remaining.count - 1)].id
         if let id = layout.state.selectedSessionID { markRead(id) }
+    }
+    private func closeMessage(_ closing: TabClosure?) -> String {
+        let running = closing?.command.map { "“\($0)” is running in this terminal." } ?? "This session is still running."
+        return running + " Closing the tab keeps it running in the background; reopen it from the Sessions sidebar."
     }
     private var terminalTarget: (folder: ProjectFolder, row: CheckoutRow)? {
         guard let project, let folder = selectedFolder ?? project.folders.first(where: \.registered) else { return nil }

@@ -321,6 +321,13 @@ struct AppSnapshot: Decodable, Sendable {
     func call(_ method: String, _ params: JSONValue = .object([:])) async throws -> JSONValue {
         try await RuntimeClient.call(IPCRequest(method, params: params), socketPath: socketPath)
     }
+    /// Whether a session's terminal is waiting at its own prompt. An
+    /// unreachable service counts as active so closing still asks first.
+    func terminalActivity(_ sessionID: UUID) async -> TerminalActivity {
+        guard online, let result = try? await call("sessionActivity", .object(["sessionID": .string(sessionID.uuidString)])),
+              let activity = try? result.decode(TerminalActivity.self) else { return TerminalActivity(idle: false, command: nil) }
+        return activity
+    }
     func refresh() async throws {
         let generation = connectionGeneration
         let result = try await call("snapshot")

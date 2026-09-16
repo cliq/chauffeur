@@ -33,6 +33,21 @@ struct LaunchCancellationTests {
         _ = try await fixture.stop()
     }
 
+    @Test func terminalActivityDistinguishesAnIdleShellFromRunningWork() async throws {
+        let fixture = try await LaunchFixture.make(); defer { fixture.cleanup() }
+        let request = LaunchRequest.shell(projectID: fixture.request.projectID, groupID: fixture.request.groupID, folderID: fixture.request.folderID, title: "Shell", worktreeID: nil)
+        let shell = try await fixture.runtime.launch(request)
+        try await fixture.wait { try await fixture.activity(shell.id).idle }
+        #expect(try await fixture.activity(shell.id).command == "zsh")
+        try fixture.sendKeys(sessionID: shell.id, "sleep 30")
+        try await fixture.wait { try await fixture.activity(shell.id).command == "sleep" }
+        #expect(try await !fixture.activity(shell.id).idle)
+        // An agent CLI is its own pane's foreground process and is never idle.
+        let agent = try await fixture.runtime.launch(fixture.request)
+        try await fixture.wait { FileManager.default.fileExists(atPath: fixture.path("started").path) }
+        #expect(try await !fixture.activity(agent.id).idle)
+    }
+
     @Test(arguments: [["--sandbox", "read-only"], ["-s", "read-only"], ["--sandbox=read-only"], ["-s=read-only"]])
     func codexReadOnlyAdditionalFoldersFailBeforeInspectingOrStartingTheCLI(arguments: [String]) async throws {
         let fixture = try await LaunchFixture.make(); defer { fixture.cleanup() }
@@ -372,6 +387,15 @@ private struct LaunchFixture: Sendable {
             try await Task.sleep(for: .milliseconds(20))
         }
         throw ChauffeurError("fixture_timeout", "Cancellation fixture did not reach its checkpoint")
+    }
+    func activity(_ sessionID: UUID) async throws -> TerminalActivity {
+        try await runtime.handle(IPCRequest("sessionActivity", params: .object(["sessionID": .string(sessionID.uuidString)]))).decode(TerminalActivity.self)
+    }
+    func sendKeys(sessionID: UUID, _ keys: String) throws {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: tmux)
+        process.arguments = ["-S", path("runtime/tmux.sock").path, "-f", "/dev/null", "send-keys", "-t", sessionID.uuidString, keys, "Enter"]
+        try process.run(); process.waitUntilExit()
     }
     func cleanup() {
         let process = Process()

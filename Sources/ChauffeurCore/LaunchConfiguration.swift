@@ -20,6 +20,14 @@ public struct TerminalPacket: Codable, Sendable {
     public init(kind: String, bytes: Data? = nil, message: String? = nil) { self.kind = kind; self.bytes = bytes; self.message = message }
 }
 
+/// Whether a session's terminal is waiting at its own prompt, with the name of
+/// the foreground command when something else is running in it.
+public struct TerminalActivity: Codable, Sendable {
+    public var idle: Bool
+    public var command: String?
+    public init(idle: Bool, command: String?) { self.idle = idle; self.command = command }
+}
+
 public enum LaunchKind: String, Codable, Sendable { case agent, shell }
 
 public struct LaunchRequest: Codable, Sendable {

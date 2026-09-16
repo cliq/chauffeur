@@ -125,6 +125,17 @@ public actor TmuxHost {
         guard let owner = try await inventory().first(where: { $0.sessionName == name }), owner.paneID == fields[0], owner.processID == pid else { throw ChauffeurError("snapshot_unavailable", "Terminal changed while its history was captured") }
         return TerminalSnapshot(sessionID: sessionID, processID: pid, terminalIdentity: fields[0], columns: columns, rows: rows, lineLimit: lines, history: history, screen: screen.output, truncated: truncated || screen.outputTruncated)
     }
+    /// The command tmux reads from the pane's foreground process group, or
+    /// `nil` when the pane is gone or its process has exited. A shell waiting at
+    /// its own prompt reports the shell itself.
+    public func foregroundCommand(sessionID: UUID) async throws -> String? {
+        let result = try await command(["display-message", "-p", "-t", sessionID.uuidString, "#{pane_dead}|#{pane_current_command}"])
+        guard result.status == 0 else { return nil }
+        // A process name may itself contain the delimiter; it is the last field.
+        let fields = result.output.trimmingCharacters(in: .newlines).split(separator: "|", maxSplits: 1, omittingEmptySubsequences: false).map(String.init)
+        guard fields.count == 2, fields[0] == "0", !fields[1].isEmpty else { return nil }
+        return fields[1]
+    }
     private func capturePane(_ name: String, options: [String]) async throws -> CommandResult {
         var result = try await ProcessRunner.run(executable, ["-S", socketPath, "capture-pane", "-p", "-e", "-t", name] + options, environment: environment, timeout: 3, outputLimit: TerminalSnapshot.maximumFileBytes, keepOutputTail: true)
         guard result.status == 0 else { throw ChauffeurError("snapshot_unavailable", "Terminal history is unavailable") }

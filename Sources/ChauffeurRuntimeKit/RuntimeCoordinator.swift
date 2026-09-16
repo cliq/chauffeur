@@ -332,6 +332,17 @@ public actor RuntimeCoordinator {
             let revision = try params.requiredString("revision")
             if request.method == "installSkill" { return try .from(await installer.install(directory: preset.configurationDirectory, revision: revision)) }
             return try .from(await installer.remove(directory: preset.configurationDirectory, revision: revision))
+        case "sessionActivity":
+            let sessionID = try params.uuid("sessionID")
+            guard let session = sessions[sessionID] else { throw ChauffeurError("missing_session", "Session not found") }
+            guard session.state.isLive, !launching.contains(sessionID) else { return try .from(TerminalActivity(idle: true, command: nil)) }
+            let foreground = try await terminals.foregroundCommand(sessionID: sessionID)
+            // An agent CLI is its own pane's foreground process, so only a shell
+            // sitting at its prompt is idle. A shell that ran a nested shell in
+            // the foreground reads as idle too; that is the cost of asking tmux.
+            let shell = URL(fileURLWithPath: session.launch.executablePath).lastPathComponent
+            let idle = foreground == nil || (!session.launch.preset.kind.isAgent && foreground == shell)
+            return try .from(TerminalActivity(idle: idle, command: foreground))
         case "terminalSnapshot":
             let sessionID = try params.uuid("sessionID")
             guard sessions[sessionID] != nil else { throw ChauffeurError("missing_session", "Session not found") }

@@ -134,8 +134,17 @@ import ChauffeurCore
         XCTAssertTrue(window.sheets.firstMatch.waitForExistence(timeout: 5))
         window.sheets.buttons["Cancel"].click()
 
+        // The shell sits at its own prompt, so it closes without confirmation.
+        app.typeKey("w", modifierFlags: .command)
+        XCTAssertTrue(window.buttons["session.card.\(terminal.id.uuidString)"].waitForNonExistence(timeout: 10))
+        XCTAssertFalse(window.sheets.firstMatch.exists)
         // Closing the final tab leaves its window open until the next Cmd-W.
-        for _ in 0..<4 { app.typeKey("w", modifierFlags: .command) }
+        for _ in 0..<3 {
+            app.typeKey("w", modifierFlags: .command)
+            let confirmation = window.sheets.buttons["Close Tab"]
+            XCTAssertTrue(confirmation.waitForExistence(timeout: 5))
+            confirmation.click()
+        }
         XCTAssertTrue(window.exists)
         XCTAssertEqual(window.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "session.card.")).count, 0)
         let snapshot = try await call("snapshot")
