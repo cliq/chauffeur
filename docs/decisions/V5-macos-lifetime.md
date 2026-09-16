@@ -158,7 +158,7 @@ text and selection are exposed through distinct live/history accessibility
 elements. This is fixture evidence, not a real-CLI or full VoiceOver audit; see
 [V1](V1-terminal-continuity.md) and [terminal history](../terminal-history.md).
 
-The real Codex 0.154.0 and Claude Code 2.1.273 basic-terminal runs now pass
+The real Codex 0.154.0 (integration enabled) and Claude Code 2.1.273 (basic-terminal mode) runs pass
 native prompts/input, clipboard, resize and history search in the signed Debug
 app. `Prototypes/real_terminal_controls.py` quits the UI through Command-Q, then
 reopens it, force-quits only that isolated UI process, and reopens it again.

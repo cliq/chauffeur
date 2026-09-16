@@ -108,8 +108,8 @@ browser requests to a private local test server. This reproduced tmux dropping
 OSC 8 targets before the attachment began advertising hyperlink support. Evidence
 is in `.build/terminal-pointer-artifacts/`.
 
-`Prototypes/real_terminal_controls.py` adds real Codex 0.154.0 and Claude Code
-2.1.273 basic-terminal evidence. Native trust prompts, Unicode input and paste,
+`Prototypes/real_terminal_controls.py` adds real Codex 0.154.0 (integration enabled)
+and Claude Code 2.1.273 (basic-terminal mode) evidence. Native trust prompts, Unicode input and paste,
 selection/copy, OS window resize, normal and forced UI quit, and reattachment
 with the same process and unsent draft pass. Each provider's two generated
 Unicode replies can be searched and copied from History at capture time; the

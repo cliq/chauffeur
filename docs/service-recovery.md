@@ -30,7 +30,8 @@ ended session with a recorded native conversation ID. See
 [terminal history](terminal-history.md) for retained output and its limits.
 
 `Prototypes/real_repository_access.py` verifies this with the signed Release
-runtime and real Codex 0.154.0 / Claude Code 2.1.273 basic-terminal sessions.
+runtime and real Codex 0.154.0 (integration enabled) / Claude Code 2.1.273
+(basic-terminal mode) sessions.
 After their first file-reading turn, it kills only the private runtime and
 starts a replacement against the same store. Both retain their process ID,
 terminal identity, conversation ID, profile and launch snapshot. Their next

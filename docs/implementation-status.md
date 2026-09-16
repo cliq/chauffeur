@@ -64,7 +64,7 @@ unverified real-CLI or native behavior; deferred workload checks remain unverifi
   Terminals now expose distinct focusable live/history accessibility elements
   with displayed text and selection. Evidence: `.build/terminal-controls-artifacts/`.
   These changes are in the current Release; link/mouse and retention evidence follows below.
-- Real Codex 0.154.0 and Claude Code 2.1.273 basic-terminal runs now pass native
+- Real Codex 0.154.0 (integration enabled) and Claude Code 2.1.273 (basic-terminal mode) runs pass native
   trust prompts, Unicode typing, clipboard, window/PTY resize, and history search
   in the signed Debug app. Normal and forced UI quit preserve each real CLI's
   process, launch profile and unsent draft; a second provider reply succeeds after
@@ -182,7 +182,7 @@ unverified real-CLI or native behavior; deferred workload checks remain unverifi
   actionable preflight error, matching the native CLI's observed restriction.
   The signed Debug build, runtime/worktree socket fixtures, and native quick-session
   probe pass. These recovery changes are in the current Release.
-- Real Codex 0.154.0 and Claude Code 2.1.273 basic-terminal sessions read and
+- Real Codex 0.154.0 (integration enabled) and Claude Code 2.1.273 (basic-terminal mode) sessions read and
   write a primary worktree and an explicitly selected additional repository,
   including paths with spaces. Random file contents are absent from prompts;
   actual file changes establish tool access. The main checkout and a sibling
@@ -276,7 +276,7 @@ pending separately. See [private service acceptance](service-recovery.md#private
 | 1.8 Basic launch | Real Codex/Claude launch and two-window profile/account displays; filtered child environments, preflight failures, native input/resize/stop and immutable launch details; cancellable launch/resume with terminal cleanup | Distinct-Claude-account check deferred by user |
 | 1.9 Session details | Native immutable context after preset edits, individual execution controls, and a real saved session's expanded launch snapshot match the stored record | — |
 | 2.1 Screen/history | tmux live state; bounded persisted snapshots, disk cleanup, native history/search; real Codex/Claude native attach, Unicode, clipboard and reply search; native link/mouse forwarding and 60,000-line retention/recovery pass | — |
-| 2.2 Reconnect | Positive pane/process reconciliation; real Codex/Claude explicit native-ID resume and MCP reconnect | Remaining service-failure edge cases and full native acceptance |
+| 2.2 Reconnect | Positive pane/process reconciliation; real Codex/Claude explicit native-ID resume and MCP reconnect | Live native LaunchAgent recovery and actual sleep/wake under 2.8 |
 | 2.3–2.4 Quit/tabs/split | Native tabs/split, window-state writes and OS keyboard commands pass; real Codex/Claude normal/forced UI quit preserve process and draft; native Stop All confirmation/cancellation, fixed targets, resistant-stop recovery and no-window operation pass | Final Spaces workload is in V2 |
 | 2.5 Worktrees | Create/list/safe-remove; periodic external inventory; identity-based moves/replacements; pending launch/removal and metadata-write reservations; legacy migration fixtures and real Codex/Claude repository-relocation, replacement/resume, and removal checks; native manager controls and concurrent registration pass | — |
 | 2.6 Multiple repos | Explicit additional-folder UI and shared-checkout warning; real Codex/Claude read/write at primary worktree and selected additional path, with spaces; main checkout and sibling worktree remain unchanged | — |
@@ -285,8 +285,8 @@ pending separately. See [private service acceptance](service-recovery.md#private
 | 2.9 Appearance setting | Implemented; System/Light/Dark, persistence, native window and terminal default-color checks pass | — |
 | 2.10 Terminal project launcher | Implemented Settings installer and folder routing; native cold/warm and Release startup checks pass; relocation repair and literal argument forwarding tested | Actual `/usr/local/bin/` installation requires macOS administrator authentication |
 | 2.11 Quick session on a new worktree | Implemented; concurrent/persisted retry tests and native sheet/fixture-agent launch pass | Real CLI/native acceptance remains tracked under 1.8 and 2.5 |
-| 4.1–4.5 Packaging/compatibility/retention/diagnostics/docs | Developer ID local builds; actual registration/update; retention settings/cleanup; diagnostics export; terminal, diagnostics and service recovery guides | Remaining focused recovery acceptance and recovery guide |
-| 4.7 Complete app manual | Todo — requested by user, after app work | Document every feature and its usage; publish through Artifact Colab MCP |
+| 4.1–4.5 Packaging/compatibility/retention/diagnostics/docs | Developer ID local builds; actual registration/update; retention settings/cleanup; diagnostics export; terminal, diagnostics and service recovery guides | Remaining focused recovery acceptance under 2.8 |
+| 4.7 Complete app manual | [Complete local draft](manual.html), covering all implemented features, shortcuts and V2 limits; light/dark/mobile layout and internal links verified | Update pending acceptance results, then publish through Artifact Colab MCP after app work |
 
 ## V2 — outside the current goal
 
@@ -297,14 +297,17 @@ pending separately. See [private service acceptance](service-recovery.md#private
 
 ## Next implementation order
 
-1. Complete remaining core app features, account-selection checks within the
-   user's current profile constraints, and foundation fixes.
-2. Stabilize and verify native terminal/window lifetime, restore/focus, and the
-   focused app interaction scenarios through direct probes and XCUITest.
-3. Complete native service lifecycle, persisted screen/history, worktree UI and
-   reconciliation, and session attention/notifications.
-4. Package/sign the app, finish focused verification, and publish the complete
-   app manual through Artifact Colab, including current V2 limitations.
+1. Run the prepared private native LaunchAgent check with live Codex and Claude
+   sessions after the user unlocks the console. The registration-only check
+   passes; the full script has not passed.
+2. Finish actual sleep/wake and `/usr/local/bin/chauffeur` installation after
+   the user's pending choices. Sleep affects the whole Mac; installation needs
+   macOS administrator authentication.
+3. Resolve any failures, package/sign any resulting app changes, and update the
+   manual's acceptance notes. The existing Release remains available to test.
+4. Publish the complete manual through Artifact Colab and verify the published
+   artifact. The local draft has 17 sections, no external assets, and checked
+   light/dark/mobile previews under `.local/manual-preview/`.
 
 The goal remains active until all current-scope work is complete and its required
 checks pass. V2 items are excluded from that completion decision.

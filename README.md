@@ -10,6 +10,10 @@ and release acceptance remain open. See the [implementation status](docs/impleme
 Completion of Codex ↔ Claude messaging/delegation and final workload testing are
 planned for [V2](docs/v2-plan.md) and are outside the current goal.
 
+The [app manual draft](docs/manual.html) covers every implemented screen and
+workflow, with keyboard shortcuts and current limitations. Open the HTML file
+in a browser; Artifact Colab publication follows the remaining app checks.
+
 ## Build the app
 
 Development requirements: macOS 15+, Xcode 26.3 / Swift 6.2, XcodeGen, Git,

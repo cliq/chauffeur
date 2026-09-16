@@ -168,14 +168,14 @@ inaccessible checkout records remain visible for recovery.
   successful recovery uses the same native conversation/profile. These agents
   are fixtures; no provider account or real conversation is involved.
 - `Prototypes/real_checkout_recovery.py` exercises the same recovery through real
-  Codex 0.154.0 and Claude Code 2.1.273 (basic-terminal mode). Each resumed
+  Codex 0.154.0 (integration enabled) and Claude Code 2.1.273 (basic-terminal mode). Each resumed
   conversation recalls a token from its first turn without receiving it again.
   Both reject removal while live, then permit clean managed removal after Stop
   while preserving the branch. Private reports are under
   `.local/checkout-recovery-{codex,claude}/`; these runs use only authorized clones.
 - `Prototypes/real_repository_access.py` verifies actual reads and writes from a
   primary worktree and an explicitly selected additional repository, including
-  paths with spaces. Codex 0.154.0 and Claude Code 2.1.273 basic-terminal mode
+  paths with spaces. Codex 0.154.0 (integration enabled) and Claude Code 2.1.273 (basic-terminal mode)
   both pass. Random input tokens are absent from prompts, and expected output
   files prove tool execution. The main checkout and a sibling worktree remain
   clean and unchanged. The second turn runs after the isolated Release runtime

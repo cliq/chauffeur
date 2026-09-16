@@ -1,0 +1,398 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>Chauffeur — App Manual</title>
+  <style>
+    :root { --paper:#fcfaf7; --panel:#fff; --ink:#25221e; --muted:#686159; --line:#dfd8cf; --accent:#a84c19; --soft:#fff0e2; }
+    * { box-sizing:border-box; }
+    html { scroll-padding-top:24px; }
+    body { margin:0; background:var(--paper); color:var(--ink); font:17px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
+    a { color:var(--accent); text-underline-offset:3px; }
+    a:focus-visible { outline:3px solid var(--accent); outline-offset:4px; }
+    .shell { display:grid; grid-template-columns:245px minmax(0,840px); gap:52px; max-width:1220px; margin:auto; padding:48px 32px 96px; }
+    nav { position:sticky; top:28px; align-self:start; max-height:calc(100vh - 56px); overflow:auto; font-size:14px; }
+    nav strong { display:block; margin-bottom:16px; font-size:18px; }
+    nav a { display:block; padding:5px 0; text-decoration:none; color:var(--muted); }
+    nav a:hover { color:var(--accent); text-decoration:underline; }
+    main { min-width:0; }
+    header { padding:8px 0 32px; border-bottom:2px solid var(--accent); }
+    .eyebrow { color:var(--accent); font-size:12px; font-weight:750; letter-spacing:.13em; text-transform:uppercase; }
+    h1 { font-size:clamp(38px,6vw,64px); line-height:1.1; letter-spacing:-.045em; margin:16px 0; }
+    .intro { font-size:21px; line-height:1.5; max-width:650px; }
+    .meta { color:var(--muted); font-size:14px; }
+    section { padding-top:38px; }
+    h2 { font-size:29px; line-height:1.25; letter-spacing:-.025em; margin:0 0 20px; }
+    h3 { font-size:20px; line-height:1.35; margin:28px 0 12px; }
+    p { margin:0 0 16px; }
+    ol,ul { padding-left:25px; margin:12px 0 20px; }
+    li { padding-left:3px; margin:7px 0; }
+    .note { background:var(--soft); border-left:4px solid var(--accent); border-radius:0 10px 10px 0; padding:18px 22px; margin:22px 0; }
+    .note p:last-child { margin-bottom:0; }
+    .table { overflow-x:auto; margin:18px 0 24px; border:1px solid var(--line); border-radius:10px; background:var(--panel); }
+    table { width:100%; border-collapse:collapse; font-size:15px; line-height:1.5; }
+    th,td { padding:12px 14px; text-align:left; vertical-align:top; border-bottom:1px solid var(--line); }
+    th { font-weight:650; background:var(--soft); }
+    tr:last-child td { border-bottom:0; }
+    code,kbd,pre { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:.88em; }
+    code { overflow-wrap:anywhere; }
+    kbd { white-space:nowrap; }
+    pre { white-space:pre-wrap; overflow-wrap:anywhere; padding:18px; background:var(--panel); border:1px solid var(--line); border-radius:10px; line-height:1.7; }
+    .cards { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:14px; margin:22px 0; }
+    .card { border:1px solid var(--line); border-radius:12px; background:var(--panel); padding:20px; }
+    .card h3 { margin:0 0 8px; }
+    .card p { font-size:15px; margin:0; }
+    footer { margin-top:45px; padding-top:20px; border-top:1px solid var(--line); color:var(--muted); font-size:14px; }
+    @media (prefers-color-scheme:dark) { :root { --paper:#1e1c19; --panel:#26231f; --ink:#f1ece5; --muted:#bdb3a6; --line:#484038; --accent:#f5aa6e; --soft:#34281e; } }
+    @media (max-width:850px) { .shell { display:block; padding:24px 22px 60px; } nav { position:static; max-height:none; padding-bottom:26px; margin-bottom:18px; border-bottom:1px solid var(--line); } nav a { display:inline-block; margin-right:16px; padding:5px 0; } }
+    @media (max-width:480px) { .cards { grid-template-columns:1fr; } th,td { padding:10px; } }
+    @media print { :root { --paper:#fff; --panel:#fff; --ink:#111; --muted:#444; --line:#ccc; --accent:#8d4014; --soft:#faf4ed; } .shell { display:block; max-width:none; padding:0; } nav { display:none; } body { font-size:11pt; } h1 { font-size:34pt; } h2 { font-size:20pt; } section { padding-top:22px; } h2,h3 { break-after:avoid; } tr,.card,.note { break-inside:avoid; } }
+  </style>
+</head>
+<body>
+<div class="shell">
+  <nav aria-label="Manual contents">
+    <strong>Chauffeur / Manual</strong>
+    <a href="#start">1. First launch</a>
+    <a href="#concepts">2. How things fit together</a>
+    <a href="#presets">3. Presets and accounts</a>
+    <a href="#projects">4. Projects and folders</a>
+    <a href="#windows">5. Windows and groups</a>
+    <a href="#sessions">6. Start a session</a>
+    <a href="#terminals">7. Use the terminal</a>
+    <a href="#lifetime">8. Close, stop, and resume</a>
+    <a href="#worktrees">9. Worktrees</a>
+    <a href="#attention">10. Status and notifications</a>
+    <a href="#appearance">11. Appearance</a>
+    <a href="#launcher">12. Terminal launcher</a>
+    <a href="#history">13. History and retention</a>
+    <a href="#coordination">14. Coordination and skill</a>
+    <a href="#recovery">15. Recovery and diagnostics</a>
+    <a href="#shortcuts">16. Keyboard reference</a>
+    <a href="#limits">17. Current release boundaries</a>
+  </nav>
+  <main>
+    <header>
+      <div class="eyebrow">Personal-use release · Version 0.1.0</div>
+      <h1>Chauffeur<br>App manual</h1>
+      <p class="intro">Chauffeur keeps real Codex and Claude Code terminals organized by project, profile, group, and Git checkout. The agents keep running when you close the app.</p>
+      <p class="meta">App manual · 16 September 2026 · Covers the implemented personal build. Messaging/delegation completion and final workload testing are planned for V2.</p>
+    </header>
+
+    <section id="start">
+      <h2>1. First launch</h2>
+      <p>This personal build targets Apple silicon and macOS 15 or later. Install the CLIs you intend to use, Git, and tmux, and sign in through each CLI before creating a Chauffeur preset. Chauffeur bundles its own background runtime and helpers; it does not install or upgrade Codex, Claude Code, or tmux.</p>
+      <ol>
+        <li>Open <code>build/Build/Products/Release/Chauffeur.app</code> from the project checkout. This build is signed with Leonardo Lobato’s Developer ID certificate.</li>
+        <li>Check the service line in Welcome. If macOS requires background-service approval, use its link to <strong>System Settings → General → Login Items &amp; Extensions</strong>, then return to Chauffeur.</li>
+        <li>Choose <strong>Manage Presets…</strong>. Create a preset set and at least one agent preset.</li>
+        <li>Return to Welcome and choose <strong>Create New Project…</strong>. Give it a name, choose that set, and add a repository or folder.</li>
+        <li>In the project window, press <kbd>⌘N</kbd>, review the preset and working directory, and choose <strong>Launch Session</strong>.</li>
+        <li>Complete any native trust, sign-in, or approval prompt in the embedded CLI, then type your task.</li>
+      </ol>
+      <p>Keep the app bundle at its registered location while the background service is in use. A project can be saved before it has folders or active presets; add those before launching an agent.</p>
+    </section>
+
+    <section id="concepts">
+      <h2>2. How things fit together</h2>
+      <div class="table"><table>
+        <thead><tr><th>Thing</th><th>What it means</th><th>Example</th></tr></thead>
+        <tbody>
+          <tr><td>Preset set</td><td>A shared collection of agent launch presets. Several projects can reference the same set.</td><td>Personal or Client 1</td></tr>
+          <tr><td>Agent preset</td><td>A CLI, executable, existing configuration directory, and optional arguments.</td><td>Personal Codex → <code>~/.codex</code></td></tr>
+          <tr><td>Project</td><td>A named collection of folders and groups with its own window.</td><td>Website and API</td></tr>
+          <tr><td>Folder / repository</td><td>An existing location registered with the project. Adding it does not move or clone it.</td><td><code>~/Projects/website</code></td></tr>
+          <tr><td>Worktree</td><td>Another Git checkout of one repository, usually on a different branch.</td><td><code>feature/search</code></td></tr>
+          <tr><td>Agent group</td><td>A fixed communication group for sessions in one project. It does not isolate their files.</td><td>Search refactor</td></tr>
+          <tr><td>Session</td><td>The saved identity and context of a conversation, plus its current or most recent execution.</td><td>Claude Code · website</td></tr>
+        </tbody>
+      </table></div>
+      <div class="note"><p><strong>A terminal tab is a view.</strong> Closing a tab, closing a project window, and quitting Chauffeur keep live executions running. Use a named Stop action when you want an execution to end.</p></div>
+    </section>
+
+    <section id="presets">
+      <h2>3. Presets and accounts</h2>
+      <h3>Create a set and preset</h3>
+      <ol>
+        <li>Open <strong>Chauffeur → Settings → Presets</strong>.</li>
+        <li>Choose <strong>Add Set…</strong>, enter a name, and save.</li>
+        <li>Select the set and choose <strong>Add Preset…</strong>.</li>
+        <li>Enter a preset name and select <strong>Codex</strong> or <strong>Claude Code</strong>.</li>
+        <li>Use an executable name such as <code>codex</code> or <code>claude</code>, or choose its full path. Full paths are useful when your login-shell environment cannot be loaded.</li>
+        <li>Choose the <strong>Existing configuration directory</strong>. This picker starts in your home folder with hidden folders visible, so you can select <code>~/.claude</code> or <code>~/.codex</code>. You can also type a path beginning with <code>~/</code>.</li>
+        <li>Add optional launch arguments, then choose <strong>Save Preset</strong>.</li>
+      </ol>
+      <p>The directory must already exist. Chauffeur selects it for that child process and removes inherited provider/profile overrides that could select a different account. It does not create profiles, copy credentials, or manage sign-in. Claude credentials on macOS can live in Keychain separately from the directory.</p>
+      <p>A preset name is your label, not proof of the signed-in account. Check the CLI’s native account/status screen when confirming a new setup. Presets that share a canonical configuration directory show a shared-directory indicator and continue to share that CLI’s native state.</p>
+      <h3>Write launch arguments normally</h3>
+      <p>Use spaces or newlines between arguments. Quote a value containing spaces. For example:</p>
+      <pre><code>--model "model name"</code></pre>
+      <p>Replace the example value with a model accepted by your CLI. The editor keeps literal <code>--</code> and straight quotes; it does not apply smart-dash or quote substitution. An unfinished quote produces a validation message instead of saving.</p>
+      <p>This field is an argument list, not a shell command. Shell variables, pipelines, command substitutions, and <code>~</code> in argument values are not expanded. Chauffeur manages the working directory, configuration directory, additional repositories, its integration, and conversation resume through dedicated fields. Conflicting options are rejected. Codex’s <code>--yolo</code> alias is recognized and retains its native CLI meaning.</p>
+      <h3>Edit, default, and archive</h3>
+      <p>Use the set’s <strong>Edit…</strong> button to rename it, choose a default preset, or change its archived state. Use a preset’s <strong>Edit…</strong> button to change its settings or archived state. Archived presets and sets cannot launch new sessions until reopened.</p>
+      <p>Changes affect future launches in every linked project. Existing sessions retain their recorded preset, set revision, configuration path, and launch arguments. The underlying CLI still controls how it reads its own configuration files.</p>
+      <p>New Session prefers the project’s last successfully launched preset, then the set default, then an available preset. A failed launch does not replace that preference.</p>
+    </section>
+
+    <section id="projects">
+      <h2>4. Projects and folders</h2>
+      <h3>Create a project</h3>
+      <p>From Welcome, choose <strong>Create New Project…</strong>, enter a name, and select a preset set. Then choose one of these folder workflows:</p>
+      <div class="table"><table><thead><tr><th>Control</th><th>Use it to</th></tr></thead><tbody>
+        <tr><td>Choose Parent Folder…</td><td>Discover repositories beneath a folder. Tick the desired results, then choose <strong>Add Selected Repositories</strong>. <strong>Cancel Discovery</strong> stops an in-progress scan.</td></tr>
+        <tr><td>Add Folder…</td><td>Add any existing folder directly, including a non-Git folder.</td></tr>
+        <tr><td>Start Empty</td><td>Create the project without registering folders yet.</td></tr>
+      </tbody></table></div>
+      <p>Discovery recognizes Git worktrees with a <code>.git</code> file, avoids Git internals and symlink loops, and reports locations it cannot read. Discovery results and registered folders have separate counts and scrollable lists. Save with <strong>Save Project</strong>; the project window opens and Welcome closes.</p>
+      <h3>Change folders or the project’s preset set</h3>
+      <p>Open the project’s <strong>… → Project Settings…</strong> menu. Add folders, use <strong>Relink…</strong> for a moved or unavailable folder, remove a registration, rename the project, or select another preset set. The sidebar’s <strong>Add Folder…</strong> and repository context menu also lead to folder management.</p>
+      <p>Aliases to the same location are treated as duplicates within one project. The same folder can belong to different projects. Removing its registration preserves the files and existing session/worktree records. Relinking or changing a preset set affects future launches; it does not rewrite a running session’s original paths.</p>
+      <h3>Archive and reopen</h3>
+      <p>In Welcome, right-click a project for <strong>Open</strong>, <strong>Rename…</strong>, <strong>Archive Project</strong>, and <strong>Reveal in Finder</strong>. Reveal opens its Chauffeur metadata folder. Archiving keeps its files and sessions and does not stop agents. Enable <strong>Archived</strong> in Welcome to find it and choose <strong>Reopen Project</strong>.</p>
+    </section>
+
+    <section id="windows">
+      <h2>5. Windows and groups</h2>
+      <p>Each project has an independent window. Open projects from Welcome with a double-click, Return, or <strong>Open Project</strong>. Opening an already-open project focuses its existing window. Use normal macOS controls to move, resize, minimize, or make a window full screen.</p>
+      <p>The header shows the project and preset set. The sidebar lists repositories, their worktrees, sessions, and attention items. Hover truncated labels to see more context; full launch paths are also available in Session Details. Use the sidebar toggle to make more room for a terminal.</p>
+      <p>Tabs, selected session and group, split layout, sidebar state, and available window geometry are saved. <kbd>⌘⇧O</kbd> opens Welcome to choose another project; <kbd>⌘⇧0</kbd> also opens Welcome. Exact Space assignment after reboot is not guaranteed.</p>
+      <h3>Groups</h3>
+      <ol>
+        <li>Choose <strong>… → Manage Groups…</strong> in a project window.</li>
+        <li>Enter a name and choose <strong>Add Group</strong>, rename existing groups, or archive/reopen a non-default group.</li>
+        <li>Choose <strong>Save Groups</strong>. Cancel discards unsaved edits.</li>
+      </ol>
+      <p>Every project has a Default group. The sidebar’s <strong>Agent group</strong> picker filters the view to one group or <strong>All Groups</strong>. New sessions use the current active group when valid, otherwise Default. A session keeps its group through stop and supported resume. Archived groups retain their sessions and messages but are excluded from new-launch choices.</p>
+      <p>Use <strong>Search sessions</strong> or <kbd>⌘K</kbd> to find a session in the current project. This command reveals a hidden sidebar. Group boundaries apply to the experimental agent communication tools; two groups can still edit the same checkout if you launch them there.</p>
+    </section>
+
+    <section id="sessions">
+      <h2>6. Start a session</h2>
+      <ol>
+        <li>Select a repository, then click <strong>+</strong> or press <kbd>⌘N</kbd>. A repository’s context menu also offers <strong>New Session Here…</strong>.</li>
+        <li>Optionally enter a title. Select the group and agent preset, and check the displayed configuration path.</li>
+        <li>Choose the repository and <strong>Work in</strong> location: its registered checkout, a registered existing worktree, or <strong>New worktree…</strong>.</li>
+        <li>Review the exact working directory. Expand <strong>Additional repository access</strong> and select any other project repositories the agent needs.</li>
+        <li>Optionally enter an initial task. It is passed as the CLI’s initial prompt; you can leave it empty and type after startup.</li>
+        <li>Review the integration toggle, then choose <strong>Launch Session</strong> or <strong>Create &amp; Launch</strong>.</li>
+      </ol>
+      <p>If another Chauffeur session uses the checkout, the sheet names it and requires <strong>Share this checkout with these sessions</strong>. Sharing is intentional collaboration on the same files. Choose a new worktree when you want a separate checkout.</p>
+      <p>Additional repositories use their displayed existing paths. A primary worktree isolates only its own repository; the other repositories remain shared checkouts. The primary repository’s main checkout is not added automatically. Codex 0.154.0 rejects additional directories with a read-only sandbox; choose a compatible native sandbox option explicitly or remove the additional paths.</p>
+      <h3>Integration and basic terminal mode</h3>
+      <p><strong>Enable Chauffeur messaging and delegation</strong> also enables Chauffeur’s completion/attention integration for candidate CLI versions. This integration remains labelled unverified while the V2 coordination work is incomplete. Turning it off selects basic terminal mode: the real terminal remains usable, with Chauffeur communication and semantic activity signals unavailable.</p>
+      <p>An unrecognized CLI version can require basic terminal mode. Invalid configuration paths or executables fail explicitly; Chauffeur does not substitute another profile. If startup fails, correct the reported cause before choosing a fresh <strong>Launch Session</strong>. <strong>Check Previous Attempt</strong> retrieves the previous result after an uncertain response and does not silently rerun an already-recorded task.</p>
+    </section>
+
+    <section id="terminals">
+      <h2>7. Use the terminal</h2>
+      <p>Type directly into the real Codex or Claude Code interface. Native commands, approvals, sign-in screens, tools, and CLI settings remain inside that terminal. Chauffeur adds organization and process continuity around them.</p>
+      <div class="cards">
+        <div class="card"><h3>Tabs and split</h3><p>Select a session in the sidebar to open its tab. With two tabs open, use the split toolbar button or <kbd>⌘D</kbd> for two terminal panes. Use it again to return to one pane.</p></div>
+        <div class="card"><h3>Copy, paste, and links</h3><p>Select output and press <kbd>⌘C</kbd>; use <kbd>⌘V</kbd> to paste. Hold Shift while dragging if the CLI captures mouse input. Command-click a link to open its associated app.</p></div>
+        <div class="card"><h3>History and search</h3><p>Choose <strong>History and Search</strong> or press <kbd>⌘F</kbd>. Search and copy from a stable, read-only capture. <strong>Refresh</strong> captures current output when the terminal still exists.</p></div>
+        <div class="card"><h3>Session Details</h3><p>Use the right-sidebar toolbar button or session context menu. Review the agent, group, preset/revision, paths, state, branch/base commit when available, and execution controls.</p></div>
+      </div>
+      <p>Expand <strong>Launch Snapshot</strong> in Session Details for the recorded executable and CLI version, process ID, native conversation ID when available, arguments, and launch time. These are the values used by this session, even if its shared preset has since changed.</p>
+      <p><kbd>Control-C</kbd> and <kbd>Escape</kbd> go to the focused CLI. The CLI decides whether they interrupt work, cancel a prompt, or exit. Live terminal selection can change during redraws; use History when you need stable text.</p>
+    </section>
+
+    <section id="lifetime">
+      <h2>8. Close, stop, and resume</h2>
+      <div class="table"><table><thead><tr><th>Action</th><th>Result</th></tr></thead><tbody>
+        <tr><td>Close a tab or project window</td><td>Detach that view. Its agent keeps running and remains available in the project’s session list.</td></tr>
+        <tr><td>Quit Chauffeur / <kbd>⌘Q</kbd></td><td>Quit the UI. The background service and live agents continue.</td></tr>
+        <tr><td>Interrupt</td><td>Send Control-C to the selected execution. Its CLI decides how to respond.</td></tr>
+        <tr><td>Stop Session…</td><td>After confirmation, ask the selected execution to stop gracefully. Other sessions stay running.</td></tr>
+        <tr><td>Force Stop…</td><td>After confirmation, close that execution’s terminal if graceful stopping is insufficient.</td></tr>
+        <tr><td>Stop All Sessions and Quit…</td><td>Review the listed live executions across projects, confirm their stops, and quit after they stop. Cancel leaves them running.</td></tr>
+        <tr><td>Resume Conversation</td><td>Start a new CLI process using the recorded native conversation ID and original launch context.</td></tr>
+      </tbody></table></div>
+      <p>A normal reopen attaches to the same surviving process and screen; it does not submit the initial task again. Stop All uses the targets shown in its confirmation. If one refuses to stop, the app reports it and stays open; use that session’s Force Stop action, then retry.</p>
+      <h3>What is preserved after an execution ends?</h3>
+      <p>Chauffeur preserves the session record, its launch settings, and retained terminal captures. Codex or Claude Code manages its native conversation separately. Chauffeur’s <strong>Messages</strong> section contains messages exchanged through its coordination tools, not a separate copy of every prompt and answer typed into the CLI.</p>
+      <p>Saved terminal history is bounded by retention limits and can be evicted. It is useful for reading past output, but it is not itself a resumable conversation. <strong>Resume Conversation</strong> appears only when a native conversation ID is available.</p>
+      <p>Resume keeps the original profile and checkout paths. If a checkout has moved or was replaced, restore the original to its recorded location to resume, or start a new session in the new location. Relinking a project folder does not change an old launch snapshot.</p>
+      <p>After logout, reboot, or lost terminal ownership, the app can report <strong>Interrupted</strong>. It does not automatically rerun the task. During sleep, agent progress is not promised; the app reconnects and reconciles state on wake.</p>
+    </section>
+
+    <section id="worktrees">
+      <h2>9. Worktrees</h2>
+      <p>Expand a repository in the sidebar to see its other Git worktrees. Rows show the branch and directory name; hover for the full path. The repository row represents its registered checkout. Selecting a worktree opens its repository manager; its context menu can reveal it in Finder.</p>
+      <h3>Create a worktree and start an agent</h3>
+      <ol>
+        <li>Choose <strong>New Worktree &amp; Session…</strong> beneath a repository or from its context menu.</li>
+        <li>Select the group and preset, enter a new branch and base ref (initially <code>HEAD</code>), and review the proposed destination.</li>
+        <li>Add an optional initial task and any explicit additional repository access.</li>
+        <li>Choose <strong>Create &amp; Launch</strong>.</li>
+      </ol>
+      <p>The checkout is created under Chauffeur’s managed worktree storage, outside the original checkout. If creation succeeds but agent startup fails, the new checkout remains selected and reusable. Correct the launch problem and choose <strong>Launch Session</strong>; you do not need to create another worktree.</p>
+      <h3>Create or register without launching</h3>
+      <p>Open <strong>… → Manage Worktrees…</strong>, choose a repository, and use the branch/base-ref fields and <strong>Create Worktree</strong>. The manager displays registered worktrees and other Git checkouts. Use <strong>Register</strong> to make an existing checkout available in the session picker. <strong>Refresh Git Inventory</strong> requests a fresh scan.</p>
+      <p>Inventory updates in the background as well. External creates, moves, branch changes, and missing checkouts are reflected after reconciliation. A copied or replaced directory does not inherit the original checkout’s cleanup ownership. If a move leaves Git’s own records stale, repair those records with Git before refreshing.</p>
+      <h3>Remove or unregister</h3>
+      <p><strong>Remove…</strong> is available for app-managed worktrees. Confirm the displayed path and branch. Removal refuses a dirty checkout, untracked files, or a checkout referenced by a live session, including additional-repository access. Stop the relevant execution first and decide what to do with its files.</p>
+      <p>Branches are preserved. External worktrees use <strong>Unregister</strong>, which removes the Chauffeur registration and leaves their files on disk. Closing a tab, stopping a session, or archiving a project never automatically removes a worktree.</p>
+      <div class="note"><p><strong>Example:</strong> Create <code>feature/search-ui</code> for one agent and <code>feature/search-api</code> for another. Their checkouts of that repository are separate. If both sessions also receive access to the same additional repository, that additional checkout is still shared.</p></div>
+    </section>
+
+    <section id="attention">
+      <h2>10. Status and notifications</h2>
+      <div class="table"><table><thead><tr><th>Label</th><th>Meaning</th></tr></thead><tbody>
+        <tr><td>Starting</td><td>The launch or attachment is being established.</td></tr>
+        <tr><td>Running</td><td>The process is live. This alone does not prove it is actively working on your task.</td></tr>
+        <tr><td>Needs attention</td><td>A supported integration signal requests approval, input, or another user action.</td></tr>
+        <tr><td>Turn finished</td><td>The agent finished a response. Its CLI may remain open for follow-up.</td></tr>
+        <tr><td>Activity unknown</td><td>The process is live, but reliable semantic activity signals are unavailable.</td></tr>
+        <tr><td>Exited</td><td>The process ended normally. Exit alone does not mean the task succeeded.</td></tr>
+        <tr><td>Failed</td><td>Launch failed or the process ended abnormally. Review its error and history.</td></tr>
+        <tr><td>Interrupted</td><td>The execution was stopped or continuity was lost. Inspect retained history and available resume actions.</td></tr>
+      </tbody></table></div>
+      <p>Attention includes user-input requests, failures, unread finished turns, and pending coordination messages. Select an item to open its session. <kbd>⌘⇧A</kbd> cycles attention items in the current project/group/search view. Opening a completed session clears its unread completion; a native approval request still needs a response in the CLI.</p>
+      <p>Chauffeur does not infer completion from a quiet terminal. Codex 0.154.0 supplies turn completion but lacks Chauffeur approval/input detection. Claude’s candidate integration reports permission requests and completion; idle reminders do not turn a finished response into an attention request.</p>
+      <h3>Enable notifications</h3>
+      <ol>
+        <li>Open <strong>Settings → Runtime</strong> and enable <strong>Show session notifications</strong>.</li>
+        <li>Allow <strong>Chauffeur Notifications</strong> in the macOS prompt.</li>
+        <li>Use <strong>Send Test Notification</strong> with an existing session to check delivery.</li>
+      </ol>
+      <p>If you do not see a banner, check Notification Center and macOS Focus/notification settings. An alert includes project and session names and generic event text, without the terminal transcript or message body. Clicking it opens the right project/session, including when Chauffeur was quit. The click does not launch or resume an agent or submit input.</p>
+      <p>Notifications are off by default and require the installed app’s default background service. Disabling them clears Chauffeur’s queued/delivered alerts; re-enabling does not replay the old queue. macOS permission remains a separate system setting.</p>
+    </section>
+
+    <section id="appearance">
+      <h2>11. Appearance</h2>
+      <p>Open <strong>Settings → Appearance → Theme</strong> and choose <strong>System</strong>, <strong>Light</strong>, or <strong>Dark</strong>. The choice is saved and applies immediately to all Chauffeur windows and terminal default colors.</p>
+      <p>Both light and dark appearance use the same warm orange accent family. The CLI may draw explicit colors or have its own theme setting; those remain under its control. Changing Chauffeur’s theme preserves terminal text and does not restart agents.</p>
+    </section>
+
+    <section id="launcher">
+      <h2>12. Open a project from Terminal</h2>
+      <p>Choose <strong>Settings → Runtime → Terminal Command → Install Terminal Command…</strong>. The destination is <code>/usr/local/bin/chauffeur</code>. macOS requests administrator authentication if that folder is not writable.</p>
+      <pre><code>chauffeur
+chauffeur ~/Projects/website
+chauffeur "./folder with spaces"
+chauffeur -- ./-example</code></pre>
+      <p>With no argument, Chauffeur uses the current folder. A path can point to a repository, worktree, or a folder inside one. The command chooses the closest registered match, opens its project, and selects its repository. If multiple projects share that match, the app asks you to choose. If nothing matches, add the folder to a project first.</p>
+      <p>Opening a folder does not start an agent. Repeated commands reuse the existing project window. If you move the app, install the command again from the new location to repair its target. An unrelated existing <code>chauffeur</code> command is preserved and reported as a conflict.</p>
+    </section>
+
+    <section id="history">
+      <h2>13. History, retention, and stored data</h2>
+      <p>History is a read-only capture of terminal output, including the active screen and retained scrollback. Typing or pasting into it does not reach the agent. The runtime captures output approximately every five seconds and when history is requested. A retained capture remains readable after its terminal ends.</p>
+      <p>Open <strong>Settings → Runtime → Retention and Delegation</strong>, change the fields, then choose <strong>Save Settings</strong>.</p>
+      <div class="table"><table><thead><tr><th>Setting</th><th>Default</th><th>Effect</th></tr></thead><tbody>
+        <tr><td>Scrollback lines</td><td>10,000</td><td>Limits retained history. Reducing it trims saved captures; new terminals use the new live-buffer limit.</td></tr>
+        <tr><td>Snapshot budget (bytes)</td><td>268435456 (256 MiB)</td><td>Limits total encoded saved captures. Old ended/orphaned captures are removed first, then older live captures if necessary. Each capture also has a 4 MiB limit.</td></tr>
+        <tr><td>Completed message history (days)</td><td>90</td><td>Cleans up old acknowledged, failed, and cancelled coordination messages. Queued and received messages remain.</td></tr>
+        <tr><td>Live delegated children per parent</td><td>4</td><td>Bounds experimental delegation. The control allows 1–32; nested delegation is not supported.</td></tr>
+      </tbody></table></div>
+      <p>Settings shows saved-history file count and size. An evicted capture cannot be recovered by Chauffeur. Output produced since the last capture can be lost if the terminal owner is lost. Retention does not delete native CLI conversations, credentials, project files, or worktrees.</p>
+      <h3>Where things live</h3>
+      <pre><code>~/Library/Application Support/Chauffeur/
+  preset-sets/       Preset-set and preset metadata
+  projects/          Projects, groups, sessions, worktree records, window state
+  worktrees/         Chauffeur-managed Git checkouts
+  runtime/          Service state, message ledger, saved terminal captures
+
+~/Library/Logs/Chauffeur/   Bounded runtime logs</code></pre>
+      <p>Metadata is editable JSON with stable IDs. The service detects external changes and refuses stale editor saves instead of overwriting newer data. If you hand-edit or restore metadata, preserve its IDs and ownership relationships; reopen an editor after an external change. Invalid files are reported with their paths and retained for repair.</p>
+      <p>These folders do not replace backups of your repositories or CLI profiles. Terminal captures can contain anything the CLI printed. Use the diagnostics export described below when you need a report designed for troubleshooting.</p>
+    </section>
+
+    <section id="coordination">
+      <h2>14. Coordination and the Chauffeur skill</h2>
+      <div class="note"><p><strong>V2 boundary.</strong> Messaging/delegation controls and tools are present, but completing Codex ↔ Claude coordination and its full acceptance tests was moved to V2. The current build continues to label this integration unverified.</p></div>
+      <p>When integration is enabled, Chauffeur supplies a local MCP connection to the session. MCP is the tool interface the CLI uses to ask Chauffeur about peers, messages, and delegated work. The runtime determines the session’s project/group; an agent cannot choose another group by changing a request field.</p>
+      <div class="table"><table><thead><tr><th>Tool</th><th>Purpose</th></tr></thead><tbody>
+        <tr><td><code>chauffeur_discover</code></td><td>Read the caller’s context, available project paths/presets, and same-group peers.</td></tr>
+        <tr><td><code>chauffeur_send_message</code></td><td>Queue an attributed message and explicit references for a same-group peer.</td></tr>
+        <tr><td><code>chauffeur_inbox</code></td><td>Read the caller’s messages, optionally wait for up to 25 seconds, and acknowledge processed messages.</td></tr>
+        <tr><td><code>chauffeur_reply</code></td><td>Reply to a received message with attribution.</td></tr>
+        <tr><td><code>chauffeur_delegate</code></td><td>Create a visible child in the same project/group using an allowed preset and folder. A new worktree is the default; sharing is explicit.</td></tr>
+        <tr><td><code>chauffeur_delegation_status</code></td><td>Inspect a delegation’s launch state and separately reported result.</td></tr>
+        <tr><td><code>chauffeur_report_result</code></td><td>Let the delegated child report a result to its parent while keeping its CLI available.</td></tr>
+      </tbody></table></div>
+      <p>In a controlled coordination session, ask the agent to use Chauffeur’s discovery and inbox tools to inspect its context. A busy or idle agent does not automatically receive injected terminal text. If it needs to read its inbox, prompt it explicitly in its terminal. “Queued” does not mean “read.”</p>
+      <p><strong>Session Details → Messages</strong> shows sender/recipient, body, references, time, and delivery state. <strong>Received by integration</strong> means the tool fetched it; <strong>Acknowledged by agent</strong> records acknowledgement. <strong>Cancel Queued Message</strong> is available while a message is still queued. Delegations show their parent/child, task, state, result/error, and worktree context.</p>
+      <p>Only user-created sessions can delegate, with the configured live-child limit. Stopping a parent preserves its children. A reported result is separate from process exit; ending a child does not establish task success. Group isolation governs Chauffeur communication and does not sandbox repositories from other processes under your macOS account.</p>
+      <h3>Install the optional guidance</h3>
+      <ol>
+        <li>Open <strong>Settings → Presets</strong>, select a set, and choose <strong>Chauffeur Skill…</strong> on a preset.</li>
+        <li>Review the bundled guidance, version, destination, and current installation.</li>
+        <li>Choose <strong>Install Skill</strong>, update an unchanged installation when available, or use <strong>Remove Skill…</strong> and confirm.</li>
+      </ol>
+      <p>The skill lives in the selected profile’s <code>skills/chauffeur/</code> directory. All sessions sharing that profile can discover it, including those launched outside Chauffeur. Installation starts no agent and does not change its group or grant permissions. Native CLI policy can still disable loading.</p>
+      <p>Edited or unmanaged files are preserved. Use <strong>Show in Finder</strong> to review a conflict and preserve any changes before retrying. Removing the skill stops future discovery; content already loaded in a conversation remains in that conversation. Restart the CLI if its skill list does not refresh.</p>
+    </section>
+
+    <section id="recovery">
+      <h2>15. Recovery and diagnostics</h2>
+      <h3>Background service unavailable</h3>
+      <ol>
+        <li>Read the service line or its <strong>issues…</strong> details.</li>
+        <li>Use <strong>Start Service</strong> when offered. If approval is required, follow <strong>System Settings…</strong> to Login Items &amp; Extensions.</li>
+        <li>Use <strong>Settings → Runtime → Restart Service</strong> to re-register the current bundled runtime and reconnect.</li>
+        <li>Reopen the session. Surviving owned terminals reattach; an interrupted execution requires explicit supported resume or a new session.</li>
+      </ol>
+      <p>The background runtime reads the login-shell environment at startup. If that fails, it reports the issue and adds standard system/Homebrew executable locations to its inherited search path. A full executable path in a preset can resolve a missing CLI without changing global shell configuration.</p>
+      <h3>Common problems</h3>
+      <div class="table"><table><thead><tr><th>Symptom</th><th>Next action</th></tr></thead><tbody>
+        <tr><td>New Session is disabled</td><td>Check service connectivity, project/set archived state, and whether the set has an active preset. Add a registered folder and valid group.</td></tr>
+        <tr><td>Configuration folder or executable unavailable</td><td>Correct it in Settings → Presets. Use the native picker and verify the CLI works with that existing profile.</td></tr>
+        <tr><td>Unsupported launch argument</td><td>Keep options as literal CLI arguments and use dedicated fields for directories, integration, and resume. Correct quoting or remove the conflicting option.</td></tr>
+        <tr><td>CLI version integration unavailable</td><td>Disable the integration toggle for a basic-terminal launch. Completion/attention signals then remain unavailable.</td></tr>
+        <tr><td>Task finished but terminal stays open</td><td>This is normal. Turn finished refers to one response; type a follow-up or stop the execution when done.</td></tr>
+        <tr><td>No Resume Conversation action</td><td>The session has no usable recorded native conversation ID. You can still read retained history and start a new session.</td></tr>
+        <tr><td>Moved or replaced checkout prevents resume</td><td>Restore the original checkout at its recorded path, or launch a new session from the current checkout. Relink project folders for future launches.</td></tr>
+        <tr><td>Worktree removal refused</td><td>Check live sessions and additional-directory use, then modified/untracked files. Preserve or resolve the work before removal.</td></tr>
+        <tr><td>Editor reports a conflicting change</td><td>Reopen the editor to load the current record, then reapply the intended change.</td></tr>
+        <tr><td>No notification banner</td><td>Check Notification Center, the app toggle, macOS permission for Chauffeur Notifications, and Focus settings.</td></tr>
+        <tr><td>Terminal command opens no project</td><td>Register that folder or an ancestor/worktree in a project. If the app moved, reinstall its terminal command.</td></tr>
+      </tbody></table></div>
+      <h3>Export a diagnostic report</h3>
+      <p>Choose <strong>Settings → Runtime → Export Diagnostics…</strong>, select a destination, and save. The report contains versions, paths, runtime/session states, error codes, and recent structured events. It excludes credentials, full configuration contents, prompts, arguments, messages, and terminal history. Paths can still identify account and project names, so review them before sharing.</p>
+      <p>If the service is offline, the app exports the last state received during that app run with its observation timestamp, or marks it unavailable if none was received. A cached report does not prove that a process is currently alive.</p>
+      <p>The bundled helper also supports <code>chauffeurctl status</code> and <code>chauffeurctl diagnostics</code>. In this checkout, invoke it from <code>build/Build/Products/Release/Chauffeur.app/Contents/MacOS/chauffeurctl</code>. The installed <code>chauffeur</code> command serves folder navigation; it is a different command.</p>
+    </section>
+
+    <section id="shortcuts">
+      <h2>16. Keyboard reference</h2>
+      <div class="table"><table><thead><tr><th>Shortcut</th><th>Action</th></tr></thead><tbody>
+        <tr><td><kbd>⌘N</kbd></td><td>New Session in the active project</td></tr>
+        <tr><td><kbd>⌘⇧O</kbd></td><td>Open Welcome to choose a project</td></tr>
+        <tr><td><kbd>⌘⇧0</kbd></td><td>Welcome to Chauffeur</td></tr>
+        <tr><td><kbd>⌘K</kbd></td><td>Reveal sidebar and focus session search</td></tr>
+        <tr><td><kbd>⌘⇧]</kbd> / <kbd>⌘⇧[</kbd></td><td>Next / previous session tab</td></tr>
+        <tr><td><kbd>⌘D</kbd></td><td>Split / unsplit terminal</td></tr>
+        <tr><td><kbd>⌘F</kbd></td><td>Open terminal history and Find</td></tr>
+        <tr><td><kbd>⌘⇧A</kbd></td><td>Next attention item in the current view</td></tr>
+        <tr><td><kbd>⌘A</kbd>, <kbd>⌘C</kbd>, <kbd>⌘V</kbd></td><td>Select terminal output, copy, paste</td></tr>
+        <tr><td><kbd>⌃C</kbd> / <kbd>Esc</kbd></td><td>Forward interrupt / escape to the live CLI</td></tr>
+        <tr><td><kbd>⌘</kbd>-click</td><td>Open a terminal link</td></tr>
+        <tr><td><kbd>Shift</kbd>-drag</td><td>Select output while mouse tracking is active</td></tr>
+        <tr><td><kbd>⌘,</kbd></td><td>Open Settings</td></tr>
+        <tr><td><kbd>⌘Q</kbd></td><td>Quit the UI while keeping agents running</td></tr>
+      </tbody></table></div>
+    </section>
+
+    <section id="limits">
+      <h2>17. Current release boundaries</h2>
+      <p>This is a signed local personal-use build. It has not been notarized or published as a public installer, and it has no automatic updater.</p>
+      <ul>
+        <li><strong>V2:</strong> completing Codex ↔ Claude messaging/delegation and the final workload test—ten real sessions, four Spaces, performance measurements, and three normal workdays.</li>
+        <li><strong>Current compatibility evidence:</strong> Codex 0.154.0 and Claude Code 2.1.272/2.1.273 have focused checks with differing integration coverage. Matching a candidate version is not a claim of complete coordination support.</li>
+        <li><strong>Activity:</strong> Codex approval/input detection is unavailable through the current integration. Basic terminal mode has no semantic status integration.</li>
+        <li><strong>Verification still pending:</strong> real sleep/wake, the complete native LaunchAgent lifecycle with live real sessions, and administrator-authenticated installation at <code>/usr/local/bin/</code>. These controls are implemented; those acceptance steps remain open.</li>
+        <li><strong>Profile evidence:</strong> the authorized Claude A/B test profiles use the same account. A different-account Claude check was deferred; profile labels do not establish account separation.</li>
+        <li><strong>Notifications:</strong> Notification Center delivery and clicking an alert with the app quit are verified. Different Focus settings and transient banner behavior have separate limits.</li>
+      </ul>
+      <p>Chauffeur does not provide an editor, diff/merge or pull-request UI, browser, remote agents, cloud sync, team sharing, account management, or automatic repository-wide isolation across several repositories. Use the native CLIs and your existing development tools alongside it.</p>
+    </section>
+    <footer>Chauffeur App Manual · Source: the implemented app and repository guides · Prepared for the current personal build on 16 September 2026.</footer>
+  </main>
+</div>
+</body>
+</html>
