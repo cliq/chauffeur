@@ -4,6 +4,33 @@ import ChauffeurCore
 @testable import ChauffeurRuntimeKit
 
 struct WorktreeCreationTests {
+    @Test func previewValidatesBranchesAndMatchesCreationAfterPathCollisions() async throws {
+        let fixture = try await Fixture.make(); defer { fixture.cleanup() }
+        func preview(_ branch: String) async throws -> String {
+            let response = try await fixture.runtime.handle(IPCRequest("previewWorktree", params: .object([
+                "projectID": .string(fixture.project.id.uuidString),
+                "folderID": .string(fixture.project.folders[0].id.uuidString), "branch": .string(branch)
+            ])))
+            return try #require(response["path"].string)
+        }
+        for invalid in ["bad branch", "feature/../bad", "main.lock", "@{previous}", "-option", ""] {
+            await #expect(throws: ChauffeurError.self) { _ = try await preview(invalid) }
+        }
+        #expect(await fixture.runtime.store.current().worktrees.isEmpty)
+        #expect(try await fixture.runtime.worktrees.inventory(at: fixture.repo.path).count == 1)
+        var request = fixture.request
+        request.branch = WorktreeBranchName.suggested(from: "Fix login flow")
+        let original = try await preview(request.branch)
+        try FileManager.default.createDirectory(atPath: original, withIntermediateDirectories: true)
+        let previewed = try await preview(request.branch)
+        #expect(previewed == original + "-2")
+        #expect(!FileManager.default.fileExists(atPath: previewed))
+        let created = try await fixture.runtime.createWorktree(request)
+        #expect(created.value.branch == "fix-login-flow")
+        #expect(created.value.path == previewed)
+        #expect(try await fixture.runtime.worktrees.inventory(at: fixture.repo.path).count == 2)
+    }
+
     @Test func concurrentExternalRegistrationReturnsOneRecord() async throws {
         let fixture = try await Fixture.make(); defer { fixture.cleanup() }
         let external = fixture.root.appendingPathComponent("external")

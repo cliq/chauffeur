@@ -39,6 +39,14 @@ public struct LaunchRequest: Codable, Sendable {
     }
 }
 
+public enum WorktreeBranchName {
+    public static func suggested(from title: String) -> String {
+        // Reuse directory slugging, but do not invent a branch for an empty title.
+        guard title.unicodeScalars.contains(where: CharacterSet.alphanumerics.contains) else { return "" }
+        return Paths.slug(title).lowercased()
+    }
+}
+
 public struct WorktreeCreationRequest: Codable, Equatable, Sendable {
     public var projectID: UUID
     public var folderID: UUID

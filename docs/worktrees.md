@@ -30,8 +30,15 @@ record.
 
 Expand a repository in the sidebar and choose **New Worktree & Session…**, or
 choose the same action from the repository's context menu. Select an agent preset
-and group, enter a new branch name and a base reference (initially `HEAD`), and
-review the destination. Add an optional initial task, then choose **Create &
+and group, enter a title to suggest a sanitized branch name, and select a base
+reference (initially `HEAD`). The branch follows title edits until you enter a
+manual branch; clearing the branch restores the title-based suggestion. A title
+with no letters or numbers leaves the branch empty. You can also leave the title
+blank and enter a branch directly.
+
+Review the full destination path, which updates with the repository and branch.
+The sheet checks the branch and destination before enabling creation, and shows
+preview failures with a retry action. Add an optional initial task, then choose **Create &
 Launch**. The regular **New Session** sheet also offers **New worktree…** in its
 **Work in** menu.
 

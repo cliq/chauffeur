@@ -184,10 +184,19 @@ public actor WorktreeManager {
             suffix += 1
         }
     }
+    public func previewDestination(folder: ProjectFolder, branch: String) async throws -> URL {
+        let repository = try Paths.directory(folder.canonicalPath)
+        try await validateBranch(branch, repository: repository)
+        return destination(repositoryID: try await repositoryID(at: repository), branch: branch)
+    }
+    private func validateBranch(_ branch: String, repository: String) async throws {
+        try Validation.require(!branch.isEmpty && !branch.hasPrefix("-") && !branch.contains("\0"), "Branch is required and cannot begin with '-' or contain NUL")
+        _ = try await git(repository, ["check-ref-format", "--branch", branch])
+    }
     public func create(projectID: UUID, folder: ProjectFolder, branch: String, baseRef: String) async throws -> Worktree {
         let repository = try Paths.directory(folder.canonicalPath)
-        try Validation.require(!branch.isEmpty && !branch.hasPrefix("-") && !baseRef.isEmpty && !baseRef.hasPrefix("-") && !branch.contains("\0") && !baseRef.contains("\0"), "Branch and base ref are required and cannot begin with '-' or contain NUL")
-        _ = try await git(repository, ["check-ref-format", "--branch", branch])
+        try Validation.require(!baseRef.isEmpty && !baseRef.hasPrefix("-") && !baseRef.contains("\0"), "Base ref is required and cannot begin with '-' or contain NUL")
+        try await validateBranch(branch, repository: repository)
         let baseCommit = try await git(repository, ["rev-parse", "--verify", "\(baseRef)^{commit}"]).trimmingCharacters(in: .whitespacesAndNewlines)
         let repoID = try await repositoryID(at: repository)
         let destination = destination(repositoryID: repoID, branch: branch)

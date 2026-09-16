@@ -18,12 +18,23 @@ struct SessionLaunchView: View {
     @State private var presetID: UUID?
     @State private var folderID: UUID?
     @State private var checkout = Checkout.repository
-    @State private var branch = ""
+    @State private var branchOverride: String?
     @State private var baseRef = "HEAD"
-    @State private var destination = ""
+    private struct DestinationRequest: Equatable {
+        let folderID: UUID
+        let branch: String
+        let attempt: Int
+    }
+    @State private var previewAttempt = 0
+    @State private var previewedRequest: DestinationRequest?
+    @State private var previewPath = ""
+    @State private var previewFailure: String?
     @State private var additional = Set<UUID>()
     @State private var shared = false
     @State private var coordination = true
+    #if DEBUG
+    @State private var probeID = UUID()
+    #endif
     private var currentProject: Project { model.project(project.id) ?? project }
     private var presetSet: PresetSet? { model.presetSets.first { $0.id == currentProject.presetSetID } }
     private var presets: [AgentPreset] { presetSet?.archived == false ? model.presets.filter { $0.setID == currentProject.presetSetID && !$0.archived } : [] }
@@ -34,6 +45,21 @@ struct SessionLaunchView: View {
     }
     private var preset: AgentPreset? { presets.first { $0.id == presetID } }
     private var folder: ProjectFolder? { currentProject.folders.first { $0.id == folderID && $0.registered } }
+    private var branch: String { branchOverride ?? WorktreeBranchName.suggested(from: title) }
+    private var branchBinding: Binding<String> {
+        Binding(get: { branch }, set: { value in
+            // TextField also writes its displayed value when focus changes.
+            // Committing a suggestion must not turn it into a manual override.
+            guard value != branch else { return }
+            branchOverride = value.isEmpty ? nil : value
+        })
+    }
+    private var destinationRequest: DestinationRequest? {
+        guard checkout == .newWorktree, model.online, let folderID, !branch.isEmpty else { return nil }
+        return DestinationRequest(folderID: folderID, branch: branch, attempt: previewAttempt)
+    }
+    private var destination: String { destinationRequest != nil && previewedRequest == destinationRequest ? previewPath : "" }
+    private var destinationFailure: String? { destinationRequest != nil && previewedRequest == destinationRequest ? previewFailure : nil }
     private var worktrees: [Worktree] {
         let records = model.snapshot.store.worktrees.map(\.value)
         var result = records.filter { $0.projectID == project.id && $0.folderID == folderID && $0.registered }
@@ -59,7 +85,7 @@ struct SessionLaunchView: View {
     }
     private var canLaunch: Bool {
         !operation.isBusy && model.online && !currentProject.archived && preset != nil && folder != nil && currentProject.groups.contains { $0.id == groupID && !$0.archived }
-            && (sharing.isEmpty || shared) && (checkout != .newWorktree || (!branch.isEmpty && !baseRef.isEmpty))
+            && (sharing.isEmpty || shared) && (checkout != .newWorktree || (!destination.isEmpty && !baseRef.isEmpty))
             && (worktreeID == nil || worktrees.contains { $0.id == worktreeID && $0.availability == .available })
     }
     var body: some View {
@@ -74,6 +100,19 @@ struct SessionLaunchView: View {
                         VStack(alignment: .leading, spacing: 4) {
                             Text(checkout == .newWorktree ? "Worktree destination" : "Working directory").font(.caption).foregroundStyle(.secondary)
                             Text(primaryPath).font(.system(.caption, design: .monospaced)).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+                                .accessibilityIdentifier("session.destination")
+                        }
+                    }
+                    if checkout == .newWorktree {
+                        if let failure = destinationFailure {
+                            HStack(alignment: .top) {
+                                Text(failure).foregroundStyle(.red).textSelection(.enabled).accessibilityIdentifier("session.preview-error")
+                                Button("Retry Preview") { previewAttempt += 1 }
+                            }.font(.caption)
+                        } else if destinationRequest != nil && previewedRequest != destinationRequest {
+                            HStack { ProgressView().controlSize(.small); Text("Checking worktree destination…").font(.caption).foregroundStyle(.secondary) }
+                        } else if branch.isEmpty {
+                            Text("Enter a title or branch name to preview the worktree folder.").font(.caption).foregroundStyle(.secondary)
                         }
                     }
                     if let created = operation.createdWorktree, worktreeID == created.id {
@@ -112,7 +151,7 @@ struct SessionLaunchView: View {
                     }
                     if operation.isBusy { ProgressView().controlSize(.small) }
                     Button(operation.progress ?? (checkout == .newWorktree ? "Create & Launch" : "Launch Session")) { launch(retry: false) }
-                        .buttonStyle(.borderedProminent).keyboardShortcut(.defaultAction).disabled(!canLaunch)
+                        .buttonStyle(.borderedProminent).keyboardShortcut(.defaultAction).disabled(!canLaunch).accessibilityIdentifier("session.launch")
                 }
             }.padding(20)
         }.frame(width: 680, height: max(420, min(650, (NSScreen.main?.visibleFrame.height ?? 800) - 100)))
@@ -129,22 +168,35 @@ struct SessionLaunchView: View {
             }
             .onDisappear {
                 #if DEBUG
-                QuickSessionProbe.sheetCommand = nil; QuickSessionProbe.sheetState = nil
+                // A dismissed sheet can disappear after its replacement appears.
+                if QuickSessionProbe.sheetID == probeID {
+                    QuickSessionProbe.sheetCommand = nil; QuickSessionProbe.sheetState = nil; QuickSessionProbe.sheetID = nil
+                }
                 #endif
             }
             .onChange(of: operation.createdWorktree?.id) { _, _ in
                 if let created = operation.createdWorktree { checkout = .existing(created.id); shared = false }
             }
-            .task(id: "\(folderID?.uuidString ?? ""):\(checkout == .newWorktree):\(branch)") {
-                destination = ""
-                guard checkout == .newWorktree, let folderID, !branch.isEmpty else { return }
-                try? await Task.sleep(for: .milliseconds(250)); guard !Task.isCancelled else { return }
-                if let result = try? await model.call("previewWorktree", .object(["projectID": .string(project.id.uuidString), "folderID": .string(folderID.uuidString), "branch": .string(branch)])), !Task.isCancelled { destination = result["path"].string ?? "" }
+            .task(id: destinationRequest) {
+                guard !Task.isCancelled else { return }
+                previewedRequest = nil; previewPath = ""; previewFailure = nil
+                guard let request = destinationRequest else { return }
+                do {
+                    try await Task.sleep(for: .milliseconds(250))
+                    let result = try await model.call("previewWorktree", .object(["projectID": .string(project.id.uuidString), "folderID": .string(request.folderID.uuidString), "branch": .string(request.branch)]))
+                    guard !Task.isCancelled, destinationRequest == request else { return }
+                    guard let path = result["path"].string, !path.isEmpty else { throw ChauffeurError("invalid_preview", "The service did not return a worktree destination. Retry the preview.") }
+                    previewPath = path
+                } catch {
+                    guard !Task.isCancelled, destinationRequest == request else { return }
+                    previewFailure = error.localizedDescription
+                }
+                previewedRequest = request
             }
     }
     private var sessionFields: some View {
         Form {
-            TextField("Title (optional)", text: $title)
+            TextField("Title (optional)", text: $title).accessibilityIdentifier("session.title")
             Picker("Group", selection: $groupID) {
                 Text("Choose a group").tag(UUID?.none)
                 ForEach(currentProject.groups.filter { !$0.archived }) { group in Text(group.name).tag(Optional(group.id)) }
@@ -175,7 +227,7 @@ struct SessionLaunchView: View {
                     Text("New worktree…").tag(Checkout.newWorktree)
                 }.onChange(of: checkout) { _, _ in shared = false }
                 if checkout == .newWorktree {
-                    TextField("New branch", text: $branch).autocorrectionDisabled()
+                    TextField("New branch", text: branchBinding).autocorrectionDisabled().accessibilityIdentifier("session.branch")
                     TextField("Base ref", text: $baseRef).autocorrectionDisabled()
                 }
             }
@@ -214,10 +266,13 @@ struct SessionLaunchView: View {
     #if DEBUG
     private func configureProbe() {
         guard QuickSessionProbe.enabled else { return }
+        QuickSessionProbe.sheetID = probeID
         QuickSessionProbe.sheetCommand = { command in
             switch command["action"].string {
             case "configure":
-                if let value = command["branch"].string { branch = value }
+                if let value = command["title"].string { title = value }
+                if let value = command["branch"].string { branchBinding.wrappedValue = value }
+                if let value = command["folderID"].string.flatMap(UUID.init(uuidString:)) { folderID = value }
                 if let value = command["task"].string { task = value }
                 if let value = command["presetID"].string.flatMap(UUID.init(uuidString:)) { presetID = value }
                 coordination = false
@@ -228,7 +283,7 @@ struct SessionLaunchView: View {
             }
         }
         QuickSessionProbe.sheetState = {
-            .object(["branch": .string(branch), "destination": .string(destination), "busy": .bool(operation.isBusy), "canLaunch": .bool(canLaunch), "presetID": presetID.map { .string($0.uuidString) } ?? .null, "worktreeID": worktreeID.map { .string($0.uuidString) } ?? .null, "path": .string(primaryPath), "failure": operation.failure.map(JSONValue.string) ?? .null])
+            .object(["title": .string(title), "branch": .string(branch), "destination": .string(destination), "previewFailure": destinationFailure.map(JSONValue.string) ?? .null, "busy": .bool(operation.isBusy), "canLaunch": .bool(canLaunch), "presetID": presetID.map { .string($0.uuidString) } ?? .null, "worktreeID": worktreeID.map { .string($0.uuidString) } ?? .null, "path": .string(primaryPath), "failure": operation.failure.map(JSONValue.string) ?? .null])
         }
     }
     #endif

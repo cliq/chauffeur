@@ -372,8 +372,7 @@ public actor RuntimeCoordinator {
         case "previewWorktree":
             let snapshot = await store.current(), projectID = try params.uuid("projectID"), folderID = try params.uuid("folderID")
             guard let folder = snapshot.projects.first(where: { $0.value.id == projectID })?.value.folders.first(where: { $0.id == folderID && $0.registered }) else { throw ChauffeurError("missing_folder", "Select a registered repository") }
-            let repositoryID = try await worktrees.repositoryID(at: folder.canonicalPath)
-            return .object(["path": .string(await worktrees.destination(repositoryID: repositoryID, branch: try params.requiredString("branch")).path)])
+            return .object(["path": .string(try await worktrees.previewDestination(folder: folder, branch: params.requiredString("branch")).path)])
         case "registerWorktree":
             let key = WorktreeRegistration(projectID: try params.uuid("projectID"), folderID: try params.uuid("folderID"), path: Paths.canonical(try params.requiredString("path")))
             if let pending = worktreeRegistrations[key] { return try .from(await pending.value) }

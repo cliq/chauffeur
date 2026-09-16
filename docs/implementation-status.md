@@ -274,8 +274,17 @@ runtime fingerprint matches the rebuilt bundle. The build log is
   each Manage Worktrees presentation carries its repository and initializes that
   selection before rendering. Native right-click checks pass for switching
   repositories repeatedly, worktree ownership, and missing-target fallback.
-- Native evidence: `.build/worktree-controls-artifacts/summary.json`, using an
-  isolated signed Debug copy, temporary repositories, and a fake agent.
+- [CLI-68](https://linear.app/cliqdev/issue/CLI-68/derive-a-new-worktrees-branch-from-the-session-title-and-preview-its):
+  title-derived branch suggestions support manual override/reset. The full
+  destination updates with branch/repository changes, reports preview errors,
+  and must validate before creation. Native typing, failed-launch recovery,
+  retained-checkout reuse, and successful session launch pass.
+- Swift validation: 76 tests in 20 suites pass. New coverage checks sanitization,
+  invalid-branch preview rejection, and agreement between preview and actual
+  creation when a destination path already exists.
+- Native evidence: `.build/quick-session-artifacts/summary.json` and
+  `.build/worktree-controls-artifacts/summary.json`. These use isolated signed
+  Debug copies, temporary repositories, and a fake agent.
 
 ## Current-goal stage audit
 

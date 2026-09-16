@@ -174,3 +174,21 @@ repositories, a discovered worktree's owning repository, and a missing-target
 fallback. Existing creation, registration, busy-state, and removal checks pass.
 Evidence: `Prototypes/worktree_controls_smoke.py` and
 `.build/worktree-controls-artifacts/summary.json`.
+
+## CLI-68 — title-derived branches and destination previews
+
+A bounded, sanitized branch slug follows the title until manually overridden;
+clearing the branch restores suggestions. The destination preview validates the
+branch, displays pending/error states, and disables creation until ready.
+Native text-entry checks pass for focus changes, overrides, repository changes,
+invalid input, retained worktrees after agent failure, and a successful retry.
+The Swift suite passes 76 tests across 20 suites, including sanitization and
+agreement between preview and creation after destination collisions. Evidence:
+`Prototypes/quick_session_smoke.py` and
+`.build/quick-session-artifacts/summary.json`.
+
+Both signed builds pass. The updated Release is in
+`build/Build/Products/Release/Chauffeur.app`; `/Applications/Chauffeur.app` was
+left running with the user's unsaved “test feature” worktree/session draft.
+The local worktree guide and HTML manual describe both fixes; the published
+manual has not been republished for this change.

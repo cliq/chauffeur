@@ -21,6 +21,8 @@ import uuid
 repository = Path(__file__).resolve().parents[1]
 artifacts = repository / '.build/quick-session-artifacts'
 artifacts.mkdir(exist_ok=True)
+accessibility_helper = repository / '.build/app-accessibility-probe'
+subprocess.run(['swiftc', str(repository / 'Prototypes/app_accessibility_probe.swift'), '-o', str(accessibility_helper)], check=True)
 
 def uid():
     return str(uuid.uuid4()).upper()
@@ -96,11 +98,20 @@ with tempfile.TemporaryDirectory(prefix='chauffeur-quick-', dir='/tmp') as direc
         assert window
         subprocess.run(['/usr/sbin/screencapture', '-x', '-l', str(window), str(artifacts / (name + '.png'))], check=True)
 
+    def type_text(identifier, value):
+        result = subprocess.run([str(accessibility_helper)], input=json.dumps({'pid': app_pid, 'operation': 'typeText', 'identifier': identifier, 'value': value}), text=True, capture_output=True, check=True)
+        response = json.loads(result.stdout)
+        assert response.get('performed'), response
+
     try:
         wait_for(lambda: call('status'), 'runtime ready')
         repo = root / 'repo 日本語'; repo.mkdir()
         for args in [['init', '-b', 'main'], ['config', 'core.hooksPath', '/dev/null'], ['config', 'commit.gpgsign', 'false'], ['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '--allow-empty', '-m', 'Initial']]:
             subprocess.run(['/usr/bin/git', '-C', str(repo), *args], capture_output=True, check=True)
+        other_repo = root / 'second repo'; other_repo.mkdir()
+        for args in [['init', '-b', 'main'], ['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '--allow-empty', '-m', 'Initial']]:
+            subprocess.run(['/usr/bin/git', '-C', str(other_repo), '-c', 'core.hooksPath=/dev/null', '-c', 'commit.gpgsign=false', *args], capture_output=True, check=True)
+        other_folder_id = uid()
         fake = root / 'fake-agent.py'
         fake.write_text('''#!/usr/bin/python3
 import json, os, sys, time
@@ -127,17 +138,38 @@ else:
         preset_set = call('snapshot')['store']['presetSets'][0]
         preset_set['value']['defaultPresetID'] = default_id
         preset_set = call('savePresetSet', {'record': preset_set['value'], 'version': preset_set['version']})
-        call('saveProject', {'record': {'id': project_id, 'name': 'Quick Session Fixture', 'presetSetID': set_id, 'folders': [{'id': folder_id, 'name': repo.name, 'selectedPath': str(repo), 'canonicalPath': str(repo), 'availability': 'available', 'registered': True}], 'groups': [{'id': uid(), 'name': 'Default', 'isDefault': True, 'archived': False, 'createdAt': now, 'updatedAt': now}], 'archived': False, 'createdAt': now, 'updatedAt': now, 'lastOpenedAt': now}})
+        call('saveProject', {'record': {'id': project_id, 'name': 'Quick Session Fixture', 'presetSetID': set_id, 'folders': [{'id': folder_id, 'name': repo.name, 'selectedPath': str(repo), 'canonicalPath': str(repo), 'availability': 'available', 'registered': True}, {'id': other_folder_id, 'name': other_repo.name, 'selectedPath': str(other_repo), 'canonicalPath': str(other_repo), 'availability': 'available', 'registered': True}], 'groups': [{'id': uid(), 'name': 'Default', 'isDefault': True, 'archived': False, 'createdAt': now, 'updatedAt': now}], 'archived': False, 'createdAt': now, 'updatedAt': now, 'lastOpenedAt': now}})
         subprocess.run([str(binary_dir / 'chauffeur-launcher'), str(repo)], capture_output=True, check=True)
         ready = wait_for(lambda: (s if (s := state())['online'] and s['ready'] else None), 'project window ready')
         app_pid = ready['processID']
         command('open', projectID=project_id, folderID=folder_id)
         wait_for(lambda: state()['sheetWindow'] and state()['sheet'], 'new worktree sheet visible')
         assert state()['sheet']['presetID'] == default_id
+        # Real text controls: suggestions keep following the title until a
+        # manual branch is supplied, and clearing it restores automatic naming.
+        type_text('session.title', 'Fix login')
+        wait_for(lambda: state()['sheet']['branch'] == 'fix-login' and state()['sheet']['destination'].endswith('/fix-login'), 'initial title suggestion')
+        type_text('session.title', 'Fix login flow')
+        wait_for(lambda: state()['sheet']['branch'] == 'fix-login-flow' and state()['sheet']['destination'].endswith('/fix-login-flow'), 'updated title suggestion')
+        type_text('session.branch', 'feature/manual')
+        type_text('session.title', 'Another title')
+        wait_for(lambda: state()['sheet']['branch'] == 'feature/manual' and state()['sheet']['destination'].endswith('/feature-manual'), 'manual override survives title edit')
+        type_text('session.branch', '')
+        wait_for(lambda: state()['sheet']['branch'] == 'another-title' and state()['sheet']['destination'].endswith('/another-title'), 'clearing branch restores suggestion')
+        type_text('session.title', '...@{}?!')
+        wait_for(lambda: not state()['sheet']['branch'] and not state()['sheet']['destination'] and not state()['sheet']['canLaunch'], 'punctuation-only title cannot create')
+        type_text('session.title', 'Fix...login @{flow} / retry.lock?')
+        wait_for(lambda: state()['sheet']['branch'] == 'fix-login-flow-retry-lock' and state()['sheet']['canLaunch'], 'sanitized title is launchable')
+        first_destination = state()['sheet']['destination']
+        command('configure', folderID=other_folder_id)
+        expected = call('previewWorktree', {'projectID': project_id, 'folderID': other_folder_id, 'branch': 'fix-login-flow-retry-lock'})['path']
+        wait_for(lambda: state()['sheet']['destination'] == expected and state()['sheet']['canLaunch'], 'destination follows repository change')
+        assert expected != first_destination
+        command('configure', folderID=folder_id)
+        wait_for(lambda: state()['sheet']['destination'] == first_destination, 'destination restored for original repository')
+        screenshot('title-derived-branch')
         command('configure', branch='bad branch', task='Fixture initial task --literal', presetID=preset_id)
-        wait_for(lambda: state()['sheet']['canLaunch'], 'branch entered')
-        command('launch')
-        wait_for(lambda: state()['sheet']['failure'] and not state()['sheet']['busy'], 'invalid branch error')
+        wait_for(lambda: state()['sheet']['previewFailure'] and not state()['sheet']['canLaunch'], 'invalid branch preview blocks creation')
         assert len(call('snapshot')['store']['worktrees']) == 0
         command('configure', branch='task/quick-fixture')
         wait_for(lambda: state()['sheet']['branch'] == 'task/quick-fixture' and state()['sheet']['destination'].endswith('/task-quick-fixture'), 'destination preview')
@@ -152,7 +184,8 @@ else:
         assert call('snapshot')['store']['projects'][0]['value'].get('lastPresetID') is None
         (root / 'fail-version').unlink()
         command('launch')
-        finished = wait_for(lambda: (s if (s := state())['sheet'] is None and s['selectedSession'] else None), 'session selected and sheet dismissed')
+        # Native dismissal can precede SwiftUI releasing the probe's closure.
+        finished = wait_for(lambda: (s if (s := state())['sheetWindow'] is None and s['selectedSession'] else None), 'session selected and sheet dismissed')
         agent = wait_for(lambda: json.loads((root / 'agent-started.json').read_text()), 'fixture agent running')
         assert agent['cwd'] == tree_path and 'Fixture initial task --literal' in agent['args']
         snapshot = call('snapshot')
@@ -169,9 +202,9 @@ else:
         retained = next(s for s in updated['sessions'] if s['id'] == live[0]['id'])
         assert retained['launch'] == live[0]['launch']
         command('open', projectID=project_id, folderID=folder_id)
-        wait_for(lambda: state()['sheet'] and state()['sheet']['presetID'] == preset_id, 'last-used preset selected instead of set default')
+        wait_for(lambda: state()['sheetWindow'] and state()['sheet'] and state()['sheet']['presetID'] == preset_id, 'last-used preset selected instead of set default')
         command('cancel')
-        wait_for(lambda: state()['sheet'] is None, 'sheet closed')
+        wait_for(lambda: state()['sheetWindow'] is None, 'sheet closed')
         empty_id = uid()
         call('savePresetSet', {'record': {'id': empty_id, 'name': 'Empty fixture set', 'revision': 1, 'archived': False}})
         project = call('snapshot')['store']['projects'][0]
@@ -180,7 +213,7 @@ else:
         assert project['value'].get('lastPresetID') is None
         command('refresh')
         command('open', projectID=project_id, folderID=folder_id)
-        wait_for(lambda: state()['sheet'] and state()['sheet']['presetID'] is None, 'empty-set sheet')
+        wait_for(lambda: state()['sheetWindow'] and state()['sheet'] and state()['sheet']['presetID'] is None, 'empty-set sheet')
         command('configure', branch='task/empty-fixture')
         wait_for(lambda: state()['sheet']['branch'] == 'task/empty-fixture', 'empty-set branch entered')
         assert not state()['sheet']['canLaunch']
@@ -189,7 +222,8 @@ else:
         assert missing['code'] == 'missing_preset'
         assert len(call('snapshot')['sessions']) == len(updated['sessions'])
         assert state()['error'] is None
-        summary = {'passed': True, 'nativeSheetOpenedFromRepository': True, 'invalidBranchDoesNotCreateCheckout': True, 'failedAgentRetainsWorktree': True, 'freshLaunchReusesSelectedWorktree': True, 'initialTaskPreserved': True, 'sessionSelectedAfterLaunch': True, 'worktreesCreated': 1, 'lastSuccessfulPresetSelected': True, 'failedLaunchDoesNotChangePreference': True, 'presetRevisionAdvanced': True, 'runningLaunchSnapshotUnchanged': True, 'emptySetSavedButCannotLaunch': True}
+        summary = {'passed': True, 'nativeSheetOpenedFromRepository': True, 'nativeTitleDerivedBranch': True, 'manualOverridePreserved': True, 'clearingOverrideRestoresSuggestion': True, 'emptySanitizedTitleBlocked': True, 'invalidBranchPreviewBlocksCreation': True, 'invalidBranchDoesNotCreateCheckout': True, 'failedAgentRetainsWorktree': True, 'freshLaunchReusesSelectedWorktree': True, 'initialTaskPreserved': True, 'sessionSelectedAfterLaunch': True, 'worktreesCreated': 1, 'lastSuccessfulPresetSelected': True, 'failedLaunchDoesNotChangePreference': True, 'presetRevisionAdvanced': True, 'runningLaunchSnapshotUnchanged': True, 'emptySetSavedButCannotLaunch': True}
+        summary['destinationFollowsRepository'] = True
         (artifacts / 'summary.json').write_text(json.dumps(summary, indent=2))
         print(json.dumps(summary, indent=2))
     finally:

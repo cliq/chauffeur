@@ -8,6 +8,7 @@ import ChauffeurCore
     static var openWorktrees: [UUID: (UUID) -> Void] = [:]
     static var sheetCommand: ((JSONValue) -> Void)?
     static var sheetState: (() -> JSONValue)?
+    static var sheetID: UUID?
     private(set) static var enabled = false
     static func start(model: AppModel) {
         guard !enabled, let path = ProcessInfo.processInfo.environment["CHAUFFEUR_QUICK_SESSION_PROBE_DIR"],
