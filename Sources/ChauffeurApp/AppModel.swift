@@ -120,7 +120,13 @@ struct AppSnapshot: Decodable, Sendable {
     init(preferences: UserDefaults = .standard) {
         self.preferences = preferences
         appearance = AppAppearance(rawValue: preferences.string(forKey: AppAppearance.preferenceKey) ?? "") ?? .system
-        socketPath = ProcessInfo.processInfo.environment["CHAUFFEUR_SOCKET"] ?? Paths.applicationSupport.appendingPathComponent("runtime/runtime.sock").path
+        var configuredSocket = ProcessInfo.processInfo.environment["CHAUFFEUR_SOCKET"]
+        #if DEBUG
+        // Exercise the real bundled SMAppService registration with a private
+        // test job/store. CHAUFFEUR_SOCKET intentionally bypasses registration.
+        configuredSocket = configuredSocket ?? ProcessInfo.processInfo.environment["CHAUFFEUR_SERVICE_PROBE_SOCKET"]
+        #endif
+        socketPath = configuredSocket ?? Paths.applicationSupport.appendingPathComponent("runtime/runtime.sock").path
         wakeObserver = NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.didWakeNotification).sink { [weak self] _ in
             Task { @MainActor in self?.reconnect() }
         }

@@ -258,6 +258,15 @@ runtime fingerprint matches the rebuilt bundle. Build and startup logs are
 
 ## Current-goal stage audit
 
+The private native service fixture passes actual registration, UI quit, launchd
+crash recovery, the Runtime settings restart button, and bundled-helper
+replacement without changing the default service/store. Evidence:
+`.local/live-service-registration/summary.json`. Its real-session extension is
+implemented, with native profile selection and provider-reply assertions, but
+has not passed; the console locked during testing. Unlocking the Mac is required
+to resume those desktop checks. Sleep/wake and launcher-install choices remain
+pending separately. See [private service acceptance](service-recovery.md#private-native-service-fixture).
+
 | Plan items | Current state | Still required |
 | --- | --- | --- |
 | Stage 0 V1–V5 | Decision documents; native CLI terminal continuity, bounded history, two-window profile/account displays and focused status checks; real scoped-stop evidence; actual LaunchAgent lifecycle | Remaining focused macOS recovery checks; distinct-Claude-account check deferred by user; coordination and final Spaces workload are in V2 |

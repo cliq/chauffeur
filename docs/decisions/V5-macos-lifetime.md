@@ -59,6 +59,16 @@ sleep/wake or live real-session LaunchAgent gates. The final Spaces workload is
 deferred to V2. See
 [service recovery](../service-recovery.md) for setup and development updates.
 
+A newer private native fixture now passes registration, UI quit, launchd crash
+recovery, the actual Settings restart button, and bundled-helper replacement
+without touching the default store or service. It uses the production
+`SMAppService` path with a unique test job and Debug-only private socket override.
+Run `Prototypes/native_live_service_smoke.py --registration-only`; evidence is
+under `.local/live-service-registration/`. Its live Codex/Claude extension is
+implemented but has not passed; the Mac locked during desktop checks. The fixture
+now checks console lock state before running and cleans up on interruption.
+This does not supersede the outstanding live-session or sleep/wake gates.
+
 The separate `Prototypes/notification_native_smoke.py --use-default-service`
 check now verifies an actual Notification Center alert using an existing read
 session and the user's enabled notification permission. With the target project

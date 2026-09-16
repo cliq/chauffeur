@@ -4,8 +4,9 @@ import AppKit
 import ServiceManagement
 import ChauffeurCore
 
-/// One-shot readout for real SMAppService registration. Uses the default service;
-/// unlike NativeProbe, this does not substitute a fixture socket or launchd job.
+/// One-shot readout for real SMAppService registration using this app's bundled
+/// LaunchAgent. Private test copies can supply their own job label/data directory
+/// in that plist and CHAUFFEUR_SERVICE_PROBE_SOCKET without bypassing registration.
 @MainActor enum ServiceProbe {
     private static var started = false
     static func start(model: AppModel) {

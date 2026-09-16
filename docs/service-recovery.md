@@ -163,6 +163,35 @@ service restart, retained history, and launch/removal reservations.
 
 ## Service acceptance probe
 
+### Private native service fixture
+
+`Prototypes/native_live_service_smoke.py --registration-only` passes using a
+separately signed Debug app with a unique bundled LaunchAgent label and private
+data directory. It exercises actual `SMAppService` registration, normal UI quit,
+launchd recovery after killing only that helper, the native Runtime settings
+restart button, and automatic registration refresh after replacing the bundled
+Release helper with the Debug helper. Cleanup unregisters only its private job.
+The existing default runtime and saved records remain unchanged. Evidence:
+`.local/live-service-registration/summary.json`.
+
+The full command without `--registration-only` additionally prepares real Codex
+and Claude sessions, selects their configuration folders through the native
+picker, and checks process/conversation continuity and provider replies after
+each recovery. **This full check has not passed yet.** Desktop testing paused
+when the Mac locked. The harness now refuses a locked console and cleans up if
+the screen locks during a run. No OS permission or lock setting is changed.
+
+The Debug-only `CHAUFFEUR_SERVICE_PROBE_SOCKET` chooses the private IPC socket
+without bypassing service registration. The fixture's plist supplies its unique
+job label and `--data-dir`; Release does not use this override. Temporary profile
+copies and the authorized matching Claude credential stay private and are
+removed afterward, including any new path-specific Keychain entry. This also
+avoids coupling the lifecycle test to Documents-folder consent for each unique
+test app. An earlier attempt with the Documents-based clones timed out in a
+Codex filesystem operation while macOS checked that fixture's file access.
+
+### Original empty-store probe
+
 With a Debug build signed using the same certificate as your Release build and
 an **empty default store**, run:
 
