@@ -7,6 +7,8 @@ import ChauffeurCore
     @Published var state: WindowState
     @Published var search = ""
     @Published var detailsVisible = false
+    @Published var closedSessionIDs = Set<UUID>()
+    @Published var newTabPresented = false
     var controllers: [UUID: TerminalController] = [:]
     weak var window: NSWindow?
     var loaded = false
@@ -29,6 +31,7 @@ import ChauffeurCore
     func selectSession(_ id: UUID, folderID: UUID?, path: String?) {
         state.selectedFolderID = folderID
         state.selectedWorktreePath = path
+        closedSessionIDs.remove(id)
         state.selectedSessionID = id
     }
     func synchronizeTerminals(model: AppModel) {
@@ -123,7 +126,8 @@ struct ProjectWindow: View {
                 }.padding(24)
             }
         }.frame(minWidth: 880, minHeight: 560)
-            .background(WindowObserver(projectID: projectID, layout: layout, didChangeFrame: saveLayout, didShow: {
+            .overlay { if layout.newTabPresented { newTabPrompt } }
+            .background(WindowObserver(projectID: projectID, layout: layout, handleKey: handleKey, didChangeFrame: saveLayout, didShow: {
                 // Wait for the native project window to be visible before
                 // closing Welcome. Preserve any other project-creation draft.
                 guard project != nil else { return }
@@ -150,6 +154,7 @@ struct ProjectWindow: View {
                 guard layout.window?.isKeyWindow == true, let command = notification.object as? String else { return }
                 switch command {
                 case "new-session": showLaunch()
+                case "new-tab": if canLaunch { layout.newTabPresented = true }
                 case "search-sessions": layout.state.sidebarMode = .sessions; layout.state.sidebarVisible = true; searchFocused = true
                 case "find": if let id = layout.state.selectedSessionID { layout.controllers[id]?.find() }
                 case "next": cycle(1)
@@ -367,7 +372,7 @@ struct ProjectWindow: View {
         if let folder = selectedFolder {
             if let path = layout.state.selectedWorktreePath {
                 let row = checkout(folder: folder, path: path, project: project)
-                let sessions = sessions(in: folder, path: path)
+                let sessions = openSessions(in: folder, path: path)
                 VStack(spacing: 0) {
                     if !sessions.isEmpty {
                         SessionStrip(sessions: sessions, project: project, selectedID: layout.state.selectedSessionID, select: { selectSession($0.id) }, details: { selectSession($0.id); layout.detailsVisible = true }, revealPath: { FilePanels.reveal($0.launch.workingDirectory) })
@@ -443,10 +448,88 @@ struct ProjectWindow: View {
 
     // MARK: Actions
 
+    private func openSessions(in folder: ProjectFolder, path: String) -> [Session] {
+        sessions(in: folder, path: path).filter { !layout.closedSessionIDs.contains($0.id) }
+    }
+    private func closeCurrentTab() {
+        let tabs: [Session]
+        if let folder = selectedFolder, let path = layout.selectedWorktreePath {
+            tabs = openSessions(in: folder, path: path)
+        } else {
+            tabs = model.session(layout.state.selectedSessionID).map { [$0] } ?? []
+        }
+        guard !tabs.isEmpty else { layout.window?.performClose(nil); return }
+        let index = tabs.firstIndex { $0.id == layout.state.selectedSessionID } ?? 0
+        let closing = tabs[index]
+        layout.closedSessionIDs.insert(closing.id)
+        layout.controllers.removeValue(forKey: closing.id)?.detach()
+        let remaining = tabs.filter { $0.id != closing.id }
+        layout.state.selectedSessionID = remaining.isEmpty ? nil : remaining[min(index, remaining.count - 1)].id
+        if let id = layout.state.selectedSessionID { markRead(id) }
+    }
+    private var terminalTarget: (folder: ProjectFolder, row: CheckoutRow)? {
+        guard let project, let folder = selectedFolder ?? project.folders.first(where: \.registered) else { return nil }
+        return (folder, checkout(folder: folder, path: layout.selectedWorktreePath ?? folder.canonicalPath, project: project))
+    }
+    private func createTerminalTab() {
+        guard let target = terminalTarget, canLaunch(in: target.row) else { return }
+        layout.newTabPresented = false
+        openShell(in: target.row, folder: target.folder)
+    }
+    private func createAgentTab() {
+        guard canLaunch else { return }
+        layout.newTabPresented = false
+        showLaunch()
+    }
+    private var newTabPrompt: some View {
+        ZStack {
+            Color.black.opacity(0.2).contentShape(Rectangle()).onTapGesture { layout.newTabPresented = false }
+            VStack(alignment: .leading, spacing: 16) {
+                Text("New Tab").font(.headline)
+                Button(action: createTerminalTab) {
+                    HStack { Label("Terminal", systemImage: "terminal"); Spacer(); Text("T").foregroundStyle(.secondary) }
+                }.disabled(terminalTarget.map { !canLaunch(in: $0.row) } ?? true)
+                    .accessibilityIdentifier("new-tab.terminal")
+                Button(action: createAgentTab) {
+                    HStack { Label("Agent…", systemImage: "sparkles"); Spacer(); Text("A").foregroundStyle(.secondary) }
+                }.disabled(!canLaunch).accessibilityIdentifier("new-tab.agent")
+                Button("Cancel") { layout.newTabPresented = false }.font(.caption)
+            }.buttonStyle(.plain).padding(20).frame(width: 280)
+                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12)).shadow(radius: 20)
+                .accessibilityIdentifier("new-tab.prompt")
+        }
+    }
+    /// Handle the chord before SwiftTerm or the native Close Window shortcut.
+    /// The prompt state changes synchronously so a fast second key is not lost.
+    private func handleKey(_ event: NSEvent) -> Bool {
+        let modifiers = event.modifierFlags.intersection([.command, .control, .option, .shift])
+        let key = event.charactersIgnoringModifiers?.lowercased()
+        if layout.newTabPresented {
+            if event.keyCode == 53 || (modifiers == .command && key == "w") {
+                layout.newTabPresented = false
+            } else if !event.isARepeat && (modifiers.isEmpty || modifiers == .command) {
+                if key == "t" { createTerminalTab() }
+                if key == "a" { createAgentTab() }
+            }
+            // Keep prompt keystrokes out of the underlying terminal; allow Quit.
+            return !(modifiers == .command && key == "q")
+        }
+        guard modifiers == .command else { return false }
+        if key == "w" {
+            if !event.isARepeat { closeCurrentTab() }
+            return true
+        }
+        if key == "t" {
+            if !event.isARepeat && canLaunch { layout.newTabPresented = true }
+            return true
+        }
+        return false
+    }
+
     private func selectCheckout(folderID: UUID, path: String?) {
         guard let project, let folder = project.folders.first(where: { $0.id == folderID && $0.registered }) else { return }
         collapsedRepositories.remove(folderID)
-        layout.selectCheckout(folderID: folderID, path: path, sessions: path.map { sessions(in: folder, path: $0) } ?? [])
+        layout.selectCheckout(folderID: folderID, path: path, sessions: path.map { openSessions(in: folder, path: $0) } ?? [])
         if let id = layout.state.selectedSessionID { markRead(id) }
     }
     private func selectSession(_ id: UUID) {
@@ -517,8 +600,8 @@ struct ProjectWindow: View {
     }
     private func cycle(_ offset: Int) {
         let ordered: [Session]
-        if let folder = selectedFolder, let path = layout.selectedWorktreePath { ordered = sessions(in: folder, path: path) }
-        else { ordered = allSessions }
+        if let folder = selectedFolder, let path = layout.selectedWorktreePath { ordered = openSessions(in: folder, path: path) }
+        else { ordered = allSessions.filter { !layout.closedSessionIDs.contains($0.id) } }
         guard !ordered.isEmpty else { return }
         let current = ordered.firstIndex { $0.id == layout.state.selectedSessionID } ?? -offset.signum()
         selectSession(ordered[((current + offset) % ordered.count + ordered.count) % ordered.count].id)
@@ -654,6 +737,7 @@ private struct SessionStrip: View {
 struct WindowObserver: NSViewRepresentable {
     let projectID: UUID
     @ObservedObject var layout: ProjectLayout
+    let handleKey: (NSEvent) -> Bool
     let didChangeFrame: () -> Void
     let didShow: () -> Void
     let didClose: () -> Void
@@ -671,14 +755,28 @@ struct WindowObserver: NSViewRepresentable {
             context.coordinator.restoreFrame(window)
         }
     }
+    static func dismantleNSView(_ view: NSView, coordinator: Coordinator) {
+        coordinator.stopMonitoringKeys()
+    }
     @MainActor final class Coordinator {
         var parent: WindowObserver
+        var keyMonitor: Any?
+        func stopMonitoringKeys() {
+            if let keyMonitor { NSEvent.removeMonitor(keyMonitor) }
+            keyMonitor = nil
+        }
         var observers: [AnyCancellable] = []
         var appliedFrame = false
         weak var observedWindow: NSWindow?
         init(parent: WindowObserver) { self.parent = parent }
         func observe(_ window: NSWindow) {
             observers.removeAll(); observedWindow = window; appliedFrame = false
+            stopMonitoringKeys()
+            keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self, weak window] event in
+                guard let self, let window, window.isKeyWindow, event.window === window,
+                      window.attachedSheet == nil else { return event }
+                return self.parent.handleKey(event) ? nil : event
+            }
             observers.append(NotificationCenter.default.publisher(for: NSWindow.didUpdateNotification, object: window).sink { [weak self, weak window] _ in
                 guard let self, let window else { return }
                 self.restoreFrame(window)

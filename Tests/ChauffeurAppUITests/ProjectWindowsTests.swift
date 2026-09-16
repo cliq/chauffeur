@@ -88,5 +88,51 @@ import ChauffeurCore
         XCTAssertEqual(before["sessions"].array.count, restored["sessions"].array.count)
         XCTAssertEqual(Set(before["sessions"].array.compactMap { $0["processID"].int }), Set(restored["sessions"].array.compactMap { $0["processID"].int }))
     }
+    func testTabShortcutsStayInSelectedWindow() async throws {
+        app.launch()
+        let window = app.windows[projects[0].name]
+        XCTAssertTrue(window.waitForExistence(timeout: 15))
+        let firstCard = window.buttons["session.card.\(sessions[0].id.uuidString)"]
+        XCTAssertTrue(firstCard.waitForExistence(timeout: 10))
+        firstCard.click()
+
+        app.typeKey("t", modifierFlags: .command)
+        XCTAssertTrue(window.buttons["new-tab.terminal"].waitForExistence(timeout: 3))
+        app.typeKey(.escape, modifierFlags: [])
+        XCTAssertFalse(window.buttons["new-tab.terminal"].exists)
+
+        // Keep Command down across the chord, including the choice key.
+        XCUIElement.perform(withKeyModifiers: .command) {
+            app.typeKey("t", modifierFlags: [])
+            app.typeKey("t", modifierFlags: [])
+        }
+        let deadline = ContinuousClock.now.advanced(by: .seconds(10))
+        var shell: Session?
+        while ContinuousClock.now < deadline {
+            let snapshot = try await call("snapshot")
+            shell = try snapshot["sessions"].array.map { try $0.decode(Session.self) }
+                .first { $0.projectID == projects[0].id && !$0.launch.preset.kind.isAgent }
+            if shell != nil { break }
+            try await Task.sleep(for: .milliseconds(100))
+        }
+        let terminal = try XCTUnwrap(shell)
+        sessions.append(terminal)
+        XCTAssertTrue(window.buttons["session.card.\(terminal.id.uuidString)"].waitForExistence(timeout: 10))
+
+        app.typeKey("t", modifierFlags: .command)
+        app.typeKey("a", modifierFlags: [])
+        XCTAssertTrue(window.sheets.firstMatch.waitForExistence(timeout: 5))
+        window.sheets.buttons["Cancel"].click()
+
+        // Closing the final tab leaves its window open until the next Cmd-W.
+        for _ in 0..<4 { app.typeKey("w", modifierFlags: .command) }
+        XCTAssertTrue(window.exists)
+        XCTAssertEqual(window.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "session.card.")).count, 0)
+        let snapshot = try await call("snapshot")
+        XCTAssertEqual(snapshot["sessions"].array.count, 11)
+        app.typeKey("w", modifierFlags: .command)
+        XCTAssertTrue(window.waitForNonExistence(timeout: 5))
+        XCTAssertTrue(app.windows[projects[1].name].exists)
+    }
     private func call(_ method: String, _ params: JSONValue = .object([:])) async throws -> JSONValue { try await RuntimeClient.call(IPCRequest(method, params: params), socketPath: socketPath) }
 }
