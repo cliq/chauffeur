@@ -75,8 +75,15 @@ import ChauffeurCore
     }
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        guard !model.isTerminating else { return .terminateLater }
         model.isTerminating = true
-        return .terminateNow
+        Task {
+            // External quit requests (including the service menu) must also
+            // preserve pending window selections before terminating.
+            await model.finishPendingWindowWrites()
+            sender.reply(toApplicationShouldTerminate: true)
+        }
+        return .terminateLater
     }
 }
 extension Notification.Name { static let chauffeurCommand = Notification.Name("ChauffeurCommand") }
