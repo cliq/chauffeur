@@ -53,12 +53,19 @@ while !queue.isEmpty, elements.count < 1500 {
 }
 let operation = request["operation"] as? String
 let pid = Int32(request["pid"] as! Int)
-func focus(_ element: AXUIElement) -> Bool {
+func activate(_ element: AXUIElement) {
     NSRunningApplication(processIdentifier: pid)?.activate()
     AXUIElementSetAttributeValue(application, kAXFrontmostAttribute as CFString, kCFBooleanTrue)
-    if let window = attribute(element, kAXWindowAttribute), CFGetTypeID(window as CFTypeRef) == AXUIElementGetTypeID() {
+    if (request["windowTitle"] != nil || request["windowIdentifier"] != nil), let window = elements.first {
+        // SwiftUI text elements may omit AXWindow. A scoped request already
+        // identified the owning native window before traversing its children.
+        AXUIElementPerformAction(window, kAXRaiseAction as CFString)
+    } else if let window = attribute(element, kAXWindowAttribute), CFGetTypeID(window as CFTypeRef) == AXUIElementGetTypeID() {
         AXUIElementPerformAction(window as! AXUIElement, kAXRaiseAction as CFString)
     }
+}
+func focus(_ element: AXUIElement) -> Bool {
+    activate(element)
     for _ in 0..<30 {
         AXUIElementSetAttributeValue(element, kAXFocusedAttribute as CFString, kCFBooleanTrue)
         if let current = attribute(application, kAXFocusedUIElementAttribute), CFEqual(current as CFTypeRef, element) { return true }
@@ -102,25 +109,31 @@ func pointer(_ element: AXUIElement, operation: String) -> [String: Any] {
           x >= 0, y >= 0, x < frame["width"]!, y < frame["height"]! else { return ["error": "Pointer must be inside the requested control"] }
     let start = CGPoint(x: frame["x"]! + x, y: frame["y"]! + y)
     let flags = modifiers()
+    let button: CGMouseButton = operation == "rightClick" ? .right : .left
     // Mouse events require WindowServer hit testing. Verify the native window
     // under the point belongs to the requested PID before posting system input.
+    var hitOwner: Int?
     func targetIsVisible() -> Bool {
         let windows = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? []
         let target = windows.first { window in
-            guard (window[kCGWindowLayer as String] as? Int) == 0,
+            // Include modal panels, but skip the pointer overlay itself; it
+            // follows the previous click and does not intercept mouse events.
+            guard (window[kCGWindowLayer as String] as? Int) != Int(CGWindowLevelForKey(.cursorWindow)),
                   let bounds = window[kCGWindowBounds as String] as? NSDictionary,
                   let rect = CGRect(dictionaryRepresentation: bounds) else { return false }
             return rect.contains(start)
         }
-        return target?[kCGWindowOwnerPID as String] as? Int == Int(pid)
+        let owner = target?[kCGWindowOwnerPID as String] as? Int
+        hitOwner = owner
+        return owner == Int(pid)
     }
     for _ in 0..<30 {
         if targetIsVisible() { break }
         RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.05))
     }
-    guard targetIsVisible() else { return ["error": "Another application covers the requested control"] }
+    guard targetIsVisible() else { return ["error": "Another application covers the requested control", "applicationPID": Int(pid), "hitOwnerPID": hitOwner ?? 0] }
     func post(_ type: CGEventType, at point: CGPoint) {
-        let event = CGEvent(mouseEventSource: nil, mouseType: type, mouseCursorPosition: point, mouseButton: .left)!
+        let event = CGEvent(mouseEventSource: nil, mouseType: type, mouseCursorPosition: point, mouseButton: button)!
         event.flags = flags
         event.setIntegerValueField(.mouseEventClickState, value: 1)
         event.post(tap: .cghidEventTap)
@@ -145,8 +158,8 @@ func pointer(_ element: AXUIElement, operation: String) -> [String: Any] {
         post(.leftMouseUp, at: end)
     } else {
         post(.mouseMoved, at: start)
-        post(.leftMouseDown, at: start)
-        post(.leftMouseUp, at: start)
+        post(operation == "rightClick" ? .rightMouseDown : .leftMouseDown, at: start)
+        post(operation == "rightClick" ? .rightMouseUp : .leftMouseUp, at: start)
     }
     return ["performed": true]
 }
@@ -181,17 +194,22 @@ var result: Any
 if operation == "inspect" { result = elements.map(describe) }
 else {
     let matches = elements.filter { element in
+        if let value = request["matchValue"] as? String, attribute(element, kAXValueAttribute) as? String != value { return false }
         if let identifier = request["identifier"] as? String { return attribute(element, kAXIdentifierAttribute) as? String == identifier }
         if let placeholder = request["placeholder"] as? String { return attribute(element, kAXPlaceholderValueAttribute) as? String == placeholder }
         if let title = request["title"] as? String {
             return (attribute(element, kAXRoleAttribute) as? String == (request["role"] as? String ?? kAXButtonRole))
                 && (attribute(element, kAXTitleAttribute) as? String == title || attribute(element, kAXDescriptionAttribute) as? String == title)
         }
+        if let role = request["role"] as? String { return attribute(element, kAXRoleAttribute) as? String == role }
         return false
     }
     if matches.count == 1, let element = matches.first {
-        if operation == "press" {
-            let status = AXUIElementPerformAction(element, kAXPressAction as CFString)
+        if operation == "press" || operation == "showMenu" {
+            if let timeout = request["actionTimeout"] as? Double {
+                AXUIElementSetMessagingTimeout(element, Float(timeout))
+            }
+            let status = AXUIElementPerformAction(element, (operation == "showMenu" ? kAXShowMenuAction : kAXPressAction) as CFString)
             result = ["performed": status == .success, "status": status.rawValue]
         } else if operation == "closeWindow", let button = attribute(element, kAXCloseButtonAttribute), CFGetTypeID(button as CFTypeRef) == AXUIElementGetTypeID() {
             let status = AXUIElementPerformAction(button as! AXUIElement, kAXPressAction as CFString)
@@ -200,8 +218,10 @@ else {
             var size = CGSize(width: width, height: height)
             let status = AXUIElementSetAttributeValue(element, kAXSizeAttribute as CFString, AXValueCreate(.cgSize, &size)!)
             result = ["performed": status == .success, "status": status.rawValue]
+        } else if ["click", "rightClick", "drag", "scroll"].contains(operation) {
+            activate(element)
+            result = pointer(element, operation: operation!)
         } else if !focus(element) { result = ["error": "The requested control did not receive keyboard focus"] }
-        else if ["click", "drag", "scroll"].contains(operation) { result = pointer(element, operation: operation!) }
         else if operation == "paste" || operation == "copy" {
             result = clipboard(element, paste: operation == "paste" ? request["value"] as? String : nil)
         } else if ["typeText", "insertText"].contains(operation), let value = request["value"] as? String {

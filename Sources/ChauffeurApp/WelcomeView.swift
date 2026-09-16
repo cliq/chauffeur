@@ -9,6 +9,7 @@ struct WelcomeView: View {
     @State private var showArchived = false
     @State private var selectedProject: UUID?
     @State private var creatingProject = false
+    @State private var createdProjectID: UUID?
     @State private var editingProject: Project?
     @State private var restored = false
     private var projects: [Project] { model.projects.filter { showArchived || !$0.archived } }
@@ -53,7 +54,11 @@ struct WelcomeView: View {
             Divider()
             ServiceHealthView().padding(10)
         }.frame(minWidth: 780, minHeight: 460)
-            .sheet(isPresented: $creatingProject) { ProjectEditor { id in creatingProject = false; open(id) } }
+            .sheet(isPresented: $creatingProject, onDismiss: {
+                // Closing a window while its creation sheet is still attached
+                // can be ignored by macOS. Navigate after the sheet is gone.
+                if let id = createdProjectID { createdProjectID = nil; open(id) }
+            }) { ProjectEditor { id in createdProjectID = id; creatingProject = false } }
             .sheet(item: $editingProject) { project in ProjectEditor(project: project) { _ in editingProject = nil } }
             .sheet(item: $model.folderSelection) { selection in
                 VStack(alignment: .leading, spacing: 16) {

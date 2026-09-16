@@ -98,7 +98,12 @@ struct ProjectWindow: View {
                 }.padding(24)
             }
         }.frame(minWidth: 880, minHeight: 560)
-            .background(WindowObserver(projectID: projectID, layout: layout, didChangeFrame: saveLayout, didClose: {
+            .background(WindowObserver(projectID: projectID, layout: layout, didChangeFrame: saveLayout, didShow: {
+                // Wait for the native project window to be visible before
+                // closing Welcome. Preserve any other project-creation draft.
+                guard project != nil else { return }
+                NSApp.windows.first { $0.identifier?.rawValue == "welcome" && $0.attachedSheet == nil }?.performClose(nil)
+            }, didClose: {
                 for controller in layout.controllers.values { controller.detach() }
                 guard !model.isTerminating else { return }
                 layout.state.wasOpen = false; model.saveWindow(layout.state); model.openProjects.remove(projectID)
@@ -332,6 +337,7 @@ struct WindowObserver: NSViewRepresentable {
     let projectID: UUID
     @ObservedObject var layout: ProjectLayout
     let didChangeFrame: () -> Void
+    let didShow: () -> Void
     let didClose: () -> Void
     func makeCoordinator() -> Coordinator { Coordinator(parent: self) }
     func makeNSView(context: Context) -> NSView { NSView() }
@@ -384,6 +390,7 @@ struct WindowObserver: NSViewRepresentable {
             parent.layout.state.frame = NSStringFromRect(window.frame)
             parent.layout.state.displayID = window.screen?.localizedName
             parent.didChangeFrame()
+            parent.didShow()
         }
     }
 }

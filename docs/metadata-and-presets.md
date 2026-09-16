@@ -96,6 +96,24 @@ check; they do not rely on notification latency to reject stale writes.
 
 ## Verification
 
+`Prototypes/editor_controls_smoke.py` exercises the native preset, project, and
+group editors in an isolated signed Debug app. It creates three projects across
+two preset sets, chooses configuration directories and executables through macOS
+file panels, checks quoted arguments and literal hyphens, and verifies that
+invalid paths or unfinished quotes remain unsaved. Repository discovery includes
+a Git worktree with a `.git` file and a symlink loop. Explicit selection,
+duplicate prevention, folder relinking, unregistering without deleting files,
+group create/rename/archive/reopen/cancel, and project archive/reopen pass.
+
+Creating a project now waits for its sheet to dismiss and its project window to
+become visible before closing Welcome. The native check verifies the actual
+visible window count; it reproduced the extra Welcome window before the fix.
+An empty preset set permits project creation but disables session launch, and a
+concurrent metadata change is preserved when a stale editor tries to save.
+Evidence is under `.build/editor-controls-artifacts/`. These checks use temporary
+repositories and profile directories, with no provider credentials or default
+runtime writes. Native session/window and terminal-pointer regressions also pass.
+
 `MetadataIntegrityTests` covers misplaced records, dangling references, retained
 history, stale writes, default ownership, revisions, remembered choices, and
 symlinked metadata directories. The native quick-session fixture also checks the

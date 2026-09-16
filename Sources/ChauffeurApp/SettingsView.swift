@@ -22,7 +22,7 @@ struct SettingsView: View {
                         }
                     }.listStyle(.sidebar).frame(maxHeight: .infinity)
                     Divider()
-                    HStack { Button("Add Set…") { newSet = true }; if let selectedSet, let set = model.presetSets.first(where: { $0.id == selectedSet }) { Button("Edit…") { editedSet = set } } }.padding(12)
+                    HStack { Button("Add Set…") { newSet = true }; if let selectedSet, let set = model.presetSets.first(where: { $0.id == selectedSet }) { Button("Edit…") { editedSet = set }.accessibilityIdentifier("preset-set.edit") } }.padding(12)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }.frame(minWidth: 200, idealWidth: 220, maxWidth: 280, maxHeight: .infinity, alignment: .topLeading)
                 VStack(alignment: .leading, spacing: 14) {
@@ -31,7 +31,7 @@ struct SettingsView: View {
                         Text("Presets select existing CLI configuration directories. Edits affect new launches in every linked project.").font(.callout).foregroundStyle(.secondary)
                         List(model.presets.filter { $0.setID == set.id }) { preset in
                             VStack(alignment: .leading, spacing: 5) {
-                                HStack { Text(preset.name).fontWeight(.semibold); Text(preset.kind == .codex ? "Codex" : "Claude Code").foregroundStyle(.secondary); if preset.archived { Text("Archived").font(.caption) }; Spacer(); Button("Edit…") { editedPreset = preset } }
+                                HStack { Text(preset.name).fontWeight(.semibold); Text(preset.kind == .codex ? "Codex" : "Claude Code").foregroundStyle(.secondary); if preset.archived { Text("Archived").font(.caption) }; Spacer(); Button("Edit…") { editedPreset = preset }.accessibilityIdentifier("preset.edit-\(preset.id.uuidString)") }
                                 Text(preset.configurationDirectory).font(.caption).textSelection(.enabled)
                                 Button("Chauffeur Skill…") { skillPreset = preset }
                                     .accessibilityIdentifier("preset-skill-\(preset.id.uuidString)")
@@ -110,12 +110,12 @@ struct PresetSetEditor: View {
         VStack(alignment: .leading, spacing: 18) {
             Text(presetSet == nil ? "Create Preset Set" : "Edit Preset Set").font(.title2)
             Form {
-                TextField("Name", text: $name)
+                TextField("Name", text: $name).accessibilityIdentifier("preset-set.name")
                 if let presetSet {
                     Picker("Default preset", selection: $defaultID) {
                         Text("None").tag(UUID?.none)
                         ForEach(model.presets.filter { $0.setID == presetSet.id && !$0.archived }) { preset in Text(preset.name).tag(Optional(preset.id)) }
-                    }
+                    }.accessibilityIdentifier("preset-set.default-preset")
                     Toggle("Archived", isOn: $archived)
                 }
             }
@@ -149,15 +149,15 @@ struct PresetEditor: View {
         VStack(alignment: .leading, spacing: 16) {
             Text(preset == nil ? "Create Agent Preset" : "Edit Agent Preset").font(.title2)
             Form {
-                TextField("Preset name", text: $name)
+                TextField("Preset name", text: $name).accessibilityIdentifier("preset.name")
                 Picker("Agent", selection: $kind) { Text("Codex").tag(CLIKind.codex); Text("Claude Code").tag(CLIKind.claude) }
                     .onChange(of: kind) { _, value in if executable == "codex" || executable == "claude" { executable = value == .codex ? "codex" : "claude" } }
-                HStack { TextField("Executable", text: $executable); Button("Choose…") { if let path = FilePanels.executable() { executable = path } } }
+                HStack { TextField("Executable", text: $executable).accessibilityIdentifier("preset.executable"); Button("Choose…") { if let path = FilePanels.executable() { executable = path } }.accessibilityIdentifier("preset.choose-executable") }
                 HStack {
-                    TextField("Existing configuration directory", text: $directory)
+                    TextField("Existing configuration directory", text: $directory).accessibilityIdentifier("preset.configuration-directory")
                     Button("Choose…") {
                         if let path = FilePanels.directory(title: "Choose an existing CLI configuration directory", startingAt: FileManager.default.homeDirectoryForCurrentUser, showsHiddenFiles: true) { directory = path }
-                    }
+                    }.accessibilityIdentifier("preset.choose-configuration-directory")
                 }
                 if preset != nil { Toggle("Archived", isOn: $archived) }
             }

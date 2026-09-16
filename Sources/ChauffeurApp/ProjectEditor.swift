@@ -23,11 +23,11 @@ struct ProjectEditor: View {
         VStack(alignment: .leading, spacing: 16) {
             Text(project == nil ? "Create Project" : "Project Settings").font(.title2)
             Form {
-                TextField("Project name", text: $name)
+                TextField("Project name", text: $name).accessibilityIdentifier("project.name")
                 Picker("Preset set", selection: $setID) {
                     Text("Choose a preset set").tag(UUID?.none)
                     ForEach(model.presetSets.filter { !$0.archived || $0.id == setID }) { set in Text(set.name).tag(Optional(set.id)) }
-                }
+                }.accessibilityIdentifier("project.preset-set")
             }
             Text("Folders").font(.headline)
             HStack {
@@ -81,7 +81,7 @@ struct ProjectEditor: View {
                     ForEach(candidates) { candidate in
                         Toggle(isOn: Binding(get: { selected.contains(candidate.id) }, set: { if $0 { selected.insert(candidate.id) } else { selected.remove(candidate.id) } })) {
                             folderLabel(candidate)
-                        }.toggleStyle(.checkbox).padding(10)
+                        }.toggleStyle(.checkbox).padding(10).accessibilityIdentifier("project.candidate-\(candidate.name)")
                         Divider().padding(.leading, 10)
                     }
                 }
@@ -97,8 +97,8 @@ struct ProjectEditor: View {
                                 if let path = FilePanels.directory(), let index = folders.firstIndex(where: { $0.id == folder.id }) {
                                     folders[index].selectedPath = path; folders[index].canonicalPath = Paths.canonical(path); folders[index].availability = .available
                                 }
-                            }
-                            Button("Remove", role: .destructive) { if let index = folders.firstIndex(where: { $0.id == folder.id }) { folders[index].registered = false } }
+                            }.accessibilityIdentifier("project.relink-\(folder.id.uuidString)")
+                            Button("Remove", role: .destructive) { if let index = folders.firstIndex(where: { $0.id == folder.id }) { folders[index].registered = false } }.accessibilityIdentifier("project.remove-\(folder.id.uuidString)")
                         }.padding(10)
                         Divider().padding(.leading, 10)
                     }
@@ -162,7 +162,7 @@ struct GroupsEditor: View {
             List {
                 ForEach($groups) { $group in
                     HStack {
-                        TextField("Group name", text: $group.name)
+                        TextField("Group name", text: $group.name).accessibilityIdentifier("group.name-\(group.id.uuidString)")
                         if group.isDefault { Text("Default").foregroundStyle(.secondary) }
                         else { Button(group.archived ? "Reopen" : "Archive") { group.archived.toggle(); group.updatedAt = Date() } }
                     }

@@ -111,7 +111,10 @@ with tempfile.TemporaryDirectory(prefix='chauffeur-terminal-pointer-', dir='/tmp
         return wait_for(lambda: (s if (s := state()).get('commandID') == identifier else None), 'command completed')
 
     def accessibility(operation, **fields):
-        result = subprocess.run([str(accessibility_helper)], input=json.dumps({'pid': app_pid, 'operation': operation, **fields}), text=True, capture_output=True, check=True)
+        result = subprocess.run([str(accessibility_helper)], input=json.dumps({
+            'pid': app_pid, 'operation': operation,
+            'windowIdentifier': 'project-' + project_id, **fields,
+        }), text=True, capture_output=True, check=True)
         return json.loads(result.stdout)
 
     def controls():
