@@ -94,7 +94,12 @@ import ChauffeurCore
         generation = UUID(); outgoing?.finish(); writer?.cancel(); reader?.cancel()
         connection?.close(); connection = nil; reader = nil; writer = nil; outgoing = nil; connected = false
     }
-    func focus() { terminal.window?.makeFirstResponder(terminal) }
+    /// Focuses the terminal, or arranges for it once the view is on screen: a
+    /// newly selected tab is not in the window yet when its selection changes.
+    func focus() {
+        guard !readOnly else { return }
+        if let window = terminal.window { window.makeFirstResponder(terminal) } else { terminal.focusesWhenAttached = true }
+    }
     func find() {
         if readOnly { terminal.performTextFinderAction(findSender()) }
         else if historyPresented, let historyController { historyController.find() }

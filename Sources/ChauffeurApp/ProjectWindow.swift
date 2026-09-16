@@ -12,6 +12,9 @@ import ChauffeurCore
     var controllers: [UUID: TerminalController] = [:]
     weak var window: NSWindow?
     var loaded = false
+    /// The session whose terminal should take the keyboard after a tab change,
+    /// held until its view exists so typing reaches the CLI straight away.
+    private var focusRequest: UUID?
     init(projectID: UUID) { state = WindowState(projectID: projectID) }
     var selectedFolderID: UUID? { state.selectedFolderID }
     var selectedWorktreePath: String? { state.selectedWorktreePath }
@@ -25,19 +28,33 @@ import ChauffeurCore
     func selectCheckout(folderID: UUID, path: String?, sessions: [Session]) {
         state.selectedFolderID = folderID
         state.selectedWorktreePath = path
-        if let current = state.selectedSessionID, sessions.contains(where: { $0.id == current }) { return }
+        if let current = state.selectedSessionID, sessions.contains(where: { $0.id == current }) { requestFocus(current); return }
         state.selectedSessionID = path == nil ? nil : sessions.first(where: \.state.isLive)?.id
+        requestFocus(state.selectedSessionID)
     }
     func selectSession(_ id: UUID, folderID: UUID?, path: String?) {
         state.selectedFolderID = folderID
         state.selectedWorktreePath = path
         closedSessionIDs.remove(id)
         state.selectedSessionID = id
+        requestFocus(id)
+    }
+    /// Focuses a terminal that is already on screen, otherwise records the
+    /// request for the next synchronization: a just-selected session has no
+    /// view yet, and a just-launched one is not in the snapshot yet either.
+    private func requestFocus(_ id: UUID?) {
+        focusRequest = id
+        guard let id, let controller = controllers[id], controller.terminal.window != nil else { return }
+        focusRequest = nil
+        controller.focus()
     }
     func synchronizeTerminals(model: AppModel) {
         let visible = state.selectedSessionID.flatMap { model.session($0)?.state.isLive == true ? $0 : nil }
         for (id, controller) in controllers where id != visible { controller.detach() }
-        if let visible { controller(for: visible, scrollback: model.snapshot.settings.scrollbackLines).attach(socketPath: model.socketPath) }
+        guard let visible else { return }
+        let controller = controller(for: visible, scrollback: model.snapshot.settings.scrollbackLines)
+        controller.attach(socketPath: model.socketPath)
+        if focusRequest == visible { focusRequest = nil; controller.focus() }
     }
 }
 

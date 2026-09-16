@@ -4,6 +4,8 @@ import AppKit
 /// Updates default terminal colors without replacing the terminal or its buffer.
 final class ThemedTerminalView: TerminalView {
     private var appliedAppearance: NSAppearance.Name?
+    /// Set when a tab change asks for keyboard focus before the view is shown.
+    var focusesWhenAttached = false
     override func isAccessibilityElement() -> Bool { true }
     override func accessibilityRole() -> NSAccessibility.Role? { .textArea }
     override func isAccessibilityEnabled() -> Bool { true }
@@ -33,7 +35,15 @@ final class ThemedTerminalView: TerminalView {
     }
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
-        if window != nil { applyAppearance() }
+        guard window != nil else { return }
+        applyAppearance()
+        guard focusesWhenAttached else { return }
+        focusesWhenAttached = false
+        // SwiftUI is still installing this view; take focus once it settles.
+        DispatchQueue.main.async { [weak self] in
+            guard let self, let window else { return }
+            window.makeFirstResponder(self)
+        }
     }
     func applyAppearance() {
         // AppKit can notify a view before TerminalView has finished its setup.
