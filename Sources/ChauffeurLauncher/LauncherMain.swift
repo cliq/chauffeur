@@ -7,7 +7,7 @@ import ChauffeurCore
         do {
             var arguments = Array(CommandLine.arguments.dropFirst())
             if arguments == ["--help"] || arguments == ["-h"] {
-                print("Usage: \(AppBuild.current.commandName) [FOLDER]\nOpens the project containing FOLDER (default: current directory).\nUse -- before a folder name beginning with a dash.\n\n\(AppBuild.current.commandName) --install   Install \(TerminalLauncherInstallation.destination.path)")
+                print("Usage: \(AppBuild.current.commandName) [FOLDER]\nOpens the project containing FOLDER (default: current directory).\nIf no project contains it, opens Create Project with FOLDER preselected.\nUse -- before a folder name beginning with a dash.\n\n\(AppBuild.current.commandName) --install   Install \(TerminalLauncherInstallation.destination.path)")
                 return
             }
             let executable = try executableURL()

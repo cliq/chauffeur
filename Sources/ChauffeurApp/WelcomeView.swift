@@ -8,7 +8,6 @@ struct WelcomeView: View {
     @Environment(\.openSettings) private var openSettings
     @State private var showArchived = false
     @State private var selectedProject: UUID?
-    @State private var creatingProject = false
     @State private var createdProjectID: UUID?
     @State private var editingProject: Project?
     @State private var restored = false
@@ -26,7 +25,7 @@ struct WelcomeView: View {
                         .accessibilityHidden(true)
                     Text("Chauffeur").font(.system(size: 32, weight: .semibold))
                     Text("Version \(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.1.0") · \(AppBuild.current.rawValue)").foregroundStyle(.secondary)
-                    Button("Create New Project…", systemImage: "plus") { creatingProject = true }.buttonStyle(.borderedProminent).disabled(!model.online || model.presetSets.filter { !$0.archived }.isEmpty)
+                    Button("Create New Project…", systemImage: "plus") { model.projectCreation = AppModel.ProjectCreation() }.buttonStyle(.borderedProminent).disabled(!model.online || model.presetSets.filter { !$0.archived }.isEmpty)
                     Button("Manage Presets…") { openSettings() }
                     if model.presetSets.isEmpty { Text("Add a preset set in Settings to create your first project.").font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.center) }
                 }.padding(32).frame(width: 290)
@@ -60,11 +59,16 @@ struct WelcomeView: View {
             Divider()
             ServiceHealthView().padding(10)
         }.frame(minWidth: 780, minHeight: 460)
-            .sheet(isPresented: $creatingProject, onDismiss: {
+            .sheet(item: $model.projectCreation, onDismiss: {
                 // Closing a window while its creation sheet is still attached
                 // can be ignored by macOS. Navigate after the sheet is gone.
                 if let id = createdProjectID { createdProjectID = nil; open(id) }
-            }) { ProjectEditor { id in createdProjectID = id; creatingProject = false } }
+            }) { creation in
+                ProjectEditor(initialFolderPath: creation.folderPath) { id in
+                    createdProjectID = id
+                    model.projectCreation = nil
+                }.id(creation.id)
+            }
             .sheet(item: $editingProject) { project in ProjectEditor(project: project) { _ in editingProject = nil } }
             .sheet(item: $model.folderSelection) { selection in
                 VStack(alignment: .leading, spacing: 16) {

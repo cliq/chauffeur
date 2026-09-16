@@ -135,9 +135,10 @@ with tempfile.TemporaryDirectory(prefix='chauffeur-launcher-', dir='/tmp') as di
         regular = root / 'regular-file'; regular.write_text('fixture')
         run([regular], success=False); run(['--unknown'], success=False); run([repo_a, repo_b], success=False)
         run([root / 'unregistered'])
-        wait_for(lambda: (s if 'No Chauffeur project' in ((s := state()).get('error') or '') and s['welcomeVisible'] else None))
-        command('clearError')
-        wait_for(lambda: state().get('error') is None)
+        wait_for(lambda: (s if (s := state()).get('creationFolder') == str(root / 'unregistered') and s['creationSheetVisible'] and s['welcomeVisible'] else None))
+        assert state().get('error') is None
+        command('cancelCreation')
+        wait_for(lambda: state().get('creationFolder') is None and not state()['creationSheetVisible'])
         c, folder_c = project('Shared A', repo_a)
         wait_for(lambda: state()['projectCount'] == 3)
         run([repo_a])
@@ -150,7 +151,7 @@ with tempfile.TemporaryDirectory(prefix='chauffeur-launcher-', dir='/tmp') as di
         restarted = wait_for(lambda: (s if (s := state())['online'] and s['processID'] != first_pid and s['windows'] == ['project-' + b] and s['selectedFolders'].get(b) == folder_b else None))
         command('quit'); wait_for(lambda: exited(restarted['processID']))
         assert len(call('snapshot')['sessions']) == 0
-        summary = {'passed': True, 'coldFromWorkingDirectory': True, 'warmExplicitRelativeAndSymlinkPaths': True, 'repeatedRoutesNoDuplicateWindows': True, 'sharedFolderChooser': True, 'invalidArgumentsRejected': True, 'unregisteredFolderError': True, 'coldRestartOpensOnlyRequestedProject': True, 'layoutSavedAfterServiceRestart': True, 'sessionsLaunched': 0}
+        summary = {'passed': True, 'coldFromWorkingDirectory': True, 'warmExplicitRelativeAndSymlinkPaths': True, 'repeatedRoutesNoDuplicateWindows': True, 'sharedFolderChooser': True, 'invalidArgumentsRejected': True, 'unregisteredFolderCreation': True, 'coldRestartOpensOnlyRequestedProject': True, 'layoutSavedAfterServiceRestart': True, 'sessionsLaunched': 0}
         (artifacts / 'summary.json').write_text(json.dumps(summary, indent=2))
         print(json.dumps(summary, indent=2))
     finally:

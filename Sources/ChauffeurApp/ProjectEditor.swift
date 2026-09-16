@@ -5,6 +5,7 @@ struct ProjectEditor: View {
     @EnvironmentObject private var model: AppModel
     @Environment(\.dismiss) private var dismiss
     let project: Project?
+    let initialFolderPath: String?
     let completion: (UUID) -> Void
     @State private var name = ""
     @State private var setID: UUID?
@@ -18,7 +19,7 @@ struct ProjectEditor: View {
     @State private var saving = false
     @State private var failure: String?
     @State private var version: String?
-    init(project: Project? = nil, completion: @escaping (UUID) -> Void) { self.project = project; self.completion = completion }
+    init(project: Project? = nil, initialFolderPath: String? = nil, completion: @escaping (UUID) -> Void) { self.project = project; self.initialFolderPath = initialFolderPath; self.completion = completion }
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text(project == nil ? "Create Project" : "Project Settings").font(.title2)
@@ -57,7 +58,7 @@ struct ProjectEditor: View {
             if let failure { Text(failure).foregroundStyle(.red).font(.callout) }
             HStack { Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction); Spacer(); Button(saving ? "Saving…" : "Save Project") { save() }.buttonStyle(.borderedProminent).keyboardShortcut(.defaultAction).disabled(saving || name.trimmingCharacters(in: .whitespaces).isEmpty || setID == nil || discovering) }
         }.padding(24).frame(width: 720)
-            .onAppear { name = project?.name ?? ""; setID = project?.presetSetID ?? model.presetSets.first(where: { !$0.archived })?.id; folders = project?.folders ?? []; discoveryFolder = project?.discoveryFolder; version = model.snapshot.store.projects.first { $0.value.id == project?.id }?.version }
+            .onAppear { name = project?.name ?? initialFolderPath.map { URL(fileURLWithPath: $0).lastPathComponent } ?? ""; setID = project?.presetSetID ?? model.presetSets.first(where: { !$0.archived })?.id; folders = project?.folders ?? initialFolderPath.map { [ProjectFolder(path: $0)] } ?? []; discoveryFolder = project?.discoveryFolder; version = model.snapshot.store.projects.first { $0.value.id == project?.id }?.version }
             .onDisappear { discoveryTask?.cancel() }
     }
     private var registeredFolders: [ProjectFolder] { folders.filter(\.registered) }

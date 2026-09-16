@@ -31,26 +31,28 @@ struct AppSnapshot: Decodable, Sendable {
     struct Navigation: Equatable { var id = UUID(); let route: SessionRoute }
     struct ProjectNavigation: Equatable { var id = UUID(); let match: ProjectFolderMatch }
     struct FolderSelection: Identifiable { let id = UUID(); let path: String; let matches: [ProjectFolderMatch] }
+    struct ProjectCreation: Identifiable { let id = UUID(); var folderPath: String? = nil }
+    @Published var projectCreation: ProjectCreation?
     @Published var pendingSessionRoute: Navigation?
     @Published var pendingProjectRoute: ProjectNavigation?
     @Published var folderSelection: FolderSelection?
     private var pendingFolderRoute: FolderRoute?
     private(set) var skipAutomaticWindowRestore = false
-    var hasPendingNavigation: Bool { pendingSessionRoute != nil || pendingProjectRoute != nil || pendingFolderRoute != nil || folderSelection != nil }
+    var hasPendingNavigation: Bool { pendingSessionRoute != nil || pendingProjectRoute != nil || pendingFolderRoute != nil || folderSelection != nil || projectCreation != nil }
     var openProjectWindow: ((UUID) -> Void)?
     var openWelcomeWindow: (() -> Void)?
     private var openedRouteID: UUID?
     func openSessionURL(_ url: URL) {
         if let route = FolderRoute(url: url) {
             skipAutomaticWindowRestore = true
-            pendingSessionRoute = nil; pendingProjectRoute = nil; folderSelection = nil
+            pendingSessionRoute = nil; pendingProjectRoute = nil; folderSelection = nil; projectCreation = nil
             pendingFolderRoute = route
             processPendingRoute()
             return
         }
         guard let route = SessionRoute(url: url) else { return }
         skipAutomaticWindowRestore = true
-        pendingFolderRoute = nil; pendingProjectRoute = nil; folderSelection = nil
+        pendingFolderRoute = nil; pendingProjectRoute = nil; folderSelection = nil; projectCreation = nil
         pendingSessionRoute = Navigation(route: route)
         processPendingRoute()
     }
@@ -74,7 +76,7 @@ struct AppSnapshot: Decodable, Sendable {
             let matches = ProjectFolderResolver.matches(path: path, projects: projects, worktrees: snapshot.store.worktrees.map(\.value), inventories: snapshot.repositoryInventories ?? [])
             if matches.count == 1 { chooseProjectForFolder(matches[0]) }
             else if matches.isEmpty {
-                error = "No Chauffeur project contains this folder. Add it to a project in Project Settings.\n\(path)"
+                projectCreation = ProjectCreation(folderPath: path)
                 openWelcomeWindow?()
             } else {
                 folderSelection = FolderSelection(path: path, matches: matches)

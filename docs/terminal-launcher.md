@@ -15,8 +15,9 @@ Chauffeur finds the closest registered repository or worktree containing the
 folder and opens its project window, selecting that repository in the sidebar.
 Worktrees observed through Git inventory are included. If multiple projects
 share the closest matching folder, a project chooser appears. An unregistered
-folder produces an explanation in the app. Opening a project does not launch an
-agent. On a cold launch, only the requested project opens; repeated commands
+folder opens Create Project with that folder already added and its name filled
+in. Review the preset set and save to create the project, or cancel. Opening a
+project does not launch an agent. On a cold launch, only the requested project opens; repeated commands
 reuse an existing window. Other windows already open remain open.
 
 ## Packaging and verification
@@ -38,7 +39,7 @@ embedding script rejects a target that resolves to the GUI executable.
   upgrade from an existing app link.
 - `Prototypes/folder_launcher_smoke.py`: actual Launch Services cold/warm routing,
   nested/relative/Unicode/symlink paths, no duplicate windows, ambiguous project
-  choice, invalid paths, and cold relaunch. It also stops the isolated runtime,
+  choice, project creation for unregistered folders, invalid paths, and cold relaunch. It also stops the isolated runtime,
   changes a window layout, and verifies the queued change saves after recovery.
 - `Prototypes/release_startup_smoke.py`: signs an isolated copy of the built
   Release app, starts it through Launch Services, checks a real visible app

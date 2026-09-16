@@ -19,6 +19,7 @@ import ChauffeurCore
                     case "choose":
                         if let match = model.folderSelection?.matches.first(where: { $0.projectID.uuidString == command["projectID"].string }) { model.chooseProjectForFolder(match) }
                     case "clearError": model.error = nil
+                    case "cancelCreation": model.projectCreation = nil
                     case "hideSidebar":
                         if let id = command["projectID"].string.flatMap(UUID.init(uuidString:)), let layout = NativeProbe.layouts[id] {
                             layout.state.sidebarVisible = false
@@ -36,6 +37,8 @@ import ChauffeurCore
                     "selectedFolders": .object(Dictionary(uniqueKeysWithValues: NativeProbe.layouts.map { ($0.key.uuidString, $0.value.selectedFolderID.map { .string($0.uuidString) } ?? .null) })),
                     "choices": .array((model.folderSelection?.matches ?? []).map { .string($0.projectID.uuidString) }),
                     "error": model.error.map(JSONValue.string) ?? .null,
+                    "creationFolder": model.projectCreation?.folderPath.map(JSONValue.string) ?? .null,
+                    "creationSheetVisible": .bool(NSApp.windows.contains { $0.isVisible && $0.title == "Welcome to \(AppBuild.current.displayName)" && $0.attachedSheet != nil }),
                     "welcomeVisible": .bool(NSApp.windows.contains { $0.isVisible && $0.title == "Welcome to \(AppBuild.current.displayName)" })
                 ])
                 try? JSONCoding.encode(result).write(to: root.appendingPathComponent("launcher-state.json"), options: .atomic)
