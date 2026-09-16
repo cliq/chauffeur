@@ -5,7 +5,6 @@ struct WorktreesView: View {
     @EnvironmentObject private var model: AppModel
     @Environment(\.dismiss) private var dismiss
     let project: Project
-    var initialFolderID: UUID? = nil
     @State private var folderID: UUID?
     @State private var branch = ""
     @State private var baseRef = "HEAD"
@@ -14,6 +13,11 @@ struct WorktreesView: View {
     @State private var failure: String?
     @State private var removing: Worktree?
     @State private var creation: WorktreeCreationRequest?
+    init(project: Project, initialFolderID: UUID? = nil) {
+        self.project = project
+        _folderID = State(initialValue: project.folders.first { $0.id == initialFolderID && $0.registered }?.id
+            ?? project.folders.first(where: \.registered)?.id)
+    }
     private var currentProject: Project { model.project(project.id) ?? project }
     private var folder: ProjectFolder? { currentProject.folders.first { $0.id == folderID } }
     private var observation: RepositoryInventory? {
@@ -86,7 +90,7 @@ struct WorktreesView: View {
             }
             Text("Removal requires a clean app-managed worktree with no live sessions. Branches are preserved. External worktrees are only unregistered.").font(.caption).foregroundStyle(.secondary)
         }.padding(24).frame(width: 760).interactiveDismissDisabled(busy)
-            .onAppear { folderID = currentProject.folders.first { $0.id == initialFolderID && $0.registered }?.id ?? currentProject.folders.first(where: \.registered)?.id }
+            .onAppear { refresh() }
             .onChange(of: folderID) { _, _ in refresh() }
             .task(id: "\(folderID?.uuidString ?? ""):\(branch)") {
                 destination = ""

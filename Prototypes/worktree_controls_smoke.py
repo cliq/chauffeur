@@ -128,6 +128,10 @@ with tempfile.TemporaryDirectory(prefix='chauffeur-controls-', dir='/tmp') as di
         external = root / 'external checkout'
         git('worktree', 'add', '-b', 'external', str(external), 'HEAD')
         marker = external / 'keep.txt'; marker.write_text('Keep external files')
+        other_repo = root / 'second repo'; other_repo.mkdir()
+        for args in [['init', '-b', 'main'], ['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '--allow-empty', '-m', 'Initial']]:
+            subprocess.run(['/usr/bin/git', '-C', str(other_repo), '-c', 'core.hooksPath=/dev/null', '-c', 'commit.gpgsign=false', *args], capture_output=True, check=True)
+        other_folder_id = uid()
         # Hold the real Git operation briefly so native busy controls can be
         # observed reliably, without changing the app's implementation.
         hooks = root / 'hooks'; hooks.mkdir()
@@ -146,12 +150,39 @@ with tempfile.TemporaryDirectory(prefix='chauffeur-controls-', dir='/tmp') as di
         call('savePresetSet', {'record': {'id': set_id, 'name': 'Controls fixture', 'revision': 1, 'archived': False}})
         call('savePreset', {'record': {'id': preset_id, 'setID': set_id, 'name': 'Fixture agent', 'kind': 'codex', 'executable': str(repository / 'Prototypes/fake_cli.py'), 'configurationDirectory': str(root), 'arguments': [], 'integration': 'unverified', 'archived': False}})
         call('saveProject', {'record': {'id': project_id, 'name': 'Worktree Controls Fixture', 'presetSetID': set_id,
-            'folders': [{'id': folder_id, 'name': repo.name, 'selectedPath': str(repo), 'canonicalPath': str(repo), 'availability': 'available', 'registered': True}],
+            'folders': [{'id': folder_id, 'name': repo.name, 'selectedPath': str(repo), 'canonicalPath': str(repo), 'availability': 'available', 'registered': True},
+                        {'id': other_folder_id, 'name': other_repo.name, 'selectedPath': str(other_repo), 'canonicalPath': str(other_repo), 'availability': 'available', 'registered': True}],
             'groups': [{'id': group_id, 'name': 'Default', 'isDefault': True, 'archived': False, 'createdAt': now, 'updatedAt': now}],
             'archived': False, 'createdAt': now, 'updatedAt': now, 'lastOpenedAt': now}})
         subprocess.run([str(binary_dir / 'chauffeur-launcher'), str(repo)], capture_output=True, check=True)
         ready = wait_for(lambda: (s if (s := state())['online'] and s['ready'] else None), 'project window ready')
         app_pid = ready['processID']
+        call('refreshWorktrees'); command('refresh')
+        # Select A, then right-click B without first selecting it. Repeat with
+        # alternating repositories and a discovered worktree's context menu.
+        ax('press', 'repository.' + folder_id)
+        for row_id, expected_repo in [('repository.' + other_folder_id, other_repo), ('repository.' + folder_id, repo), ('repository.' + other_folder_id, other_repo), ('repository.worktree.' + str(external), repo)]:
+            if row_id.startswith('repository.worktree.') and control(row_id) is None:
+                # SwiftUI's native outline can collapse a repository after its
+                # label is pressed. Expand its disclosure before targeting a child.
+                items = controls()
+                parent = next(c for c in items if c['identifier'] == 'repository.' + folder_id)
+                disclosure = min((c for c in items if c['role'] == 'AXDisclosureTriangle'), key=lambda c: abs(c['frame']['y'] - parent['frame']['y']))
+                window = next(c for c in items if c['role'] == 'AXWindow')
+                ax('click', role='AXWindow', x=disclosure['frame']['x'] + disclosure['frame']['width'] / 2 - window['frame']['x'], y=disclosure['frame']['y'] + disclosure['frame']['height'] / 2 - window['frame']['y'])
+            row = wait_for(lambda: control(row_id), 'repository row visible: ' + row_id)
+            ax('rightClick', row_id, x=min(30, row['frame']['width'] / 2), y=row['frame']['height'] / 2)
+            wait_for(lambda: any(c['role'] == 'AXMenuItem' and c['title'] == 'Manage Worktrees…' for c in controls()), 'context menu visible')
+            ax('press', title='Manage Worktrees…', role='AXMenuItem')
+            wait_for(lambda: (c := control('worktrees.repository')) and c['value'] == expected_repo.name, 'context repository selected')
+            wait_for(lambda: control('worktrees.done')['enabled'], 'inventory loaded')
+            ax('press', 'worktrees.done')
+            wait_for(lambda: state()['sheetWindow'] is None, 'manager dismissed')
+        command('openWorktrees', projectID=project_id, folderID=uid())
+        wait_for(lambda: (c := control('worktrees.repository')) and c['value'] == repo.name, 'missing target falls back to first repository')
+        wait_for(lambda: control('worktrees.done')['enabled'], 'fallback inventory loaded')
+        ax('press', 'worktrees.done')
+        wait_for(lambda: state()['sheetWindow'] is None, 'fallback manager dismissed')
         command('openWorktrees', projectID=project_id, folderID=folder_id)
         wait_for(lambda: state()['sheetWindow'], 'worktree manager visible')
         (artifacts / 'controls.json').write_text(json.dumps(controls(), indent=2))
@@ -211,7 +242,7 @@ with tempfile.TemporaryDirectory(prefix='chauffeur-controls-', dir='/tmp') as di
         wait_for(lambda: control('worktrees.done')['enabled'], 'manager idle')
         ax('press', 'worktrees.done')
         wait_for(lambda: state()['sheetWindow'] is None, 'manager dismissed')
-        report = {'passed': True, 'nativeAccessibilityActions': True, 'invalidBranchRecovery': True,
+        report = {'passed': True, 'nativeAccessibilityActions': True, 'contextMenuRepositorySelection': True, 'repeatedRepositorySwitching': True, 'worktreeContextSelectsOwner': True, 'missingRepositoryFallback': True, 'invalidBranchRecovery': True,
             'createAndDestinationPreview': True, 'busyControlsDisabled': True, 'confirmationCancellation': True,
             'externalUnregisterPreservesFiles': True, 'dirtyRemovalPreservesFiles': True,
             'cleanRemovalPreservesBranch': True, 'OSAccessibilityControls': 'pass', 'XCUITest': 'not exercised'}

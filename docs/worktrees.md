@@ -12,6 +12,12 @@ the destination under Chauffeur's managed storage. The resolved base commit is
 recorded separately from the branch's current state. A failed agent launch
 retains the checkout for another explicit launch.
 
+Opening the manager from a repository's context menu selects that repository
+immediately, even when another repository is selected in the sidebar. A
+worktree's context menu selects its owning repository. Each opening starts with
+its requested repository; an unavailable target falls back to the first
+registered project folder.
+
 The manager shows registered and other Git checkout counts above a bounded list
 with a persistent scrollbar. While Git is working, the repository picker, creation
 fields, list actions, and Done button are disabled. Failed operations leave the

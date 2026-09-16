@@ -48,8 +48,11 @@ struct ProjectWindow: View {
     @State private var launchingInNewWorktree = false
     @State private var editingProject = false
     @State private var editingGroups = false
-    @State private var managingWorktrees = false
-    @State private var worktreeFolderID: UUID?
+    private struct WorktreeSheet: Identifiable {
+        let id = UUID()
+        let folderID: UUID?
+    }
+    @State private var worktreeSheet: WorktreeSheet?
     @State private var collapsedRepositories = Set<UUID>()
     @FocusState private var searchFocused: Bool
     init(projectID: UUID) { self.projectID = projectID; _layout = StateObject(wrappedValue: ProjectLayout(projectID: projectID)) }
@@ -82,7 +85,7 @@ struct ProjectWindow: View {
                         Menu {
                             Button("Project Settings…") { editingProject = true }
                             Button("Manage Groups…") { editingGroups = true }
-                            Button("Manage Worktrees…") { worktreeFolderID = layout.selectedFolderID; managingWorktrees = true }
+                            Button("Manage Worktrees…") { showWorktrees(folderID: layout.selectedFolderID) }
                             Button("Open Another Project…") { openWindow(id: "welcome") }
                         } label: { Label("Project Actions", systemImage: "ellipsis.circle") }
                     }
@@ -90,7 +93,7 @@ struct ProjectWindow: View {
                 .sheet(isPresented: $launching) { SessionLaunchView(project: project, initialGroupID: layout.state.selectedGroupID, initialFolderID: layout.selectedFolderID, startsInNewWorktree: launchingInNewWorktree) { layout.select($0) } }
                 .sheet(isPresented: $editingProject) { ProjectEditor(project: project) { _ in editingProject = false } }
                 .sheet(isPresented: $editingGroups) { GroupsEditor(project: project) }
-                .sheet(isPresented: $managingWorktrees) { WorktreesView(project: project, initialFolderID: worktreeFolderID) }
+                .sheet(item: $worktreeSheet) { selection in WorktreesView(project: project, initialFolderID: selection.folderID) }
             } else {
                 VStack(spacing: 20) {
                     ContentUnavailableView(model.online ? "Project unavailable" : "Connecting…", systemImage: "folder.badge.questionmark", description: Text("Restore the project directory or choose another project. Existing agents remain in the background service."))
@@ -183,7 +186,7 @@ struct ProjectWindow: View {
                 Text("No worktrees").font(.caption).foregroundStyle(.secondary)
             }
             ForEach(trees) { tree in
-                Button { worktreeFolderID = folder.id; managingWorktrees = true } label: {
+                Button { showWorktrees(folderID: folder.id) } label: {
                     Label {
                         VStack(alignment: .leading, spacing: 2) {
                             Text(tree.branch.isEmpty ? "Detached HEAD" : tree.branch).lineLimit(1)
@@ -191,9 +194,9 @@ struct ProjectWindow: View {
                             if tree.availability != .available { Text(tree.availability.rawValue.capitalized).font(.caption).foregroundStyle(.orange) }
                         }
                     } icon: { Image(systemName: "arrow.triangle.branch") }
-                }.buttonStyle(.plain).help(tree.path)
+                }.buttonStyle(.plain).help(tree.path).accessibilityIdentifier("repository.worktree.\(tree.path)")
                     .contextMenu {
-                        Button("Manage Worktrees…") { worktreeFolderID = folder.id; managingWorktrees = true }
+                        Button("Manage Worktrees…") { showWorktrees(folderID: folder.id) }
                         Button("Reveal in Finder") { FilePanels.reveal(tree.path) }.disabled(tree.availability != .available)
                     }
             }
@@ -202,16 +205,19 @@ struct ProjectWindow: View {
         } label: {
             Button { layout.selectedFolderID = folder.id } label: {
                 Label { Text(folder.name).foregroundStyle(layout.selectedFolderID == folder.id ? Color.accentColor : Color.primary) } icon: { Image(systemName: FileManager.default.isReadableFile(atPath: folder.canonicalPath) ? "folder" : "folder.badge.questionmark") }
-            }.buttonStyle(.plain).help(folder.selectedPath)
+            }.buttonStyle(.plain).help(folder.selectedPath).accessibilityIdentifier("repository.\(folder.id)")
                 .contextMenu {
                     Button("New Session Here…") { showLaunch(folderID: folder.id) }
                     Button("New Worktree & Session…") { showLaunch(folderID: folder.id, newWorktree: true) }
                         .disabled(!model.online || project.archived || folder.availability != .available)
-                    Button("Manage Worktrees…") { worktreeFolderID = folder.id; managingWorktrees = true }
+                    Button("Manage Worktrees…") { showWorktrees(folderID: folder.id) }
                     Button("Relink / Edit Folder…") { editingProject = true }
                     Button("Reveal in Finder") { FilePanels.reveal(folder.selectedPath) }
                 }
         }
+    }
+    private func showWorktrees(folderID: UUID?) {
+        worktreeSheet = WorktreeSheet(folderID: folderID)
     }
     private func sessionRow(_ session: Session, project: Project) -> some View {
         Button { select(session.id) } label: {
@@ -277,7 +283,7 @@ struct ProjectWindow: View {
         NativeProbe.openProject = { id in openWindow(id: "project", value: id) }
         if QuickSessionProbe.enabled {
             QuickSessionProbe.openSheet[projectID] = { folderID in showLaunch(folderID: folderID, newWorktree: true) }
-            QuickSessionProbe.openWorktrees[projectID] = { folderID in worktreeFolderID = folderID; managingWorktrees = true }
+            QuickSessionProbe.openWorktrees[projectID] = { folderID in showWorktrees(folderID: folderID) }
         }
         #endif
         if let saved = model.snapshot.store.windows.first(where: { $0.value.id == projectID })?.value { layout.state = saved }

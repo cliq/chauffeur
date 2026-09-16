@@ -165,3 +165,12 @@ See [compatibility](compatibility.md) and [V5](decisions/V5-macos-lifetime.md).
 No additional current-goal implementation is queued. Use the user's next test
 feedback to select the next fix, or [the V2 plan](v2-plan.md) if they ask to begin
 that phase.
+
+## CLI-65 — worktree repository selection
+
+Manage Worktrees now uses an item-based sheet request and initializes the
+repository before rendering. Native context-menu checks pass for alternating
+repositories, a discovered worktree's owning repository, and a missing-target
+fallback. Existing creation, registration, busy-state, and removal checks pass.
+Evidence: `Prototypes/worktree_controls_smoke.py` and
+`.build/worktree-controls-artifacts/summary.json`.

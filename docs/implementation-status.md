@@ -268,6 +268,15 @@ runtime fingerprint matches the rebuilt bundle. The build log is
 `.build/release-final-startup.log` and
 `.build/release-final-default-verification.log`.
 
+## Worktree feedback fixes — 2026-09-16
+
+- [CLI-65](https://linear.app/cliqdev/issue/CLI-65/open-manage-worktrees-with-the-repository-that-was-right-clicked):
+  each Manage Worktrees presentation carries its repository and initializes that
+  selection before rendering. Native right-click checks pass for switching
+  repositories repeatedly, worktree ownership, and missing-target fallback.
+- Native evidence: `.build/worktree-controls-artifacts/summary.json`, using an
+  isolated signed Debug copy, temporary repositories, and a fake agent.
+
 ## Current-goal stage audit
 
 The full private native service fixture passes with Codex 0.154.0 and Claude Code
