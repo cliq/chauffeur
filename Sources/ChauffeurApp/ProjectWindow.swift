@@ -267,7 +267,7 @@ struct ProjectWindow: View {
                     Label { Text(folder.name).foregroundStyle(overviewSelected ? Color.accentColor : Color.primary) } icon: { Image(systemName: FileManager.default.isReadableFile(atPath: folder.canonicalPath) ? "folder" : "folder.badge.questionmark") }
                     Spacer()
                     badge(attentionCount(in: folder))
-                }
+                }.contentShape(Rectangle())
             }.buttonStyle(.plain).help(folder.selectedPath).accessibilityIdentifier("repository.\(folder.id)")
                 .contextMenu {
                     Button("Launch Agent…") { showLaunch(folderID: folder.id) }.disabled(!canLaunch)
@@ -301,6 +301,7 @@ struct ProjectWindow: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 6).padding(.vertical, 4)
             .background(selected ? Color.accentColor.opacity(0.2) : .clear, in: RoundedRectangle(cornerRadius: 6))
+            .contentShape(Rectangle())
         }.buttonStyle(.plain).help(row.path)
             .accessibilityIdentifier(row.isMain ? "repository.main.\(folder.id)" : "repository.worktree.\(row.path)")
             .accessibilityAddTraits(selected ? .isSelected : [])
