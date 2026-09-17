@@ -14,8 +14,11 @@ open 'build/Build/Products/Debug/Chauffeur Debug.app'
 `make build` (or just `make`) generates the Xcode project, builds the native app,
 embeds its runtime and helpers, and signs and verifies the complete bundle.
 Use `make release` for an optimized build at
-`build/Build/Products/Release/Chauffeur.app`. `make open` opens the generated Xcode
-project, `make test` runs Swift package tests, and `make test-ui` runs native UI tests.
+`build/Build/Products/Release/Chauffeur.app`. `make install` builds that Release,
+quits any copy running from `/Applications/Chauffeur.app`, replaces it, verifies the
+installed signature, and relaunches it (set `INSTALL_DIR` to install elsewhere).
+`make open` opens the generated Xcode project, `make test` runs Swift package tests,
+and `make test-ui` runs native UI tests.
 
 ## Debug and Release side by side
 
