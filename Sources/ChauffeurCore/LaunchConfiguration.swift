@@ -41,12 +41,14 @@ public struct LaunchRequest: Codable, Sendable {
     public var title: String
     public var task: String?
     public var allowSharedCheckout: Bool
+    /// Chauffeur messaging and delegation are experimental, so launches opt in
+    /// explicitly. Callers that omit a choice get basic terminal mode.
     public var coordinationEnabled: Bool
     public var retryKey: UUID
     /// Missing in requests from older clients, which only launch agents.
     public var kind: LaunchKind?
     public var launchKind: LaunchKind { kind ?? .agent }
-    public init(projectID: UUID, groupID: UUID, presetID: UUID, folderID: UUID, title: String, worktreeID: UUID? = nil, additionalFolderIDs: [UUID] = [], task: String? = nil, allowSharedCheckout: Bool = false, coordinationEnabled: Bool = true, retryKey: UUID = UUID(), kind: LaunchKind? = nil) {
+    public init(projectID: UUID, groupID: UUID, presetID: UUID, folderID: UUID, title: String, worktreeID: UUID? = nil, additionalFolderIDs: [UUID] = [], task: String? = nil, allowSharedCheckout: Bool = false, coordinationEnabled: Bool = false, retryKey: UUID = UUID(), kind: LaunchKind? = nil) {
         self.projectID = projectID; self.groupID = groupID; self.presetID = presetID; self.folderID = folderID; self.title = title
         self.worktreeID = worktreeID; self.additionalFolderIDs = additionalFolderIDs; self.task = task
         self.allowSharedCheckout = allowSharedCheckout; self.coordinationEnabled = coordinationEnabled; self.retryKey = retryKey

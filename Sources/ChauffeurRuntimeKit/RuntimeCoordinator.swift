@@ -865,7 +865,7 @@ public actor RuntimeCoordinator {
                     try await ledger.updateDelegation(delegation)
                 }
                 _ = try await ledger.authenticate(token)
-                let request = LaunchRequest(projectID: caller.scope.projectID, groupID: caller.scope.groupID, presetID: delegation.presetID, folderID: delegation.folderID, title: String(delegation.task.prefix(100)), worktreeID: delegation.worktreeID, task: delegation.task, allowSharedCheckout: delegation.shareCheckout, retryKey: delegation.childID)
+                let request = LaunchRequest(projectID: caller.scope.projectID, groupID: caller.scope.groupID, presetID: delegation.presetID, folderID: delegation.folderID, title: String(delegation.task.prefix(100)), worktreeID: delegation.worktreeID, task: delegation.task, allowSharedCheckout: delegation.shareCheckout, coordinationEnabled: true, retryKey: delegation.childID)
                 _ = try await launch(request, child: delegation)
                 delegation.state = .running
             } catch {

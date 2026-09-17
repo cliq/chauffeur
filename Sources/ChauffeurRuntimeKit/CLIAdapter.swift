@@ -17,7 +17,14 @@ public enum CLIAdapter {
         let help = try await ProcessRunner.run(executable, ["--help"], environment: environment)
         guard help.status == 0 else { throw ChauffeurError("help_failed", "Executable does not report its supported options", path: executable) }
         let text = version.output.trimmingCharacters(in: .whitespacesAndNewlines)
-        let baseline = kind == .codex ? text == "codex-cli 0.154.0" : ["2.1.272 (Claude Code)", "2.1.273 (Claude Code)"].contains(text)
+        let baseline = switch kind {
+        case .codex: text == "codex-cli 0.154.0"
+        // Claude Code ships new builds almost daily, so pinning versions would leave
+        // the integration unavailable most of the time. Any build that identifies
+        // itself as Claude Code is a candidate; the integration stays unverified.
+        case .claude: text.hasSuffix("(Claude Code)")
+        case .shell: false
+        }
         return CLICapabilities(version: String(text.prefix(200)), coordination: baseline, statusSignals: baseline, additionalDirectories: help.output.contains("--add-dir"), resume: help.output.contains("resume"), limitation: baseline ? (kind == .codex ? "Turn completion via notify; approval/input detection is unavailable" : nil) : "CLI version has not passed coordination/status compatibility checks. Basic terminal mode remains available")
     }
     public static func arguments(session: Session, endpoint: String, ctlPath: String, integrationDirectory: URL, coordination: Bool, resume: Bool) throws -> [String] {

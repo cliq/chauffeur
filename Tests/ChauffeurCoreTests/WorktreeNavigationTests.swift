@@ -68,6 +68,16 @@ struct WorktreeNavigationTests {
         #expect(try JSONCoding.decode(LaunchRequest.self, from: Data(older.utf8)).launchKind == .agent)
     }
 
+    @Test func agentLaunchRequestsDefaultToBasicTerminalMode() throws {
+        // Messaging and delegation are experimental: a caller that omits a choice must not enable them.
+        let implicit = LaunchRequest(projectID: UUID(), groupID: UUID(), presetID: UUID(), folderID: UUID(), title: "Agent")
+        #expect(!implicit.coordinationEnabled)
+        let explicit = LaunchRequest(projectID: UUID(), groupID: UUID(), presetID: UUID(), folderID: UUID(), title: "Agent", coordinationEnabled: true)
+        #expect(explicit.coordinationEnabled)
+        // The choice survives the round trip used for retries.
+        #expect(try JSONCoding.decode(LaunchRequest.self, from: JSONCoding.encode(explicit)).coordinationEnabled)
+    }
+
     @Test func shellPresetsSkipCLIEnvironmentAndArgumentPolicy() throws {
         let shell = AgentPreset(setID: UUID(), name: "Shell", kind: .shell, executable: "/bin/zsh", configurationDirectory: "/tmp")
         var value = shell; value.arguments = ["-l", "--anything-goes"]

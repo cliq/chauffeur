@@ -4,6 +4,33 @@ import ChauffeurCore
 @testable import ChauffeurRuntimeKit
 
 struct CLIAdapterTests {
+    /// A stand-in CLI that answers `--version` and `--help` like the real tools.
+    private func fakeCLI(reporting version: String, in root: URL) throws -> String {
+        let path = root.appendingPathComponent("cli-\(UUID().uuidString.prefix(8))").path
+        let script = "#!/bin/sh\ncase \"$1\" in --version) echo '\(version)';; --help) echo 'resume --add-dir';; *) exit 1;; esac\n"
+        try script.write(toFile: path, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: path)
+        return path
+    }
+
+    @Test func anyClaudeCodeBuildIsACoordinationCandidate() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("chauffeur-cli-versions-\(UUID())")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        defer { try? FileManager.default.removeItem(at: root) }
+        let environment = ["PATH": "/usr/bin:/bin"]
+        // Claude Code updates daily; a build newer than any we have inspected must still be usable.
+        let claude = try await CLIAdapter.capabilities(executable: fakeCLI(reporting: "9.9.999 (Claude Code)", in: root), kind: .claude, environment: environment)
+        #expect(claude.coordination && claude.statusSignals && claude.version == "9.9.999 (Claude Code)")
+        #expect(claude.additionalDirectories && claude.resume)
+        // Something that is not Claude Code at all is still rejected for coordination.
+        let other = try await CLIAdapter.capabilities(executable: fakeCLI(reporting: "some-other-tool 1.0", in: root), kind: .claude, environment: environment)
+        #expect(!other.coordination && other.limitation != nil)
+        // Codex keeps its verified baseline.
+        let codex = try await CLIAdapter.capabilities(executable: fakeCLI(reporting: "codex-cli 0.154.0", in: root), kind: .codex, environment: environment)
+        let newerCodex = try await CLIAdapter.capabilities(executable: fakeCLI(reporting: "codex-cli 0.155.0", in: root), kind: .codex, environment: environment)
+        #expect(codex.coordination && !newerCodex.coordination)
+    }
+
     @Test func claudeAttentionNotificationsRequireUserInput() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("chauffeur-hook-filter-\(UUID())")
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])

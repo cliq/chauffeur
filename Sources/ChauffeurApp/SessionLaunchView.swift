@@ -33,7 +33,7 @@ struct SessionLaunchView: View {
     @State private var previewFailure: String?
     @State private var additional = Set<UUID>()
     @State private var shared = false
-    @State private var coordination = true
+    @State private var coordination = false
     #if DEBUG
     @State private var probeID = UUID()
     #endif
@@ -136,7 +136,7 @@ struct SessionLaunchView: View {
                     }
                     VStack(alignment: .leading, spacing: 6) {
                         Toggle("Enable Chauffeur messaging and delegation", isOn: $coordination)
-                        Text(coordination ? "CLI integration is under compatibility validation. Profile names identify configuration directories; they do not verify an account." : "Basic terminal mode: Chauffeur communication and semantic status signals are unavailable.").font(.caption).foregroundStyle(.secondary)
+                        Text(coordination ? "Experimental: CLI integration is under compatibility validation. Profile names identify configuration directories; they do not verify an account." : "Basic terminal mode (default): Chauffeur messaging, delegation, and semantic status signals are unavailable. Turn the experimental integration on for this launch to try them.").font(.caption).foregroundStyle(.secondary)
                     }
                 }.padding(24).padding(.trailing, NSScroller.scrollerWidth(for: .regular, scrollerStyle: .legacy))
                     .background(PersistentScrollbars()).disabled(operation.isBusy)

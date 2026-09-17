@@ -26,10 +26,13 @@ prompts are sent by this check.
 
 ## Capability behavior
 
-The adapter checks `--version` and `--help` before spawning an agent. Baseline
-versions have a candidate coordination configuration, recorded as unverified.
-Other versions require an explicit basic-terminal launch, showing unavailable
-coordination/status. Missing `--add-dir` support rejects a multi-directory launch.
+The adapter checks `--version` and `--help` before spawning an agent. Codex
+0.154.0 is the baseline version with a candidate coordination configuration,
+recorded as unverified; other Codex versions require an explicit basic-terminal
+launch, showing unavailable coordination/status. Claude Code releases almost
+daily, so any build that identifies itself as Claude Code is accepted as a
+candidate without per-version validation; the versions in the table are the ones
+with evidence. Missing `--add-dir` support rejects a multi-directory launch.
 Missing native conversation IDs disable resume; no global resume selector is used.
 
 Codex 0.154.0 rejects `--add-dir` with a read-only sandbox. Chauffeur reports an
