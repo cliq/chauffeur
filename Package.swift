@@ -38,7 +38,7 @@ let package = Package(
         .executableTarget(name: "ChauffeurCtl", dependencies: ["ChauffeurCore", "CChauffeur"]),
         .executableTarget(name: "ChauffeurLauncher", dependencies: ["ChauffeurCore"]),
         .testTarget(name: "ChauffeurCoreTests", dependencies: ["ChauffeurCore"]),
-        .testTarget(name: "ChauffeurRuntimeTests", dependencies: ["ChauffeurRuntimeKit", "ChauffeurRemoteProtocol"]),
+        .testTarget(name: "ChauffeurRuntimeTests", dependencies: ["ChauffeurRuntimeKit", "ChauffeurRemoteProtocol", "ChauffeurRemoteClient", "ChauffeurTerminalTesting"]),
         .testTarget(name: "ChauffeurRemoteProtocolTests", dependencies: ["ChauffeurRemoteProtocol"]),
         .testTarget(name: "ChauffeurTerminalInterfaceTests", dependencies: ["ChauffeurTerminalInterface", "ChauffeurTerminalTesting"]),
         .testTarget(name: "ChauffeurRemoteClientTests", dependencies: ["ChauffeurRemoteClient", "ChauffeurRemoteProtocol", "ChauffeurTerminalInterface", "ChauffeurTerminalTesting"])

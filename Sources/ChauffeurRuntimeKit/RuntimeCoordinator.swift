@@ -42,6 +42,12 @@ public actor RuntimeCoordinator {
     private var notificationHeartbeat: Date?
     private var notificationHelperAvailable = false
     private var notificationCleanupPending = false
+    private var remoteAccess: RemoteAccessService?
+    public func attachRemoteAccess(_ service: RemoteAccessService) { remoteAccess = service }
+    private func remoteAccessService() throws -> RemoteAccessService {
+        guard let remoteAccess else { throw ChauffeurError("remote_access_unavailable", "Remote access is not available in this runtime") }
+        return remoteAccess
+    }
     public func configureNotifications(available: Bool) { notificationHelperAvailable = available }
     public func shouldLaunchNotificationHelper() async throws -> Bool {
         let enabled = try await ledger.notificationsEnabled()
@@ -103,7 +109,9 @@ public actor RuntimeCoordinator {
     }
     public func snapshot() async throws -> JSONValue {
         let snapshot = await store.refresh()
-        return .object(["store": try .from(snapshot), "sessions": try .from(Array(sessions.values).sorted { $0.createdAt < $1.createdAt }), "messages": try .from(await ledger.allMessages()), "delegations": try .from(await ledger.allDelegations()), "health": health(), "settings": try .from(settings), "notifications": try .from(await notificationStatus()), "snapshotStorage": try .from(snapshotStorage), "errors": try .from(recentErrors), "repositoryInventories": try .from(repositoryInventories)])
+        var object: [String: JSONValue] = ["store": try .from(snapshot), "sessions": try .from(Array(sessions.values).sorted { $0.createdAt < $1.createdAt }), "messages": try .from(await ledger.allMessages()), "delegations": try .from(await ledger.allDelegations()), "health": health(), "settings": try .from(settings), "notifications": try .from(await notificationStatus()), "snapshotStorage": try .from(snapshotStorage), "errors": try .from(recentErrors), "repositoryInventories": try .from(repositoryInventories)]
+        if let remoteAccess { object["remoteAccess"] = try .from(await remoteAccess.status()) }
+        return .object(object)
     }
     public func reconcileWorktrees() async {
         if let pending = worktreeScan { await pending.value; return }
@@ -493,6 +501,14 @@ public actor RuntimeCoordinator {
             await maintainHistory(applySettings: true)
             return try .from(value)
         case "reconcile": try await reconcile(); return health()
+        case "remoteAccessStatus": return try .from(await remoteAccessService().status())
+        case "setRemoteAccess":
+            guard let enabled = params["enabled"].bool else { throw ChauffeurError("invalid_argument", "enabled must be a boolean") }
+            return try .from(await remoteAccessService().setEnabled(enabled, port: params["port"].int))
+        case "beginPairing": return try .from(await remoteAccessService().beginPairing())
+        case "cancelPairing": return try .from(await remoteAccessService().cancelPairing())
+        case "revokeRemoteDevice": return try .from(await remoteAccessService().revokeDevice(params.uuid("deviceID")))
+        case "resetRemoteAccess": return try .from(await remoteAccessService().resetAccess())
         default: throw ChauffeurError("unknown_method", "Unknown runtime method")
         }
     }

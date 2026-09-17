@@ -49,7 +49,7 @@ public final class LocalSocketSink: TerminalOutputSink {
 }
 
 /// One-shot latch that suspends callers until it is opened.
-private final class OutputGate: @unchecked Sendable {
+final class OutputGate: @unchecked Sendable {
     private let lock = NSLock()
     private var opened = false
     private var waiters: [CheckedContinuation<Void, Never>] = []

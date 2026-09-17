@@ -57,6 +57,17 @@ import ChauffeurRuntimeKit
             let server = try IPCServer(root: root, runtime: runtime)
             try await runtime.start()
             server.start()
+            // The LAN listener only opens when the user enabled remote access;
+            // the real operation handlers replace the default dispatcher later.
+            let hostName = Host.current().localizedName ?? ProcessInfo.processInfo.hostName
+            let terminals = await runtime.terminals
+            let remoteOperations = RemoteOperationHandlers(runtime: runtime, root: root, hostName: hostName) { sessionID in
+                await terminals.currentGeneration(sessionID: sessionID) != nil
+            }
+            await remoteOperations.reconcileAfterRestart()
+            let remote = RemoteAccessService(root: root, runtime: runtime, dispatcher: remoteOperations, hostName: hostName)
+            await runtime.attachRemoteAccess(remote)
+            await remote.startIfEnabled()
             let recordedPort = (try? Data(contentsOf: root.appendingPathComponent("runtime/mcp-port.json"))).flatMap { try? JSONCoding.decode(Int.self, from: $0) }
             let reconcile = Task {
                 while !Task.isCancelled {
@@ -79,7 +90,7 @@ import ChauffeurRuntimeKit
             }
             let notifications = Task { await NotificationHelper.maintain(runtime: runtime, executable: executable, root: root) }
             defer { reconcile.cancel(); history.cancel(); repositories.cancel(); notifications.cancel() }
-            defer { _fixLifetime(server) }
+            defer { _fixLifetime(server); _fixLifetime(remote) }
             try await MCPServer.run(runtime: runtime, port: port ?? recordedPort ?? 0)
         } catch {
             // Startup failures can happen before our socket or file store exists.
