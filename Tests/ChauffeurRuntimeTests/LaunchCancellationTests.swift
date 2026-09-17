@@ -466,3 +466,26 @@ private struct LaunchFixture: Sendable {
         try? FileManager.default.removeItem(at: root)
     }
 }
+
+struct FailedLaunchCleanupTests {
+    /// A launch rejected before its terminal exists still leaves a failed
+    /// session behind; closing that session must not fail.
+    @Test func closingASessionThatFailedToStartSucceeds() async throws {
+        let fixture = try await LaunchFixture.make(); defer { fixture.cleanup() }
+        let set = try #require(await fixture.runtime.store.current().presetSets.first).value
+        // The fixture CLI reports a Claude Code version; as a Codex preset it fails the compatibility check.
+        let codex = AgentPreset(setID: set.id, name: "Mismatched", kind: .codex, executable: fixture.root.appendingPathComponent("fixture.py").path, configurationDirectory: fixture.root.path)
+        try await fixture.runtime.store.save(codex)
+        var request = fixture.request; request.presetID = codex.id; request.coordinationEnabled = true; request.retryKey = UUID()
+        var failure: ChauffeurError?
+        do { _ = try await fixture.runtime.launch(request) } catch let error as ChauffeurError { failure = error }
+        #expect(failure?.code == "integration_unavailable")
+        let sessions = try await fixture.runtime.snapshot()["sessions"].decode([Session].self)
+        let failed = try #require(sessions.first { $0.id == request.retryKey })
+        #expect(!failed.state.isLive)
+        let params: JSONValue = .object(["sessionID": .string(failed.id.uuidString)])
+        _ = try await fixture.runtime.handle(IPCRequest("closeSession", params: params))
+        let remaining = try await fixture.runtime.snapshot()["sessions"].decode([Session].self)
+        #expect(!remaining.contains { $0.id == failed.id })
+    }
+}

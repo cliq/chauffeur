@@ -33,6 +33,8 @@ public actor SnapshotStore {
     }
     /// Deletes a session's saved history: only our named file and its folder.
     public func delete(_ id: UUID) throws {
+        // A session that failed before its terminal started never had history to delete.
+        guard Self.exists(root.appendingPathComponent(id.uuidString)) else { return }
         let file = try file(id)
         if Self.exists(file) { try manager.removeItem(at: file) }
         let directory = root.appendingPathComponent(id.uuidString)

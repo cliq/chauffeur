@@ -59,7 +59,7 @@ public final class IPCServer: @unchecked Sendable {
                 let response: IPCResponse
                 do { response = IPCResponse(id: request.id, result: try await runtime.handle(request)) }
                 catch {
-                    let failure = error as? ChauffeurError ?? ChauffeurError("operation_failed", "Runtime operation failed")
+                    let failure = error as? ChauffeurError ?? ChauffeurError("operation_failed", "Runtime operation failed: \(error.localizedDescription)")
                     await runtime.record(failure)
                     response = IPCResponse(id: request.id, error: failure)
                 }
