@@ -294,8 +294,8 @@ struct ProjectWindow: View {
     /// attention badge beside it means waiting on the user.
     @ViewBuilder private func liveBadge(_ count: Int) -> some View {
         if count > 0 {
-            Text("\(count)").font(.caption2).fontWeight(.semibold).foregroundStyle(.white)
-                .padding(.horizontal, 6).padding(.vertical, 1).background(.green, in: Capsule())
+            Text("\(count)").font(.caption2).fontWeight(.semibold).foregroundStyle(.green)
+                .padding(.horizontal, 6).padding(.vertical, 1).background(.green.opacity(0.18), in: Capsule())
                 .help("\(count) live session\(count == 1 ? "" : "s")")
                 .accessibilityLabel("\(count) live sessions")
         }
@@ -384,7 +384,7 @@ struct ProjectWindow: View {
                             Text(row.isMain ? "Main checkout" : URL(fileURLWithPath: row.path).lastPathComponent).lineLimit(1)
                             if let unmerged = row.unmergedDescription {
                                 Text("·")
-                                HStack(spacing: 1) { Image(systemName: "arrow.up").imageScale(.small); Text("\(row.unmergedCount)") }
+                                HStack(spacing: 3) { UnmergedCommitsGlyph(); Text("\(row.unmergedCount)") }
                                     .help(unmerged).accessibilityElement(children: .combine).accessibilityLabel(unmerged)
                                     .accessibilityIdentifier("repository.unmerged.\(row.path)")
                             }
