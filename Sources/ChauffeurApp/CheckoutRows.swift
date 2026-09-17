@@ -13,6 +13,10 @@ struct CheckoutRow: Identifiable {
     let isMain: Bool
     let managed: Bool
     let sessions: [Session]
+    /// Git status from the last inventory scan; `nil` until the checkout was inspected.
+    var hasUncommittedChanges: Bool? = nil
+    var unmergedCommits: Int? = nil
+    var baseBranch: String? = nil
     var id: String { path }
     var title: String { branch.isEmpty ? (isMain ? "Main checkout" : "Detached HEAD") : branch }
     /// The checkout no longer exists; the row only carries history.
@@ -24,6 +28,20 @@ struct CheckoutRow: Identifiable {
         case .missing: "Finished"
         case .inaccessible: "Inaccessible"
         }
+    }
+    /// Commits the base branch lacks; zero when the branch is merged or unknown.
+    var unmergedCount: Int { finished ? 0 : (unmergedCommits ?? 0) }
+    var isDirty: Bool { !finished && hasUncommittedChanges == true }
+    var unmergedDescription: String? {
+        guard unmergedCount > 0 else { return nil }
+        return "\(unmergedCount) commit\(unmergedCount == 1 ? "" : "s") not merged" + (baseBranch.map { " into \($0)" } ?? "")
+    }
+    /// The status facts the worktree manager lists after availability.
+    var gitStatusLabels: [String] { (isDirty ? ["Uncommitted changes"] : []) + (unmergedDescription.map { [$0] } ?? []) }
+    mutating func applyStatus(from entry: GitWorktree?) {
+        hasUncommittedChanges = entry?.hasUncommittedChanges
+        unmergedCommits = entry?.unmergedCommits
+        baseBranch = entry?.baseBranch
     }
 }
 
@@ -37,8 +55,9 @@ enum CheckoutRows {
         let entries = inventory?.entries ?? []
         let allSessions = sessions
         func history(at path: String) -> [Session] { WorktreeSessions.sessions(allSessions, folder: folder, path: path, worktrees: records) }
-        let mainBranch = entries.first { $0.path == folder.canonicalPath }?.branch ?? ""
-        let main = CheckoutRow(folderID: folder.id, path: folder.canonicalPath, branch: mainBranch, availability: folder.availability, worktreeID: nil, isMain: true, managed: false, sessions: history(at: folder.canonicalPath))
+        let mainEntry = entries.first { $0.path == folder.canonicalPath }
+        var main = CheckoutRow(folderID: folder.id, path: folder.canonicalPath, branch: mainEntry?.branch ?? "", availability: folder.availability, worktreeID: nil, isMain: true, managed: false, sessions: history(at: folder.canonicalPath))
+        main.applyStatus(from: mainEntry)
         var rows: [CheckoutRow] = []
         var matched = Set<UUID>()
         for entry in entries where entry.path != folder.canonicalPath {
@@ -48,7 +67,9 @@ enum CheckoutRows {
             let availability = entry.availability ?? .available
             // A stale Git entry with no history is left for Manage Worktrees to prune.
             if availability != .available && history.isEmpty { continue }
-            rows.append(CheckoutRow(folderID: folder.id, path: entry.path, branch: entry.branch, availability: availability, worktreeID: record?.id, isMain: false, managed: record?.managed ?? false, sessions: history))
+            var row = CheckoutRow(folderID: folder.id, path: entry.path, branch: entry.branch, availability: availability, worktreeID: record?.id, isMain: false, managed: record?.managed ?? false, sessions: history)
+            row.applyStatus(from: entry)
+            rows.append(row)
         }
         for record in records where !matched.contains(record.id) && record.path != folder.canonicalPath && !rows.contains(where: { $0.path == record.path }) {
             let history = history(at: record.path)

@@ -168,3 +168,90 @@ struct WorktreeTests {
         #expect(try await git(["show-ref", "--verify", "refs/heads/task/one"]).status != 0)
     }
 }
+
+struct WorktreeGitStatusTests {
+    private static func git(_ directory: URL, _ args: [String]) async throws {
+        let result = try await ProcessRunner.run("/usr/bin/git", ["-C", directory.path, "-c", "core.hooksPath=/dev/null", "-c", "commit.gpgsign=false", "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid"] + args)
+        try #require(result.status == 0, "Git fixture failed: \(result.error)")
+    }
+
+    @Test func createdWorktreesRememberTheirStartingBranch() async throws {
+        let root = URL(fileURLWithPath: "/tmp/chauffeur-base-branch-\(UUID())").resolvingSymlinksInPath()
+        let repo = root.appendingPathComponent("repo")
+        try FileManager.default.createDirectory(at: repo, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try await Self.git(repo, ["init", "-b", "main"])
+        try await Self.git(repo, ["commit", "--allow-empty", "-m", "Initial"])
+        try await Self.git(repo, ["branch", "develop"])
+        try await Self.git(repo, ["tag", "v1"])
+        let manager = WorktreeManager(root: root.appendingPathComponent("managed"))
+        let folder = ProjectFolder(path: repo.path)
+        #expect(try await manager.create(projectID: UUID(), folder: folder, branch: "from-head", baseRef: "HEAD").baseBranch == "main")
+        #expect(try await manager.create(projectID: UUID(), folder: folder, branch: "from-develop", baseRef: "develop").baseBranch == "develop")
+        // A tag or commit is a starting point, not a branch to merge back into.
+        #expect(try await manager.create(projectID: UUID(), folder: folder, branch: "from-tag", baseRef: "v1").baseBranch == nil)
+    }
+
+    @Test func inventoryReportsUncommittedChangesAndUnmergedCommits() async throws {
+        let root = URL(fileURLWithPath: "/tmp/chauffeur-git-status-\(UUID())").resolvingSymlinksInPath()
+        let repo = root.appendingPathComponent("repo")
+        try FileManager.default.createDirectory(at: repo, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try Data("build/\n".utf8).write(to: repo.appendingPathComponent(".gitignore"))
+        try await Self.git(repo, ["init", "-b", "main"])
+        try await Self.git(repo, ["add", ".gitignore"])
+        try await Self.git(repo, ["commit", "-m", "Initial"])
+        try await Self.git(repo, ["branch", "develop"])
+        let manager = WorktreeManager(root: root.appendingPathComponent("managed"))
+        let folder = ProjectFolder(path: repo.path)
+        let fromMain = try await manager.create(projectID: UUID(), folder: folder, branch: "task/main", baseRef: "HEAD")
+        let fromDevelop = try await manager.create(projectID: UUID(), folder: folder, branch: "task/develop", baseRef: "develop")
+        let external = root.appendingPathComponent("external")
+        try await Self.git(repo, ["worktree", "add", "-b", "external", external.path, "HEAD"])
+        let bases = [fromMain.path: fromMain.baseBranch, fromDevelop.path: fromDevelop.baseBranch]
+        func annotated() async throws -> [String: GitWorktree] {
+            let entries = await manager.annotated(try await manager.inventory(at: repo.path)) { bases[$0.path] ?? nil }
+            return Dictionary(uniqueKeysWithValues: entries.map { ($0.path, $0) })
+        }
+        var status = try await annotated()
+        let mainPath = Paths.canonical(repo.path)
+        #expect(status[mainPath]?.hasUncommittedChanges == false && status[mainPath]?.unmergedCommits == nil && status[mainPath]?.baseBranch == nil)
+        for path in [fromMain.path, fromDevelop.path, Paths.canonical(external.path)] {
+            #expect(status[path]?.hasUncommittedChanges == false, "\(path)")
+            #expect(status[path]?.unmergedCommits == 0, "\(path)")
+        }
+        #expect(status[fromMain.path]?.baseBranch == "main")
+        #expect(status[fromDevelop.path]?.baseBranch == "develop")
+        // A worktree Chauffeur did not create is measured against the main checkout's branch.
+        #expect(status[Paths.canonical(external.path)]?.baseBranch == "main")
+
+        // Ignored files are not pending work; untracked and modified files are.
+        let ignored = URL(fileURLWithPath: fromMain.path).appendingPathComponent("build")
+        try FileManager.default.createDirectory(at: ignored, withIntermediateDirectories: true)
+        try Data("out".utf8).write(to: ignored.appendingPathComponent("artifact"))
+        try Data("note".utf8).write(to: URL(fileURLWithPath: fromDevelop.path).appendingPathComponent("notes.txt"))
+        status = try await annotated()
+        #expect(status[fromMain.path]?.hasUncommittedChanges == false)
+        #expect(status[fromDevelop.path]?.hasUncommittedChanges == true)
+        #expect(try await manager.hasChanges(at: fromMain.path) == true) // Deletion still warns about ignored files.
+
+        // Commits count against the starting branch, not the main checkout.
+        try await Self.git(URL(fileURLWithPath: fromDevelop.path), ["add", "notes.txt"])
+        try await Self.git(URL(fileURLWithPath: fromDevelop.path), ["commit", "-m", "Notes"])
+        try await Self.git(URL(fileURLWithPath: fromDevelop.path), ["commit", "--allow-empty", "-m", "More"])
+        try await Self.git(repo, ["commit", "--allow-empty", "-m", "Main moves on"])
+        status = try await annotated()
+        #expect(status[fromDevelop.path]?.unmergedCommits == 2)
+        #expect(status[fromDevelop.path]?.hasUncommittedChanges == false)
+        #expect(status[fromMain.path]?.unmergedCommits == 0)
+        // Merging into the base clears the count; a deleted base reports nothing.
+        try await Self.git(repo, ["checkout", "develop"])
+        try await Self.git(repo, ["merge", "--ff-only", "task/develop"])
+        try await Self.git(repo, ["checkout", "main"])
+        status = try await annotated()
+        #expect(status[fromDevelop.path]?.unmergedCommits == 0)
+        try await Self.git(repo, ["branch", "-D", "develop"])
+        status = try await annotated()
+        #expect(status[fromDevelop.path]?.unmergedCommits == nil && status[fromDevelop.path]?.baseBranch == "develop")
+    }
+}

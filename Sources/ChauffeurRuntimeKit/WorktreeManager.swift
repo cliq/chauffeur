@@ -198,12 +198,14 @@ public actor WorktreeManager {
         try Validation.require(!baseRef.isEmpty && !baseRef.hasPrefix("-") && !baseRef.contains("\0"), "Base ref is required and cannot begin with '-' or contain NUL")
         try await validateBranch(branch, repository: repository)
         let baseCommit = try await git(repository, ["rev-parse", "--verify", "\(baseRef)^{commit}"]).trimmingCharacters(in: .whitespacesAndNewlines)
+        let baseBranchName = (try? await branchName(of: baseRef, repository: repository)) ?? nil
         let repoID = try await repositoryID(at: repository)
         let destination = destination(repositoryID: repoID, branch: branch)
         reservations.insert(destination.path); defer { reservations.remove(destination.path) }
         try FileManager.default.createDirectory(at: destination.deletingLastPathComponent(), withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
         _ = try await git(repository, ["worktree", "add", "-b", branch, "--", destination.path, baseCommit])
         var result = Worktree(projectID: projectID, folderID: folder.id, repositoryID: repoID, path: Paths.canonical(destination.path), repositoryPath: repository, branch: branch, baseCommit: baseCommit, managed: true)
+        result.baseBranch = baseBranchName
         result.gitIdentity = try? await identity(at: result.path)
         return result
     }
@@ -240,6 +242,41 @@ public actor WorktreeManager {
     public func hasChanges(at path: String) async throws -> Bool {
         // Ignored files also disappear when the checkout is removed.
         try await !git(path, ["status", "--porcelain=v1", "-z", "--untracked-files=all", "--ignored"]).isEmpty
+    }
+    /// Whether the checkout has work to commit: tracked modifications or
+    /// untracked files. Ignored files are build output, not pending work.
+    public func hasUncommittedChanges(at path: String) async throws -> Bool {
+        try await !git(path, ["status", "--porcelain=v1", "-z", "--untracked-files=normal"]).isEmpty
+    }
+    /// The local branch a ref names (`HEAD` resolves to the checked-out branch),
+    /// or `nil` for a detached commit, tag, or remote ref.
+    public func branchName(of ref: String, repository: String) async throws -> String? {
+        let reference = Self.line(try await git(repository, ["rev-parse", "--symbolic-full-name", "--verify", "--quiet", "--end-of-options", ref]))
+        return reference.hasPrefix("refs/heads/") ? String(reference.dropFirst("refs/heads/".count)) : nil
+    }
+    /// Commits reachable from `branch` but not from `base`, or `nil` when either
+    /// branch is gone or they are the same branch.
+    public func unmergedCommits(at path: String, branch: String, base: String?) async -> Int? {
+        guard let base, !branch.isEmpty, base != branch else { return nil }
+        guard let count = try? await git(path, ["rev-list", "--count", "--end-of-options", "refs/heads/\(base)..refs/heads/\(branch)"]) else { return nil }
+        return Int(count.trimmingCharacters(in: .whitespacesAndNewlines))
+    }
+    /// Adds working-tree and unmerged-commit status to available entries. The
+    /// first entry is the main checkout, whose branch is the fallback base for
+    /// worktrees Chauffeur did not create. A checkout that cannot be inspected
+    /// keeps `nil` status rather than a guess.
+    public func annotated(_ entries: [GitWorktree], baseBranch: (GitWorktree) -> String?) async -> [GitWorktree] {
+        var entries = entries
+        let mainBranch = entries.first?.branch ?? ""
+        for index in entries.indices where entries[index].availability ?? .available == .available {
+            let path = entries[index].path
+            entries[index].hasUncommittedChanges = try? await hasUncommittedChanges(at: path)
+            guard index > 0 else { continue } // The main checkout has no starting point.
+            let base = baseBranch(entries[index]) ?? (mainBranch.isEmpty ? nil : mainBranch)
+            entries[index].baseBranch = base
+            entries[index].unmergedCommits = await unmergedCommits(at: path, branch: entries[index].branch, base: base)
+        }
+        return entries
     }
     public func deleteBranchIfUnused(_ branch: String, repository: String) async {
         guard !branch.isEmpty else { return } // Detached HEAD.

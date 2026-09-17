@@ -8,6 +8,15 @@ public struct GitWorktree: Codable, Equatable, Sendable, Identifiable {
     public var prunable: Bool
     public var gitIdentity: UUID?
     public var availability: Availability?
+    /// Tracked modifications or untracked files in the checkout. Ignored files
+    /// do not count. `nil` until the runtime has inspected the checkout.
+    public var hasUncommittedChanges: Bool?
+    /// Commits on this checkout's branch that `baseBranch` does not contain.
+    /// `nil` when the base is unknown, gone, or is this branch itself.
+    public var unmergedCommits: Int?
+    /// The branch `unmergedCommits` is measured against: the branch the worktree
+    /// started from when Chauffeur created it, otherwise the main checkout's branch.
+    public var baseBranch: String?
     public var id: String { path }
     public init(path: String, commit: String, branch: String, locked: Bool, prunable: Bool) {
         self.path = path; self.commit = commit; self.branch = branch; self.locked = locked; self.prunable = prunable
@@ -56,4 +65,28 @@ public enum InventoryReadiness: Equatable, Sendable {
         }
     }
     public var isPending: Bool { self == .pending }
+}
+
+/// What `previewWorktreeDeletion` reports before the user confirms a removal.
+public struct WorktreeDeletionPreview: Codable, Equatable, Sendable {
+    /// Uncommitted, untracked, or ignored files: everything removal deletes.
+    public var hasChanges: Bool
+    public var unmergedCommits: Int?
+    public var baseBranch: String?
+    public init(hasChanges: Bool, unmergedCommits: Int? = nil, baseBranch: String? = nil) {
+        self.hasChanges = hasChanges; self.unmergedCommits = unmergedCommits; self.baseBranch = baseBranch
+    }
+    /// Warnings the confirmation shows before the removal description, one per
+    /// line. Empty when nothing would be lost.
+    public var warnings: [String] {
+        var lines: [String] = []
+        if hasChanges { lines.append("This worktree has uncommitted, untracked, or ignored files. These changes will be permanently lost.") }
+        if let unmergedCommits, unmergedCommits > 0 {
+            let commits = "\(unmergedCommits) commit\(unmergedCommits == 1 ? "" : "s")"
+            let base = baseBranch.map { " into \($0)" } ?? ""
+            lines.append("Its branch has \(commits) not merged\(base). The branch is kept, but it no longer has a checkout.")
+        }
+        return lines
+    }
+    public var warningText: String { warnings.isEmpty ? "" : warnings.joined(separator: "\n") + "\n\n" }
 }

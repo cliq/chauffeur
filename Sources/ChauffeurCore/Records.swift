@@ -196,6 +196,9 @@ public struct Worktree: Record, Equatable {
     public var repositoryPath: String
     public var branch: String
     public var baseCommit: String
+    /// The branch the worktree was created from, when the base ref named one.
+    /// Unmerged-commit counts are measured against it.
+    public var baseBranch: String?
     public var managed: Bool
     public var creationRequestFingerprint: String?
     public var gitIdentity: UUID?

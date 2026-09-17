@@ -90,7 +90,7 @@ struct ProjectWindow: View {
     @State private var sidebarReveal: SidebarReveal?
     @State private var pendingWorktree: Worktree?
     @State private var deletingCheckout: CheckoutRow?
-    @State private var deletionHasChanges = false
+    @State private var deletionPreview = WorktreeDeletionPreview(hasChanges: false)
     @State private var checkingDeletion = false
     private struct TabClosure {
         let session: Session
@@ -290,6 +290,16 @@ struct ProjectWindow: View {
             }.listStyle(.sidebar)
         }
     }
+    /// Sessions still running in a checkout. Green means working; the orange
+    /// attention badge beside it means waiting on the user.
+    @ViewBuilder private func liveBadge(_ count: Int) -> some View {
+        if count > 0 {
+            Text("\(count)").font(.caption2).fontWeight(.semibold).foregroundStyle(.white)
+                .padding(.horizontal, 6).padding(.vertical, 1).background(.green, in: Capsule())
+                .help("\(count) live session\(count == 1 ? "" : "s")")
+                .accessibilityLabel("\(count) live sessions")
+        }
+    }
     @ViewBuilder private func badge(_ count: Int) -> some View {
         if count > 0 {
             Text("\(count)").font(.caption2).fontWeight(.semibold).foregroundStyle(.white)
@@ -361,12 +371,28 @@ struct ProjectWindow: View {
             Label {
                 HStack(alignment: .top) {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(row.title).lineLimit(1)
-                        Text(row.isMain ? "Main checkout" : URL(fileURLWithPath: row.path).lastPathComponent).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                        HStack(spacing: 4) {
+                            Text(row.title).lineLimit(1)
+                            if row.isDirty {
+                                Circle().fill(.secondary).frame(width: 6, height: 6)
+                                    .help("Uncommitted changes")
+                                    .accessibilityLabel("Uncommitted changes")
+                                    .accessibilityIdentifier("repository.dirty.\(row.path)")
+                            }
+                        }
+                        HStack(spacing: 4) {
+                            Text(row.isMain ? "Main checkout" : URL(fileURLWithPath: row.path).lastPathComponent).lineLimit(1)
+                            if let unmerged = row.unmergedDescription {
+                                Text("·")
+                                Label("\(row.unmergedCount)", systemImage: "arrow.up").labelStyle(.titleAndIcon).imageScale(.small)
+                                    .help(unmerged).accessibilityLabel(unmerged)
+                                    .accessibilityIdentifier("repository.unmerged.\(row.path)")
+                            }
+                        }.font(.caption).foregroundStyle(.secondary)
                         if let status = row.statusLabel { Text(status).font(.caption).foregroundStyle(.secondary) }
                     }
                     Spacer(minLength: 4)
-                    if live > 0 { Text("\(live)").font(.caption2).foregroundStyle(.secondary).help("\(live) live sessions") }
+                    liveBadge(live)
                     badge(WorktreeSessions.attentionCount(sessions))
                 }
             } icon: { Image(systemName: row.isMain ? "house" : "arrow.triangle.branch") }
@@ -687,7 +713,7 @@ struct ProjectWindow: View {
         guard let row else { return "" }
         let history = row.sessions.isEmpty ? "No session history is affected." : "\(row.sessions.count) finished session\(row.sessions.count == 1 ? "" : "s") and their saved terminal history are deleted."
         if row.finished { return "The checkout is already gone.\n\(history)" }
-        return (deletionHasChanges ? "This worktree has uncommitted, untracked, or ignored files. These changes will be permanently lost.\n\n" : "") + "Removes the checkout at \(row.path) from disk with git worktree remove. Branches with no unique commits are also deleted.\n\(history)"
+        return deletionPreview.warningText + "Removes the checkout at \(row.path) from disk with git worktree remove. Branches with no unique commits are also deleted.\n\(history)"
     }
     private func showWorktrees(folderID: UUID?) {
         worktreeSheet = WorktreeSheet(folderID: folderID)
@@ -723,13 +749,13 @@ struct ProjectWindow: View {
         model.perform {
             defer { checkingDeletion = false }
             let preview = try await model.call("previewWorktreeDeletion", .object(["projectID": .string(project.id.uuidString), "folderID": .string(row.folderID.uuidString), "path": .string(row.path)]))
-            deletionHasChanges = preview["hasChanges"].bool == true
+            deletionPreview = try preview.decode(WorktreeDeletionPreview.self)
             deletingCheckout = row
         }
     }
     private func deleteWorktree(_ row: CheckoutRow) {
         guard let project else { return }
-        let discardChanges = deletionHasChanges
+        let discardChanges = deletionPreview.hasChanges
         model.perform {
             _ = try await model.call("deleteWorktree", .object(["projectID": .string(project.id.uuidString), "folderID": .string(row.folderID.uuidString), "path": .string(row.path), "discardChanges": .bool(discardChanges)]))
             if layout.selectedWorktreePath.map({ Paths.canonical($0) == Paths.canonical(row.path) }) == true {

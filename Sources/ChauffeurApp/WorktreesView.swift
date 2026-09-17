@@ -13,7 +13,7 @@ struct WorktreesView: View {
     @State private var busy = false
     @State private var failure: String?
     @State private var removing: CheckoutRow?
-    @State private var deletionHasChanges = false
+    @State private var deletionPreview = WorktreeDeletionPreview(hasChanges: false)
     @State private var creation: WorktreeCreationRequest?
     init(project: Project, initialFolderID: UUID? = nil, worktreeCreated: @escaping (Worktree) -> Void = { _ in }) {
         self.project = project
@@ -53,7 +53,8 @@ struct WorktreesView: View {
                         VStack(alignment: .leading, spacing: 5) {
                             Text(row.title).fontWeight(.medium)
                             Text(row.path).font(.caption).textSelection(.enabled)
-                            Text([row.managed ? "Chauffeur managed" : "External", row.statusLabel ?? "Available"].joined(separator: " · ")).font(.caption).foregroundStyle(.secondary)
+                            Text(([row.managed ? "Chauffeur managed" : "External", row.statusLabel ?? "Available"] + row.gitStatusLabels).joined(separator: " · ")).font(.caption).foregroundStyle(.secondary)
+                                .accessibilityIdentifier("worktrees.status.\(row.path)")
                             if observation?.entries.first(where: { $0.path == row.path })?.locked == true { Text("Locked in Git").font(.caption).foregroundStyle(.secondary) }
                             if !row.sessions.isEmpty {
                                 Text("Sessions: \(row.sessions.map(\.title).joined(separator: ", "))").font(.caption).lineLimit(2).help(row.sessions.map(\.title).joined(separator: ", "))
@@ -116,14 +117,14 @@ struct WorktreesView: View {
             .confirmationDialog("Delete \(removing?.title ?? "worktree")?", isPresented: Binding(get: { removing != nil }, set: { if !$0 { removing = nil } }), titleVisibility: .visible) {
                 Button("Delete Worktree", role: .destructive) {
                     if let removing {
-                        let discardChanges = deletionHasChanges
+                        let discardChanges = deletionPreview.hasChanges
                         run { _ = try await model.call("deleteWorktree", .object(["projectID": .string(project.id.uuidString), "folderID": .string(removing.folderID.uuidString), "path": .string(removing.path), "discardChanges": .bool(discardChanges)])) }
                     }
                     removing = nil
                 }
             } message: {
                 if let removing {
-                    Text((deletionHasChanges ? "This worktree has uncommitted, untracked, or ignored files. These changes will be permanently lost.\n\n" : "") + (removing.finished ? "The checkout is already gone." : "Removes \(removing.path) from disk. Branches with no unique commits are also deleted.")
+                    Text(deletionPreview.warningText + (removing.finished ? "The checkout is already gone." : "Removes \(removing.path) from disk. Branches with no unique commits are also deleted.")
                          + (removing.sessions.isEmpty ? "" : "\n\(removing.sessions.count) finished session\(removing.sessions.count == 1 ? "" : "s") and their terminal history are deleted."))
                 }
             }
@@ -131,7 +132,7 @@ struct WorktreesView: View {
     private func prepareDeletion(_ row: CheckoutRow) {
         run {
             let preview = try await model.call("previewWorktreeDeletion", .object(["projectID": .string(project.id.uuidString), "folderID": .string(row.folderID.uuidString), "path": .string(row.path)]))
-            deletionHasChanges = preview["hasChanges"].bool == true
+            deletionPreview = try preview.decode(WorktreeDeletionPreview.self)
             removing = row
         }
     }

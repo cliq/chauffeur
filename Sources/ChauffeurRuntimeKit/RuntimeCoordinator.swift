@@ -135,6 +135,11 @@ public actor RuntimeCoordinator {
                 }
             } else { observations.append(result) }
         }
+        let recordedBases = Dictionary(records.map { (Paths.canonical($0.value.path), $0.value.baseBranch) }, uniquingKeysWith: { first, _ in first })
+        for index in observations.indices where observations[index].status == .available {
+            if Task.isCancelled { return }
+            observations[index].entries = await worktrees.annotated(observations[index].entries) { recordedBases[$0.path] ?? nil }
+        }
         for stored in records {
             let observed = repositories[stored.value.repositoryID]
                 ?? observations.first { observation in
@@ -529,11 +534,14 @@ public actor RuntimeCoordinator {
             throw ChauffeurError("active_worktree", "Stop sessions using this worktree before deleting it", path: path)
         }
         if preview {
-            let dirty: Bool
+            var result = WorktreeDeletionPreview(hasChanges: false)
             if let entry, entry.availability ?? .available == .available {
-                dirty = try await worktrees.hasChanges(at: path)
-            } else { dirty = false }
-            return .object(["hasChanges": .bool(dirty)])
+                result.hasChanges = try await worktrees.hasChanges(at: path)
+                let mainBranch = inventory.first?.branch ?? ""
+                result.baseBranch = records.first?.value.baseBranch ?? (mainBranch.isEmpty ? nil : mainBranch)
+                result.unmergedCommits = await worktrees.unmergedCommits(at: path, branch: entry.branch, base: result.baseBranch)
+            }
+            return try .from(result)
         }
         let removalID = records.first?.value.id ?? UUID()
         try checkoutClaims.beginRemoval(removalID, path: path, worktreeIDs: recordIDs, gitIdentity: entry?.gitIdentity, sessions: Array(sessions.values))

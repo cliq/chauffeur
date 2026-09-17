@@ -2,8 +2,16 @@
 
 Expand a repository in the sidebar's **Repositories** mode to see its main
 checkout and its other Git worktrees, including external checkouts. Each row
-shows its branch and directory name, a live-session count, and an orange badge
-when a session needs attention; hover for the full path. Select a checkout to show
+shows its branch and directory name, a green badge counting its live sessions,
+and an orange badge when a session needs attention; hover for the full path. A dot
+after the branch name means the checkout has uncommitted or untracked files
+(ignored files do not count). An up arrow with a count in the caption means the
+branch has commits not yet merged into its starting point: the base branch chosen
+when Chauffeur created the worktree, or the main checkout's branch for worktrees
+created elsewhere. Hover either indicator for details. Both come from the
+background service's Git inventory scan, so they refresh within a few seconds of a
+commit or edit and are absent until a checkout has been inspected. The Manage
+Worktrees sheet lists the same facts in each row's status line. Select a checkout to show
 its sessions above the terminal, with **Launch Agent…** and **Open Shell** for
 that checkout in the header, the empty state, and the row's context menu. Select
 the repository row for an overview of all its checkouts. Every worktree Git
@@ -16,7 +24,9 @@ entries whose directory is gone are left for **Prune** in Manage Worktrees.
 Right-click a worktree and choose **Delete Worktree…** to remove its checkout
 together with its finished sessions and saved terminal history. Stop live sessions
 first. The confirmation warns when uncommitted, untracked, or ignored files will
-be permanently lost. Branches with no commits unique to other local branches are
+be permanently lost, and when the branch has commits not merged into its starting
+point; in that case the branch is kept but loses its checkout. Branches with no
+commits unique to other local branches are
 also deleted; branches with unique commits are preserved. On a Finished row the
 same action removes the history and cleans up an eligible branch.
 
