@@ -870,9 +870,9 @@ public actor RuntimeCoordinator {
         }
         session.updatedAt = Date(); try await persist(session, notification: notification); return .object(["accepted": .bool(true)])
     }
-    public func attach(sessionID: UUID, owner: UUID, connection: SocketConnection, cols: Int, rows: Int) async throws {
+    public func attach(sessionID: UUID, sink: any TerminalOutputSink, cols: Int, rows: Int, takeControl: Bool) async throws -> AttachmentGeneration {
         guard sessions[sessionID]?.state.isLive == true else { throw ChauffeurError("not_live", "Session is not live. Inspect its details or resume explicitly") }
-        try await terminals.attach(sessionID: sessionID, owner: owner, connection: connection, cols: cols, rows: rows)
+        return try await terminals.attach(sessionID: sessionID, sink: sink, cols: cols, rows: rows, takeControl: takeControl)
     }
     public func callTool(token: String, name: String, arguments: JSONValue) async throws -> JSONValue {
         let caller = try await ledger.authenticate(token)

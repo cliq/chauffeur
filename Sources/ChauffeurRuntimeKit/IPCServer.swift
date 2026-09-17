@@ -68,26 +68,52 @@ public final class IPCServer: @unchecked Sendable {
         } catch { /* EOF or detached UI: agent ownership is unchanged. */ }
     }
     private func serveTerminal(_ connection: SocketConnection, request: IPCRequest) async throws {
-        let sessionID = try request.params.uuid("sessionID"), owner = try request.params.uuid("owner")
+        let sessionID = try request.params.uuid("sessionID")
         guard request.version == WireProtocol.major else { try await connection.sendAsync(IPCResponse(id: request.id, error: ChauffeurError("protocol_mismatch", "App and service versions differ"))); return }
-        try await connection.sendAsync(IPCResponse(id: request.id, result: .object(["stream": .bool(true)])))
+        // Output is pumped asynchronously, so hold it until the acknowledgement
+        // is on the wire: the client must never decode a terminal frame as the
+        // attach reply.
+        let sink = LocalSocketSink(connection: connection, holdOutput: true)
+        let generation: AttachmentGeneration
         do {
-            try await runtime.attach(sessionID: sessionID, owner: owner, connection: connection, cols: request.params["cols"].int ?? 100, rows: request.params["rows"].int ?? 30)
+            generation = try await runtime.attach(sessionID: sessionID, sink: sink, cols: request.params["cols"].int ?? 100, rows: request.params["rows"].int ?? 30, takeControl: request.params["takeControl"].bool ?? false)
+        } catch {
+            let failure = error as? ChauffeurError ?? ChauffeurError("attach_failed", "Terminal attachment failed: \(error.localizedDescription)")
+            try await connection.sendAsync(IPCResponse(id: request.id, error: failure)); return
+        }
+        do {
+            defer { sink.releaseOutput() }
+            try await connection.sendAsync(IPCResponse(id: request.id, result: .object(["stream": .bool(true), "generation": .number(Double(generation))])))
+        } catch {
+            await runtime.terminals.detach(sessionID: sessionID, generation: generation); throw error
+        }
+        do {
             while true {
                 let packet = try await connection.receiveAsync(IPCRequest.self)
                 guard packet.version == WireProtocol.major else { throw ChauffeurError("protocol_mismatch", "Terminal protocol changed") }
                 switch packet.method {
                 case "input":
                     guard let encoded = packet.params["bytes"].string, let bytes = Data(base64Encoded: encoded) else { throw ChauffeurError("invalid_input", "Invalid terminal input") }
-                    try await runtime.terminals.input(sessionID: sessionID, owner: owner, bytes: bytes)
-                case "resize": try await runtime.terminals.resize(sessionID: sessionID, owner: owner, cols: packet.params["cols"].int ?? 100, rows: packet.params["rows"].int ?? 30)
-                case "detach": await runtime.terminals.detach(sessionID: sessionID, owner: owner); return
+                    try await runtime.terminals.input(sessionID: sessionID, generation: Self.generation(packet.params), bytes: bytes)
+                case "resize": try await runtime.terminals.resize(sessionID: sessionID, generation: Self.generation(packet.params), cols: packet.params["cols"].int ?? 100, rows: packet.params["rows"].int ?? 30)
+                case "detach": await runtime.terminals.detach(sessionID: sessionID, generation: try Self.generation(packet.params)); return
                 default: throw ChauffeurError("unknown_terminal_command", "Invalid terminal command")
                 }
             }
         } catch {
-            try? await connection.sendAsync(TerminalPacket(kind: "error", message: (error as? ChauffeurError)?.message ?? "Terminal detached"))
-            await runtime.terminals.detach(sessionID: sessionID, owner: owner)
+            let failure = error as? ChauffeurError
+            if failure?.code == "attachment_revoked" {
+                // The client may already have been told through its sink; make
+                // sure a stale command never surfaces as a generic disconnect.
+                try? await connection.sendAsync(TerminalPacket(kind: "controlLost", message: failure?.message))
+            } else {
+                try? await connection.sendAsync(TerminalPacket(kind: "error", message: failure?.message ?? "Terminal detached"))
+            }
+            await runtime.terminals.detach(sessionID: sessionID, generation: generation)
         }
+    }
+    private static func generation(_ params: JSONValue) throws -> AttachmentGeneration {
+        guard let value = params["generation"].int, value >= 0 else { throw ChauffeurError("invalid_argument", "generation is required") }
+        return AttachmentGeneration(value)
     }
 }

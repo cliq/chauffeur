@@ -16,7 +16,16 @@ public actor TmuxHost {
     public let socketPath: String
     private let runtimeDirectory: URL
     private let ctlPath: String
-    private var attachments: [UUID: (UUID, PTYAttachment)] = [:]
+    private struct Attachment {
+        let generation: AttachmentGeneration
+        let pty: PTYAttachment
+        let pump: AttachmentPump
+        let sink: any TerminalOutputSink
+    }
+    private var attachments: [UUID: Attachment] = [:]
+    /// Never reused, so a revoked client's late commands can be told apart
+    /// from the client that replaced it.
+    private var nextGeneration: AttachmentGeneration = 1
     private var spawning = Set<UUID>()
     private let environment: [String: String]
     public init(runtimeDirectory: URL, ctlPath: String, environment: [String: String]) throws {
@@ -81,29 +90,66 @@ public actor TmuxHost {
             throw error
         }
     }
-    public func attach(sessionID: UUID, owner: UUID, connection: SocketConnection, cols: Int, rows: Int) async throws {
-        guard attachments[sessionID] == nil else { throw ChauffeurError("already_attached", "This terminal is attached in another view. Close that view before attaching") }
-        // Reserve ownership before any suspension; concurrent attaches cannot win.
+    /// Attaches `sink` to a session's terminal and returns the generation that
+    /// authorizes its input and resize commands. A session has one controlling
+    /// client at a time: with `takeControl` the current one is revoked and told
+    /// it lost control; without it the call fails with `terminal_busy`.
+    ///
+    /// Everything up to storing the new attachment runs without suspension, so
+    /// a stale client's concurrent input cannot slip in between the revocation
+    /// and the hand-over.
+    public func attach(sessionID: UUID, sink: any TerminalOutputSink, cols: Int, rows: Int, takeControl: Bool) async throws -> AttachmentGeneration {
+        let generation = nextGeneration; nextGeneration += 1
+        if let previous = attachments[sessionID] {
+            guard takeControl else { throw ChauffeurError("terminal_busy", "This terminal is controlled by another client. Take control to use it here") }
+            attachments.removeValue(forKey: sessionID)
+            previous.pump.revoke(); previous.pty.close()
+            let lostSink = previous.sink
+            Task.detached { await lostSink.close(reason: .controlLost, message: "Another client took control of this terminal") }
+        }
         // SwiftTerm supports OSC 8 links, but tmux's generic xterm-256color
         // features do not advertise them. Set this on every attachment so links
         // survive redraws and reconnects to already-running tmux servers too.
         // SwiftTerm always decodes UTF-8. launchd may supply no locale; without
         // -u tmux replaces Unicode with underscores before it reaches the UI.
-        let attachment = try PTYAttachment(executable: executable, arguments: ["-u", "-S", socketPath, "-T", "hyperlinks", "attach-session", "-t", sessionID.uuidString], directory: runtimeDirectory.path, environment: environment.merging(["TERM": "xterm-256color"], uniquingKeysWith: { _, new in new }), cols: cols, rows: rows)
-        attachments[sessionID] = (owner, attachment)
-        attachment.startOutput(to: connection)
+        let pty = try PTYAttachment(executable: executable, arguments: ["-u", "-S", socketPath, "-T", "hyperlinks", "attach-session", "-t", sessionID.uuidString], directory: runtimeDirectory.path, environment: environment.merging(["TERM": "xterm-256color"], uniquingKeysWith: { _, new in new }), cols: cols, rows: rows)
+        let pump = AttachmentPump(generation: generation, sink: sink) { [weak self] ended in
+            guard let self else { return }
+            Task { await self.attachmentEnded(sessionID: sessionID, generation: ended) }
+        }
+        attachments[sessionID] = Attachment(generation: generation, pty: pty, pump: pump, sink: sink)
+        pty.startOutput(into: pump)
+        pump.start()
+        return generation
     }
-    public func input(sessionID: UUID, owner: UUID, bytes: Data) throws {
-        guard let (actualOwner, attachment) = attachments[sessionID], actualOwner == owner else { throw ChauffeurError("attachment_lost", "Terminal attachment ownership was lost") }
-        try attachment.input(bytes)
+    public func input(sessionID: UUID, generation: AttachmentGeneration, bytes: Data) throws {
+        try current(sessionID, generation).pty.input(bytes)
     }
-    public func resize(sessionID: UUID, owner: UUID, cols: Int, rows: Int) throws {
-        guard let (actualOwner, attachment) = attachments[sessionID], actualOwner == owner else { throw ChauffeurError("attachment_lost", "Terminal attachment ownership was lost") }
-        try attachment.resize(cols: cols, rows: rows)
+    public func resize(sessionID: UUID, generation: AttachmentGeneration, cols: Int, rows: Int) throws {
+        try current(sessionID, generation).pty.resize(cols: cols, rows: rows)
     }
-    public func detach(sessionID: UUID, owner: UUID) {
-        guard let (actualOwner, attachment) = attachments[sessionID], actualOwner == owner else { return }
-        attachment.close(); attachments.removeValue(forKey: sessionID)
+    /// Silently ignores a stale generation: a revoked client's teardown must
+    /// never detach the client that replaced it.
+    public func detach(sessionID: UUID, generation: AttachmentGeneration) {
+        guard let attachment = attachments[sessionID], attachment.generation == generation else { return }
+        attachments.removeValue(forKey: sessionID)
+        attachment.pump.revoke(); attachment.pty.close()
+        let sink = attachment.sink
+        Task.detached { await sink.close(reason: .clientDetached, message: nil) }
+    }
+    /// The generation currently controlling a session's terminal, if any.
+    public func currentGeneration(sessionID: UUID) -> AttachmentGeneration? { attachments[sessionID]?.generation }
+    private func current(_ sessionID: UUID, _ generation: AttachmentGeneration) throws -> Attachment {
+        guard let attachment = attachments[sessionID] else { throw ChauffeurError("attachment_lost", "Terminal is not attached") }
+        guard attachment.generation == generation else { throw ChauffeurError("attachment_revoked", "Another client took control of this terminal") }
+        return attachment
+    }
+    /// The pump gave up on its own (slow consumer, transport failure or EOF);
+    /// drop the attachment when it is still the current one and stop its client.
+    private func attachmentEnded(sessionID: UUID, generation: AttachmentGeneration) {
+        guard let attachment = attachments[sessionID], attachment.generation == generation else { return }
+        attachments.removeValue(forKey: sessionID)
+        attachment.pty.close()
     }
     public func capture(sessionID: UUID, lines: Int) async throws -> TerminalSnapshot {
         let name = sessionID.uuidString
@@ -185,16 +231,17 @@ private final class PTYAttachment: @unchecked Sendable {
         descriptor = master
     }
     deinit { Darwin.close(descriptor) }
-    func startOutput(to connection: SocketConnection) {
+    /// Reads the tmux client's output on a blocking thread into `pump`. The
+    /// thread only ever cleans up this attachment's own process.
+    func startOutput(into pump: AttachmentPump) {
         DispatchQueue.global(qos: .userInitiated).async { [self] in
-            defer { close(); connection.close(); var status: Int32 = 0; waitpid(pid, &status, 0) }
+            defer { close(); var status: Int32 = 0; waitpid(pid, &status, 0) }
             var buffer = [UInt8](repeating: 0, count: 16_384)
             while true {
                 let count = Darwin.read(descriptor, &buffer, buffer.count)
                 if count < 0 && errno == EINTR { continue }
-                guard count > 0 else { return }
-                do { try connection.send(TerminalPacket(kind: "output", bytes: Data(buffer.prefix(count)))) }
-                catch { return }
+                guard count > 0 else { pump.finish(); return }
+                pump.enqueue(Data(buffer[..<count]))
             }
         }
     }

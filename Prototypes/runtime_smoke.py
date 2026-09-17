@@ -67,6 +67,7 @@ with tempfile.TemporaryDirectory(prefix="chauffeur-smoke-", dir="/tmp") as direc
     log = open(root / "runtime.log", "w")
     runtime = None
     attachments = []
+    generations = {}
     # Exercise launchd's minimal PATH and an unavailable login shell too.
     environment = dict(os.environ, OPENAI_API_KEY="fixture-must-be-removed", PATH="/usr/bin:/bin:/usr/sbin:/sbin", SHELL="/nonexistent-fixture-shell")
     def start_runtime():
@@ -102,8 +103,10 @@ with tempfile.TemporaryDirectory(prefix="chauffeur-smoke-", dir="/tmp") as direc
     def attach(session_id):
         connection = socket.socket(socket.AF_UNIX)
         connection.settimeout(5); connection.connect(socket_path)
-        send_frame(connection, request("attach", {"sessionID": session_id, "owner": uid(), "cols": 100, "rows": 30}))
-        assert receive_frame(connection)["result"]["stream"]
+        send_frame(connection, request("attach", {"sessionID": session_id, "cols": 100, "rows": 30}))
+        acknowledgement = receive_frame(connection)["result"]
+        assert acknowledgement["stream"]
+        generations[connection] = acknowledgement["generation"]
         import base64
         output = bytearray()
         while b"Chauffeur fixture" not in output:
@@ -185,12 +188,12 @@ with tempfile.TemporaryDirectory(prefix="chauffeur-smoke-", dir="/tmp") as direc
         assert tool(token_other, "chauffeur_send_message", message_args)[0]
         connection = attach(sessions[0]["id"])
         import base64
-        send_frame(connection, request("input", {"bytes": base64.b64encode(b"unsent fixture input").decode()}))
+        send_frame(connection, request("input", {"bytes": base64.b64encode(b"unsent fixture input").decode(), "generation": generations[connection]}))
         time.sleep(0.15)
         connection.close(); attachments.remove(connection)
         time.sleep(0.2)
         reattached = attach(sessions[0]["id"])
-        send_frame(reattached, request("resize", {"cols": 110, "rows": 35}))
+        send_frame(reattached, request("resize", {"cols": 110, "rows": 35, "generation": generations[reattached]}))
         reattached.close(); attachments.remove(reattached)
         # Multiple views can request the first archive while periodic capture is
         # also running. Every caller must receive the completed capture.

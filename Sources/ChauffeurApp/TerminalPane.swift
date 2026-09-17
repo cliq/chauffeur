@@ -3,12 +3,17 @@ import AppKit
 import ChauffeurCore
 @preconcurrency import SwiftTerm
 
+/// Whether this view controls the session's terminal. A terminal whose control
+/// was taken by another client stays `controlLost` until the user takes it
+/// back; automatic reattachment must never reclaim it silently.
+enum TerminalControlState: Equatable { case detached, connecting, connected, controlLost(String), failed(String) }
+
 @MainActor final class TerminalController: ObservableObject, @preconcurrency TerminalViewDelegate {
     let sessionID: UUID
-    let owner = UUID()
     let terminal = ThemedTerminalView(frame: NSRect(x: 0, y: 0, width: 900, height: 620))
     @Published var status: String?
     @Published var connected = false
+    @Published var controlState: TerminalControlState = .detached
     @Published var historyPresented = false
     private let readOnly: Bool
     var historyController: TerminalController?
@@ -17,6 +22,9 @@ import ChauffeurCore
     private var writer: Task<Void, Never>?
     private var outgoing: AsyncStream<IPCRequest>.Continuation?
     private var generation = UUID()
+    /// The runtime's identity for the current attachment; every input and
+    /// resize command carries it so a superseded view cannot act on the terminal.
+    private var attachmentGeneration: UInt64?
     #if DEBUG
     var debugEvents: [String] = []
     private func trace(_ text: String) {
@@ -35,24 +43,30 @@ import ChauffeurCore
         terminal.setAccessibilityIdentifier("\(readOnly ? "history" : "terminal")-\(sessionID.uuidString)")
         terminal.setAccessibilityLabel(readOnly ? "Saved terminal history" : "Agent terminal")
     }
-    func attach(socketPath: String) {
+    /// Attaches to the live terminal. Automatic calls (layout synchronization)
+    /// leave a terminal alone once another client took control of it; only an
+    /// explicit `takeControl` reclaims it.
+    func attach(socketPath: String, takeControl: Bool = false) {
         guard !readOnly, reader == nil else { return }
+        if case .controlLost = controlState, !takeControl { return }
         let current = UUID(); generation = current
         #if DEBUG
-        trace("attach \(current)")
+        trace("attach \(current) takeControl=\(takeControl)")
         #endif
-        status = "Connecting…"
+        status = "Connecting…"; controlState = .connecting
         reader = Task { [weak self] in
             guard let self else { return }
             do {
                 let socket = try SocketConnection(path: socketPath); connection = socket
                 let size = terminal.getTerminal()
-                let request = IPCRequest("attach", params: .object(["sessionID": .string(sessionID.uuidString), "owner": .string(owner.uuidString), "cols": .number(Double(max(2, min(500, size.cols)))), "rows": .number(Double(max(2, min(300, size.rows))))]))
+                let request = IPCRequest("attach", params: .object(["sessionID": .string(sessionID.uuidString), "cols": .number(Double(max(2, min(500, size.cols)))), "rows": .number(Double(max(2, min(300, size.rows)))), "takeControl": .bool(takeControl)]))
                 try await socket.sendAsync(request)
                 let response = try await socket.receiveAsync(IPCResponse.self)
                 guard generation == current, !Task.isCancelled else { socket.close(); return }
                 if let error = response.error { throw error }
                 guard response.version == WireProtocol.major else { throw ChauffeurError("protocol_mismatch", "Restart the service to match this app version") }
+                guard let granted = response.result?["generation"].int, granted >= 0 else { throw ChauffeurError("protocol_mismatch", "Service did not identify the terminal attachment. Restart the service") }
+                attachmentGeneration = UInt64(granted); controlState = .connected
                 let (stream, continuation) = AsyncStream<IPCRequest>.makeStream(bufferingPolicy: .bufferingOldest(512))
                 outgoing = continuation
                 writer = Task {
@@ -77,23 +91,45 @@ import ChauffeurCore
                     let packet = try await socket.receiveAsync(TerminalPacket.self)
                     guard generation == current, !Task.isCancelled else { return }
                     guard packet.version == WireProtocol.major else { throw ChauffeurError("protocol_mismatch", "Terminal protocol changed") }
+                    if packet.kind == "controlLost" {
+                        loseControl(packet.message ?? "Another client took control of this terminal"); break
+                    }
                     if packet.kind == "error" { throw ChauffeurError("terminal_error", packet.message ?? "Terminal disconnected") }
                     if let bytes = packet.bytes {
                         terminal.feed(byteArray: Array(bytes)[...]); connected = true; status = nil
                     }
                 }
             } catch {
-                if generation == current { status = (error as? ChauffeurError)?.message ?? "Terminal disconnected. Reconnect to the live session"; connected = false }
+                if generation == current {
+                    let failure = error as? ChauffeurError
+                    if failure?.code == "terminal_busy" {
+                        loseControl(failure?.message ?? "Another client took control of this terminal")
+                    } else {
+                        status = failure?.message ?? "Terminal disconnected. Reconnect to the live session"; connected = false
+                        controlState = .failed(status ?? "Terminal disconnected")
+                    }
+                }
             }
-            if generation == current { connection?.close(); outgoing?.finish(); writer?.cancel(); reader = nil }
+            if generation == current { connection?.close(); outgoing?.finish(); writer?.cancel(); reader = nil; attachmentGeneration = nil }
         }
+    }
+    /// Another client owns the terminal now. No "disconnected" status: the user
+    /// chooses whether to take it back.
+    private func loseControl(_ message: String) {
+        #if DEBUG
+        trace("control lost \(generation)")
+        #endif
+        controlState = .controlLost(message); connected = false; status = nil
     }
     func detach() {
         #if DEBUG
         if reader != nil { trace("detach \(generation)") }
         #endif
         generation = UUID(); outgoing?.finish(); writer?.cancel(); reader?.cancel()
-        connection?.close(); connection = nil; reader = nil; writer = nil; outgoing = nil; connected = false
+        connection?.close(); connection = nil; reader = nil; writer = nil; outgoing = nil; connected = false; attachmentGeneration = nil
+        // Lost control survives a detach so the next automatic attach still
+        // leaves the terminal with the client that took it.
+        if case .controlLost = controlState {} else { controlState = .detached }
     }
     /// Focuses the terminal, or arranges for it once the view is on screen: a
     /// newly selected tab is not in the window yet when its selection changes.
@@ -119,7 +155,11 @@ import ChauffeurCore
     }
     private func findSender() -> NSMenuItem { let item = NSMenuItem(); item.tag = NSTextFinder.Action.showFindInterface.rawValue; return item }
     private func enqueue(_ request: IPCRequest) {
-        guard !readOnly else { return }
+        guard !readOnly, let attachmentGeneration else { return }
+        var request = request
+        if case .object(var params) = request.params {
+            params["generation"] = .number(Double(attachmentGeneration)); request.params = .object(params)
+        }
         let result = outgoing?.yield(request)
         #if DEBUG
         trace("queue \(request.method) \(request.params["cols"].int ?? 0)x\(request.params["rows"].int ?? 0): active=\(outgoing != nil)")
@@ -165,11 +205,16 @@ struct TerminalPane: View {
                 Spacer()
                 Text(session.state.label).font(.caption).foregroundStyle(session.needsAttention ? .orange : .secondary)
                 Button { controller.find() } label: { Label("History and Search", systemImage: "clock.arrow.circlepath") }.labelStyle(.iconOnly).help("View and search saved terminal history")
-                if !controller.connected && session.state.isLive {
+                if case .controlLost = controller.controlState, session.state.isLive {
+                    Button("Take Control") { controller.detach(); controller.attach(socketPath: model.socketPath, takeControl: true) }
+                        .help("Take this terminal back from the client that controls it")
+                } else if !controller.connected && session.state.isLive {
                     Button("Reconnect") { controller.detach(); controller.attach(socketPath: model.socketPath) }
                 }
             }.padding(.horizontal, 12).padding(.vertical, 7).background(.bar)
-            if let status = controller.status, !controller.connected { Text(status).font(.caption).padding(8).frame(maxWidth: .infinity, alignment: .leading).background(.orange.opacity(0.12)) }
+            if case .controlLost(let message) = controller.controlState, session.state.isLive {
+                Text(message).font(.caption).padding(8).frame(maxWidth: .infinity, alignment: .leading).background(.orange.opacity(0.12))
+            } else if let status = controller.status, !controller.connected { Text(status).font(.caption).padding(8).frame(maxWidth: .infinity, alignment: .leading).background(.orange.opacity(0.12)) }
             if session.state.isLive {
                 TerminalHost(controller: controller)
             } else {

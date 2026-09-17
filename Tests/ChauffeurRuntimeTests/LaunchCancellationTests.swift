@@ -71,8 +71,7 @@ struct LaunchCancellationTests {
         defer { writer.close(); reader.close() }
         var timeout = timeval(tv_sec: 3, tv_usec: 0)
         try #require(setsockopt(reader.descriptor, SOL_SOCKET, SO_RCVTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size)) == 0)
-        let owner = UUID()
-        try await fixture.runtime.terminals.attach(sessionID: session.id, owner: owner, connection: writer, cols: 100, rows: 30)
+        let generation = try await fixture.runtime.terminals.attach(sessionID: session.id, sink: LocalSocketSink(connection: writer), cols: 100, rows: 30, takeControl: false)
         var output = Data()
         // The fixture's END marker also arrives in ASCII-only mode. Wait for
         // that complete redraw before asserting the actual non-ASCII bytes.
@@ -81,7 +80,7 @@ struct LaunchCancellationTests {
             if let bytes = packet.bytes { output.append(bytes) }
         }
         #expect(String(decoding: output, as: UTF8.self).contains(expected))
-        await fixture.runtime.terminals.detach(sessionID: session.id, owner: owner)
+        await fixture.runtime.terminals.detach(sessionID: session.id, generation: generation)
         _ = try await fixture.stop()
     }
 
@@ -419,7 +418,9 @@ private extension Result where Success == Session, Failure == Error {
     }
 }
 
-private struct LaunchFixture: Sendable {
+/// Builds a `RuntimeCoordinator` around a fake agent CLI and a real, private
+/// tmux server. Shared by the terminal attachment tests.
+struct LaunchFixture: Sendable {
     let root: URL
     let runtime: RuntimeCoordinator
     let request: LaunchRequest
