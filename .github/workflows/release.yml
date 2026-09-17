@@ -83,6 +83,31 @@ jobs:
           make release CODESIGN_FLAGS=--timestamp \
             XCODEBUILD_ARGS="ARCHS=arm64 CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY='Developer ID Application' DEVELOPMENT_TEAM=$TEAM_ID CHAUFFEUR_NOTARIZE=1 ENABLE_HARDENED_RUNTIME=YES OTHER_CODE_SIGN_FLAGS='--timestamp --options=runtime' MARKETING_VERSION=$RELEASE_VERSION CURRENT_PROJECT_VERSION=$GITHUB_RUN_NUMBER"
 
+      - name: Check app and helper entitlements for notarization
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import pathlib
+          import plistlib
+          import subprocess
+
+          app = pathlib.Path("build/Build/Products/Release/Chauffeur.app")
+          executables = sorted(app.glob("**/Contents/MacOS/*"))
+          if not executables:
+              raise SystemExit("::error::No release executables found")
+          for executable in executables:
+              if not executable.is_file():
+                  continue
+              result = subprocess.run(
+                  ["codesign", "--display", "--entitlements", "-", "--xml", str(executable)],
+                  check=True, capture_output=True,
+              )
+              entitlements = plistlib.loads(result.stdout) if result.stdout.strip() else {}
+              if entitlements.get("com.apple.security.get-task-allow"):
+                  raise SystemExit(f"::error::{executable} has get-task-allow enabled")
+              print(f"Notarization entitlements OK: {executable}")
+          PY
+
       - name: Build signed DMG
         run: |
           set -euo pipefail
