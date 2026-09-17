@@ -1,0 +1,289 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Chauffeur mobile · POC screen flow</title>
+<style>
+  * { box-sizing: border-box; }
+  :root { color-scheme: light; --ink: #252525; --muted: #6b6b6b; --line: #bcbcb7; --paper: #f4f3ef; }
+  body { margin: 0; background: var(--paper); color: var(--ink); font: 14px/1.5 system-ui, sans-serif; }
+  header, main, footer { max-width: 1450px; margin: auto; padding: 28px 36px; }
+  header { border-bottom: 1px solid var(--line); }
+  h1 { font-size: 28px; font-weight: 600; margin: 8px 0; letter-spacing: -.7px; }
+  h2 { font-size: 18px; margin: 0 0 5px; }
+  p { margin: 8px 0; }
+  .eyebrow, .lane-label { font: 11px/1.5 ui-monospace, monospace; text-transform: uppercase; letter-spacing: 1.4px; }
+  .muted, .caption { color: var(--muted); }
+  .intro { max-width: 750px; }
+  .map { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin-top: 23px; }
+  .map a { border: 1px solid var(--line); padding: 7px 12px; background: white; }
+  a { color: inherit; text-underline-offset: 3px; }
+  .lane { padding: 12px 0 32px; }
+  .lane + .lane { border-top: 1px dashed var(--line); padding-top: 30px; }
+  .lane-label { margin-bottom: 6px; color: var(--muted); }
+  .screens { display: flex; align-items: flex-start; gap: 20px; margin-top: 23px; }
+  .screen { width: 290px; flex: 0 0 290px; scroll-margin-top: 20px; }
+  .screen:target .phone { outline: 3px solid var(--ink); outline-offset: 5px; }
+  .screen-title { font: 12px ui-monospace, monospace; margin-bottom: 12px; }
+  .phone { min-height: 480px; border: 1.5px solid var(--ink); border-radius: 22px; background: #fff; overflow: hidden; display: flex; flex-direction: column; }
+  .status { display: flex; justify-content: space-between; padding: 13px 17px 7px; font: 10px ui-monospace, monospace; }
+  .nav { padding: 10px 15px; border-bottom: 1px solid var(--line); display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+  .nav b { font-size: 15px; }
+  .body { padding: 16px; flex: 1; }
+  .body h3 { margin: 10px 0 15px; font-size: 19px; }
+  .small { font-size: 12px; }
+  label { display: block; margin: 12px 0; font-size: 12px; }
+  input, select, textarea { width: 100%; padding: 9px; border: 1px solid #999; background: white; border-radius: 3px; font: 13px system-ui, sans-serif; color: var(--ink); margin-top: 4px; }
+  textarea { resize: vertical; }
+  button, .button { display: block; text-align: center; cursor: pointer; border: 1px solid var(--ink); border-radius: 4px; background: white; padding: 10px; color: inherit; text-decoration: none; font: 13px system-ui, sans-serif; }
+  .primary { background: #303030; color: white; }
+  .bottom { padding: 13px 16px 20px; }
+  .row { display: block; border-bottom: 1px solid #ddd; padding: 12px 0; text-decoration: none; }
+  .row strong { display: block; font-size: 13px; }
+  .row span { display: block; color: var(--muted); font-size: 11px; }
+  .group { margin: 15px 0 0; color: var(--muted); font: 10px ui-monospace, monospace; text-transform: uppercase; }
+  .note { border: 1px dashed #aaa; padding: 10px; margin: 14px 0; font-size: 12px; background: #fafaf8; }
+  .caption { font-size: 12px; margin-top: 14px; max-width: 290px; }
+  .arrow { padding-top: 225px; font: 22px ui-monospace, monospace; color: var(--muted); flex: 0 0 22px; }
+  .tabs { display: flex; gap: 5px; padding: 10px; border-bottom: 1px solid var(--line); }
+  .tabs button, .tabs a { padding: 6px 9px; font-size: 11px; }
+  .tabs [aria-selected="true"] { background: #ddd; font-weight: bold; }
+  .terminal { padding: 15px; font: 12px/1.7 ui-monospace, monospace; white-space: pre-wrap; flex: 1; min-height: 225px; margin: 0; }
+  .keys { display: flex; gap: 4px; padding: 8px; border-top: 1px solid var(--line); }
+  .keys span { border: 1px solid #bbb; border-radius: 3px; padding: 4px 7px; font: 11px ui-monospace, monospace; }
+  .keyboard { text-align: center; padding: 18px 5px; background: #eee; color: #777; font: 11px/2 ui-monospace, monospace; letter-spacing: 5px; }
+  .banner { padding: 8px 15px; background: #eee; font-size: 11px; }
+  .choices { display: flex; gap: 15px; }
+  .choices label { display: flex; align-items: center; gap: 5px; }
+  .choices input { width: auto; margin: 0; }
+  [hidden] { display: none !important; }
+  footer { border-top: 1px solid var(--line); font-size: 12px; color: var(--muted); }
+  @media (max-width: 1100px) { .screens { flex-wrap: wrap; gap: 25px; } .arrow { display: none; } }
+  @media (max-width: 600px) { header, main, footer { padding: 22px 18px; } .screens { flex-direction: column; align-items: center; } .screen { width: min(100%, 340px); flex: auto; } .caption { max-width: none; } }
+  @media print { .screen { break-inside: avoid; } .screens { flex-wrap: wrap; } .arrow { display: none; } }
+</style>
+</head>
+<body>
+<header>
+  <div class="eyebrow">Chauffeur / iOS POC / rough screen flow</div>
+  <h1>A terminal remote for your Mac.</h1>
+  <p class="intro muted">Minimum screens to reach a running session or start another one. Boxes show structure, not final design. Click links to follow the flow; try the launch choices and terminal tabs. All data and terminal output are illustrative.</p>
+  <nav class="map" aria-label="Screen flow">
+    <a href="#connect">1 Connect</a><span>→</span><a href="#sessions">2 Sessions</a><span>→</span><a href="#terminal">3 Terminal</a>
+    <span>· New session →</span><a href="#location">4 Location</a><span>→</span><a href="#launch">5 Launch</a><span>→ Terminal</span>
+  </nav>
+</header>
+<main>
+<section class="lane">
+  <div class="lane-label">A / Open an existing session</div>
+  <h2>Connect → browse → terminal</h2>
+  <p class="muted small">After pairing, reconnect directly to Sessions. The desktop app can be closed; its background service must be running.</p>
+  <div class="screens">
+    <article class="screen" id="connect">
+      <div class="screen-title">01 / Connect to Mac</div>
+      <div class="phone">
+        <div class="status"><span>9:41</span><span>Wi-Fi · Battery</span></div>
+        <div class="nav"><b>Chauffeur</b></div>
+        <div class="body">
+          <h3>Connect to your Mac</h3><p class="small muted">Use the same local network.</p>
+          <label>Mac address<input value="leos-mac.local" spellcheck="false"></label>
+          <div class="note">First connection: enable remote access on the Mac and pair this device.<br><br>[ Pairing / host verification ]</div>
+          <p class="small muted">Pairing method is still to be decided.</p>
+        </div>
+        <div class="bottom"><a class="button primary" href="#sessions">Pair &amp; connect →</a></div>
+      </div>
+      <p class="caption">One-time setup, then a saved host. Reachability and pairing errors appear here.</p>
+    </article>
+    <div class="arrow" aria-hidden="true">→</div>
+    <article class="screen" id="sessions">
+      <div class="screen-title">02 / All active sessions</div>
+      <div class="phone">
+        <div class="status"><span>9:41</span><span>Wi-Fi · Battery</span></div>
+        <div class="nav"><b>Sessions</b><a href="#location" data-new>＋ New</a></div>
+        <div class="banner">● Leo’s Mac · Connected</div>
+        <div class="body">
+          <div class="group">Chauffeur · 2 active</div>
+          <a class="row" href="#handoff"><strong>Mobile remote ↗</strong><span>Codex · feature/mobile</span><span>Waiting for input · Open on Mac</span></a>
+          <a class="row" href="#terminal" data-session="shell"><strong>Shell ↗</strong><span>Shell · main · Running</span></a>
+          <div class="group">Client website · 1 active</div>
+          <a class="row" href="#terminal" data-session="client"><strong>Fix navigation ↗</strong><span>Claude · fix/nav · Running</span></a>
+          <div class="group">Notes · 0 active</div>
+          <a class="row" href="#location" data-new><span>No active sessions · Start one →</span></a>
+        </div>
+        <div class="bottom small"><a href="#connect">Connection</a> <span class="muted">· All existing projects</span></div>
+      </div>
+      <p class="caption">A single list across projects. A session opens directly unless another device owns its terminal.</p>
+    </article>
+    <div class="arrow" aria-hidden="true">→</div>
+    <article class="screen" id="terminal">
+      <div class="screen-title">03 / Terminal + session tabs</div>
+      <div class="phone">
+        <div class="status"><span>9:41</span><span>Wi-Fi · Battery</span></div>
+        <div class="nav"><a href="#sessions">‹ Sessions</a><b id="terminal-project">Chauffeur</b></div>
+        <div class="banner" id="terminal-context">feature/mobile · Controlled here</div>
+        <div class="tabs" role="tablist" aria-label="Session tabs">
+          <button role="tab" aria-selected="true" data-tab="agent">Codex</button>
+          <button role="tab" aria-selected="false" data-tab="shell">Shell</button>
+          <a class="button" href="#launch" id="new-tab" aria-label="New tab">＋</a>
+        </div>
+        <pre class="terminal" id="terminal-output" aria-live="polite">Codex
+~/Chauffeur/feature-mobile
+
+Ready for your next instruction.
+
+› ▊</pre>
+        <div class="keys" aria-label="Illustrative terminal accessory keys"><span>Esc</span><span>Tab</span><span>Ctrl</span><span>↑</span><span>↓</span><span>←</span><span>→</span></div>
+        <div class="keyboard">Q W E R T Y U I O P<br>A S D F G H J K L<br>⇧ Z X C V B N M ⌫<br>123 &nbsp; space &nbsp; return</div>
+      </div>
+      <p class="caption">Real terminal in the app; static sample here. ＋ starts a new tab in this checkout. Switching or closing tabs leaves processes running.</p>
+    </article>
+  </div>
+</section>
+<section class="lane">
+  <div class="lane-label">B / Create a session or another tab</div>
+  <h2>Choose location → choose agent or shell → terminal</h2>
+  <p class="muted small">“New” starts at Location. Terminal ＋ skips to Launch with the current location filled in.</p>
+  <div class="screens">
+    <article class="screen" id="location">
+      <div class="screen-title">04 / Location</div>
+      <div class="phone">
+        <div class="status"><span>9:41</span><span>Wi-Fi · Battery</span></div>
+        <div class="nav"><a href="#sessions">Cancel</a><b>New session</b></div>
+        <div class="body">
+          <label>Project<select id="project"><option>Chauffeur</option><option>Client website</option><option>Notes</option></select></label>
+          <label>Repository / folder<select id="repository"><option>Chauffeur</option></select></label>
+          <label>Checkout<select id="checkout"><option value="main">Main checkout · main</option><option value="existing">Existing · feature/mobile</option><option value="new">＋ New worktree…</option></select></label>
+          <div id="worktree-fields" hidden>
+            <label>New branch<input id="branch" value="feature/mobile-poc" spellcheck="false"></label>
+            <label>Base ref<input id="base" value="HEAD" spellcheck="false"></label>
+            <p class="small muted">Destination on Mac: managed worktree folder (preview before launch).</p>
+          </div>
+          <p class="small muted" id="location-hint">Use a checkout already available on your Mac.</p>
+        </div>
+        <div class="bottom"><a class="button primary" href="#launch" id="continue">Continue →</a></div>
+      </div>
+      <p class="caption">New Worktree reveals branch/base fields inline. No separate worktree-management screen.</p>
+    </article>
+    <div class="arrow" aria-hidden="true">→</div>
+    <article class="screen" id="launch">
+      <div class="screen-title">05 / Launch</div>
+      <div class="phone">
+        <div class="status"><span>9:41</span><span>Wi-Fi · Battery</span></div>
+        <div class="nav"><a href="#location">‹ Location</a><b>Launch session</b></div>
+        <div class="body">
+          <div class="note"><strong id="launch-location">Chauffeur / main</strong><br><a href="#location">Change location</a></div>
+          <div class="choices">
+            <label><input type="radio" name="kind" value="agent" checked> Agent</label>
+            <label><input type="radio" name="kind" value="shell"> Shell</label>
+          </div>
+          <div id="agent-fields">
+            <label>Agent preset<select id="preset"><option>Codex · Personal</option><option>Claude · Personal</option></select></label>
+            <label>Initial prompt (optional)<textarea rows="2" placeholder="Start interactively, or enter a task"></textarea></label>
+          </div>
+          <p id="shell-hint" class="note" hidden>Open your Mac’s login shell in this checkout.</p>
+          <label>Title (optional)<input placeholder="Session title"></label>
+          <p class="small muted">Group: Default · Uses existing Mac configuration.</p>
+        </div>
+        <div class="bottom"><a class="button primary" href="#terminal" id="launch-button">Launch agent →</a></div>
+      </div>
+      <p class="caption">Launch opens a terminal tab. Validation and launch errors stay inline; retry retains the original operation.</p>
+    </article>
+    <div class="arrow" aria-hidden="true">→</div>
+    <article class="screen">
+      <div class="screen-title">Returns to 03 / Terminal</div>
+      <div class="note"><b>Same terminal screen</b><p>The new session becomes the selected tab and also appears in the global session list.</p><a href="#terminal">Go to Terminal →</a></div>
+      <div class="note"><b>If launch fails</b><p>Show the error on Launch. If the worktree was created successfully, keep it selected for retry.</p></div>
+      <p class="caption">Five main screens total. The following are states and a confirmation sheet, not additional navigation sections.</p>
+    </article>
+  </div>
+</section>
+<section class="lane">
+  <div class="lane-label">C / Two essential interruption states</div>
+  <h2>Control handoff and reconnect</h2>
+  <div class="screens">
+    <article class="screen" id="handoff">
+      <div class="screen-title">03a / Terminal control sheet</div>
+      <div class="phone">
+        <div class="status"><span>9:41</span><span>Wi-Fi · Battery</span></div>
+        <div class="nav"><a href="#sessions">‹ Sessions</a><b>Mobile remote</b></div>
+        <div class="body"><p class="muted small">Terminal is attached on another device.</p><div style="height:70px"></div><div class="note"><h3>Take control here?</h3><p>This session is open on your Mac. Its terminal input will pause there while you control it from your phone.</p><p>The session keeps running.</p></div></div>
+        <div class="bottom"><a class="button primary" href="#terminal" data-session="agent">Take control →</a><p class="small" style="text-align:center"><a href="#sessions">Cancel</a></p></div>
+      </div>
+      <p class="caption">Only shown when needed. Returning control to the Mac uses the same explicit handoff.</p>
+    </article>
+    <div class="arrow" aria-hidden="true">↔</div>
+    <article class="screen" id="offline">
+      <div class="screen-title">03b / Connection lost</div>
+      <div class="phone">
+        <div class="status"><span>9:41</span><span>Offline · Battery</span></div>
+        <div class="nav"><a href="#sessions">‹ Sessions</a><b>Mobile remote</b></div>
+        <div class="banner">Disconnected · Last screen, not live</div>
+        <pre class="terminal muted">Codex
+~/Chauffeur/feature-mobile
+
+Ready for your next instruction.</pre>
+        <div class="body"><div class="note"><b>Mac unreachable</b><p>Input is disabled. The session can continue on your Mac.</p><p>Check Wi-Fi and that the Mac is awake.</p></div></div>
+        <div class="bottom"><a class="button primary" href="#terminal">Reconnect to same session →</a></div>
+      </div>
+      <p class="caption">The same state handles returning from background. Reattach without starting a new process or replaying keys.</p>
+    </article>
+  </div>
+</section>
+</main>
+<footer>Local HTML mockup · No network connections or real commands · <a href="mobile-poc-prd.md">Companion PRD</a> · Pairing details and final UX remain open.</footer>
+<script>
+  const el = id => document.getElementById(id);
+  let currentProject = 'Chauffeur';
+  let currentCheckout = 'feature/mobile';
+  let currentAgent = 'Codex';
+  function showTab(kind) {
+    document.querySelectorAll('[data-tab]').forEach(button => button.setAttribute('aria-selected', String(button.dataset.tab === kind)));
+    el('terminal-project').textContent = currentProject;
+    el('terminal-context').textContent = currentCheckout + ' · Controlled here';
+    el('terminal-output').textContent = kind === 'shell'
+      ? `Shell\n${currentProject} / ${currentCheckout}\n\n$ pwd\n[Mac checkout directory]\n\n$ ▊`
+      : `${currentAgent}\n${currentProject} / ${currentCheckout}\n\nReady for your next instruction.\n\n› ▊`;
+    document.querySelector('[data-tab="agent"]').textContent = currentAgent;
+  }
+  function summarizeLocation() {
+    const checkout = el('checkout').value;
+    el('launch-location').textContent = el('project').value + ' / ' + (checkout === 'new' ? el('branch').value + ' (new worktree)' : checkout === 'existing' ? 'feature/mobile' : 'main');
+  }
+  el('checkout').addEventListener('change', () => { el('worktree-fields').hidden = el('checkout').value !== 'new'; });
+  el('project').addEventListener('change', () => {
+    el('repository').replaceChildren(new Option(el('project').value, el('project').value));
+    el('checkout').value = 'main';
+    el('worktree-fields').hidden = true;
+    el('checkout').options[1].disabled = el('project').value !== 'Chauffeur';
+  });
+  el('continue').addEventListener('click', summarizeLocation);
+  document.querySelectorAll('[name="kind"]').forEach(radio => radio.addEventListener('change', () => {
+    const shell = radio.value === 'shell';
+    el('agent-fields').hidden = shell;
+    el('shell-hint').hidden = !shell;
+    el('launch-button').textContent = shell ? 'Open shell →' : 'Launch agent →';
+  }));
+  document.querySelectorAll('[data-tab]').forEach(button => button.addEventListener('click', () => showTab(button.dataset.tab)));
+  document.querySelectorAll('[data-session]').forEach(link => link.addEventListener('click', () => {
+    const session = link.dataset.session;
+    currentProject = session === 'client' ? 'Client website' : 'Chauffeur';
+    currentCheckout = session === 'client' ? 'fix/nav' : session === 'shell' ? 'main' : 'feature/mobile';
+    currentAgent = session === 'client' ? 'Claude' : 'Codex';
+    showTab(session === 'shell' ? 'shell' : 'agent');
+  }));
+  el('new-tab').addEventListener('click', () => {
+    el('project').value = currentProject;
+    el('repository').replaceChildren(new Option(currentProject, currentProject));
+    el('launch-location').textContent = currentProject + ' / ' + currentCheckout;
+  });
+  el('launch-button').addEventListener('click', () => {
+    const location = el('launch-location').textContent.split(' / ');
+    currentProject = location[0];
+    currentCheckout = location.slice(1).join(' / ').replace(' (new worktree)', '');
+    currentAgent = el('preset').value.startsWith('Claude') ? 'Claude' : 'Codex';
+    showTab(document.querySelector('[name="kind"]:checked').value);
+  });
+</script>
+</body>
+</html>
