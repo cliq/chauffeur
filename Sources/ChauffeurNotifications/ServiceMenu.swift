@@ -2,17 +2,12 @@ import AppKit
 import ChauffeurCore
 
 /// Owned by the accessory helper so quitting the main UI does not hide it.
-@MainActor final class ServiceMenu: NSObject, NSMenuDelegate, NSMenuItemValidation {
+@MainActor final class ServiceMenu: NSObject, NSMenuDelegate {
     private var statusItem: NSStatusItem?
     private var entries: [ActiveProject] = []
     private var tracking = false
     private var parentAppURL: URL {
         Bundle.main.bundleURL.deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-    }
-    private var runningApps: [NSRunningApplication] {
-        NSWorkspace.shared.runningApplications.filter {
-            !$0.isTerminated && $0.bundleURL?.resolvingSymlinksInPath() == parentAppURL.resolvingSymlinksInPath()
-        }
     }
 
     func update(_ entries: [ActiveProject]) {
@@ -64,9 +59,9 @@ import ChauffeurCore
         chooser.target = self
         let open = menu.addItem(withTitle: "Open \(AppBuild.current.displayName)…", action: #selector(openApp), keyEquivalent: "")
         open.target = self
-        let quit = menu.addItem(withTitle: "Quit \(AppBuild.current.displayName)", action: #selector(quitApp), keyEquivalent: "q")
+        let quit = menu.addItem(withTitle: "Quit Chauffeur...", action: #selector(quitApp), keyEquivalent: "q")
         quit.target = self
-        quit.toolTip = "Close the app. Sessions and the menu bar remain available."
+        quit.toolTip = "Quit the app and background service."
     }
 
     @objc private func openProject(_ sender: NSMenuItem) {
@@ -74,12 +69,9 @@ import ChauffeurCore
         Task { await open(url: url) }
     }
 
-    func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
-        menuItem.action != #selector(quitApp) || !runningApps.isEmpty
-    }
-
     @objc private func quitApp() {
-        for application in runningApps { application.terminate() }
+        // Registration belongs to the containing app, including when its UI is closed.
+        Task { await open(url: QuitServiceRoute.url) }
     }
 
     @objc private func openProjectChooser() { Task { await open(url: WelcomeRoute.url) } }

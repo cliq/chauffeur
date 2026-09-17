@@ -40,10 +40,7 @@ import ChauffeurCore
                 Button("Welcome to Chauffeur") { openWindow(id: "welcome") }.keyboardShortcut("0", modifiers: [.command, .shift])
             }
             CommandGroup(replacing: .appTermination) {
-                Button("Stop All Sessions and Quit…") { model.confirmStopAllAndQuit() }
-                    .disabled(model.stopAllPresented || model.isStoppingAll)
-                Divider()
-                Button("Quit Chauffeur") { model.quit() }.keyboardShortcut("q")
+                Button("Quit Chauffeur...") { model.quit() }.keyboardShortcut("q")
             }
             CommandGroup(replacing: .help) {
                 Button("Chauffeur Help") { openWindow(id: "help") }
@@ -76,7 +73,70 @@ import ChauffeurCore
         model.start()
     }
     func application(_ application: NSApplication, open urls: [URL]) {
-        for url in urls { model.openSessionURL(url) }
+        for url in urls {
+            if url == QuitServiceRoute.url { confirmServiceQuit() }
+            else { model.openSessionURL(url) }
+        }
+    }
+    func confirmServiceQuit() {
+        guard !preparingToQuit else { return }
+        preparingToQuit = true
+        Task {
+            let hasRunningSessions: Bool
+            do { hasRunningSessions = try await model.call("hasRunningSessionTerminals").decode(Bool.self) }
+            catch {
+                preparingToQuit = false
+                model.error = "Couldn’t check running sessions: \(error.localizedDescription)"
+                return
+            }
+            let prompt = QuitConfirmation()
+            quitConfirmation = prompt
+            prompt.showServiceQuit(hasRunningSessions: hasRunningSessions) { [weak self] choice in
+                guard let self else { return }
+                self.quitConfirmation = nil
+                switch choice {
+                case .quit: self.quitService(forceSessions: false)
+                case .forceQuit:
+                    // Present the second prompt after the first sheet has finished closing.
+                    Task { self.confirmForceQuit() }
+                case .cancel, .keepRunning, .review: self.preparingToQuit = false
+                }
+            }
+        }
+    }
+    private func confirmForceQuit() {
+        let prompt = QuitConfirmation()
+        quitConfirmation = prompt
+        prompt.showForceQuitConfirmation { [weak self] choice in
+            guard let self else { return }
+            self.quitConfirmation = nil
+            if case .forceQuit = choice { self.quitService(forceSessions: true) }
+            else { self.preparingToQuit = false }
+        }
+    }
+    private func quitService(forceSessions: Bool) {
+        Task {
+            do {
+                await model.finishPendingWindowWrites()
+                // A new terminal may have started while the no-sessions prompt was open.
+                if !forceSessions, try await model.call("hasRunningSessionTerminals").decode(Bool.self) {
+                    confirmForceQuit()
+                    return
+                }
+                // Also remove finished panes, so menu bar quit leaves no terminals behind.
+                _ = try await model.call("forceStopAllSessions")
+                try await model.stopBackgroundService()
+                let helperURL = Bundle.main.bundleURL.appendingPathComponent("Contents/Library/ChauffeurNotifications.app").resolvingSymlinksInPath()
+                // Stop the helper after unregistering so the runtime cannot relaunch it.
+                for app in NSWorkspace.shared.runningApplications where app.bundleURL?.resolvingSymlinksInPath() == helperURL {
+                    app.terminate()
+                }
+                await finishQuitting(NSApp)
+            } catch {
+                preparingToQuit = false
+                model.error = "Couldn’t finish quitting Chauffeur: \(error.localizedDescription)"
+            }
+        }
     }
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
@@ -84,13 +144,12 @@ import ChauffeurCore
         guard !preparingToQuit else { return .terminateCancel }
         preparingToQuit = true
         // Return to the normal run loop before presenting UI or awaiting work.
-        // AppKit's terminateLater loop can starve main-actor tasks.
         Task {
             let active = model.snapshot.sessions.filter { $0.state.isLive }
             guard !active.isEmpty else { await finishQuitting(sender); return }
             let prompt = QuitConfirmation()
             quitConfirmation = prompt
-            prompt.show(sessionCount: active.count) { [weak self] choice in
+            prompt.showAppQuit(sessionCount: active.count) { [weak self] choice in
                 guard let self else { return }
                 self.quitConfirmation = nil
                 switch choice {
@@ -98,14 +157,13 @@ import ChauffeurCore
                     Task { await self.finishQuitting(sender) }
                 case .review:
                     self.preparingToQuit = false
-                    // Re-read the snapshot: a session may finish while the prompt is open.
                     let available = self.model.snapshot.sessions.filter { $0.state.isLive && self.model.project($0.projectID) != nil }
                     if let session = available.first(where: \.needsAttention) ?? available.first {
                         self.model.openSessionURL(SessionRoute(projectID: session.projectID, sessionID: session.id).url)
                     } else {
                         self.model.openWelcomeWindow?()
                     }
-                case .cancel:
+                case .cancel, .quit, .forceQuit:
                     self.preparingToQuit = false
                 }
             }

@@ -18,6 +18,7 @@ public actor RuntimeCoordinator {
     private var stopRequests = Set<UUID>()
     private var stopGenerations: [UUID: UInt64] = [:]
     private var stopping = Set<UUID>()
+    private var stoppingAllSessions = false
     private var reconciliation: Task<Void, Error>?
     private var checkoutClaims = CheckoutClaims()
     private var endpoint: String?
@@ -400,6 +401,13 @@ public actor RuntimeCoordinator {
             try await reconcile()
             try await deleteFinishedSession(sessionID)
             return .object(["deleted": .bool(true)])
+        case "hasRunningSessionTerminals":
+            return .bool(try await terminals.inventory().contains { !$0.dead })
+        case "hasSessionTerminals":
+            return .bool(try await !terminals.inventory().isEmpty)
+        case "forceStopAllSessions":
+            try await forceStopAllSessions()
+            return .object(["stopped": .bool(true)])
         case "stop", "closeSession":
             let sessionID = try params.uuid("sessionID")
             guard sessions[sessionID] != nil || launchTasks[sessionID] != nil else { throw ChauffeurError("missing_session", "Session not found") }
@@ -623,7 +631,37 @@ public actor RuntimeCoordinator {
         do { return try await saveWorktree(worktree) }
         catch { throw ChauffeurError("worktree_registration", "The worktree was created but its record could not be saved. Refresh Git Inventory and register the retained checkout", path: worktree.path) }
     }
+    /// Stops the runtime's complete terminal inventory, including finished panes.
+    /// Block new launches while cancelling startup and removing terminals.
+    private func forceStopAllSessions() async throws {
+        guard !stoppingAllSessions else { throw ChauffeurError("stop_pending", "All sessions are already being stopped") }
+        stoppingAllSessions = true
+        defer { stoppingAllSessions = false }
+        let pending = Array(launchTasks.values)
+        for task in pending { task.cancel() }
+        for task in pending { _ = await task.result }
+        for id in sessions.keys {
+            stopGenerations[id, default: 0] += 1
+            stopping.insert(id)
+            try await ledger.revoke(sessionID: id)
+        }
+        var failures: [String] = []
+        for pane in try await terminals.inventory() {
+            guard let id = UUID(uuidString: pane.sessionName) else {
+                failures.append("Unrecognized terminal: \(pane.sessionName)")
+                continue
+            }
+            do { try await terminals.stop(sessionID: id, force: true) }
+            catch { failures.append(error.localizedDescription) }
+        }
+        try await reconcile()
+        guard try await terminals.inventory().isEmpty else {
+            throw ChauffeurError("sessions_still_running", "Some terminals could not be stopped. \(failures.joined(separator: "; "))")
+        }
+    }
+
     public func launch(_ request: LaunchRequest, child: Delegation? = nil) async throws -> Session {
+        guard !stoppingAllSessions else { throw ChauffeurError("stop_pending", "All sessions are being stopped") }
         // User retry UUID is also the durable session UUID. A retry after an IPC
         // timeout returns the original record, including failures, without spawn.
         let sessionID = child?.childID ?? request.retryKey
@@ -753,7 +791,7 @@ public actor RuntimeCoordinator {
     private func resume(_ sessionID: UUID) async throws -> Session {
         let generation = stopGenerations[sessionID, default: 0]
         try await reconcile()
-        guard generation == stopGenerations[sessionID, default: 0], !stopRequests.contains(sessionID) else { throw ChauffeurError("stop_pending", "Stop is still in progress. Resume after it finishes") }
+        guard !stoppingAllSessions, generation == stopGenerations[sessionID, default: 0], !stopRequests.contains(sessionID) else { throw ChauffeurError("stop_pending", "Stop is still in progress. Resume after it finishes") }
         guard let session = sessions[sessionID], !session.state.isLive else { throw ChauffeurError("already_live", "Reattach the live session instead of resuming") }
         guard session.nativeConversationID != nil else { throw ChauffeurError("resume_unavailable", "No native conversation ID is available. Create a new session explicitly") }
         guard !launching.contains(sessionID) else { throw ChauffeurError("launch_pending", "Resume is already in progress") }

@@ -271,25 +271,36 @@ struct AppSnapshot: Decodable, Sendable {
         guard canStopService else { return }
         isStoppingService = true
         Task {
-            defer { isStoppingService = false }
-            await finishPendingWindowWrites()
-            connectionGeneration += 1
-            connection?.close()
-            online = false
-            serviceMessage = "Stopping background service…"
-            do {
-                // Unregister instead of killing the process: launchd must not
-                // immediately relaunch the service's KeepAlive job.
-                try await service.unregister()
-                isServiceStopped = true
-                serviceRegistrationError = nil; serviceDiagnosticError = nil
-                serviceMessage = "Background service stopped"
-            } catch {
-                serviceRegistrationError = "Background service could not stop: \(error.localizedDescription)"
-                serviceDiagnosticError = error as NSError
-                serviceMessage = serviceRegistrationError!
-                self.error = serviceRegistrationError
-            }
+            do { try await finishStoppingService() }
+            catch { self.error = error.localizedDescription }
+        }
+    }
+    func stopBackgroundService() async throws {
+        guard !usesCustomSocket, !isRestartingService, !isStoppingService else {
+            throw ChauffeurError("service_unavailable", "The background service cannot be stopped while it is changing or using a custom connection.")
+        }
+        isStoppingService = true
+        try await finishStoppingService()
+    }
+    private func finishStoppingService() async throws {
+        defer { isStoppingService = false }
+        await finishPendingWindowWrites()
+        connectionGeneration += 1
+        connection?.close()
+        online = false
+        serviceMessage = "Stopping background service…"
+        do {
+            // Unregister instead of killing the process: launchd must not
+            // immediately relaunch the service's KeepAlive job.
+            if service.status != .notRegistered { try await service.unregister() }
+            isServiceStopped = true
+            serviceRegistrationError = nil; serviceDiagnosticError = nil
+            serviceMessage = "Background service stopped"
+        } catch {
+            serviceRegistrationError = "Background service could not stop: \(error.localizedDescription)"
+            serviceDiagnosticError = error as NSError
+            serviceMessage = serviceRegistrationError!
+            throw error
         }
     }
     func restartService() {

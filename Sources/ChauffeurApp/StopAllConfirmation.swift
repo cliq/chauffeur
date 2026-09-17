@@ -47,21 +47,48 @@ import SwiftUI
 /// A nonblocking quit prompt. The standalone fallback must not enter runModal:
 /// editor saves and terminal input still need the normal application run loop.
 @MainActor final class QuitConfirmation: NSObject, NSWindowDelegate {
-    enum Choice { case keepRunning, review, cancel }
+    enum Choice { case keepRunning, review, quit, forceQuit, cancel }
     private let alert = NSAlert()
     private var completion: ((Choice) -> Void)?
+    private var choices: [Choice] = [.keepRunning, .cancel, .forceQuit]
 
-    func show(sessionCount: Int, completion: @escaping (Choice) -> Void) {
+    func showAppQuit(sessionCount: Int, completion: @escaping (Choice) -> Void) {
         self.completion = completion
+        choices = [.keepRunning, .review, .cancel]
         alert.messageText = "Quit Chauffeur?"
-        alert.informativeText = "\(sessionCount) active session\(sessionCount == 1 ? "" : "s") will keep running in the background. Review opens an active session without quitting."
-        alert.addButton(withTitle: "Keep All Sessions Running & Quit")
+        alert.informativeText = "\(sessionCount) active session\(sessionCount == 1 ? "" : "s") will keep running. The background service and menu bar icon will stay available so you can reopen your sessions."
+        alert.addButton(withTitle: "Quit and Keep All Terminals Running")
         alert.addButton(withTitle: "Review Sessions")
         alert.addButton(withTitle: "Cancel").keyEquivalent = "\u{1b}"
+        present()
+    }
+    func showServiceQuit(hasRunningSessions: Bool, completion: @escaping (Choice) -> Void) {
+        self.completion = completion
+        alert.messageText = "Quit Chauffeur and its background service?"
+        alert.informativeText = hasRunningSessions
+            ? "This will stop all running sessions, quit the app and background service, and remove the menu bar icon."
+            : "The app and background service will quit, and the menu bar icon will close."
+        choices = hasRunningSessions ? [.forceQuit, .cancel] : [.quit, .cancel]
+        let quit = alert.addButton(withTitle: hasRunningSessions ? "Force Quit All Sessions..." : "Quit")
+        quit.hasDestructiveAction = hasRunningSessions
+        alert.addButton(withTitle: "Cancel").keyEquivalent = "\u{1b}"
+        present()
+    }
+    func showForceQuitConfirmation(completion: @escaping (Choice) -> Void) {
+        self.completion = completion
+        choices = [.cancel, .forceQuit]
+        alert.messageText = "Force quit all sessions?"
+        alert.informativeText = "This will immediately kill every Chauffeur session terminal across all projects, including running agents and shells. Unsaved work may be lost. The app and background service will then quit."
+        alert.alertStyle = .critical
+        alert.addButton(withTitle: "Cancel").keyEquivalent = "\u{1b}"
+        alert.addButton(withTitle: "Force Quit All Sessions").hasDestructiveAction = true
+        present()
+    }
+    private func present() {
         NSApp.activate(ignoringOtherApps: true)
         if let window = NSApp.keyWindow ?? NSApp.mainWindow, window.isVisible, window.attachedSheet == nil {
             alert.beginSheetModal(for: window) { [self] response in
-                finish(response == .alertFirstButtonReturn ? .keepRunning : response == .alertSecondButtonReturn ? .review : .cancel)
+                finish(choice(at: response.rawValue - NSApplication.ModalResponse.alertFirstButtonReturn.rawValue))
             }
         } else {
             alert.layout()
@@ -75,8 +102,9 @@ import SwiftUI
     }
     @objc private func choose(_ button: NSButton) {
         alert.window.orderOut(nil)
-        finish(button.tag == 0 ? .keepRunning : button.tag == 1 ? .review : .cancel)
+        finish(choice(at: button.tag))
     }
+    private func choice(at index: Int) -> Choice { choices.indices.contains(index) ? choices[index] : .cancel }
     func windowShouldClose(_ sender: NSWindow) -> Bool { finish(.cancel); return true }
     private func finish(_ choice: Choice) {
         let callback = completion; completion = nil

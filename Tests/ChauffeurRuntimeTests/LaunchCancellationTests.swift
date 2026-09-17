@@ -5,6 +5,58 @@ import ChauffeurCore
 @testable import ChauffeurRuntimeKit
 
 struct LaunchCancellationTests {
+    @Test func forceStopAllRemovesAgentAndShellTerminals() async throws {
+        let fixture = try await LaunchFixture.make(); defer { fixture.cleanup() }
+        _ = try await fixture.runtime.launch(fixture.request)
+        let shell = LaunchRequest.shell(projectID: fixture.request.projectID, groupID: fixture.request.groupID, folderID: fixture.request.folderID, title: "Shell", worktreeID: nil)
+        let shellSession = try await fixture.runtime.launch(shell)
+        try await fixture.wait { try await fixture.activity(shellSession.id).idle }
+        try fixture.sendKeys(sessionID: shellSession.id, "exit 7")
+        try await fixture.wait {
+            try await fixture.runtime.terminals.inventory().contains { $0.sessionName == shellSession.id.uuidString && $0.dead }
+        }
+        #expect(try await fixture.runtime.terminals.inventory().count == 2)
+        #expect(try await fixture.runtime.handle(IPCRequest("hasSessionTerminals")).bool == true)
+        _ = try await fixture.runtime.handle(IPCRequest("forceStopAllSessions"))
+        #expect(try await fixture.runtime.terminals.inventory().isEmpty)
+        #expect(try await fixture.runtime.handle(IPCRequest("hasSessionTerminals")).bool == false)
+        // A second call is safe when there are no terminals left.
+        _ = try await fixture.runtime.handle(IPCRequest("forceStopAllSessions"))
+        #expect(try await fixture.runtime.terminals.inventory().isEmpty)
+    }
+
+    @Test func runningTerminalCheckExcludesFinishedPanes() async throws {
+        let fixture = try await LaunchFixture.make(); defer { fixture.cleanup() }
+        #expect(try await fixture.runtime.handle(IPCRequest("hasRunningSessionTerminals")).bool == false)
+        let shell = LaunchRequest.shell(projectID: fixture.request.projectID, groupID: fixture.request.groupID, folderID: fixture.request.folderID, title: "Shell", worktreeID: nil)
+        let session = try await fixture.runtime.launch(shell)
+        try await fixture.wait { try await fixture.activity(session.id).idle }
+        #expect(try await fixture.runtime.handle(IPCRequest("hasRunningSessionTerminals")).bool == true)
+        try fixture.sendKeys(sessionID: session.id, "exit 7")
+        try await fixture.wait { try await fixture.runtime.terminals.inventory().contains { $0.dead } }
+        #expect(try await fixture.runtime.handle(IPCRequest("hasSessionTerminals")).bool == true)
+        #expect(try await fixture.runtime.handle(IPCRequest("hasRunningSessionTerminals")).bool == false)
+        _ = try await fixture.runtime.handle(IPCRequest("forceStopAllSessions"))
+        #expect(try await fixture.runtime.terminals.inventory().isEmpty)
+    }
+
+    @Test func forceStopAllWaitsForPendingTerminalCreation() async throws {
+        let fixture = try await LaunchFixture.make(gatedCreation: true); defer { fixture.cleanup() }
+        try Data().write(to: fixture.path("block-creation"))
+        let launch = Task { try await fixture.runtime.launch(fixture.request) }
+        try await fixture.wait { FileManager.default.fileExists(atPath: fixture.path("creation-entered").path) }
+        let stopping = Task {
+            _ = try await fixture.runtime.handle(IPCRequest("forceStopAllSessions"))
+            try Data().write(to: fixture.path("stop-finished"))
+        }
+        try await Task.sleep(for: .milliseconds(300))
+        #expect(!FileManager.default.fileExists(atPath: fixture.path("stop-finished").path))
+        try FileManager.default.removeItem(at: fixture.path("block-creation"))
+        try await stopping.value
+        #expect(await launch.result.failureCode == "launch_cancelled")
+        #expect(try await fixture.runtime.terminals.inventory().isEmpty)
+    }
+
     @Test func terminalAttachmentPreservesUnicodeWithoutLocaleVariables() async throws {
         let fixture = try await LaunchFixture.make(); defer { fixture.cleanup() }
         let expected = "UNICODE café 界 ❯ ✓ END"
