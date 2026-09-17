@@ -27,7 +27,8 @@ Debug builds use `Chauffeur Debug.app`, the `.debug` bundle-ID suffix, the
 Release keeps `Chauffeur.app`, `dev.chauffeur.runtime`, and the existing
 `~/Library/Application Support/Chauffeur` store. Notifications, logs, URL schemes,
 preferences, and installed terminal commands are also separate (`chauffeur-debug`
-versus `chauffeur`).
+versus `chauffeur`), as are managed worktree checkouts (`~/.chauffeur-debug/worktrees`
+versus `~/.chauffeur/worktrees`).
 
 Startup refreshes service registration after the app moves or its runtime changes.
 The app verifies the connected runtime's build, executable location/hash, and data

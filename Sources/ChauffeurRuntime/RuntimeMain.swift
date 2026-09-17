@@ -50,7 +50,9 @@ import ChauffeurRuntimeKit
             var searchPaths = (environment["PATH"] ?? "").split(separator: ":").map(String.init)
             for path in ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin", "/usr/sbin", "/sbin"] where !searchPaths.contains(path) { searchPaths.append(path) }
             environment["PATH"] = searchPaths.joined(separator: ":")
-            let runtime = try RuntimeCoordinator(root: root, ctlPath: ctl, environment: environment, logs: logs, id: runtimeID, identity: identity)
+            // A custom data directory (fixtures, probes) keeps its checkouts inside it.
+            let worktreeRoot = Paths.canonical(root.path) == Paths.canonical(Paths.applicationSupport.path) ? Paths.worktreeRoot : nil
+            let runtime = try RuntimeCoordinator(root: root, worktreeRoot: worktreeRoot, ctlPath: ctl, environment: environment, logs: logs, id: runtimeID, identity: identity)
             if !loginEnvironmentLoaded { await runtime.record(ChauffeurError("login_environment_unavailable", "Could not load the login-shell environment. Using inherited environment and standard executable search paths; select full CLI paths if needed")) }
             let server = try IPCServer(root: root, runtime: runtime)
             try await runtime.start()

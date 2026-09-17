@@ -255,3 +255,41 @@ struct WorktreeGitStatusTests {
         #expect(status[fromDevelop.path]?.unmergedCommits == nil && status[fromDevelop.path]?.baseBranch == "develop")
     }
 }
+
+struct WorktreeRootTests {
+    @Test func newCheckoutsUseTheCurrentRootWhileLegacyCheckoutsStayManaged() async throws {
+        let root = URL(fileURLWithPath: "/tmp/chauffeur-worktree-root-\(UUID())").resolvingSymlinksInPath()
+        let repo = root.appendingPathComponent("repo")
+        try FileManager.default.createDirectory(at: repo, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        func git(_ args: [String]) async throws {
+            let result = try await ProcessRunner.run("/usr/bin/git", ["-C", repo.path, "-c", "core.hooksPath=/dev/null", "-c", "commit.gpgsign=false", "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid"] + args)
+            try #require(result.status == 0, "Git fixture failed: \(result.error)")
+        }
+        try await git(["init", "-b", "main"])
+        try await git(["commit", "--allow-empty", "-m", "Initial"])
+        let legacyRoot = root.appendingPathComponent("Application Support/worktrees"), newRoot = root.appendingPathComponent(".chauffeur/worktrees")
+        let folder = ProjectFolder(path: repo.path)
+        // A checkout created before the root moved.
+        let legacy = try await WorktreeManager(root: legacyRoot).create(projectID: UUID(), folder: folder, branch: "legacy", baseRef: "HEAD")
+        #expect(legacy.path.hasPrefix(Paths.canonical(legacyRoot.path) + "/"))
+        let manager = WorktreeManager(root: newRoot, legacyRoots: [legacyRoot])
+        let fresh = try await manager.create(projectID: UUID(), folder: folder, branch: "fresh", baseRef: "HEAD")
+        #expect(fresh.path.hasPrefix(Paths.canonical(newRoot.path) + "/") && fresh.managed)
+        #expect(!fresh.path.contains(" "))
+        // Reconciliation keeps both managed; a checkout elsewhere becomes external.
+        let inventory = await manager.observe(at: repo.path)
+        #expect(await manager.reconciled(legacy, inventory: inventory).managed)
+        #expect(await manager.reconciled(fresh, inventory: inventory).managed)
+        var elsewhere = fresh; elsewhere.path = root.appendingPathComponent("elsewhere").path
+        try FileManager.default.moveItem(atPath: fresh.path, toPath: elsewhere.path)
+        try await git(["worktree", "repair", elsewhere.path])
+        #expect(await !manager.reconciled(elsewhere, inventory: manager.observe(at: repo.path)).managed)
+        // Legacy managed checkouts can still be removed without the external override.
+        try await manager.remove(legacy, liveSessions: [])
+        #expect(!FileManager.default.fileExists(atPath: legacy.path))
+        var code: String?
+        do { try await manager.remove(elsewhere, liveSessions: []) } catch let error as ChauffeurError { code = error.code }
+        #expect(code == "unmanaged_path")
+    }
+}

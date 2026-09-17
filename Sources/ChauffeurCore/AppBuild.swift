@@ -17,6 +17,13 @@ public enum AppBuild: String, Codable, Sendable, CaseIterable {
     public var applicationSupport: URL {
         FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/\(displayName)", isDirectory: true)
     }
+    /// Where new managed Git checkouts are created. A dot directory in the home
+    /// folder keeps the path free of spaces, which tools launched inside a
+    /// worktree do not always quote correctly. Checkouts created under the
+    /// Application Support store before this change stay managed there.
+    public var worktreeRoot: URL {
+        FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(self == .debug ? ".chauffeur-debug/worktrees" : ".chauffeur/worktrees", isDirectory: true)
+    }
 }
 
 /// Captured once when the runtime starts, before an app update can replace its

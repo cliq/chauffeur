@@ -22,6 +22,7 @@ public enum Paths {
     public static var applicationSupport: URL {
         AppBuild.current.applicationSupport
     }
+    public static var worktreeRoot: URL { AppBuild.current.worktreeRoot }
     public static func canonical(_ path: String) -> String {
         let url = URL(fileURLWithPath: (path as NSString).expandingTildeInPath).standardizedFileURL
         if let resolved = realpath(url.path, nil) { defer { free(resolved) }; return String(cString: resolved) }

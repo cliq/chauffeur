@@ -43,7 +43,11 @@ move the scroll position.
 
 Open **Manage Worktrees…** in a project window, choose a repository, and create a
 worktree with a branch and base ref, delete existing ones, or prune stale Git entries. Creation shows
-the destination under Chauffeur's managed storage. The resolved base commit is
+the destination under Chauffeur's managed storage, `~/.chauffeur/worktrees/<repository-id>/<branch-slug>`
+(`~/.chauffeur-debug/…` for Debug builds). The path has no spaces, which tools
+launched inside a checkout do not always quote correctly. Checkouts created under
+the earlier `~/Library/Application Support/Chauffeur/worktrees` location stay
+managed and deletable where they are. The resolved base commit is
 recorded separately from the branch's current state. A failed agent launch
 retains the checkout for another explicit launch.
 

@@ -384,8 +384,8 @@ struct ProjectWindow: View {
                             Text(row.isMain ? "Main checkout" : URL(fileURLWithPath: row.path).lastPathComponent).lineLimit(1)
                             if let unmerged = row.unmergedDescription {
                                 Text("·")
-                                Label("\(row.unmergedCount)", systemImage: "arrow.up").labelStyle(.titleAndIcon).imageScale(.small)
-                                    .help(unmerged).accessibilityLabel(unmerged)
+                                HStack(spacing: 1) { Image(systemName: "arrow.up").imageScale(.small); Text("\(row.unmergedCount)") }
+                                    .help(unmerged).accessibilityElement(children: .combine).accessibilityLabel(unmerged)
                                     .accessibilityIdentifier("repository.unmerged.\(row.path)")
                             }
                         }.font(.caption).foregroundStyle(.secondary)

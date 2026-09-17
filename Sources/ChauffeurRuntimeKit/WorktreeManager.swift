@@ -5,8 +5,18 @@ import ChauffeurCore
 
 public actor WorktreeManager {
     private let root: URL
+    /// Earlier managed roots. Checkouts there stay managed and removable, but
+    /// new checkouts are only created under `root`.
+    private let legacyRoots: [URL]
     private var reservations = Set<String>()
-    public init(root: URL) { self.root = URL(fileURLWithPath: Paths.canonical(root.path)) }
+    public init(root: URL, legacyRoots: [URL] = []) {
+        self.root = URL(fileURLWithPath: Paths.canonical(root.path))
+        self.legacyRoots = legacyRoots.map { URL(fileURLWithPath: Paths.canonical($0.path)) }
+    }
+    /// Whether a canonical path lies inside the current or a legacy managed root.
+    public func isManagedPath(_ path: String) -> Bool {
+        ([root] + legacyRoots).contains { path.hasPrefix($0.path + "/") }
+    }
     private func git(_ directory: String, _ arguments: [String]) async throws -> String {
         let result = try await ProcessRunner.run("/usr/bin/git", ["-C", directory] + arguments, environment: ["PATH": "/usr/bin:/bin", "HOME": FileManager.default.homeDirectoryForCurrentUser.path, "LC_ALL": "en_US.UTF-8", "GIT_TERMINAL_PROMPT": "0"], timeout: 30)
         guard result.status == 0, !result.outputTruncated else {
@@ -171,7 +181,7 @@ public actor WorktreeManager {
         }
         // Moving a checkout out of managed storage transfers its cleanup to the
         // user. Registering/moving it back does not silently regain ownership.
-        if !entry.path.hasPrefix(root.path + "/") { result.managed = false }
+        if !isManagedPath(entry.path) { result.managed = false }
         return result
     }
     public func destination(repositoryID: UUID, branch: String) -> URL {
@@ -213,10 +223,9 @@ public actor WorktreeManager {
     /// only deleted when the caller explicitly asks for it.
     public func remove(_ worktree: Worktree, liveSessions: [Session], allowExternal: Bool = false, discardChanges: Bool = false) async throws {
         let path = Paths.canonical(worktree.path)
-        let managedRoot = Paths.canonical(root.path) + "/"
         if !allowExternal {
             guard worktree.managed else { throw ChauffeurError("external_worktree", "External worktrees can only be unregistered") }
-            guard path.hasPrefix(managedRoot) else { throw ChauffeurError("unmanaged_path", "Worktree is outside Chauffeur's managed directory", path: path) }
+            guard isManagedPath(path) else { throw ChauffeurError("unmanaged_path", "Worktree is outside Chauffeur's managed directory", path: path) }
         }
         guard path != Paths.canonical(worktree.repositoryPath) else { throw ChauffeurError("main_checkout", "The main checkout cannot be removed", path: path) }
         guard !liveSessions.contains(where: { session in

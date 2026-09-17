@@ -51,7 +51,10 @@ public actor RuntimeCoordinator {
                            authorization: notificationHelperAvailable ? notificationAuthorization : .unavailable,
                            helperConnected: notificationHeartbeat.map { Date().timeIntervalSince($0) < 15 } ?? false)
     }
-    public init(root: URL, ctlPath: String, environment: [String: String], logs: RuntimeLogStore? = nil, id: UUID = UUID(), identity: RuntimeIdentity? = nil) throws {
+    /// `worktreeRoot` is where new managed checkouts are created; `nil` keeps
+    /// them under the data root, as fixtures and earlier releases do. When it
+    /// is set, checkouts under the data root remain managed.
+    public init(root: URL, worktreeRoot: URL? = nil, ctlPath: String, environment: [String: String], logs: RuntimeLogStore? = nil, id: UUID = UUID(), identity: RuntimeIdentity? = nil) throws {
         self.id = id
         self.identity = identity
         self.logs = logs ?? (try? RuntimeLogStore(root: RuntimeLogStore.directory(for: root)))
@@ -59,7 +62,8 @@ public actor RuntimeCoordinator {
         store = try FileStore(root: root)
         ledger = try Ledger(path: root.appendingPathComponent("runtime/ledger.sqlite").path)
         terminals = try TmuxHost(runtimeDirectory: root.appendingPathComponent("runtime"), ctlPath: ctlPath, environment: environment)
-        worktrees = WorktreeManager(root: root.appendingPathComponent("worktrees"))
+        let legacyWorktreeRoot = root.appendingPathComponent("worktrees")
+        worktrees = WorktreeManager(root: worktreeRoot ?? legacyWorktreeRoot, legacyRoots: worktreeRoot == nil ? [] : [legacyWorktreeRoot])
         snapshots = try SnapshotStore(root: root.appendingPathComponent("runtime/snapshots"))
     }
     public func start() async throws {
