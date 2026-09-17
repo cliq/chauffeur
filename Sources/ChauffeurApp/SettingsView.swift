@@ -67,6 +67,7 @@ struct SettingsView: View {
                     Text("Quitting the service keeps agents running but pauses updates and coordination. Start it again here or reopen Chauffeur to reconnect.").font(.caption).foregroundStyle(.secondary)
                 }
                 NotificationSettingsSection()
+                RemoteAccessSettingsSection()
                 TerminalLauncherSettings()
                 Section("Retention and Delegation") {
                     Toggle("Keep finished sessions", isOn: $retention.keepFinishedSessions)

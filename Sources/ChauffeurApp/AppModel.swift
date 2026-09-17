@@ -16,6 +16,7 @@ struct AppSnapshot: Decodable, Sendable {
     var errors: [ChauffeurError] = []
     var repositoryInventories: [RepositoryInventory]?
     var notifications: NotificationStatus?
+    var remoteAccess: RemoteAccessStatus?
     init() {}
 }
 
