@@ -40,6 +40,10 @@ targets:
     dependencies:
       - package: Chauffeur
         product: ChauffeurCore
+      - package: Chauffeur
+        product: ChauffeurTerminalInterface
+      - package: Chauffeur
+        product: ChauffeurTerminalSwiftTerm
       - package: SwiftTerm
         product: SwiftTerm
     info:

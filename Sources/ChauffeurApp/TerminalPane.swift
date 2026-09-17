@@ -1,19 +1,30 @@
 import SwiftUI
 import AppKit
 import ChauffeurCore
-@preconcurrency import SwiftTerm
+import ChauffeurTerminalInterface
+import ChauffeurTerminalSwiftTerm
 
 /// Whether this view controls the session's terminal. A terminal whose control
 /// was taken by another client stays `controlLost` until the user takes it
 /// back; automatic reattachment must never reclaim it silently.
 enum TerminalControlState: Equatable { case detached, connecting, connected, controlLost(String), failed(String) }
 
-@MainActor final class TerminalController: ObservableObject, @preconcurrency TerminalViewDelegate {
+/// Owns one session's IPC attachment (connection, attachment generation, control
+/// state, outgoing queue) and drives an engine-neutral `TerminalEngineAdapter`.
+/// Every byte in or out crosses the adapter; the controller never talks to
+/// SwiftTerm for I/O. Engine-specific desktop features (history find, focus
+/// deferral, accessibility, the Debug probe) reach the themed view through
+/// `desktopAdapter`/`terminal` only.
+@MainActor final class TerminalController: ObservableObject, TerminalEngineAdapterDelegate {
     let sessionID: UUID
-    let terminal = ThemedTerminalView(frame: NSRect(x: 0, y: 0, width: 900, height: 620))
+    /// The engine-neutral terminal this controller feeds and listens to.
+    let adapter: any TerminalEngineAdapter
+    /// The same object as `adapter` when it is the production SwiftTerm adapter;
+    /// `nil` when a test or probe injected another engine.
+    let desktopAdapter: SwiftTermAdapter?
     @Published var status: String?
     @Published var connected = false
-    @Published var controlState: TerminalControlState = .detached
+    @Published var controlState: TerminalControlState = .detached { didSet { syncInputGate() } }
     @Published var historyPresented = false
     private let readOnly: Bool
     var historyController: TerminalController?
@@ -24,7 +35,7 @@ enum TerminalControlState: Equatable { case detached, connecting, connected, con
     private var generation = UUID()
     /// The runtime's identity for the current attachment; every input and
     /// resize command carries it so a superseded view cannot act on the terminal.
-    private var attachmentGeneration: UInt64?
+    private var attachmentGeneration: UInt64? { didSet { syncInputGate() } }
     #if DEBUG
     var debugEvents: [String] = []
     private func trace(_ text: String) {
@@ -32,16 +43,49 @@ enum TerminalControlState: Equatable { case detached, connecting, connected, con
         if debugEvents.count > 40 { debugEvents.removeFirst(debugEvents.count - 40) }
     }
     #endif
-    init(sessionID: UUID, scrollback: Int, readOnly: Bool = false) {
+    /// Creates the controller around the desktop SwiftTerm adapter wrapping the
+    /// app's themed view, unless `adapter` injects another engine (probes, tests).
+    init(sessionID: UUID, scrollback: Int, readOnly: Bool = false, adapter: (any TerminalEngineAdapter)? = nil) {
         self.sessionID = sessionID
         self.readOnly = readOnly
-        terminal.terminalDelegate = self
-        terminal.acceptsFileDrops = !readOnly
-        terminal.font = .monospacedSystemFont(ofSize: 13, weight: .regular)
-        terminal.getTerminal().changeScrollback(scrollback)
-        terminal.applyAppearance()
-        terminal.setAccessibilityIdentifier("\(readOnly ? "history" : "terminal")-\(sessionID.uuidString)")
-        terminal.setAccessibilityLabel(readOnly ? "Saved terminal history" : "Agent terminal")
+        // `ThemedTerminalView` owns the colors (it re-applies them on appearance
+        // changes), so the adapter is told not to touch them.
+        let appearance = TerminalAppearance(fontSize: 13, scrollbackLines: scrollback, followsSystemColors: false)
+        let engine: any TerminalEngineAdapter = adapter ?? SwiftTermAdapter(view: ThemedTerminalView(frame: NSRect(x: 0, y: 0, width: 900, height: 620)), appearance: appearance)
+        self.adapter = engine
+        self.desktopAdapter = engine as? SwiftTermAdapter
+        engine.delegate = self
+        if let view = themedView {
+            view.acceptsFileDrops = !readOnly
+            view.applyAppearance()
+            view.setAccessibilityIdentifier("\(readOnly ? "history" : "terminal")-\(sessionID.uuidString)")
+            view.setAccessibilityLabel(readOnly ? "Saved terminal history" : "Agent terminal")
+            // Drops go through the adapter so the input gate and the bracketed
+            // paste encoding are the engine's, not the view's.
+            view.pasteHandler = { [weak self] text in self?.adapter.paste(text) }
+        }
+        #if DEBUG
+        assert(TerminalAdapterConformance.check(engine).isEmpty, "Terminal adapter violates its contract: \(TerminalAdapterConformance.check(engine))")
+        #endif
+        syncInputGate()
+    }
+    /// The desktop's themed SwiftTerm view, when the production adapter is in
+    /// use. Only for engine-specific desktop features (focus deferral, find, the
+    /// Debug probe); never for bytes.
+    private var themedView: ThemedTerminalView? { desktopAdapter?.view as? ThemedTerminalView }
+    /// The themed view for callers that only exist on the desktop (`ProjectWindow`
+    /// focus checks, `NativeProbe`). Traps when another engine was injected.
+    var terminal: ThemedTerminalView {
+        guard let themedView else { preconditionFailure("TerminalController.terminal requires the SwiftTerm desktop adapter") }
+        return themedView
+    }
+    /// Input may leave the terminal only while this controller holds a live
+    /// attachment it controls. Anything typed otherwise is dropped by the
+    /// adapter, never queued, so nothing replays after a reconnect.
+    private func syncInputGate() {
+        let enabled = !readOnly && attachmentGeneration != nil && controlState == .connected
+        if adapter.isInputEnabled != enabled { adapter.setInputEnabled(enabled) }
+        themedView?.inputEnabled = enabled
     }
     /// Attaches to the live terminal. Automatic calls (layout synchronization)
     /// leave a terminal alone once another client took control of it; only an
@@ -58,7 +102,7 @@ enum TerminalControlState: Equatable { case detached, connecting, connected, con
             guard let self else { return }
             do {
                 let socket = try SocketConnection(path: socketPath); connection = socket
-                let size = terminal.getTerminal()
+                let size = adapter.cellSize
                 let request = IPCRequest("attach", params: .object(["sessionID": .string(sessionID.uuidString), "cols": .number(Double(max(2, min(500, size.cols)))), "rows": .number(Double(max(2, min(300, size.rows)))), "takeControl": .bool(takeControl)]))
                 try await socket.sendAsync(request)
                 let response = try await socket.receiveAsync(IPCResponse.self)
@@ -66,7 +110,6 @@ enum TerminalControlState: Equatable { case detached, connecting, connected, con
                 if let error = response.error { throw error }
                 guard response.version == WireProtocol.major else { throw ChauffeurError("protocol_mismatch", "Restart the service to match this app version") }
                 guard let granted = response.result?["generation"].int, granted >= 0 else { throw ChauffeurError("protocol_mismatch", "Service did not identify the terminal attachment. Restart the service") }
-                attachmentGeneration = UInt64(granted); controlState = .connected
                 let (stream, continuation) = AsyncStream<IPCRequest>.makeStream(bufferingPolicy: .bufferingOldest(512))
                 outgoing = continuation
                 writer = Task {
@@ -83,10 +126,10 @@ enum TerminalControlState: Equatable { case detached, connecting, connected, con
                     }
                     catch { socket.close() }
                 }
-                terminal.feed(text: "\u{1b}c")
+                attachmentGeneration = UInt64(granted); controlState = .connected
+                adapter.reset()
                 // Layout may change while the attachment handshake is pending.
-                let currentSize = terminal.getTerminal()
-                sizeChanged(source: terminal, newCols: currentSize.cols, newRows: currentSize.rows)
+                sendResize(adapter.cellSize)
                 while !Task.isCancelled && generation == current {
                     let packet = try await socket.receiveAsync(TerminalPacket.self)
                     guard generation == current, !Task.isCancelled else { return }
@@ -96,7 +139,7 @@ enum TerminalControlState: Equatable { case detached, connecting, connected, con
                     }
                     if packet.kind == "error" { throw ChauffeurError("terminal_error", packet.message ?? "Terminal disconnected") }
                     if let bytes = packet.bytes {
-                        terminal.feed(byteArray: Array(bytes)[...]); connected = true; status = nil
+                        adapter.feed(bytes); connected = true; status = nil
                     }
                 }
             } catch {
@@ -135,10 +178,10 @@ enum TerminalControlState: Equatable { case detached, connecting, connected, con
     /// newly selected tab is not in the window yet when its selection changes.
     func focus() {
         guard !readOnly else { return }
-        if let window = terminal.window { window.makeFirstResponder(terminal) } else { terminal.focusesWhenAttached = true }
+        if let themedView, themedView.window == nil { themedView.focusesWhenAttached = true } else { adapter.focus() }
     }
     func find() {
-        if readOnly { terminal.performTextFinderAction(findSender()) }
+        if readOnly { desktopAdapter?.view.performTextFinderAction(findSender()) }
         else if historyPresented, let historyController { historyController.find() }
         else {
             historyController = TerminalController(sessionID: sessionID, scrollback: 10_000, readOnly: true)
@@ -150,8 +193,9 @@ enum TerminalControlState: Equatable { case detached, connecting, connected, con
         #if DEBUG
         trace("display history bytes=\(snapshot.history.utf8.count) screen bytes=\(snapshot.screen.utf8.count)")
         #endif
-        terminal.getTerminal().changeScrollback(snapshot.lineLimit + snapshot.rows)
-        terminal.feed(text: "\u{1b}c" + snapshot.rendering)
+        adapter.configure(TerminalAppearance(fontSize: 13, scrollbackLines: snapshot.lineLimit + snapshot.rows, followsSystemColors: false))
+        adapter.reset()
+        adapter.feed(Data(snapshot.rendering.utf8))
     }
     private func findSender() -> NSMenuItem { let item = NSMenuItem(); item.tag = NSTextFinder.Action.showFindInterface.rawValue; return item }
     private func enqueue(_ request: IPCRequest) {
@@ -166,32 +210,35 @@ enum TerminalControlState: Equatable { case detached, connecting, connected, con
         #endif
         if case .dropped = result { status = "Terminal input queue is full. Reconnect before continuing"; connection?.close() }
     }
-    func send(source: TerminalView, data: ArraySlice<UInt8>) { enqueue(IPCRequest("input", params: .object(["bytes": .string(Data(data).base64EncodedString())]))) }
-    func sizeChanged(source: TerminalView, newCols: Int, newRows: Int) {
-        guard newCols >= 2 && newRows >= 2 else { return }
-        enqueue(IPCRequest("resize", params: .object(["cols": .number(Double(min(newCols, 500))), "rows": .number(Double(min(newRows, 300)))])))
+    private func sendResize(_ size: TerminalCellSize) {
+        guard size.cols >= 2 && size.rows >= 2 else { return }
+        enqueue(IPCRequest("resize", params: .object(["cols": .number(Double(min(size.cols, 500))), "rows": .number(Double(min(size.rows, 300)))])))
     }
-    func setTerminalTitle(source: TerminalView, title: String) {}
-    func hostCurrentDirectoryUpdate(source: TerminalView, directory: String?) {}
-    func scrolled(source: TerminalView, position: Double) {}
-    func bell(source: TerminalView) { NSSound.beep() }
-    func requestOpenLink(source: TerminalView, link: String, params: [String: String]) {
+
+    // MARK: TerminalEngineAdapterDelegate
+
+    func terminal(_ adapter: any TerminalEngineAdapter, didGenerateInput data: Data) {
+        enqueue(IPCRequest("input", params: .object(["bytes": .string(data.base64EncodedString())])))
+    }
+    func terminal(_ adapter: any TerminalEngineAdapter, didChangeCellSize size: TerminalCellSize) { sendResize(size) }
+    func terminal(_ adapter: any TerminalEngineAdapter, didChangeTitle title: String) {}
+    func terminalDidRingBell(_ adapter: any TerminalEngineAdapter) { NSSound.beep() }
+    /// OSC 52: the adapter only reports the request; writing the pasteboard is the app's call.
+    func terminal(_ adapter: any TerminalEngineAdapter, didCopyToClipboard text: String) {
+        NSPasteboard.general.clearContents(); NSPasteboard.general.setString(text, forType: .string)
+    }
+    /// The adapter already filters to web and mail links; the desktop additionally
+    /// keeps its historical allowance for `file` URLs.
+    func terminal(_ adapter: any TerminalEngineAdapter, didRequestOpenLink link: String) {
         guard let url = URL(string: link), ["http", "https", "mailto", "file"].contains(url.scheme?.lowercased() ?? "") else { return }
         NSWorkspace.shared.open(url)
     }
-    func clipboardCopy(source: TerminalView, content: Data) {
-        guard let text = String(data: content, encoding: .utf8) else { return }
-        NSPasteboard.general.clearContents(); NSPasteboard.general.setString(text, forType: .string)
-    }
-    func clipboardRead(source: TerminalView) -> Data? { nil }
-    func iTermContent(source: TerminalView, content: ArraySlice<UInt8>) {}
-    func rangeChanged(source: TerminalView, startY: Int, endY: Int) {}
 }
 
 struct TerminalHost: NSViewRepresentable {
     @ObservedObject var controller: TerminalController
-    func makeNSView(context: Context) -> TerminalView { controller.terminal }
-    func updateNSView(_ nsView: TerminalView, context: Context) {}
+    func makeNSView(context: Context) -> NSView { controller.adapter.makeView() }
+    func updateNSView(_ nsView: NSView, context: Context) {}
 }
 
 struct TerminalPane: View {

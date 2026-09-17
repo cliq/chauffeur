@@ -32,15 +32,27 @@ final class ThemedTerminalView: TerminalView {
         guard acceptsFileDrops else { return false }
         let files = droppedFiles(sender)
         guard !files.isEmpty else { return false }
-        // Honor bracketed paste without touching the system clipboard. Quote
-        // each path, including spaces, apostrophes, and shell metacharacters.
+        // Quote each path, including spaces, apostrophes, and shell
+        // metacharacters, without touching the system clipboard.
         let paths = ArgumentText.format(files.map(\.path)) + " "
-        let paste = getTerminal().bracketedPasteMode
-            ? "\u{1b}[200~" + paths + "\u{1b}[201~" : paths
-        send(txt: paste)
+        if let pasteHandler {
+            // The controller's engine adapter applies bracketed paste and its
+            // input gate, so a disconnected terminal never queues the drop.
+            pasteHandler(paths)
+        } else {
+            let paste = getTerminal().bracketedPasteMode
+                ? "\u{1b}[200~" + paths + "\u{1b}[201~" : paths
+            send(txt: paste)
+        }
         window?.makeFirstResponder(self)
         return true
     }
+    /// Receives dropped file paths as pasted text. Set by the owning controller
+    /// so drops are encoded and gated by its terminal engine adapter.
+    var pasteHandler: ((String) -> Void)?
+    /// Mirrors the engine adapter's input gate for the keys this view sends on
+    /// its own (`sendWordNavigation`), which bypass SwiftTerm's delegate.
+    var inputEnabled = true
     /// Set when a tab change asks for keyboard focus before the view is shown.
     var focusesWhenAttached = false
     /// Option-Arrow and Option-Delete as Terminal.app sends them. Without the
@@ -50,7 +62,7 @@ final class ThemedTerminalView: TerminalView {
     /// SwiftTerm's `keyDown` is not overridable, so the window's key monitor
     /// asks first. Returns true when the key was consumed.
     func sendWordNavigation(_ event: NSEvent) -> Bool {
-        guard optionAsMetaKey, terminal?.keyboardEnhancementFlags.isEmpty == true,
+        guard inputEnabled, optionAsMetaKey, terminal?.keyboardEnhancementFlags.isEmpty == true,
               event.modifierFlags.intersection([.command, .control, .option, .shift]) == .option,
               let scalar = event.charactersIgnoringModifiers?.unicodeScalars.first else { return false }
         switch Int(scalar.value) {
