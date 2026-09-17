@@ -1,7 +1,7 @@
 # Native iOS remote control — implementation plan
 
 - Date: 2026-09-17
-- Status: Planned; implementation has not started.
+- Status: Implemented on `feature/mobile` on 2026-09-17 through P4; P5 device validation is open. See the [validation record](mobile-validation.md) and [M1](decisions/M1-mobile-transport-and-terminal.md).
 - Scope: [PRD](mobile-poc-prd.md) and [approved low-fi screen flow](mobile-poc-flow.html).
 - Architecture constraint: The terminal emulator must be replaceable. SwiftTerm is the current desktop engine; Ghostty is under consideration, not a selected or validated iOS dependency.
 

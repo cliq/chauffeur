@@ -24,13 +24,14 @@ notifications, and simultaneous terminal writers are all explicitly deferred;
 see the PRD's [deferred scope](mobile-poc-prd.md#8-explicitly-deferred) for the
 complete list.
 
-Some of the client code in this tree is still scaffolding for screens and
-navigation rather than a finished remote client: `MobileAppModel` currently
-connects, pairs, and launches against an in-memory fixture inventory instead
-of `ChauffeurRemoteClient`, and its terminal adapter factory defaults to
-`FakeTerminalEngineAdapter` rather than the SwiftTerm adapter. Where this doc
-describes behavior that isn't wired up yet in the tree, it says "planned for
-the POC" rather than asserting it works today.
+The iOS app in this tree is wired to the real remote client: pairing, the
+session list, launches and terminals go through `ChauffeurRemoteClient` over the
+TLS connection described below, and the terminal surface is the SwiftTerm
+adapter (`--fake-terminal` swaps in the fake engine for previews and tests).
+What has and has not been verified is recorded in
+[mobile-validation.md](mobile-validation.md); physical-iPhone checks are still
+open, so where this doc describes device behaviour it is the intended contract,
+not an observed result.
 
 ## 2. Building
 
