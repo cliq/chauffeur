@@ -25,8 +25,10 @@ struct WorktreesView: View {
     private var folder: ProjectFolder? { currentProject.folders.first { $0.id == folderID } }
     private var observation: RepositoryInventory? {
         guard let folder else { return nil }
-        return model.snapshot.repositoryInventories?.first { $0.sourcePath == folder.canonicalPath || $0.sourcePaths?.contains(folder.canonicalPath) == true }
+        return model.snapshot.repositoryInventories?.observation(for: folder.canonicalPath)
     }
+    /// No observation yet means the folder has not been scanned, not that it has no worktrees.
+    private var inventoryPending: Bool { folder != nil && observation == nil && model.online }
     private var rows: [CheckoutRow] {
         guard let folder else { return [] }
         return CheckoutRows.rows(folder: folder, project: currentProject, records: model.snapshot.store.worktrees.map(\.value), inventory: observation, sessions: model.sessions(in: project.id))
@@ -43,7 +45,7 @@ struct WorktreesView: View {
                 }.disabled(busy).accessibilityIdentifier("worktrees.repository")
                 Button("Refresh Git Inventory") { refresh() }.disabled(folder == nil || busy).accessibilityIdentifier("worktrees.refresh")
             }
-            Text("\(worktreeRows.count) worktrees" + (stale.isEmpty ? "" : " · \(stale.count) stale Git entries")).font(.caption).foregroundStyle(.secondary)
+            Text(inventoryPending ? "Loading Git inventory…" : "\(worktreeRows.count) worktrees" + (stale.isEmpty ? "" : " · \(stale.count) stale Git entries")).font(.caption).foregroundStyle(.secondary)
             ScrollView {
               VStack(alignment: .leading, spacing: 0) {
                 ForEach(worktreeRows) { row in
@@ -76,7 +78,9 @@ struct WorktreesView: View {
                     }.padding(10)
                     Divider()
                 }
-                if worktreeRows.isEmpty && stale.isEmpty { Text("No worktrees for this repository.").foregroundStyle(.secondary).padding(16) }
+                if inventoryPending {
+                    HStack(spacing: 8) { ProgressView().controlSize(.small); Text("Loading Git inventory…").foregroundStyle(.secondary) }.padding(16).accessibilityIdentifier("worktrees.loading")
+                } else if worktreeRows.isEmpty && stale.isEmpty { Text("No worktrees for this repository.").foregroundStyle(.secondary).padding(16) }
               }.frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.trailing, NSScroller.scrollerWidth(for: .regular, scrollerStyle: .legacy))
                 .background(PersistentScrollbars())

@@ -26,3 +26,34 @@ public struct RepositoryInventory: Codable, Sendable {
     public var error: ChauffeurError?
     public init(sourcePath: String, status: Status) { self.sourcePath = sourcePath; self.status = status }
 }
+
+public extension Array where Element == RepositoryInventory {
+    /// The observation covering a project folder, whether it was scanned
+    /// directly or grouped under another path of the same repository.
+    func observation(for folderPath: String) -> RepositoryInventory? {
+        first { $0.sourcePath == folderPath || $0.sourcePaths?.contains(folderPath) == true }
+    }
+}
+
+/// What a project window may claim about a folder's Git checkouts. Until the
+/// runtime has reported the folder, nothing is known: not its worktrees, not the
+/// main checkout's branch. Showing "no worktrees" then would be a guess.
+public enum InventoryReadiness: Equatable, Sendable {
+    /// No observation yet; the first scan after registering the folder is still running.
+    case pending
+    case ready
+    case notRepository
+    /// The scan could not inspect the folder; a refresh may recover.
+    case failed(String)
+    public static func of(folderPath: String, inventories: [RepositoryInventory]?) -> InventoryReadiness {
+        guard let inventory = inventories?.observation(for: folderPath) else { return .pending }
+        switch inventory.status {
+        case .available: return .ready
+        case .notRepository: return .notRepository
+        case .missing: return .failed(inventory.error?.errorDescription ?? "The folder is missing")
+        case .inaccessible: return .failed(inventory.error?.errorDescription ?? "The folder is not accessible")
+        case .failed: return .failed(inventory.error?.errorDescription ?? "Git inventory could not be read")
+        }
+    }
+    public var isPending: Bool { self == .pending }
+}

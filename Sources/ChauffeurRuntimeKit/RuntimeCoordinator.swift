@@ -107,6 +107,14 @@ public actor RuntimeCoordinator {
         await pending.value
         worktreeScan = nil
     }
+    /// Scans after any in-flight scan finishes, so a folder registered while a
+    /// scan was already running is still observed promptly.
+    private func rescanWorktrees() {
+        Task {
+            while let pending = worktreeScan { await pending.value; await Task.yield() }
+            await reconcileWorktrees()
+        }
+    }
     private func scanWorktrees() async {
         let snapshot = await store.refresh()
         let records = snapshot.worktrees.filter { $0.value.registered }
@@ -363,7 +371,12 @@ public actor RuntimeCoordinator {
             return .object(["deleted": .bool(true)])
         case "savePresetSet": return try .from(await store.save(params["record"].decode(PresetSet.self), expectedVersion: params["version"].string))
         case "savePreset": return try .from(await store.save(params["record"].decode(AgentPreset.self), expectedVersion: params["version"].string))
-        case "saveProject": return try .from(await store.save(params["record"].decode(Project.self), expectedVersion: params["version"].string))
+        case "saveProject":
+            let project = try params["record"].decode(Project.self)
+            let saved = try await store.save(project, expectedVersion: params["version"].string)
+            // A new folder shows as loading in the app until it is observed; do not make it wait for the periodic tick.
+            if project.folders.contains(where: { $0.registered && repositoryInventories.observation(for: $0.canonicalPath) == nil }) { rescanWorktrees() }
+            return try .from(saved)
         case "saveWindow": return try .from(await store.save(params["record"].decode(WindowState.self), expectedVersion: params["version"].string))
         case "discoverFolders":
             let parent = try params.requiredString("path")

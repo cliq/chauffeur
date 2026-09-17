@@ -204,8 +204,16 @@ struct ProjectWindow: View {
     // MARK: Checkouts
 
     private func inventory(for folder: ProjectFolder) -> RepositoryInventory? {
-        model.snapshot.repositoryInventories?.first { $0.sourcePath == folder.canonicalPath || $0.sourcePaths?.contains(folder.canonicalPath) == true }
+        model.snapshot.repositoryInventories?.observation(for: folder.canonicalPath)
     }
+    /// Whether the folder's checkouts are known yet. A folder that has not been
+    /// scanned shows as loading rather than as an empty repository; offline, a
+    /// missing observation cannot resolve, so it is reported as a failure.
+    private func readiness(for folder: ProjectFolder) -> InventoryReadiness {
+        let readiness = InventoryReadiness.of(folderPath: folder.canonicalPath, inventories: model.snapshot.repositoryInventories)
+        return readiness.isPending && !model.online ? .failed("Git inventory is unavailable while the background service is offline") : readiness
+    }
+    private func refreshInventory() { model.perform { _ = try await model.call("refreshWorktrees") } }
     private func checkouts(for folder: ProjectFolder, project: Project) -> [CheckoutRow] {
         CheckoutRows.rows(folder: folder, project: project, records: worktreeRecords, inventory: inventory(for: folder), sessions: allSessions, pending: pendingWorktree)
     }
@@ -292,10 +300,16 @@ struct ProjectWindow: View {
     private func repositoryRow(_ folder: ProjectFolder, project: Project) -> some View {
         let rows = checkouts(for: folder, project: project)
         let overviewSelected = layout.selectedFolderID == folder.id && layout.selectedWorktreePath == nil
+        let readiness = readiness(for: folder)
         return DisclosureGroup(isExpanded: Binding(get: { !collapsedRepositories.contains(folder.id) }, set: { if $0 { collapsedRepositories.remove(folder.id) } else { collapsedRepositories.insert(folder.id) } })) {
-            ForEach(rows) { row in checkoutRow(row, folder: folder, project: project) }
+            if readiness.isPending {
+                inventoryPendingRow(folder)
+            } else {
+                ForEach(rows) { row in checkoutRow(row, folder: folder, project: project) }
+                inventoryStatusRow(readiness, folder: folder)
+            }
             Button("New Worktree & Session…", systemImage: "plus") { showLaunch(folderID: folder.id, newWorktree: true) }
-                .buttonStyle(.plain).font(.caption).disabled(!canLaunch || folder.availability != .available)
+                .buttonStyle(.plain).font(.caption).disabled(!canLaunch || folder.availability != .available || readiness.isPending)
                 .accessibilityIdentifier("repository.new-worktree.\(folder.id)")
         } label: {
             Button { selectCheckout(folderID: folder.id, path: nil) } label: {
@@ -306,16 +320,38 @@ struct ProjectWindow: View {
                 }.contentShape(Rectangle())
             }.buttonStyle(.plain).help(folder.selectedPath).accessibilityIdentifier("repository.\(folder.id)")
                 .contextMenu {
-                    Button("Launch Agent…") { showLaunch(folderID: folder.id) }.disabled(!canLaunch)
-                    Button("Open Shell") { openShell(in: rows[0], folder: folder) }.disabled(!canLaunch(in: rows[0]))
+                    Button("Launch Agent…") { showLaunch(folderID: folder.id) }.disabled(!canLaunch || readiness.isPending)
+                    Button("Open Shell") { openShell(in: rows[0], folder: folder) }.disabled(!canLaunch(in: rows[0]) || readiness.isPending)
                     Button("New Worktree & Session…") { showLaunch(folderID: folder.id, newWorktree: true) }
-                        .disabled(!canLaunch || folder.availability != .available)
+                        .disabled(!canLaunch || folder.availability != .available || readiness.isPending)
                     Divider()
-                    Button("Manage Worktrees…") { showWorktrees(folderID: folder.id) }
+                    Button("Manage Worktrees…") { showWorktrees(folderID: folder.id) }.disabled(readiness.isPending)
                     Button("Relink / Edit Folder…") { editingProject = true }
                     Button("Reveal in Finder") { FilePanels.reveal(folder.selectedPath) }
                 }
         }.id(SidebarRowID.repository(folder.id))
+    }
+    private func inventoryPendingRow(_ folder: ProjectFolder) -> some View {
+        HStack(spacing: 8) {
+            ProgressView().controlSize(.small)
+            Text("Loading Git inventory…").font(.caption).foregroundStyle(.secondary)
+        }.padding(.horizontal, 6).padding(.vertical, 4)
+            .accessibilityElement(children: .combine).accessibilityIdentifier("repository.loading.\(folder.id)")
+    }
+    @ViewBuilder private func inventoryStatusRow(_ readiness: InventoryReadiness, folder: ProjectFolder) -> some View {
+        switch readiness {
+        case .failed(let message):
+            VStack(alignment: .leading, spacing: 4) {
+                Label(message, systemImage: "exclamationmark.triangle").font(.caption).foregroundStyle(.secondary).lineLimit(3)
+                Button("Retry Git Inventory", systemImage: "arrow.clockwise") { refreshInventory() }
+                    .buttonStyle(.plain).font(.caption).disabled(!model.online)
+                    .accessibilityIdentifier("repository.retry-inventory.\(folder.id)")
+            }.padding(.horizontal, 6).padding(.vertical, 4)
+        case .notRepository:
+            Text("Not a Git repository").font(.caption).foregroundStyle(.secondary).padding(.horizontal, 6)
+        case .pending, .ready:
+            EmptyView()
+        }
     }
     private func checkoutRow(_ row: CheckoutRow, folder: ProjectFolder, project: Project) -> some View {
         let sessions = sessions(in: folder, path: row.path)
@@ -453,6 +489,7 @@ struct ProjectWindow: View {
     }
     private func repositoryOverview(_ folder: ProjectFolder, project: Project) -> some View {
         let rows = checkouts(for: folder, project: project)
+        let readiness = readiness(for: folder)
         return VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 4) {
@@ -460,9 +497,23 @@ struct ProjectWindow: View {
                     Text(folder.canonicalPath).font(.system(.caption, design: .monospaced)).foregroundStyle(.secondary).textSelection(.enabled)
                 }
                 Spacer()
-                Button("Manage Worktrees…") { showWorktrees(folderID: folder.id) }
-                Button("New Worktree & Session…") { showLaunch(folderID: folder.id, newWorktree: true) }.disabled(!canLaunch || folder.availability != .available)
+                Button("Manage Worktrees…") { showWorktrees(folderID: folder.id) }.disabled(readiness.isPending)
+                Button("New Worktree & Session…") { showLaunch(folderID: folder.id, newWorktree: true) }.disabled(!canLaunch || folder.availability != .available || readiness.isPending)
             }.padding(20)
+            if readiness.isPending {
+                VStack(spacing: 12) {
+                    ProgressView()
+                    Text("Loading Git inventory…").foregroundStyle(.secondary)
+                    Text("Worktrees and branches appear when the background service finishes scanning this repository.").font(.caption).foregroundStyle(.secondary)
+                }.frame(maxWidth: .infinity, maxHeight: .infinity).accessibilityIdentifier("overview.loading.\(folder.id)")
+            } else {
+            if case .failed(let message) = readiness {
+                HStack {
+                    Label(message, systemImage: "exclamationmark.triangle").foregroundStyle(.secondary)
+                    Spacer()
+                    Button("Retry Git Inventory") { refreshInventory() }.disabled(!model.online)
+                }.padding(.horizontal, 20).padding(.bottom, 8)
+            }
             List(rows) { row in
                 let sessions = sessions(in: folder, path: row.path)
                 let live = WorktreeSessions.live(sessions).count
@@ -480,6 +531,7 @@ struct ProjectWindow: View {
                 }.padding(.vertical, 4)
                     .contextMenu { checkoutMenu(row, folder: folder) }
                     .accessibilityIdentifier("overview.checkout.\(row.path)")
+            }
             }
         }
     }
