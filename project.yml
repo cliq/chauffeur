@@ -120,6 +120,9 @@ targets:
       base:
         PRODUCT_NAME: Chauffeur
         PRODUCT_BUNDLE_IDENTIFIER: $(APP_BUNDLE_ID).mobile$(CHAUFFEUR_BUNDLE_SUFFIX)
+        # iOS cannot use the Developer ID identity the Mac service is signed with.
+        CODE_SIGN_STYLE: Automatic
+        CODE_SIGN_IDENTITY: Apple Development
         IPHONEOS_DEPLOYMENT_TARGET: "18.0"
         TARGETED_DEVICE_FAMILY: "1"
         SUPPORTS_MACCATALYST: NO
