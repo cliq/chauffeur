@@ -12,6 +12,7 @@ struct SettingsView: View {
     @State private var deleting = false
     @State private var editedPreset: AgentPreset?
     @State private var skillPreset: AgentPreset?
+    @State private var revealedPresetID: UUID?
     @State private var retention = RetentionSettings()
     var body: some View {
         TabView {
@@ -37,16 +38,7 @@ struct SettingsView: View {
                     if let selectedSet, let set = model.presetSets.first(where: { $0.id == selectedSet }) {
                         HStack { Text(set.name).font(.title2); Spacer(); Text("Revision \(set.revision)").foregroundStyle(.secondary) }
                         Text("Agent presets select existing CLI configuration directories. Edits affect new launches in every linked project.").font(.callout).foregroundStyle(.secondary)
-                        List(model.presets.filter { $0.setID == set.id }) { preset in
-                            VStack(alignment: .leading, spacing: 5) {
-                                HStack { Text(preset.name).fontWeight(.semibold); Text(preset.kind.displayName).foregroundStyle(.secondary); if preset.archived { Text("Archived").font(.caption) }; Spacer(); Button("Edit…") { editedPreset = preset }.accessibilityIdentifier("preset.edit-\(preset.id.uuidString)") }
-                                Text(preset.configurationDirectory).font(.caption).textSelection(.enabled)
-                                Button("Chauffeur Skill…") { skillPreset = preset }
-                                    .accessibilityIdentifier("preset-skill-\(preset.id.uuidString)")
-                                if model.presets.filter({ Paths.canonical($0.configurationDirectory) == Paths.canonical(preset.configurationDirectory) }).count > 1 { Label("Configuration directory shared by multiple agent presets", systemImage: "person.2").font(.caption).foregroundStyle(.secondary) }
-                                if set.defaultPresetID == preset.id { Text("Default agent preset").font(.caption).foregroundStyle(.tint) }
-                            }.padding(.vertical, 6)
-                        }
+                        AgentPresetList(set: set, revealedPresetID: $revealedPresetID, edit: { editedPreset = $0 }, showSkill: { skillPreset = $0 })
                         Button("Add Agent Preset…") { newPreset = true }.disabled(set.archived)
                     } else {
                         ContentUnavailableView("Choose a team", systemImage: "person.crop.rectangle.stack", description: Text("Create teams such as Personal or Client 1, then add Codex and Claude Code agent presets."))
@@ -103,8 +95,8 @@ struct SettingsView: View {
             }
             .sheet(isPresented: $newSet) { PresetSetEditor { id in selectedSet = id; newSet = false } }
             .sheet(item: $editedSet) { set in PresetSetEditor(presetSet: set) { id in selectedSet = id; editedSet = nil } }
-            .sheet(isPresented: $newPreset) { if let selectedSet { PresetEditor(setID: selectedSet) } }
-            .sheet(item: $editedPreset) { preset in PresetEditor(setID: preset.setID, preset: preset) }
+            .sheet(isPresented: $newPreset) { if let selectedSet { PresetEditor(setID: selectedSet) { revealedPresetID = $0 } } }
+            .sheet(item: $editedPreset) { preset in PresetEditor(setID: preset.setID, preset: preset) { revealedPresetID = $0 } }
             .sheet(item: $skillPreset) { preset in CoordinationSkillView(preset: preset) }
     }
     private func confirmDelete(_ set: PresetSet) {
@@ -129,6 +121,69 @@ struct SettingsView: View {
         }
     }
 
+}
+
+/// Agent presets of one team. A plain scroll view instead of `List`: the
+/// table-backed list mis-measured freshly inserted multi-line rows and clipped
+/// them to a single control, and it offered no way to reveal a saved preset.
+struct AgentPresetList: View {
+    @EnvironmentObject private var model: AppModel
+    let set: PresetSet
+    @Binding var revealedPresetID: UUID?
+    let edit: (AgentPreset) -> Void
+    let showSkill: (AgentPreset) -> Void
+    private var presets: [AgentPreset] { model.presets.filter { $0.setID == set.id } }
+    private var sharedDirectories: Set<String> {
+        let directories = model.presets.map { Paths.canonical($0.configurationDirectory) }
+        return Set(directories.filter { directory in directories.filter { $0 == directory }.count > 1 })
+    }
+    var body: some View {
+        ScrollViewReader { proxy in
+            ScrollView {
+                VStack(alignment: .leading, spacing: 0) {
+                    if presets.isEmpty {
+                        Text("No agent presets yet. Choose Add Agent Preset… to create one.").foregroundStyle(.secondary).padding(12)
+                    }
+                    ForEach(presets) { preset in
+                        row(preset).id(preset.id)
+                        if preset.id != presets.last?.id { Divider() }
+                    }
+                }.frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .clipShape(RoundedRectangle(cornerRadius: 6))
+            .overlay(RoundedRectangle(cornerRadius: 6).stroke(.separator, lineWidth: 1))
+            .accessibilityIdentifier("preset.list")
+            .onChange(of: revealedPresetID) { _, id in reveal(id, with: proxy) }
+            .onChange(of: presets.map(\.id)) { _, ids in if let id = revealedPresetID, ids.contains(id) { reveal(id, with: proxy) } }
+        }
+    }
+    private func row(_ preset: AgentPreset) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            HStack {
+                Text(preset.name).fontWeight(.semibold); Text(preset.kind.displayName).foregroundStyle(.secondary)
+                if preset.archived { Text("Archived").font(.caption) }
+                Spacer()
+                Button("Edit…") { edit(preset) }.accessibilityIdentifier("preset.edit-\(preset.id.uuidString)")
+            }
+            Text(preset.configurationDirectory).font(.caption).textSelection(.enabled)
+            Button("Chauffeur Skill…") { showSkill(preset) }.accessibilityIdentifier("preset-skill-\(preset.id.uuidString)")
+            if sharedDirectories.contains(Paths.canonical(preset.configurationDirectory)) { Label("Configuration directory shared by multiple agent presets", systemImage: "person.2").font(.caption).foregroundStyle(.secondary) }
+            if set.defaultPresetID == preset.id { Text("Default agent preset").font(.caption).foregroundStyle(.tint) }
+        }
+        .padding(.horizontal, 12).padding(.vertical, 10).frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .contain).accessibilityIdentifier("preset.row-\(preset.id.uuidString)")
+    }
+    /// The saved preset is in the snapshot before the editor closes; wait for
+    /// the sheet to dismiss so the row is laid out before scrolling to it.
+    private func reveal(_ id: UUID?, with proxy: ScrollViewProxy) {
+        guard let id, presets.contains(where: { $0.id == id }) else { return }
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(120))
+            withAnimation { proxy.scrollTo(id, anchor: .bottom) }
+            revealedPresetID = nil
+        }
+    }
 }
 
 struct AppearanceSettingsView: View {
@@ -190,6 +245,7 @@ struct PresetEditor: View {
     @Environment(\.dismiss) private var dismiss
     let setID: UUID
     var preset: AgentPreset?
+    var completion: ((UUID) -> Void)? = nil
     @State private var name = ""
     @State private var kind: CLIKind = .codex
     @State private var executable = "codex"
@@ -226,8 +282,8 @@ struct PresetEditor: View {
                     var value = preset ?? AgentPreset(setID: setID, name: name, kind: kind, executable: executable, configurationDirectory: directory)
                     value.name = name; value.kind = kind; value.executable = executable; value.configurationDirectory = (directory as NSString).expandingTildeInPath
                     value.archived = archived; value.integration = .unverified
-                    Task { do { value.arguments = try ArgumentText.parse(arguments); try value.validate(); _ = try Paths.directory(value.configurationDirectory); try await model.save("savePreset", value, version: version); dismiss() } catch { failure = error.localizedDescription } }
-                }.keyboardShortcut(.defaultAction).disabled(name.trimmingCharacters(in: .whitespaces).isEmpty || directory.isEmpty)
+                    Task { do { value.arguments = try ArgumentText.parse(arguments); try value.validate(); _ = try Paths.directory(value.configurationDirectory); try await model.save("savePreset", value, version: version); completion?(value.id); dismiss() } catch { failure = error.localizedDescription } }
+                }.keyboardShortcut(.defaultAction).disabled(name.trimmingCharacters(in: .whitespaces).isEmpty || directory.isEmpty).accessibilityIdentifier("preset.save")
             }
         }.padding(24).frame(width: 650)
             .onAppear { name = preset?.name ?? ""; kind = preset?.kind ?? .codex; executable = preset?.executable ?? "codex"; directory = preset?.configurationDirectory ?? ""; arguments = ArgumentText.format(preset?.arguments ?? []); archived = preset?.archived ?? false; version = model.snapshot.store.presets.first { $0.value.id == preset?.id }?.version }
