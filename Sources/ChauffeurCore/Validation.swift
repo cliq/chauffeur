@@ -61,7 +61,7 @@ public enum LaunchPolicy {
     // parent agent. Strip provider routing/auth and nested CLI session identity.
     public static let deniedPrefixes = ["CODEX_", "CLAUDE_", "CLAUDECODE", "OPENAI_", "ANTHROPIC_", "AZURE_OPENAI_", "CHAUFFEUR_", "AWS_", "GOOGLE_", "VERTEX_", "BEDROCK_"]
     public static let deniedNames: Set<String> = ["TMUX", "TMUX_PANE", "GOOGLE_APPLICATION_CREDENTIALS", "CLOUD_ML_REGION", "BASH_ENV", "ENV", "ZDOTDIR", "NODE_OPTIONS", "DYLD_INSERT_LIBRARIES", "DYLD_LIBRARY_PATH"]
-    public static func environment(base: [String: String], preset: AgentPreset, sessionID: UUID, token: String) throws -> [String: String] {
+    public static func environment(base: [String: String], preset: AgentPreset, projectID: UUID, sessionID: UUID, token: String) throws -> [String: String] {
         let directory = try Paths.directory(preset.configurationDirectory)
         var result = base.filter { key, _ in !deniedNames.contains(key) && !deniedPrefixes.contains(where: key.hasPrefix) }
         switch preset.kind {
@@ -70,6 +70,10 @@ public enum LaunchPolicy {
         case .shell: break
         }
         result["CHAUFFEUR_SESSION_ID"] = sessionID.uuidString
+        // A deep link other tools can open to reveal this terminal: it launches
+        // the app, opens the project window, selects the worktree and focuses
+        // the session. The scheme differs per build, so the full URL is exported.
+        result["CHAUFFEUR_SESSION_URL"] = SessionRoute(projectID: projectID, sessionID: sessionID).url.absoluteString
         // A shell has no MCP integration, so it never receives a grant token.
         if preset.kind.isAgent { result["CHAUFFEUR_SESSION_TOKEN"] = token }
         result["TERM"] = "xterm-256color"

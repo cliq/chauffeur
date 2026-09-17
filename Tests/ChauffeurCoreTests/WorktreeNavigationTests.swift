@@ -82,7 +82,7 @@ struct WorktreeNavigationTests {
         let shell = AgentPreset(setID: UUID(), name: "Shell", kind: .shell, executable: "/bin/zsh", configurationDirectory: "/tmp")
         var value = shell; value.arguments = ["-l", "--anything-goes"]
         try value.validate()
-        let environment = try LaunchPolicy.environment(base: ["PATH": "/usr/bin", "CODEX_HOME": "/bad"], preset: value, sessionID: UUID(), token: "secret")
+        let environment = try LaunchPolicy.environment(base: ["PATH": "/usr/bin", "CODEX_HOME": "/bad"], preset: value, projectID: UUID(), sessionID: UUID(), token: "secret")
         #expect(environment["CODEX_HOME"] == nil && environment["CLAUDE_CONFIG_DIR"] == nil)
         #expect(environment["CHAUFFEUR_SESSION_TOKEN"] == nil && environment["CHAUFFEUR_SESSION_ID"] != nil)
         #expect(!CLIKind.shell.isAgent && CLIKind.codex.isAgent && CLIKind.shell.displayName == "Shell")

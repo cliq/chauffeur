@@ -705,7 +705,7 @@ public actor RuntimeCoordinator {
             guard isShell || sharing.isEmpty || request.allowSharedCheckout else { throw ChauffeurError("shared_checkout", "Checkout is already used by: \(sharing.map(\.title).joined(separator: ", ")). Explicitly choose to share it", path: workingDirectory) }
             let token = isShell ? "" : try await ledger.issueGrant(sessionID: session.id)
             try Task.checkCancellation()
-            var environment = try LaunchPolicy.environment(base: baseEnvironment, preset: preset, sessionID: session.id, token: token)
+            var environment = try LaunchPolicy.environment(base: baseEnvironment, preset: preset, projectID: session.projectID, sessionID: session.id, token: token)
             environment["CHAUFFEUR_SOCKET"] = root.appendingPathComponent("runtime/runtime.sock").path
             let coordination = !isShell && request.coordinationEnabled
             let integration = root.appendingPathComponent("runtime/integration/\(session.id)")
@@ -771,7 +771,7 @@ public actor RuntimeCoordinator {
             let token = try await ledger.issueGrant(sessionID: sessionID)
             try Task.checkCancellation()
             var preset = session.launch.preset; preset.configurationDirectory = session.launch.configurationPath
-            var environment = try LaunchPolicy.environment(base: baseEnvironment, preset: preset, sessionID: sessionID, token: token)
+            var environment = try LaunchPolicy.environment(base: baseEnvironment, preset: preset, projectID: session.projectID, sessionID: sessionID, token: token)
             environment["CHAUFFEUR_SOCKET"] = root.appendingPathComponent("runtime/runtime.sock").path
             let integration = root.appendingPathComponent("runtime/integration/\(session.id)")
             try FileManager.default.createDirectory(at: integration, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])

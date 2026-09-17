@@ -30,15 +30,25 @@ struct FoundationTests {
         let root = try temporaryDirectory(); defer { try? FileManager.default.removeItem(at: root) }
         let preset = AgentPreset(setID: UUID(), name: "A", kind: .codex, executable: "/bin/cat", configurationDirectory: root.path)
         let inherited = ["CODEX_HOME": "/bad", "CLAUDE_CONFIG_DIR": "/bad", "OPENAI_API_KEY": "secret", "ANTHROPIC_AUTH_TOKEN": "secret", "CLAUDE_CODE_OAUTH_TOKEN": "secret", "AWS_PROFILE": "bad", "PATH": "/bin", "HOME": "/real-home", "CHAUFFEUR_SESSION_TOKEN": "parent"]
-        let first = try LaunchPolicy.environment(base: inherited, preset: preset, sessionID: UUID(), token: "first")
-        let second = try LaunchPolicy.environment(base: inherited, preset: preset, sessionID: UUID(), token: "second")
+        let first = try LaunchPolicy.environment(base: inherited, preset: preset, projectID: UUID(), sessionID: UUID(), token: "first")
+        let second = try LaunchPolicy.environment(base: inherited, preset: preset, projectID: UUID(), sessionID: UUID(), token: "second")
         #expect(first["CODEX_HOME"] == Paths.canonical(root.path))
         #expect(first["HOME"] == "/real-home")
         #expect(first["OPENAI_API_KEY"] == nil && first["CLAUDE_CONFIG_DIR"] == nil && first["AWS_PROFILE"] == nil)
         #expect(first["CHAUFFEUR_SESSION_TOKEN"] != second["CHAUFFEUR_SESSION_TOKEN"])
         #expect(inherited["CODEX_HOME"] == "/bad")
         var invalid = preset; invalid.configurationDirectory += "/missing"
-        #expect(throws: ChauffeurError.self) { try LaunchPolicy.environment(base: inherited, preset: invalid, sessionID: UUID(), token: "x") }
+        #expect(throws: ChauffeurError.self) { try LaunchPolicy.environment(base: inherited, preset: invalid, projectID: UUID(), sessionID: UUID(), token: "x") }
+    }
+    @Test func environmentExportsSessionDeepLink() throws {
+        let root = try temporaryDirectory(); defer { try? FileManager.default.removeItem(at: root) }
+        let preset = AgentPreset(setID: UUID(), name: "A", kind: .shell, executable: "/bin/zsh", configurationDirectory: root.path)
+        let projectID = UUID(), sessionID = UUID()
+        let environment = try LaunchPolicy.environment(base: ["CHAUFFEUR_SESSION_URL": "stale"], preset: preset, projectID: projectID, sessionID: sessionID, token: "")
+        let url = try #require(environment["CHAUFFEUR_SESSION_URL"].flatMap(URL.init(string:)))
+        #expect(url.scheme == AppBuild.current.urlScheme)
+        #expect(SessionRoute(url: url) == SessionRoute(projectID: projectID, sessionID: sessionID))
+        #expect(environment["CHAUFFEUR_SESSION_ID"] == sessionID.uuidString)
     }
     @Test func managedArgumentsCannotBeOverridden() throws {
         for args in [["--cd=/tmp"], ["-C/tmp"], ["-c", "mcp_servers.chauffeur.url='bad'"], ["resume", "--last"], ["--worktree"]] {
