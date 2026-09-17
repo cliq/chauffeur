@@ -1,9 +1,9 @@
 import SwiftUI
 import ChauffeurCore
 
-/// Confirms a worktree removal with a checklist instead of prose: each fact
-/// about the checkout is one line, green when nothing is lost and red when
-/// something is. The path and the mechanism stay out of the way.
+/// Confirms a worktree removal with one verdict a glance can read: red with
+/// the issues that lose work, or green with the reasons nothing is lost. The
+/// two are never mixed in one list. Branch bookkeeping is a footnote.
 struct WorktreeDeletionSheet: View {
     let row: CheckoutRow
     let preview: WorktreeDeletionPreview
@@ -13,7 +13,10 @@ struct WorktreeDeletionSheet: View {
     private var items: [WorktreeDeletionPreview.Item] {
         preview.items(branch: row.branch, finishedSessions: row.sessions.count, checkoutMissing: row.finished)
     }
-    private var losesSomething: Bool { items.contains { $0.severity == .loss } }
+    private var issues: [WorktreeDeletionPreview.Item] { items.filter { $0.severity == .loss } }
+    private var reasons: [WorktreeDeletionPreview.Item] { items.filter { $0.severity == .safe } }
+    private var notes: [WorktreeDeletionPreview.Item] { items.filter { $0.severity == .note } }
+    private var losesWork: Bool { !issues.isEmpty }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -22,30 +25,32 @@ struct WorktreeDeletionSheet: View {
                 Text(row.path).font(.caption).foregroundStyle(.secondary).lineLimit(2).truncationMode(.middle).textSelection(.enabled)
             }
             VStack(alignment: .leading, spacing: 8) {
-                ForEach(items) { item in
-                    Label { Text(item.text) } icon: { icon(for: item.severity) }
-                        .accessibilityIdentifier("worktreeDeletion.item.\(item.severity == .loss ? "loss" : item.severity == .safe ? "safe" : "note")")
+                Label {
+                    Text(losesWork ? "Deleting this worktree loses work" : "Safe to delete").fontWeight(.semibold)
+                } icon: {
+                    Image(systemName: losesWork ? "xmark.circle.fill" : "checkmark.circle.fill")
                 }
+                .foregroundStyle(losesWork ? Color.red : Color.green)
+                .accessibilityIdentifier(losesWork ? "worktreeDeletion.verdict.loss" : "worktreeDeletion.verdict.safe")
+                ForEach(losesWork ? issues : reasons) { item in
+                    Text(item.text).padding(.leading, 26)
+                        .accessibilityIdentifier("worktreeDeletion.item.\(losesWork ? "loss" : "safe")")
+                }
+            }
+            if !notes.isEmpty {
+                Text(notes.map(\.text).joined(separator: " · ")).font(.caption).foregroundStyle(.secondary)
             }
             HStack {
                 Spacer()
                 Button("Cancel", role: .cancel) { cancel() }.keyboardShortcut(.cancelAction)
                 Button("Delete Worktree", role: .destructive) { confirm() }
                     .keyboardShortcut(.defaultAction)
-                    .tint(losesSomething ? .red : nil)
+                    .tint(losesWork ? .red : nil)
                     .accessibilityIdentifier("worktreeDeletion.confirm")
             }
         }
         .padding(20)
         .frame(width: 460)
         .accessibilityIdentifier("worktreeDeletion.sheet")
-    }
-
-    @ViewBuilder private func icon(for severity: WorktreeDeletionPreview.Severity) -> some View {
-        switch severity {
-        case .safe: Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
-        case .loss: Image(systemName: "xmark.circle.fill").foregroundStyle(.red)
-        case .note: Image(systemName: "info.circle").foregroundStyle(.secondary)
-        }
     }
 }
