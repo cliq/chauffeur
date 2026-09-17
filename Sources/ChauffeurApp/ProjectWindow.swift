@@ -625,6 +625,7 @@ struct ProjectWindow: View {
     /// Handle the chord before SwiftTerm or the native Close Window shortcut.
     /// The prompt state changes synchronously so a fast second key is not lost.
     private func handleKey(_ event: NSEvent) -> Bool {
+        if let terminal = event.window?.firstResponder as? ThemedTerminalView, terminal.sendWordNavigation(event) { return true }
         let modifiers = event.modifierFlags.intersection([.command, .control, .option, .shift])
         let key = event.charactersIgnoringModifiers?.lowercased()
         if layout.newTabPresented {

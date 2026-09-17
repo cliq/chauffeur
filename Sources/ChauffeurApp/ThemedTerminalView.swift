@@ -43,6 +43,24 @@ final class ThemedTerminalView: TerminalView {
     }
     /// Set when a tab change asks for keyboard focus before the view is shown.
     var focusesWhenAttached = false
+    /// Option-Arrow and Option-Delete as Terminal.app sends them. Without the
+    /// kitty keyboard protocol, SwiftTerm encodes these as CSI modifier
+    /// sequences (`ESC [1;3D`), which shells and CLIs leave unbound; the
+    /// classic `ESC b`, `ESC f`, and `ESC DEL` move and delete by word everywhere.
+    /// SwiftTerm's `keyDown` is not overridable, so the window's key monitor
+    /// asks first. Returns true when the key was consumed.
+    func sendWordNavigation(_ event: NSEvent) -> Bool {
+        guard optionAsMetaKey, terminal?.keyboardEnhancementFlags.isEmpty == true,
+              event.modifierFlags.intersection([.command, .control, .option, .shift]) == .option,
+              let scalar = event.charactersIgnoringModifiers?.unicodeScalars.first else { return false }
+        switch Int(scalar.value) {
+        case NSLeftArrowFunctionKey: send(txt: "\u{1b}b")
+        case NSRightArrowFunctionKey: send(txt: "\u{1b}f")
+        case NSDeleteCharacter: send(txt: "\u{1b}\u{7f}")
+        default: return false
+        }
+        return true
+    }
     override func isAccessibilityElement() -> Bool { true }
     override func accessibilityRole() -> NSAccessibility.Role? { .textArea }
     override func isAccessibilityEnabled() -> Bool { true }
