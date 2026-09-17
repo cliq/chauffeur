@@ -27,6 +27,22 @@ struct AppSnapshot: Decodable, Sendable {
         }
     }
     private let preferences: UserDefaults
+    @Published private var recentProjectIDs: [UUID]?
+    private static let recentProjectsKey = "recentProjectIDs"
+    var recentProjects: [Project] {
+        let ids = recentProjectIDs ?? projects.map(\.id)
+        return Array(ids.compactMap { project($0) }.prefix(10))
+    }
+    func recordRecentProject(_ id: UUID) {
+        guard project(id) != nil else { return }
+        let ids = [id] + recentProjects.map(\.id).filter { $0 != id }
+        recentProjectIDs = Array(ids.prefix(10))
+        preferences.set(recentProjectIDs?.map(\.uuidString), forKey: Self.recentProjectsKey)
+    }
+    func clearRecentProjects() {
+        recentProjectIDs = []
+        preferences.set([String](), forKey: Self.recentProjectsKey)
+    }
     private func applyAppearance() { NSApplication.shared.appearance = appearance.nativeAppearance }
     struct Navigation: Equatable { var id = UUID(); let route: SessionRoute }
     struct ProjectNavigation: Equatable { var id = UUID(); let match: ProjectFolderMatch }
@@ -149,6 +165,7 @@ struct AppSnapshot: Decodable, Sendable {
 
     init(preferences: UserDefaults = .standard) {
         self.preferences = preferences
+        recentProjectIDs = preferences.stringArray(forKey: Self.recentProjectsKey)?.compactMap(UUID.init(uuidString:))
         appearance = AppAppearance(rawValue: preferences.string(forKey: AppAppearance.preferenceKey) ?? "") ?? .system
         var configuredSocket = ProcessInfo.processInfo.environment["CHAUFFEUR_SOCKET"]
         #if DEBUG
@@ -435,6 +452,7 @@ struct AppSnapshot: Decodable, Sendable {
         try await save("saveProject", value, version: version)
     }
     func projectOpened(_ id: UUID) {
+        recordRecentProject(id)
         openProjects.insert(id)
         guard var project = project(id) else { return }
         let version = projectVersion(id)

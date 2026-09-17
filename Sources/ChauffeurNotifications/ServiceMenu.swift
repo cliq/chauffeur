@@ -59,7 +59,7 @@ import ChauffeurCore
         chooser.target = self
         let open = menu.addItem(withTitle: "Open \(AppBuild.current.displayName)…", action: #selector(openApp), keyEquivalent: "")
         open.target = self
-        let quit = menu.addItem(withTitle: "Quit Chauffeur...", action: #selector(quitApp), keyEquivalent: "q")
+        let quit = menu.addItem(withTitle: "Quit Chauffeur...", action: #selector(quitApp), keyEquivalent: "")
         quit.target = self
         quit.toolTip = "Quit the app and background service."
     }

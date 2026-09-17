@@ -24,6 +24,7 @@ import ChauffeurCore
         .commands {
             CommandGroup(replacing: .newItem) {
                 Button("Open Project…") { openWindow(id: "welcome") }.keyboardShortcut("o", modifiers: [.command, .shift])
+                RecentProjectsMenu(model: model)
                 Button("New Tab…") { command("new-tab") }.keyboardShortcut("t")
                 Button("New Session…") { NotificationCenter.default.post(name: .chauffeurCommand, object: "new-session") }.keyboardShortcut("n")
             }

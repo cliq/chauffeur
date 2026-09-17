@@ -184,6 +184,10 @@ struct ProjectWindow: View {
                 if let pendingWorktree, ids.contains(pendingWorktree.id) { self.pendingWorktree = nil }
             }
             .onChange(of: model.snapshot.sessions) { _, _ in if layout.loaded { layout.synchronizeTerminals(model: model) } }
+            .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { notification in
+                guard let window = notification.object as? NSWindow, window === layout.window else { return }
+                model.recordRecentProject(projectID)
+            }
             .onReceive(NotificationCenter.default.publisher(for: .chauffeurCommand)) { notification in
                 guard layout.window?.isKeyWindow == true, let command = notification.object as? String else { return }
                 switch command {
