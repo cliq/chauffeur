@@ -114,19 +114,12 @@ struct WorktreesView: View {
                 try? await Task.sleep(for: .milliseconds(250)); guard !Task.isCancelled else { return }
                 if let value = try? await model.call("previewWorktree", .object(["projectID": .string(project.id.uuidString), "folderID": .string(folderID.uuidString), "branch": .string(proposedBranch)])), !Task.isCancelled, self.folderID == folderID, branch == proposedBranch { destination = value["path"].string ?? "" }
             }
-            .confirmationDialog("Delete \(removing?.title ?? "worktree")?", isPresented: Binding(get: { removing != nil }, set: { if !$0 { removing = nil } }), titleVisibility: .visible) {
-                Button("Delete Worktree", role: .destructive) {
-                    if let removing {
-                        let discardChanges = deletionPreview.hasChanges
-                        run { _ = try await model.call("deleteWorktree", .object(["projectID": .string(project.id.uuidString), "folderID": .string(removing.folderID.uuidString), "path": .string(removing.path), "discardChanges": .bool(discardChanges)])) }
-                    }
+            .sheet(item: $removing) { row in
+                WorktreeDeletionSheet(row: row, preview: deletionPreview, confirm: {
+                    let discardChanges = deletionPreview.hasChanges
+                    run { _ = try await model.call("deleteWorktree", .object(["projectID": .string(project.id.uuidString), "folderID": .string(row.folderID.uuidString), "path": .string(row.path), "discardChanges": .bool(discardChanges)])) }
                     removing = nil
-                }
-            } message: {
-                if let removing {
-                    Text(deletionPreview.warningText + (removing.finished ? "The checkout is already gone." : "Removes \(removing.path) from disk. Branches with no unique commits are also deleted.")
-                         + (removing.sessions.isEmpty ? "" : "\n\(removing.sessions.count) finished session\(removing.sessions.count == 1 ? "" : "s") and their terminal history are deleted."))
-                }
+                }, cancel: { removing = nil })
             }
     }
     private func prepareDeletion(_ row: CheckoutRow) {

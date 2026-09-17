@@ -179,7 +179,7 @@ struct WorktreeCreationTests {
         #expect(inventories.flatMap(\.entries).first { $0.path == Paths.canonical(fixture.repo.path) }?.hasUncommittedChanges == false)
         try #require(try await ProcessRunner.run("/usr/bin/git", ["-C", fixture.repo.path, "merge", "--ff-only", "external"]).status == 0)
         preview = try await fixture.runtime.handle(IPCRequest("previewWorktreeDeletion", params: params)).decode(WorktreeDeletionPreview.self)
-        #expect(preview.unmergedCommits == 0 && preview.warnings.isEmpty)
+        #expect(preview.unmergedCommits == 0 && preview.remoteBranch == nil && preview.unpushedCommits == nil)
         // Untracked files refuse the deletion and keep everything in place.
         let marker = external.appendingPathComponent("keep.txt")
         try Data("keep".utf8).write(to: marker)
@@ -189,7 +189,7 @@ struct WorktreeCreationTests {
         snapshot = await fixture.runtime.store.reload()
         #expect(FileManager.default.fileExists(atPath: marker.path) && snapshot.sessions.count == 1 && snapshot.worktrees.count == 1)
         preview = try await fixture.runtime.handle(IPCRequest("previewWorktreeDeletion", params: params)).decode(WorktreeDeletionPreview.self)
-        #expect(preview.hasChanges && preview.warnings.count == 1)
+        #expect(preview.hasChanges && preview.items(branch: "external", finishedSessions: 1, checkoutMissing: false).filter { $0.severity == .loss }.count == 2)
         let confirmed: JSONValue = .object(["projectID": .string(fixture.project.id.uuidString), "folderID": .string(folder.id.uuidString), "path": .string(external.path), "discardChanges": .bool(true)])
         let result = try await fixture.runtime.handle(IPCRequest("deleteWorktree", params: confirmed))
         #expect(result["deletedCheckout"].bool == true && result["deletedSessions"].int == 1 && result["deletedRecords"].int == 1)

@@ -544,6 +544,7 @@ public actor RuntimeCoordinator {
                 let mainBranch = inventory.first?.branch ?? ""
                 result.baseBranch = records.first?.value.baseBranch ?? (mainBranch.isEmpty ? nil : mainBranch)
                 result.unmergedCommits = await worktrees.unmergedCommits(at: path, branch: entry.branch, base: result.baseBranch)
+                (result.remoteBranch, result.unpushedCommits) = await worktrees.remoteStatus(at: path)
             }
             return try .from(result)
         }

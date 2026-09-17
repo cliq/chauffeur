@@ -23,9 +23,12 @@ entries whose directory is gone are left for **Prune** in Manage Worktrees.
 
 Right-click a worktree and choose **Delete Worktree…** to remove its checkout
 together with its finished sessions and saved terminal history. Stop live sessions
-first. The confirmation warns when uncommitted, untracked, or ignored files will
-be permanently lost, and when the branch has commits not merged into its starting
-point; in that case the branch is kept but loses its checkout. Branches with no
+first. The confirmation is a checklist, one line per fact, green when nothing is
+lost and red when something is: uncommitted, untracked, or ignored files; commits
+not merged into the branch's starting point, which count as safe when every one
+is already on a remote branch (the upstream, or any remote branch containing the
+tip); whether the branch is kept or deleted with the checkout; and finished
+sessions whose terminal history goes with it. Branches with no
 commits unique to other local branches are
 also deleted; branches with unique commits are preserved. On a Finished row the
 same action removes the history and cleans up an eligible branch.

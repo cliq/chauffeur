@@ -3,17 +3,30 @@ import Testing
 import ChauffeurCore
 
 struct WorktreeStatusTests {
-    @Test func deletionPreviewWarnsAboutEachKindOfLoss() throws {
-        #expect(WorktreeDeletionPreview(hasChanges: false).warnings.isEmpty)
-        #expect(WorktreeDeletionPreview(hasChanges: false).warningText == "")
-        #expect(WorktreeDeletionPreview(hasChanges: false, unmergedCommits: 0, baseBranch: "main").warnings.isEmpty)
-        let dirty = WorktreeDeletionPreview(hasChanges: true).warnings
-        #expect(dirty.count == 1 && dirty[0].contains("permanently lost"))
-        let unmerged = WorktreeDeletionPreview(hasChanges: false, unmergedCommits: 1, baseBranch: "main").warnings
-        #expect(unmerged == ["Its branch has 1 commit not merged into main. The branch is kept, but it no longer has a checkout."])
-        let both = WorktreeDeletionPreview(hasChanges: true, unmergedCommits: 3)
-        #expect(both.warnings.count == 2 && both.warnings[1].hasPrefix("Its branch has 3 commits not merged."))
-        #expect(both.warningText.hasSuffix("\n\n"))
+    @Test func deletionChecklistMarksEachFactSafeOrLossy() throws {
+        typealias Item = WorktreeDeletionPreview.Item
+        let clean = WorktreeDeletionPreview(hasChanges: false, unmergedCommits: 0, baseBranch: "main")
+        #expect(clean.items(branch: "task", finishedSessions: 0, checkoutMissing: false) == [
+            Item(.safe, "No uncommitted changes"), Item(.safe, "All commits are merged into main"),
+            Item(.note, "Branch task is deleted too"), Item(.safe, "No session history is affected")])
+        // Unmerged commits that already live on a remote lose nothing.
+        let pushed = WorktreeDeletionPreview(hasChanges: false, unmergedCommits: 4, baseBranch: "main", unpushedCommits: 0, remoteBranch: "origin/task")
+        #expect(pushed.isPushed)
+        #expect(pushed.items(branch: "task", finishedSessions: 2, checkoutMissing: false) == [
+            Item(.safe, "No uncommitted changes"), Item(.safe, "4 commits not merged into main, all pushed to origin/task"),
+            Item(.note, "Branch task is kept"), Item(.loss, "2 finished sessions and their terminal history are deleted")])
+        let partlyPushed = WorktreeDeletionPreview(hasChanges: true, unmergedCommits: 4, baseBranch: "main", unpushedCommits: 1, remoteBranch: "origin/task")
+        #expect(!partlyPushed.isPushed)
+        #expect(partlyPushed.items(branch: "task", finishedSessions: 0, checkoutMissing: false).map(\.severity) == [.loss, .loss, .note, .safe])
+        #expect(partlyPushed.items(branch: "task", finishedSessions: 0, checkoutMissing: false)[1].text == "4 commits not merged into main, 1 not pushed to origin/task")
+        let local = WorktreeDeletionPreview(hasChanges: false, unmergedCommits: 1, baseBranch: "main")
+        #expect(local.items(branch: "task", finishedSessions: 0, checkoutMissing: false)[1] == Item(.loss, "1 commit not merged into main, not pushed to any remote"))
+        // Unknown merge state and a detached HEAD are stated, not guessed.
+        #expect(WorktreeDeletionPreview(hasChanges: false).items(branch: "", finishedSessions: 0, checkoutMissing: false) == [
+            Item(.safe, "No uncommitted changes"), Item(.note, "Merge state is unknown"), Item(.safe, "No session history is affected")])
+        // A vanished checkout has nothing left to lose but its history.
+        #expect(WorktreeDeletionPreview(hasChanges: true, unmergedCommits: 3).items(branch: "task", finishedSessions: 1, checkoutMissing: true) == [
+            Item(.note, "The checkout is already gone"), Item(.loss, "1 finished session and their terminal history are deleted")])
     }
 
     @Test func previewAndInventoryDecodeWithoutStatusFields() throws {

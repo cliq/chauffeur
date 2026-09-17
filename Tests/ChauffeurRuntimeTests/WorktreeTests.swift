@@ -293,3 +293,40 @@ struct WorktreeRootTests {
         #expect(code == "unmanaged_path")
     }
 }
+
+struct WorktreeRemoteStatusTests {
+    @Test func pushStateFollowsTheUpstreamOrAnyRemoteBranchContainingHead() async throws {
+        let root = URL(fileURLWithPath: "/tmp/chauffeur-remote-status-\(UUID())").resolvingSymlinksInPath()
+        let repo = root.appendingPathComponent("repo"), remote = root.appendingPathComponent("remote.git")
+        try FileManager.default.createDirectory(at: repo, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        func git(_ directory: URL, _ args: [String]) async throws {
+            let result = try await ProcessRunner.run("/usr/bin/git", ["-C", directory.path, "-c", "core.hooksPath=/dev/null", "-c", "commit.gpgsign=false", "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid"] + args)
+            try #require(result.status == 0, "Git fixture failed: \(result.error)")
+        }
+        try await git(root, ["init", "--bare", "-b", "main", remote.path])
+        try await git(repo, ["init", "-b", "main"])
+        try await git(repo, ["commit", "--allow-empty", "-m", "Initial"])
+        try await git(repo, ["remote", "add", "origin", remote.path])
+        try await git(repo, ["push", "-q", "-u", "origin", "main"])
+        let manager = WorktreeManager(root: root.appendingPathComponent("managed"))
+        let tree = try await manager.create(projectID: UUID(), folder: ProjectFolder(path: repo.path), branch: "task", baseRef: "HEAD")
+        let checkout = URL(fileURLWithPath: tree.path)
+        // No upstream and no remote branch contains the branch's tip: unknown.
+        try await git(checkout, ["commit", "--allow-empty", "-m", "Work"])
+        var status = await manager.remoteStatus(at: tree.path)
+        #expect(status.remoteBranch == nil && status.unpushedCommits == nil)
+        // Pushing with an upstream makes the branch fully pushed; new commits count as unpushed.
+        try await git(checkout, ["push", "-q", "-u", "origin", "task"])
+        status = await manager.remoteStatus(at: tree.path)
+        #expect(status.remoteBranch == "origin/task" && status.unpushedCommits == 0)
+        try await git(checkout, ["commit", "--allow-empty", "-m", "More"])
+        status = await manager.remoteStatus(at: tree.path)
+        #expect(status.remoteBranch == "origin/task" && status.unpushedCommits == 1)
+        // Without an upstream, a remote branch that already contains HEAD still counts.
+        try await git(checkout, ["push", "-q", "origin", "task:review"])
+        try await git(checkout, ["branch", "--unset-upstream"])
+        status = await manager.remoteStatus(at: tree.path)
+        #expect(status.remoteBranch == "origin/review" && status.unpushedCommits == 0)
+    }
+}

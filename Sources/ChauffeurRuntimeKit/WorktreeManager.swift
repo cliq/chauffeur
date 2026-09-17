@@ -270,6 +270,20 @@ public actor WorktreeManager {
         guard let count = try? await git(path, ["rev-list", "--count", "--end-of-options", "refs/heads/\(base)..refs/heads/\(branch)"]) else { return nil }
         return Int(count.trimmingCharacters(in: .whitespacesAndNewlines))
     }
+    /// Which remote branch holds this checkout's branch and how many commits it
+    /// lacks. The configured upstream wins; otherwise any remote branch that
+    /// already contains HEAD counts as fully pushed.
+    public func remoteStatus(at path: String) async -> (remoteBranch: String?, unpushedCommits: Int?) {
+        if let upstream = try? await git(path, ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"]) {
+            let count = try? await git(path, ["rev-list", "--count", "@{upstream}..HEAD"])
+            return (Self.line(upstream), count.flatMap { Int($0.trimmingCharacters(in: .whitespacesAndNewlines)) })
+        }
+        if let listing = try? await git(path, ["branch", "-r", "--contains", "HEAD", "--format=%(refname:short)"]),
+           let remote = listing.split(separator: "\n").map(String.init).first(where: { !$0.isEmpty && !$0.hasSuffix("/HEAD") }) {
+            return (remote, 0)
+        }
+        return (nil, nil)
+    }
     /// Adds working-tree and unmerged-commit status to available entries. The
     /// first entry is the main checkout, whose branch is the fallback base for
     /// worktrees Chauffeur did not create. A checkout that cannot be inspected

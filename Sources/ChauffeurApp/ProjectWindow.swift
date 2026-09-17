@@ -142,9 +142,9 @@ struct ProjectWindow: View {
                 .sheet(isPresented: $editingProject) { ProjectEditor(project: project) { _ in editingProject = false } }
                 .sheet(isPresented: $editingGroups) { GroupsEditor(project: project) }
                 .sheet(item: $worktreeSheet) { selection in WorktreesView(project: project, initialFolderID: selection.folderID, worktreeCreated: revealCreatedWorktree) }
-                .confirmationDialog("Delete \(deletingCheckout?.title ?? "worktree")?", isPresented: Binding(get: { deletingCheckout != nil }, set: { if !$0 { deletingCheckout = nil } }), titleVisibility: .visible) {
-                    Button("Delete Worktree", role: .destructive) { if let row = deletingCheckout { deleteWorktree(row) }; deletingCheckout = nil }
-                } message: { Text(deletionMessage(deletingCheckout)) }
+                .sheet(item: $deletingCheckout) { row in
+                    WorktreeDeletionSheet(row: row, preview: deletionPreview, confirm: { deleteWorktree(row); deletingCheckout = nil }, cancel: { deletingCheckout = nil })
+                }
                 .confirmationDialog("Delete \(deletingSession?.title ?? "finished session")?", isPresented: Binding(get: { deletingSession != nil }, set: { if !$0 { deletingSession = nil } }), titleVisibility: .visible) {
                     Button("Delete Finished Session", role: .destructive) { if let session = deletingSession { deleteSession(session) }; deletingSession = nil }
                     Button("Cancel", role: .cancel) { deletingSession = nil }
@@ -708,12 +708,6 @@ struct ProjectWindow: View {
         layout.state.sidebarVisible = true
         selectCheckout(folderID: tree.folderID, path: tree.path)
         sidebarReveal = SidebarReveal(row: .worktree(tree.folderID, tree.path))
-    }
-    private func deletionMessage(_ row: CheckoutRow?) -> String {
-        guard let row else { return "" }
-        let history = row.sessions.isEmpty ? "No session history is affected." : "\(row.sessions.count) finished session\(row.sessions.count == 1 ? "" : "s") and their saved terminal history are deleted."
-        if row.finished { return "The checkout is already gone.\n\(history)" }
-        return deletionPreview.warningText + "Removes the checkout at \(row.path) from disk with git worktree remove. Branches with no unique commits are also deleted.\n\(history)"
     }
     private func showWorktrees(folderID: UUID?) {
         worktreeSheet = WorktreeSheet(folderID: folderID)
