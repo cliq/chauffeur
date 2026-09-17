@@ -254,13 +254,25 @@ struct PresetEditor: View {
     @State private var archived = false
     @State private var version: String?
     @State private var failure: String?
+    private var teamName: String? { model.presetSets.first { $0.id == setID }?.name }
+    private var title: String {
+        let action = preset == nil ? "Create Agent Preset" : "Edit Agent Preset"
+        return teamName.map { "\(action) (\($0))" } ?? action
+    }
+    /// A blank custom name falls back to the agent's own name.
+    private var effectiveName: String {
+        let custom = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        return custom.isEmpty ? kind.displayName : custom
+    }
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text(preset == nil ? "Create Agent Preset" : "Edit Agent Preset").font(.title2)
+            Text(title).font(.title2).accessibilityIdentifier("preset.title")
             Form {
-                TextField("Agent preset name", text: $name).accessibilityIdentifier("preset.name")
                 Picker("Agent", selection: $kind) { Text("Codex").tag(CLIKind.codex); Text("Claude Code").tag(CLIKind.claude) }
+                    .accessibilityIdentifier("preset.agent")
                     .onChange(of: kind) { _, value in if executable == "codex" || executable == "claude" { executable = value == .codex ? "codex" : "claude" } }
+                TextField("Name", text: $name, prompt: Text(kind.displayName)).accessibilityIdentifier("preset.name")
+                Text("Optional. Leave blank to name the agent preset “\(kind.displayName)”.").font(.caption).foregroundStyle(.secondary)
                 HStack { TextField("Executable", text: $executable).accessibilityIdentifier("preset.executable"); Button("Choose…") { if let path = FilePanels.executable() { executable = path } }.accessibilityIdentifier("preset.choose-executable") }
                 HStack {
                     TextField("Existing configuration directory", text: $directory).accessibilityIdentifier("preset.configuration-directory")
@@ -279,11 +291,11 @@ struct PresetEditor: View {
             HStack {
                 Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction); Spacer()
                 Button("Save Agent Preset") {
-                    var value = preset ?? AgentPreset(setID: setID, name: name, kind: kind, executable: executable, configurationDirectory: directory)
-                    value.name = name; value.kind = kind; value.executable = executable; value.configurationDirectory = (directory as NSString).expandingTildeInPath
+                    var value = preset ?? AgentPreset(setID: setID, name: effectiveName, kind: kind, executable: executable, configurationDirectory: directory)
+                    value.name = effectiveName; value.kind = kind; value.executable = executable; value.configurationDirectory = (directory as NSString).expandingTildeInPath
                     value.archived = archived; value.integration = .unverified
                     Task { do { value.arguments = try ArgumentText.parse(arguments); try value.validate(); _ = try Paths.directory(value.configurationDirectory); try await model.save("savePreset", value, version: version); completion?(value.id); dismiss() } catch { failure = error.localizedDescription } }
-                }.keyboardShortcut(.defaultAction).disabled(name.trimmingCharacters(in: .whitespaces).isEmpty || directory.isEmpty).accessibilityIdentifier("preset.save")
+                }.keyboardShortcut(.defaultAction).disabled(directory.trimmingCharacters(in: .whitespaces).isEmpty).accessibilityIdentifier("preset.save")
             }
         }.padding(24).frame(width: 650)
             .onAppear { name = preset?.name ?? ""; kind = preset?.kind ?? .codex; executable = preset?.executable ?? "codex"; directory = preset?.configurationDirectory ?? ""; arguments = ArgumentText.format(preset?.arguments ?? []); archived = preset?.archived ?? false; version = model.snapshot.store.presets.first { $0.value.id == preset?.id }?.version }
