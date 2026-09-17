@@ -77,7 +77,10 @@ final class MobileAppModel {
     @ObservationIgnored private var previewConnectionState: HostConnectionState?
 
     init(
-        credentials: any CredentialStore = KeychainCredentialStore(service: MobileAppModel.keychainService),
+        credentials: any CredentialStore = FallbackCredentialStore(
+            primary: KeychainCredentialStore(service: MobileAppModel.keychainService),
+            fallback: FileCredentialStore()
+        ),
         journal: any PendingOperationJournal = UserDefaultsOperationJournal(),
         makeTerminalAdapter: @escaping @MainActor () -> any TerminalEngineAdapter
     ) {

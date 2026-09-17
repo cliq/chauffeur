@@ -141,3 +141,60 @@ public final class InMemoryCredentialStore: CredentialStore, @unchecked Sendable
         lock.withLock { host = nil }
     }
 }
+
+/// Stores the saved host as a 0600 JSON file in the app's Application Support directory.
+///
+/// Meant for builds that cannot use the data-protection keychain, such as unsigned simulator
+/// builds (`errSecMissingEntitlement`, -34018). Signed builds should prefer the keychain.
+public final class FileCredentialStore: CredentialStore {
+    private let url: URL
+
+    public init(url: URL) { self.url = url }
+
+    public convenience init(filename: String = "saved-host.json") {
+        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+            ?? FileManager.default.temporaryDirectory
+        self.init(url: base.appendingPathComponent(filename))
+    }
+
+    public func load() throws -> SavedHost? {
+        guard FileManager.default.fileExists(atPath: url.path) else { return nil }
+        let data = try Data(contentsOf: url)
+        do { return try JSONDecoder().decode(SavedHost.self, from: data) } catch { throw CredentialStoreError.corruptData }
+    }
+
+    public func save(_ host: SavedHost) throws {
+        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let data = try JSONEncoder().encode(host)
+        try data.write(to: url, options: [.atomic, .completeFileProtection])
+        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+    }
+
+    public func clear() throws {
+        if FileManager.default.fileExists(atPath: url.path) { try FileManager.default.removeItem(at: url) }
+    }
+}
+
+/// Uses the keychain and falls back to a file store only when the keychain reports a missing
+/// entitlement, which is what unsigned development builds get. Every other keychain error is
+/// surfaced unchanged.
+public final class FallbackCredentialStore: CredentialStore {
+    public static let missingEntitlement: OSStatus = -34018
+    private let primary: any CredentialStore
+    private let fallback: any CredentialStore
+
+    public init(primary: any CredentialStore, fallback: any CredentialStore) {
+        self.primary = primary
+        self.fallback = fallback
+    }
+
+    private func run<T>(_ operation: (any CredentialStore) throws -> T) throws -> T {
+        do { return try operation(primary) } catch CredentialStoreError.keychain(let status) where status == Self.missingEntitlement {
+            return try operation(fallback)
+        }
+    }
+
+    public func load() throws -> SavedHost? { try run { try $0.load() } }
+    public func save(_ host: SavedHost) throws { try run { try $0.save(host) } }
+    public func clear() throws { try run { try $0.clear() } }
+}
