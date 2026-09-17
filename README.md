@@ -105,4 +105,5 @@ known limits. Full release workload testing is also pending.
 ## Documentation
 
 The [app manual](docs/manual.html) covers the screens, workflows, and keyboard
-shortcuts. Open it locally in a browser.
+shortcuts. Open it locally in a browser. A native iPhone remote-control app is
+in proof-of-concept; see [mobile remote control](docs/mobile-remote.md).
