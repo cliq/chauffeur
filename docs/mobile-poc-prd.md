@@ -4,6 +4,7 @@
 - Status: Draft; user-confirmed scope with proposed implementation defaults below.
 - Audience: Personal use on an iPhone and an existing Chauffeur Mac.
 - Priority: Prove communication and terminal interaction before designing the final mobile UX.
+- Companions: [Screen flow](mobile-poc-flow.html), [Implementation plan](mobile-poc-implementation-plan.md).
 
 ## 1. Outcome
 
@@ -86,6 +87,8 @@ Required behavior:
 - Loss of connection disables input and shows connection state. Do not queue commands offline or replay unacknowledged terminal input after reconnect; terminal keystrokes are not retryable launch operations.
 
 The exact gestures, key accessory layout, font controls, and final tab design remain open. Working interaction on a physical iPhone is the acceptance standard.
+
+**Terminal engine constraint (2026-09-17):** SwiftTerm may be replaced by Ghostty. Keep emulator-specific types and behavior behind an adapter so changing the engine does not require changing session browsing, launch logic, transport, or runtime ownership. Ghostty integration and iOS suitability remain to be evaluated; this POC does not require committing to either engine or implementing both.
 
 ## 6. Communication and lifetime
 
