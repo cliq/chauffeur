@@ -144,19 +144,35 @@ jobs:
           xcrun stapler validate build/Chauffeur.dmg
           spctl --assess --type open --context context:primary-signature --verbose=2 build/Chauffeur.dmg
 
-      - name: Upload to GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: build/Chauffeur.dmg
-          generate_release_notes: true
-          fail_on_unmatched_files: true
-
       - name: Upload DMG as workflow artifact
         uses: actions/upload-artifact@v4
         with:
           name: Chauffeur-dmg
           path: build/Chauffeur.dmg
           if-no-files-found: error
+
+      - name: Upload to GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          test -s build/Chauffeur.dmg
+          if ! gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release create "$GITHUB_REF_NAME" --draft --verify-tag --generate-notes
+          fi
+          for attempt in 1 2 3 4; do
+            if gh release upload "$GITHUB_REF_NAME" build/Chauffeur.dmg --clobber; then
+              gh release edit "$GITHUB_REF_NAME" --draft=false
+              exit 0
+            fi
+            if [[ "$attempt" -lt 4 ]]; then
+              echo "::warning::Release upload attempt $attempt failed; retrying."
+              sleep "$((attempt * 10))"
+            fi
+          done
+          echo '::error::Release upload failed after four attempts. The DMG is saved as a workflow artifact.'
+          exit 1
 
       - name: Upload notarization diagnostics
         if: failure()
