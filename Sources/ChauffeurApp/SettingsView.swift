@@ -67,7 +67,6 @@ struct SettingsView: View {
                     Text("Quitting the service keeps agents running but pauses updates and coordination. Start it again here or reopen Chauffeur to reconnect.").font(.caption).foregroundStyle(.secondary)
                 }
                 NotificationSettingsSection()
-                RemoteAccessSettingsSection()
                 TerminalLauncherSettings()
                 Section("Retention and Delegation") {
                     Toggle("Keep finished sessions", isOn: $retention.keepFinishedSessions)
@@ -86,6 +85,8 @@ struct SettingsView: View {
                     Text("Exports paths, versions, session state, and error codes. Offline exports use the last received state and include its timestamp.").font(.caption).foregroundStyle(.secondary)
                 }
             }.formStyle(.grouped).tabItem { Label("Runtime", systemImage: "gearshape.2") }
+            Form { RemoteAccessSettingsSection() }
+                .formStyle(.grouped).tabItem { Label("Remote Access", systemImage: "iphone") }
         }.frame(minWidth: 740, idealWidth: 830, maxWidth: .infinity, minHeight: 480, idealHeight: 550, maxHeight: .infinity)
             .onAppear { selectedSet = selectedSet ?? model.presetSets.first?.id; retention = model.snapshot.settings }
             .confirmationDialog("Delete \(deletingSet?.value.name ?? "team")?", isPresented: $confirmingSetDeletion, titleVisibility: .visible) {

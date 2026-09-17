@@ -9,20 +9,28 @@ struct RemoteAccessSettingsSection: View {
     @State private var confirmingReset = false
     private var status: RemoteAccessStatus? { model.snapshot.remoteAccess }
     var body: some View {
-        Section("Remote Access") {
-            Text("Let the Chauffeur iPhone app browse sessions and use terminals on this Mac over the local network.")
-                .font(.caption).foregroundStyle(.secondary)
+        Group {
             if let status {
-                Toggle("Allow remote access", isOn: Binding(get: { status.enabled }, set: { setEnabled($0) }))
-                    .accessibilityIdentifier("remote-access-toggle")
-                stateRow(status)
-                portRow(status)
-                pairingSection(status)
-                devicesSection(status)
-                Button("Reset Remote Access…", role: .destructive) { confirmingReset = true }
-                    .accessibilityIdentifier("remote-access-reset")
+                Section("Remote Access") {
+                    Text("Let the Chauffeur iPhone app browse sessions and use terminals on this Mac over the local network.")
+                        .font(.caption).foregroundStyle(.secondary)
+                    Toggle("Allow remote access", isOn: Binding(get: { status.enabled }, set: { setEnabled($0) }))
+                        .accessibilityIdentifier("remote-access-toggle")
+                    stateRow(status)
+                    portRow(status)
+                }
+                Section("Pair an iPhone") {
+                    pairingSection(status)
+                }
+                Section("Paired Devices") {
+                    devicesSection(status)
+                    Button("Reset Remote Access…", role: .destructive) { confirmingReset = true }
+                        .accessibilityIdentifier("remote-access-reset")
+                }
             } else {
-                Text("Remote access is not available from this runtime.")
+                Section("Remote Access") {
+                    Text("Remote access is not available from this runtime.")
+                }
             }
         }
         .onAppear { if let status { portText = String(status.port) } }
