@@ -1,4 +1,5 @@
 import SwiftUI
+import ChauffeurRemoteProtocol
 
 /// 04 / Location: project → repository/folder → checkout (main, worktrees, or a new worktree).
 struct LocationView: View {
@@ -10,6 +11,10 @@ struct LocationView: View {
     @State private var checkout: LaunchLocation.Checkout?
 
     private var inventory: InventorySnapshot? { model.inventory }
+
+    private var projects: [ProjectSummary] {
+        inventory?.projects.filter { !$0.archived } ?? []
+    }
 
     private var project: ProjectSummary? {
         projectID.flatMap { inventory?.project($0) }
@@ -28,7 +33,7 @@ struct LocationView: View {
         Form {
             Section("Project") {
                 Picker("Project", selection: $projectID) {
-                    ForEach(inventory?.projects ?? []) { project in
+                    ForEach(projects) { project in
                         Text(project.name).tag(Optional(project.id))
                     }
                 }
@@ -42,7 +47,7 @@ struct LocationView: View {
                         ForEach(project.folders) { folder in
                             VStack(alignment: .leading) {
                                 Text(folder.name)
-                                Text(folder.path)
+                                Text(folder.availability == .available ? folder.path : "\(folder.path) · unavailable")
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                             }
@@ -58,15 +63,16 @@ struct LocationView: View {
                 Section {
                     ForEach(folder.checkouts) { existing in
                         CheckoutRow(
-                            title: existing.kind == .main ? "Main checkout" : "Existing",
-                            subtitle: existing.branch,
+                            title: existing.kind == .main ? "Main checkout" : "Existing worktree",
+                            subtitle: existing.availability == .available ? existing.branch : "\(existing.branch) · unavailable on the Mac",
                             systemImage: existing.kind == .main ? "arrow.triangle.branch" : "arrow.triangle.pull",
-                            isSelected: checkout == .existing(existing.id)
+                            isSelected: checkout == .existing(path: existing.path)
                         ) {
-                            checkout = .existing(existing.id)
+                            checkout = .existing(path: existing.path)
                         }
+                        .disabled(existing.availability != .available)
                     }
-                    if folder.isGitRepository {
+                    if folder.isRepository {
                         CheckoutRow(
                             title: "New worktree…",
                             subtitle: "Branch and base ref on the next step",
@@ -79,7 +85,7 @@ struct LocationView: View {
                 } header: {
                     Text("Checkout")
                 } footer: {
-                    Text(folder.isGitRepository
+                    Text(folder.isRepository
                          ? "Use a checkout already available on your Mac, or create a managed worktree."
                          : "Non-Git folders support existing-folder launches only.")
                 }
@@ -100,6 +106,7 @@ struct LocationView: View {
                     }
                 }
                 .disabled(location == nil)
+                .accessibilityIdentifier("location-continue")
             }
         }
         .onAppear(perform: applyDefaults)
@@ -114,14 +121,15 @@ struct LocationView: View {
 
     private func applyDefaults() {
         guard projectID == nil else { return }
-        projectID = preselectedProjectID ?? inventory?.projects.first?.id
+        projectID = preselectedProjectID ?? projects.first?.id
         folderID = project?.folders.first?.id
         selectDefaultCheckout()
     }
 
     private func selectDefaultCheckout() {
-        let main = folder?.checkouts.first(where: { $0.kind == .main }) ?? folder?.checkouts.first
-        checkout = main.map { .existing($0.id) }
+        let available = folder?.checkouts.filter { $0.availability == .available } ?? []
+        let main = available.first(where: { $0.kind == .main }) ?? available.first
+        checkout = main.map { .existing(path: $0.path) }
     }
 }
 

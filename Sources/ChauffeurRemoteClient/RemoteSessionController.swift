@@ -49,6 +49,12 @@ public final class RemoteSessionController: TerminalEngineAdapterDelegate {
     @ObservationIgnored private var resizeTask: Task<Void, Never>?
     @ObservationIgnored private var pendingResize: TerminalCellSize?
 
+    /// Called for an OSC 52 copy request from the remote program. The app decides whether to
+    /// write to the pasteboard; the controller and adapter never touch it.
+    @ObservationIgnored public var onClipboardCopy: ((String) -> Void)?
+    /// Called when the user taps a web or mail link in the terminal. The app decides whether to open it.
+    @ObservationIgnored public var onOpenLink: ((String) -> Void)?
+
     private struct PendingInput: Sendable {
         var generation: UInt64
         var bytes: Data
@@ -296,5 +302,13 @@ public final class RemoteSessionController: TerminalEngineAdapterDelegate {
             let request = TerminalResizeRequest(generation: current, cols: size.cols, rows: size.rows)
             _ = try? await self.connection.request(.terminalResize(request))
         }
+    }
+
+    public func terminal(_ adapter: any TerminalEngineAdapter, didCopyToClipboard text: String) {
+        onClipboardCopy?(text)
+    }
+
+    public func terminal(_ adapter: any TerminalEngineAdapter, didRequestOpenLink link: String) {
+        onOpenLink?(link)
     }
 }

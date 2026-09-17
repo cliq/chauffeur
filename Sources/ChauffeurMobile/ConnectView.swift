@@ -1,6 +1,8 @@
 import SwiftUI
+import ChauffeurRemoteProtocol
+import ChauffeurRemoteClient
 
-/// 01 / Connect to Mac. A saved host reconnects directly; otherwise manual entry or pairing.
+/// 01 / Connect to Mac. A saved host reconnects directly; otherwise enter the address and pair.
 struct ConnectView: View {
     @Bindable var model: MobileAppModel
     @State private var host = ""
@@ -9,6 +11,10 @@ struct ConnectView: View {
 
     private var port: Int {
         Int(portText.trimmingCharacters(in: .whitespaces)) ?? MobileAppModel.defaultPort
+    }
+
+    private var canPair: Bool {
+        !host.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !model.isPairing
     }
 
     var body: some View {
@@ -36,9 +42,10 @@ struct ConnectView: View {
                                 .foregroundStyle(.secondary)
                         }
                     }
-                    Button("Use a different Mac", role: .destructive) {
-                        model.forgetSavedHost()
+                    Button("Forget this Mac", role: .destructive) {
+                        model.forget()
                     }
+                    .accessibilityIdentifier("connect-forget")
                 }
             } else {
                 Section {
@@ -46,51 +53,85 @@ struct ConnectView: View {
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
                         .keyboardType(.URL)
+                        .accessibilityIdentifier("connect-host")
                     TextField("Port", text: $portText)
                         .keyboardType(.numberPad)
-                    Button("Pair with a code") {
-                        showPairing = true
-                    }
+                        .accessibilityIdentifier("connect-port")
                 } header: {
                     Text("Mac address")
                 } footer: {
-                    Text("First connection: enable remote access on the Mac and pair this device.")
+                    Text("Enable Remote Access in the Mac's Settings, then pair with the code it shows. Pairing uses port \(String(port + 1)).")
                 }
             }
 
             Section {
                 ConnectionStateLabel(state: model.connectionState)
+                if let error = model.connectError {
+                    Label(error, systemImage: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.orange)
+                }
+                if isProtocolMismatch {
+                    Text("Protocol mismatch: the Mac and this iPhone run different Chauffeur builds. Install the same version on both (a Debug phone build pairs with a Debug Mac build on port \(String(MobileAppModel.defaultPort))).")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             } footer: {
                 Text("Reachability and pairing errors appear here.")
             }
 
             Section {
-                Button {
-                    if let saved = model.savedHost {
-                        model.connect(host: saved.host, port: saved.port)
-                    } else {
-                        model.connect(host: host, port: port)
-                    }
-                } label: {
-                    Text(model.savedHost == nil ? "Pair & connect" : "Connect")
+                if model.savedHost != nil {
+                    Button {
+                        Task { await model.connect() }
+                    } label: {
+                        HStack {
+                            if model.isConnecting {
+                                ProgressView()
+                            }
+                            Text(model.isConnecting ? "Connecting…" : "Connect")
+                        }
                         .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(model.isConnecting)
+                    .accessibilityIdentifier("connect-button")
+                } else {
+                    Button {
+                        showPairing = true
+                    } label: {
+                        HStack {
+                            if model.isPairing {
+                                ProgressView()
+                            }
+                            Text(model.isPairing ? "Pairing…" : "Pair with a code")
+                        }
+                        .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(!canPair)
+                    .accessibilityIdentifier("connect-pair")
                 }
-                .buttonStyle(.borderedProminent)
-                .disabled(model.connectionState == .connecting)
             }
             .listRowBackground(Color.clear)
         }
         .navigationTitle("Chauffeur")
         .sheet(isPresented: $showPairing) {
             PairingSheet { code in
-                model.pair(code: code)
+                Task { await model.pair(host: host, port: port, code: code) }
             }
         }
+    }
+
+    private var isProtocolMismatch: Bool {
+        let mismatch = RemoteClientError.protocolMismatch(hostVersion: 0, clientVersion: 0).userMessage
+        if model.connectError == mismatch { return true }
+        if case .unavailable(let message) = model.connectionState, message == mismatch { return true }
+        return false
     }
 }
 
 struct ConnectionStateLabel: View {
-    let state: ConnectionState
+    let state: HostConnectionState
 
     var body: some View {
         switch state {
@@ -102,8 +143,8 @@ struct ConnectionStateLabel: View {
                 ProgressView()
                 Text("Connecting…")
             }
-        case .connected(let hostName):
-            Label("Connected to \(hostName)", systemImage: "circle.fill")
+        case .connected(let info):
+            Label("Connected to \(info.hostName)", systemImage: "circle.fill")
                 .foregroundStyle(.green)
         case .unavailable(let message):
             Label(message, systemImage: "exclamationmark.triangle.fill")
@@ -112,15 +153,15 @@ struct ConnectionStateLabel: View {
     }
 }
 
-/// Pairing / host verification. Ten alphanumeric characters shown as XXXX-XXXX-XX.
+/// Pairing code entry. Ten Crockford base32 characters shown as XXXX-XXXX-XX.
 struct PairingSheet: View {
     var onPair: (String) -> Void
 
     @Environment(\.dismiss) private var dismiss
     @State private var display = ""
 
-    private var rawCode: String {
-        display.filter { $0.isLetter || $0.isNumber }
+    private var normalizedCode: String? {
+        PairingKeyDerivation.normalize(display)
     }
 
     var body: some View {
@@ -132,6 +173,7 @@ struct PairingSheet: View {
                         .textInputAutocapitalization(.characters)
                         .autocorrectionDisabled()
                         .multilineTextAlignment(.center)
+                        .accessibilityIdentifier("pairing-code")
                         .onChange(of: display) { _, newValue in
                             let formatted = Self.format(newValue)
                             if formatted != newValue {
@@ -141,19 +183,22 @@ struct PairingSheet: View {
                 } header: {
                     Text("Pairing code")
                 } footer: {
-                    Text("Open Remote Access on your Mac and enter the code it shows. The code expires after a few minutes.")
+                    Text("Open Remote Access in the Mac's Settings and enter the code it shows. The code expires after a few minutes.")
                 }
 
                 Section {
                     Button {
-                        onPair(rawCode)
-                        dismiss()
+                        if let code = normalizedCode {
+                            onPair(code)
+                            dismiss()
+                        }
                     } label: {
                         Text("Pair & connect")
                             .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.borderedProminent)
-                    .disabled(rawCode.count != 10)
+                    .disabled(normalizedCode == nil)
+                    .accessibilityIdentifier("pairing-submit")
                 }
                 .listRowBackground(Color.clear)
             }
@@ -169,7 +214,7 @@ struct PairingSheet: View {
     }
 
     static func format(_ text: String) -> String {
-        let raw = text.uppercased().filter { $0.isLetter || $0.isNumber }.prefix(10)
+        let raw = text.uppercased().filter { $0.isLetter || $0.isNumber }.prefix(PairingKeyDerivation.codeLength)
         var result = ""
         for (index, character) in raw.enumerated() {
             if index == 4 || index == 8 {
@@ -189,7 +234,11 @@ struct PairingSheet: View {
 
 #Preview("Manual entry") {
     NavigationStack {
-        ConnectView(model: MobileAppModel(makeTerminalAdapter: MobileAppModel.defaultTerminalAdapterFactory(arguments: ["--fake-terminal"])))
+        ConnectView(model: MobileAppModel(
+            credentials: InMemoryCredentialStore(),
+            journal: InMemoryOperationJournal(),
+            makeTerminalAdapter: MobileAppModel.defaultTerminalAdapterFactory(arguments: ["--fake-terminal"])
+        ))
     }
 }
 

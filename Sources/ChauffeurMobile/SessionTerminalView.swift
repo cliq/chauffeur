@@ -1,9 +1,14 @@
 import SwiftUI
 import UIKit
+import ChauffeurRemoteProtocol
+import ChauffeurRemoteClient
 import ChauffeurTerminalInterface
 import ChauffeurTerminalTesting
 
 /// 03 / Terminal + session tabs, with 03a (control handoff) as a sheet and 03b (connection lost) as a banner.
+///
+/// The key bar sits below the surface and the view does not ignore the keyboard safe area, so the
+/// surface shrinks when the keyboard appears and the engine reports the new cell size itself.
 struct SessionTerminalView: View {
     var model: MobileAppModel
     @State private var showHandoff = false
@@ -13,26 +18,12 @@ struct SessionTerminalView: View {
             TabStrip(model: model)
             Divider()
 
-            if !model.connectionState.isConnected {
-                StatusBanner(
-                    title: "Disconnected · Last screen, not live",
-                    message: "Mac unreachable. Input is disabled. The session can continue on your Mac. Check Wi-Fi and that the Mac is awake.",
-                    actionTitle: "Reconnect to same session"
-                ) {
-                    model.reconnect()
-                }
-            } else if case .controlledElsewhere(let device) = model.controlState {
-                StatusBanner(
-                    title: "Terminal is attached on \(device)",
-                    message: "Input is disabled here until you take control.",
-                    actionTitle: "Take control"
-                ) {
-                    showHandoff = true
-                }
-            }
-
             if let sessionID = model.selectedTab {
-                let adapter = model.terminalAdapter(for: sessionID)
+                let adapter = model.adapter(for: sessionID)
+                let controller = model.terminals[sessionID]
+
+                banner(for: sessionID, controller: controller)
+
                 TerminalSurface(adapter: adapter)
                     .id(sessionID)
                     .overlay(alignment: .topLeading) {
@@ -40,10 +31,11 @@ struct SessionTerminalView: View {
                             FakeTerminalScreen(text: fake.screenText)
                         }
                     }
-                    .opacity(model.isTerminalInputEnabled ? 1 : 0.6)
+                    .opacity(isInputEnabled(controller) ? 1 : 0.6)
+                    .accessibilityIdentifier("terminal-surface")
                 Divider()
                 KeyAccessoryBar(adapter: adapter)
-                    .disabled(!model.isTerminalInputEnabled)
+                    .disabled(!isInputEnabled(controller))
             } else {
                 ContentUnavailableView {
                     Label("No open tabs", systemImage: "rectangle.on.rectangle.slash")
@@ -68,23 +60,93 @@ struct SessionTerminalView: View {
             }
             ToolbarItem(placement: .topBarTrailing) {
                 Menu("More", systemImage: "ellipsis.circle") {
-                    Button("Handoff to Mac…", systemImage: "arrow.left.arrow.right") {
+                    Button("Take control here", systemImage: "hand.raised") {
                         showHandoff = true
                     }
-                    Button("Simulate control lost", systemImage: "hand.raised") {
-                        model.controlState = .controlledElsewhere(device: "your Mac")
-                    }
-                    Button("Simulate disconnect", systemImage: "wifi.slash") {
-                        model.disconnect()
+                    .disabled(model.selectedTab == nil || !model.isConnected)
+                    if let sessionID = model.selectedTab {
+                        Button("Close tab", systemImage: "xmark.rectangle") {
+                            model.closeTab(sessionID)
+                        }
                     }
                 }
             }
         }
         .sheet(isPresented: $showHandoff) {
             HandoffSheet(sessionTitle: model.selectedSession?.title ?? "this session") {
-                model.takeControl()
+                guard let sessionID = model.selectedTab else { return }
+                Task { await model.takeControl(of: sessionID) }
             }
         }
+        .task(id: model.selectedTab) {
+            await model.attachSelectedTerminalIfNeeded()
+        }
+    }
+
+    @ViewBuilder
+    private func banner(for sessionID: UUID, controller: RemoteSessionController?) -> some View {
+        if !model.isConnected {
+            StatusBanner(
+                title: "Disconnected · Last screen, not live",
+                message: connectionMessage,
+                actionTitle: model.isConnecting ? "Reconnecting…" : "Reconnect to same session",
+                actionDisabled: model.isConnecting
+            ) {
+                Task { await model.retryTerminal(sessionID) }
+            }
+        } else if let controller {
+            switch controller.state {
+            case .controlLost(let message):
+                StatusBanner(
+                    title: "Terminal is in use on another device",
+                    message: "\(message) Input is disabled here until you take control.",
+                    actionTitle: "Take control"
+                ) {
+                    showHandoff = true
+                }
+            case .disconnected(let message):
+                StatusBanner(
+                    title: "Terminal detached",
+                    message: "\(message) The session can continue on your Mac.",
+                    actionTitle: "Reconnect"
+                ) {
+                    Task { await model.retryTerminal(sessionID) }
+                }
+            case .ended:
+                StatusBanner(
+                    title: "Session ended",
+                    message: "The process exited on your Mac. Close this tab or launch a new session.",
+                    actionTitle: "Close tab"
+                ) {
+                    model.closeTab(sessionID)
+                }
+            case .attaching:
+                HStack(spacing: 8) {
+                    ProgressView()
+                    Text("Attaching…")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+            case .idle, .attached:
+                EmptyView()
+            }
+        }
+    }
+
+    private var connectionMessage: String {
+        if case .unavailable(let message) = model.connectionState {
+            return "\(message) Input is disabled."
+        }
+        return "Mac unreachable. Input is disabled. The session can continue on your Mac. Check Wi-Fi and that the Mac is awake."
+    }
+
+    private func isInputEnabled(_ controller: RemoteSessionController?) -> Bool {
+        guard model.isConnected, let controller else { return false }
+        if case .attached = controller.state { return true }
+        return false
     }
 
     private var projectName: String {
@@ -95,11 +157,16 @@ struct SessionTerminalView: View {
     private var subtitle: String {
         guard let session = model.selectedSession else { return "No tab selected" }
         let control: String
-        switch model.controlState {
-        case .controlledHere: control = "Controlled here"
-        case .controlledElsewhere(let device): control = "Controlled on \(device)"
+        switch model.selectedTab.flatMap({ model.terminals[$0] })?.state {
+        case .attached: control = "Controlled here"
+        case .controlLost: control = "Controlled elsewhere"
+        case .attaching: control = "Attaching"
+        case .disconnected: control = "Detached"
+        case .ended: control = "Ended"
+        case .idle, .none: control = model.isConnected ? "Not attached" : "Disconnected"
         }
-        return "\(session.branch) · \(control)"
+        let branch = session.branch ?? URL(fileURLWithPath: session.checkoutPath).lastPathComponent
+        return "\(branch) · \(control)"
     }
 
     private func newTab() {
@@ -120,15 +187,14 @@ private struct TabStrip: View {
             ScrollView(.horizontal) {
                 HStack(spacing: 6) {
                     ForEach(model.openTabs, id: \.self) { sessionID in
-                        if let session = model.session(sessionID) {
-                            TabChip(
-                                title: session.title,
-                                kind: session.kind,
-                                isSelected: model.selectedTab == sessionID,
-                                onSelect: { model.selectedTab = sessionID },
-                                onClose: { model.closeTab(sessionID) }
-                            )
-                        }
+                        let session = model.session(sessionID)
+                        TabChip(
+                            title: session?.title ?? "Session",
+                            kind: session?.kind,
+                            isSelected: model.selectedTab == sessionID,
+                            onSelect: { model.selectTab(sessionID) },
+                            onClose: { model.closeTab(sessionID) }
+                        )
                     }
                 }
                 .padding(.horizontal, 12)
@@ -145,6 +211,8 @@ private struct TabStrip: View {
             }
             .labelStyle(.iconOnly)
             .padding(.horizontal, 12)
+            .disabled(!model.isConnected)
+            .accessibilityIdentifier("terminal-new-tab")
         }
         .background(Color(uiColor: .secondarySystemBackground))
     }
@@ -152,7 +220,7 @@ private struct TabStrip: View {
 
 private struct TabChip: View {
     let title: String
-    let kind: SessionKind
+    let kind: RemoteSessionKind?
     let isSelected: Bool
     var onSelect: () -> Void
     var onClose: () -> Void
@@ -161,9 +229,11 @@ private struct TabChip: View {
         HStack(spacing: 6) {
             Button(action: onSelect) {
                 HStack(spacing: 6) {
-                    Text(kind.label)
-                        .font(.caption2.weight(.semibold))
-                        .foregroundStyle(.secondary)
+                    if let kind {
+                        Text(kind.label)
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                    }
                     Text(title)
                         .font(.subheadline.weight(isSelected ? .semibold : .regular))
                         .lineLimit(1)
@@ -188,7 +258,8 @@ private struct TabChip: View {
     }
 }
 
-/// Hosts the engine's view without the app knowing which engine is behind it.
+/// Hosts the engine's view without the app knowing which engine is behind it. The engine view
+/// fills the container, so every bounds change (rotation, keyboard, key bar) reaches the engine.
 struct TerminalSurface: UIViewRepresentable {
     let adapter: any TerminalEngineAdapter
 
@@ -208,9 +279,13 @@ struct TerminalSurface: UIViewRepresentable {
     }
 
     func updateUIView(_ uiView: UIView, context: Context) {}
+
+    func sizeThatFits(_ proposal: ProposedViewSize, uiView: UIView, context: Context) -> CGSize? {
+        CGSize(width: proposal.width ?? 320, height: proposal.height ?? 240)
+    }
 }
 
-/// The fake engine renders nothing; show what it was fed so the flow is legible in the scaffold.
+/// The fake engine renders nothing; show what it was fed so the flow is legible without SwiftTerm.
 private struct FakeTerminalScreen: View {
     let text: String
 
@@ -224,30 +299,73 @@ private struct FakeTerminalScreen: View {
 }
 
 /// Keys the software keyboard lacks. Encodings come from the adapter, never hard-coded here.
+/// Ctrl is a one-shot modifier: tap it, then a letter from the row it reveals.
 struct KeyAccessoryBar: View {
+    static let controlLetters: [Character] = ["c", "d", "z", "l", "r", "a", "e", "u", "k"]
+
     let adapter: any TerminalEngineAdapter
+    @State private var controlArmed = false
 
     var body: some View {
-        ScrollView(.horizontal) {
-            HStack(spacing: 8) {
-                key("Esc") { adapter.sendKey(.escape) }
-                key("Tab") { adapter.sendKey(.tab) }
-                // TODO: Ctrl as a sticky modifier applied to the next typed letter.
-                key("^C") { adapter.sendKey(.control("c")) }
-                key("←", label: "Left") { adapter.sendKey(.left) }
-                key("↑", label: "Up") { adapter.sendKey(.up) }
-                key("↓", label: "Down") { adapter.sendKey(.down) }
-                key("→", label: "Right") { adapter.sendKey(.right) }
-                key("Paste") {
-                    if let text = UIPasteboard.general.string {
-                        adapter.paste(text)
+        VStack(spacing: 0) {
+            if controlArmed {
+                ScrollView(.horizontal) {
+                    HStack(spacing: 8) {
+                        Text("Ctrl +")
+                            .font(.system(.caption, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                        ForEach(Self.controlLetters, id: \.self) { letter in
+                            key(String(letter).uppercased(), label: "Control \(letter)") {
+                                adapter.sendKey(.control(letter))
+                                controlArmed = false
+                            }
+                            .accessibilityIdentifier("key-ctrl-\(letter)")
+                        }
                     }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
                 }
+                .scrollIndicators(.hidden)
+                Divider()
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
+            ScrollView(.horizontal) {
+                HStack(spacing: 8) {
+                    key("Esc") { adapter.sendKey(.escape) }
+                        .accessibilityIdentifier("key-esc")
+                    key("Tab") { adapter.sendKey(.tab) }
+                        .accessibilityIdentifier("key-tab")
+                    Button {
+                        controlArmed.toggle()
+                    } label: {
+                        Text("Ctrl")
+                            .font(.system(.subheadline, design: .monospaced))
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 6)
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(controlArmed ? .accentColor : nil)
+                    .accessibilityLabel(controlArmed ? "Control, armed" : "Control")
+                    .accessibilityIdentifier("key-ctrl")
+                    key("←", label: "Left") { adapter.sendKey(.left) }
+                        .accessibilityIdentifier("key-left")
+                    key("↑", label: "Up") { adapter.sendKey(.up) }
+                        .accessibilityIdentifier("key-up")
+                    key("↓", label: "Down") { adapter.sendKey(.down) }
+                        .accessibilityIdentifier("key-down")
+                    key("→", label: "Right") { adapter.sendKey(.right) }
+                        .accessibilityIdentifier("key-right")
+                    key("Paste") {
+                        if let text = UIPasteboard.general.string {
+                            adapter.paste(text)
+                        }
+                    }
+                    .accessibilityIdentifier("key-paste")
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+            }
+            .scrollIndicators(.hidden)
         }
-        .scrollIndicators(.hidden)
         .background(Color(uiColor: .secondarySystemBackground))
     }
 
@@ -267,6 +385,7 @@ private struct StatusBanner: View {
     let title: String
     let message: String
     let actionTitle: String
+    var actionDisabled = false
     var action: () -> Void
 
     var body: some View {
@@ -279,10 +398,12 @@ private struct StatusBanner: View {
             Button(actionTitle, action: action)
                 .buttonStyle(.borderedProminent)
                 .controlSize(.small)
+                .disabled(actionDisabled)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(12)
         .background(Color.yellow.opacity(0.15))
+        .accessibilityIdentifier("terminal-banner")
     }
 }
 
@@ -298,7 +419,7 @@ struct HandoffSheet: View {
             VStack(alignment: .leading, spacing: 16) {
                 Text("Terminal is attached on another device. Take control here?")
                     .font(.title3.weight(.semibold))
-                Text("“\(sessionTitle)” is open on your Mac. Its terminal input will pause there while you control it from your phone. The session keeps running.")
+                Text("“\(sessionTitle)” is open elsewhere. Its terminal input will pause there while you control it from your phone. The session keeps running.")
                     .foregroundStyle(.secondary)
                 Spacer()
                 Button {
@@ -309,6 +430,7 @@ struct HandoffSheet: View {
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)
+                .accessibilityIdentifier("handoff-take-control")
                 Button("Cancel") { dismiss() }
                     .frame(maxWidth: .infinity)
             }
@@ -320,24 +442,14 @@ struct HandoffSheet: View {
     }
 }
 
-#Preview("Controlled here") {
+#Preview("Connected") {
     NavigationStack {
         SessionTerminalView(model: .preview())
     }
 }
 
-#Preview("Control lost") {
-    let model = MobileAppModel.preview()
-    model.controlState = .controlledElsewhere(device: "your Mac")
-    return NavigationStack {
-        SessionTerminalView(model: model)
-    }
-}
-
 #Preview("Disconnected") {
-    let model = MobileAppModel.preview()
-    model.disconnect()
-    return NavigationStack {
-        SessionTerminalView(model: model)
+    NavigationStack {
+        SessionTerminalView(model: .preview(connected: false))
     }
 }

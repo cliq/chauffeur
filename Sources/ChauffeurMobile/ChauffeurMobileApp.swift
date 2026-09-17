@@ -1,15 +1,26 @@
 import SwiftUI
-// Linked for the upcoming networking layer; proves the portable products build for iOS.
-import ChauffeurRemoteProtocol
 import ChauffeurRemoteClient
 
 @main
 struct ChauffeurMobileApp: App {
     @State private var model = MobileAppModel(makeTerminalAdapter: MobileAppModel.defaultTerminalAdapterFactory())
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some Scene {
         WindowGroup {
             RootView(model: model)
+        }
+        .onChange(of: scenePhase) { _, phase in
+            switch phase {
+            case .background:
+                model.handleBackground()
+            case .active:
+                Task { await model.handleForeground() }
+            case .inactive:
+                break
+            @unknown default:
+                break
+            }
         }
     }
 }
@@ -41,5 +52,9 @@ struct RootView: View {
 }
 
 #Preview("First launch") {
-    RootView(model: MobileAppModel(makeTerminalAdapter: MobileAppModel.defaultTerminalAdapterFactory(arguments: ["--fake-terminal"])))
+    RootView(model: MobileAppModel(
+        credentials: InMemoryCredentialStore(),
+        journal: InMemoryOperationJournal(),
+        makeTerminalAdapter: MobileAppModel.defaultTerminalAdapterFactory(arguments: ["--fake-terminal"])
+    ))
 }
