@@ -609,8 +609,21 @@ struct ProjectWindow: View {
             layout.controllers.removeValue(forKey: session.id)?.detach()
             layout.closedSessionIDs.remove(session.id)
             if layout.state.selectedSessionID == session.id {
-                layout.state.selectedSessionID = remaining.isEmpty ? nil : remaining[min(index, remaining.count - 1)].id
-                if let id = layout.state.selectedSessionID { markRead(id) }
+                // Focus the tab that takes the closed one's place, preferring a live session and
+                // otherwise the nearest tab; selecting it also focuses its terminal.
+                let positions = Dictionary(uniqueKeysWithValues: tabs.enumerated().map { ($1.id, $0) })
+                let live = remaining.filter { $0.state.isLive }
+                let pool = live.isEmpty ? remaining : live
+                let next = pool.min { lhs, rhs in
+                    let l = abs((positions[lhs.id] ?? 0) - index), r = abs((positions[rhs.id] ?? 0) - index)
+                    return l != r ? l < r : (positions[lhs.id] ?? 0) > (positions[rhs.id] ?? 0)
+                }
+                if let next {
+                    selectSession(next.id)
+                    markRead(next.id)
+                } else {
+                    layout.state.selectedSessionID = nil
+                }
             }
         }
     }
