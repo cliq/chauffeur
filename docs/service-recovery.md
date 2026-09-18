@@ -53,6 +53,11 @@ tools can report their own responsible PIDs while TCC still retains the original
 runtime's executable path. Restarting the runtime is not evidence that privacy
 attribution has been repaired or lost. See [privacy prompts](privacy-prompts.md)
 for the measured behavior and how to investigate repeated per-tool consent.
+AppData consent has a shorter lifetime than Documents consent: the isolated
+probe showed renewed prompts after the original responsible process exited,
+even with its signed bundle still present. Removing that bundle can additionally
+make macOS select a tool identity. Preserving sessions does not preserve every
+privacy grant, and sessions must not be killed automatically to repair one.
 
 `Prototypes/real_repository_access.py` verifies this with the signed Release
 runtime and real Codex 0.154.0 (integration enabled) / Claude Code 2.1.273

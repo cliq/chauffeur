@@ -14,8 +14,12 @@ static void accessProbe(const char *phase) {
     if (!path) return;
     int fd = open(path.fileSystemRepresentation, O_RDONLY);
     int error = fd < 0 ? errno : 0;
+    char byte;
+    ssize_t count = fd >= 0 ? read(fd, &byte, 1) : -1;
+    if (fd >= 0 && count < 0) error = errno;
     if (fd >= 0) close(fd);
-    NSDictionary *row = @{@"pid": @(getpid()), @"opened": @(fd >= 0), @"errno": @(error)};
+    NSDictionary *row = @{@"pid": @(getpid()), @"opened": @(fd >= 0),
+        @"bytes_read": @(count), @"errno": @(error)};
     NSString *out = [NSString stringWithFormat:@"%s/access-%s.json", directory, phase];
     [[NSJSONSerialization dataWithJSONObject:row options:0 error:NULL] writeToFile:out atomically:YES];
 }
@@ -46,10 +50,20 @@ int main(int argc, char **argv) {
         const char *mode = argv[1], *name = argv[4];
         if (!strcmp(mode, "hold")) { record(name); sleep(600); return 0; }
         if (!strcmp(mode, "leaf")) {
+            NSString *python = [NSString stringWithContentsOfFile:
+                [NSString stringWithFormat:@"%s/python-tool.txt", directory]
+                encoding:NSUTF8StringEncoding error:NULL];
+            if (python) {
+                NSString *script = [NSString stringWithFormat:@"%s/python-leaf.py", directory];
+                execl(python.fileSystemRepresentation, python.fileSystemRepresentation,
+                    script.fileSystemRepresentation, directory, name, NULL);
+                return 1;
+            }
             record(name);
             if (!strcmp(name, "pane") && ![[NSFileManager defaultManager] fileExistsAtPath:
                     [NSString stringWithFormat:@"%s/access-after-only", directory]]) accessProbe("before");
-            if (!strcmp(name, "later") || !strcmp(name, "after-replacement")) accessProbe(name);
+            if (!strcmp(name, "later") || !strcmp(name, "after-replacement") ||
+                !strncmp(name, "alive-", 6)) accessProbe(name);
             // A file gate permits measuring the same process after its owner exits.
             NSString *gate = [NSString stringWithFormat:@"%s/sample-after-exit", directory];
             for (int i = 0; i < 1200; i++) {
