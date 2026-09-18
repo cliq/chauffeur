@@ -5,13 +5,13 @@ import ChauffeurRemoteClient
 import ChauffeurTerminalInterface
 import ChauffeurTerminalTesting
 
-/// 03 / Terminal + session tabs, with 03a (control handoff) as a sheet and 03b (connection lost) as a banner.
+/// 03 / Terminal + session tabs, with 03b (connection lost) as a banner. Taking control is immediate:
+/// the other side loses input but the session keeps running, so there is nothing worth confirming.
 ///
 /// The key bar sits below the surface and the view does not ignore the keyboard safe area, so the
 /// surface shrinks when the keyboard appears and the engine reports the new cell size itself.
 struct SessionTerminalView: View {
     var model: MobileAppModel
-    @State private var showHandoff = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -61,7 +61,7 @@ struct SessionTerminalView: View {
             ToolbarItem(placement: .topBarTrailing) {
                 Menu("More", systemImage: "ellipsis.circle") {
                     Button("Take control here", systemImage: "hand.raised") {
-                        showHandoff = true
+                        takeControl()
                     }
                     .disabled(model.selectedTab == nil || !model.isConnected)
                     if let sessionID = model.selectedTab {
@@ -72,15 +72,14 @@ struct SessionTerminalView: View {
                 }
             }
         }
-        .sheet(isPresented: $showHandoff) {
-            HandoffSheet(sessionTitle: model.selectedSession?.title ?? "this session") {
-                guard let sessionID = model.selectedTab else { return }
-                Task { await model.takeControl(of: sessionID) }
-            }
-        }
         .task(id: model.selectedTab) {
             await model.attachSelectedTerminalIfNeeded()
         }
+    }
+
+    private func takeControl() {
+        guard let sessionID = model.selectedTab else { return }
+        Task { await model.takeControl(of: sessionID) }
     }
 
     @ViewBuilder
@@ -102,7 +101,7 @@ struct SessionTerminalView: View {
                     message: "\(message) Input is disabled here until you take control.",
                     actionTitle: "Take control"
                 ) {
-                    showHandoff = true
+                    takeControl()
                 }
             case .disconnected(let message):
                 StatusBanner(
@@ -435,41 +434,6 @@ private struct StatusBanner: View {
         .padding(12)
         .background(Color.yellow.opacity(0.15))
         .accessibilityIdentifier("terminal-banner")
-    }
-}
-
-/// 03a / Terminal control sheet.
-struct HandoffSheet: View {
-    let sessionTitle: String
-    var onTakeControl: () -> Void
-
-    @Environment(\.dismiss) private var dismiss
-
-    var body: some View {
-        NavigationStack {
-            VStack(alignment: .leading, spacing: 16) {
-                Text("Terminal is attached on another device. Take control here?")
-                    .font(.title3.weight(.semibold))
-                Text("“\(sessionTitle)” is open elsewhere. Its terminal input will pause there while you control it from your phone. The session keeps running.")
-                    .foregroundStyle(.secondary)
-                Spacer()
-                Button {
-                    onTakeControl()
-                    dismiss()
-                } label: {
-                    Text("Take control")
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.borderedProminent)
-                .accessibilityIdentifier("handoff-take-control")
-                Button("Cancel") { dismiss() }
-                    .frame(maxWidth: .infinity)
-            }
-            .padding()
-            .navigationTitle("Control handoff")
-            .navigationBarTitleDisplayMode(.inline)
-        }
-        .presentationDetents([.medium])
     }
 }
 
