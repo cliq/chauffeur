@@ -575,7 +575,9 @@ public actor RuntimeCoordinator {
         if preview {
             var result = WorktreeDeletionPreview(hasChanges: false)
             if let entry, entry.availability ?? .available == .available {
-                result.hasChanges = try await worktrees.hasChanges(at: path)
+                let changedFiles = try await worktrees.changedFiles(at: path)
+                result.changedFiles = changedFiles
+                result.hasChanges = !changedFiles.isEmpty
                 let mainBranch = inventory.first?.branch ?? ""
                 result.baseBranch = records.first?.value.baseBranch ?? (mainBranch.isEmpty ? nil : mainBranch)
                 result.unmergedCommits = await worktrees.unmergedCommits(at: path, branch: entry.branch, base: result.baseBranch)

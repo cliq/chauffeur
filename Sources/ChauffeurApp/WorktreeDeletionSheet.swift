@@ -36,6 +36,21 @@ struct WorktreeDeletionSheet: View {
                     Text(item.text).padding(.leading, 26)
                         .accessibilityIdentifier("worktreeDeletion.item.\(losesWork ? "loss" : "safe")")
                 }
+                if !row.finished, let files = preview.changedFiles, !files.isEmpty {
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 6) {
+                            ForEach(files) { file in
+                                Text(file.description)
+                                    .font(.caption.monospaced())
+                                    .textSelection(.enabled)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                        }
+                    }
+                    .frame(height: min(CGFloat(files.count) * 36, 180))
+                    .padding(.leading, 26)
+                    .accessibilityIdentifier("worktreeDeletion.changedFiles")
+                }
             }
             if !notes.isEmpty {
                 Text(notes.map(\.text).joined(separator: " · ")).font(.caption).foregroundStyle(.secondary)

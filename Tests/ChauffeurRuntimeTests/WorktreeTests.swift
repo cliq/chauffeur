@@ -99,7 +99,7 @@ struct WorktreeTests {
         #expect(await manager.observe(at: root.path).status == .notRepository)
         #expect(await manager.observe(at: root.appendingPathComponent("missing").path).status == .missing)
     }
-    @Test func deletionPreservesUniqueCommitsAndWarnsAboutIgnoredFiles() async throws {
+    @Test func deletionPreservesUniqueCommitsAndRemovesIgnoredFiles() async throws {
         let root = URL(fileURLWithPath: "/tmp/chauffeur-delete-\(UUID())")
         let repo = root.appendingPathComponent("repo")
         try FileManager.default.createDirectory(at: repo, withIntermediateDirectories: true)
@@ -116,9 +116,10 @@ struct WorktreeTests {
         #expect(try await !manager.hasChanges(at: tree.path))
         try #require(try await git(tree.path, ["commit", "--allow-empty", "-m", "Unique"]).status == 0)
         try Data("local".utf8).write(to: URL(fileURLWithPath: tree.path).appendingPathComponent("ignored.txt"))
-        #expect(try await manager.hasChanges(at: tree.path))
-        await #expect(throws: ChauffeurError.self) { try await manager.remove(tree, liveSessions: []) }
-        try await manager.remove(tree, liveSessions: [], discardChanges: true)
+        #expect(try await !manager.hasChanges(at: tree.path))
+        #expect(try await manager.changedFiles(at: tree.path).isEmpty)
+        try await manager.remove(tree, liveSessions: [])
+        #expect(!FileManager.default.fileExists(atPath: tree.path))
         #expect(try await git(repo.path, ["show-ref", "--verify", "refs/heads/task/unique"]).status == 0)
         // Another branch protects the commits even when main has not merged them.
         try #require(try await git(repo.path, ["branch", "saved", "task/unique"]).status == 0)
@@ -148,7 +149,9 @@ struct WorktreeTests {
         try Data("changed\n".utf8).write(to: URL(fileURLWithPath: first.path).appendingPathComponent("file.txt"))
         #expect(try String(contentsOf: URL(fileURLWithPath: second.path).appendingPathComponent("file.txt"), encoding: .utf8) == "original\n")
         await #expect(throws: ChauffeurError.self) { try await manager.remove(first, liveSessions: []) }
+        #expect(try await manager.changedFiles(at: first.path) == [.init(path: "file.txt", status: " M")])
         try Data("untracked".utf8).write(to: URL(fileURLWithPath: second.path).appendingPathComponent("new.txt"))
+        #expect(try await manager.changedFiles(at: second.path) == [.init(path: "new.txt", status: "??")])
         await #expect(throws: ChauffeurError.self) { try await manager.remove(second, liveSessions: []) }
         try FileManager.default.removeItem(atPath: second.path + "/new.txt")
         let set = PresetSet(name: "Fixture"), preset = AgentPreset(setID: UUID(), name: "Fixture", kind: .codex, executable: "/bin/cat", configurationDirectory: root.path)
@@ -233,7 +236,7 @@ struct WorktreeGitStatusTests {
         status = try await annotated()
         #expect(status[fromMain.path]?.hasUncommittedChanges == false)
         #expect(status[fromDevelop.path]?.hasUncommittedChanges == true)
-        #expect(try await manager.hasChanges(at: fromMain.path) == true) // Deletion still warns about ignored files.
+        #expect(try await manager.hasChanges(at: fromMain.path) == false)
 
         // Commits count against the starting branch, not the main checkout.
         try await Self.git(URL(fileURLWithPath: fromDevelop.path), ["add", "notes.txt"])

@@ -242,15 +242,22 @@ public actor WorktreeManager {
         guard worktree.gitIdentity == nil || entry.gitIdentity == worktree.gitIdentity else { throw ChauffeurError("worktree_unavailable", "A different checkout now occupies this path. Refresh the Git inventory", path: path) }
         let dirty = try await hasChanges(at: path)
         guard discardChanges || !dirty else {
-            throw ChauffeurError("dirty_worktree", "Worktree has uncommitted, untracked, or ignored files. Confirm deletion to discard them", path: path)
+            throw ChauffeurError("dirty_worktree", "Worktree has uncommitted or untracked files. Confirm deletion to discard them", path: path)
         }
         // Git still enforces locks and refuses to remove the main checkout.
         _ = try await git(worktree.repositoryPath, ["worktree", "remove"] + (discardChanges ? ["--force"] : []) + ["--", path])
         await deleteBranchIfUnused(entry.branch, repository: worktree.repositoryPath)
     }
     public func hasChanges(at path: String) async throws -> Bool {
-        // Ignored files also disappear when the checkout is removed.
-        try await !git(path, ["status", "--porcelain=v1", "-z", "--untracked-files=all", "--ignored"]).isEmpty
+        try await hasUncommittedChanges(at: path)
+    }
+    public func changedFiles(at path: String) async throws -> [WorktreeDeletionPreview.ChangedFile] {
+        // Disable rename folding so every affected path is shown, including both
+        // sides of a rename. NUL delimiters preserve spaces and newlines in names.
+        let output = try await git(path, ["status", "--porcelain=v1", "-z", "--untracked-files=all", "--no-renames"])
+        return output.split(separator: "\0").map { record in
+            WorktreeDeletionPreview.ChangedFile(path: String(record.dropFirst(3)), status: String(record.prefix(2)))
+        }
     }
     /// Whether the checkout has work to commit: tracked modifications or
     /// untracked files. Ignored files are build output, not pending work.

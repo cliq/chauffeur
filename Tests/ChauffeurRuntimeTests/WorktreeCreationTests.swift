@@ -172,7 +172,7 @@ struct WorktreeCreationTests {
         // A commit the main branch lacks is reported before deletion and in the scanned inventory.
         try #require(try await ProcessRunner.run("/usr/bin/git", ["-C", external.path, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "--allow-empty", "-m", "Unique"]).status == 0)
         var preview = try await fixture.runtime.handle(IPCRequest("previewWorktreeDeletion", params: params)).decode(WorktreeDeletionPreview.self)
-        #expect(preview == WorktreeDeletionPreview(hasChanges: false, unmergedCommits: 1, baseBranch: "main"))
+        #expect(preview == WorktreeDeletionPreview(hasChanges: false, unmergedCommits: 1, baseBranch: "main", changedFiles: []))
         let inventories = try await fixture.runtime.handle(IPCRequest("refreshWorktrees")).decode([RepositoryInventory].self)
         let scanned = inventories.flatMap(\.entries).first { $0.path == Paths.canonical(external.path) }
         #expect(scanned?.unmergedCommits == 1 && scanned?.baseBranch == "main" && scanned?.hasUncommittedChanges == false)
@@ -190,6 +190,7 @@ struct WorktreeCreationTests {
         #expect(FileManager.default.fileExists(atPath: marker.path) && snapshot.sessions.count == 1 && snapshot.worktrees.count == 1)
         preview = try await fixture.runtime.handle(IPCRequest("previewWorktreeDeletion", params: params)).decode(WorktreeDeletionPreview.self)
         #expect(preview.hasChanges && preview.items(branch: "external", finishedSessions: 1, checkoutMissing: false).filter { $0.severity == .loss }.count == 2)
+        #expect(preview.changedFiles == [.init(path: "keep.txt", status: "??")])
         let confirmed: JSONValue = .object(["projectID": .string(fixture.project.id.uuidString), "folderID": .string(folder.id.uuidString), "path": .string(external.path), "discardChanges": .bool(true)])
         let result = try await fixture.runtime.handle(IPCRequest("deleteWorktree", params: confirmed))
         #expect(result["deletedCheckout"].bool == true && result["deletedSessions"].int == 1 && result["deletedRecords"].int == 1)

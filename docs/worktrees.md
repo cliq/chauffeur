@@ -24,7 +24,8 @@ entries whose directory is gone are left for **Prune** in Manage Worktrees.
 Right-click a worktree and choose **Delete Worktree…** to remove its checkout
 together with its finished sessions and saved terminal history. Stop live sessions
 first. The confirmation is a checklist, one line per fact, green when nothing is
-lost and red when something is: uncommitted, untracked, or ignored files; commits
+lost and red when something is: uncommitted or untracked files (listed by path
+and change type); commits
 not merged into the branch's starting point, which count as safe when every one
 is already on a remote branch (the upstream, or any remote branch containing the
 tip); whether the branch is kept or deleted with the checkout; and finished

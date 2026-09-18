@@ -69,8 +69,9 @@ public enum InventoryReadiness: Equatable, Sendable {
 
 /// What `previewWorktreeDeletion` reports before the user confirms a removal.
 public struct WorktreeDeletionPreview: Codable, Equatable, Sendable {
-    /// Uncommitted, untracked, or ignored files: everything removal deletes.
+    /// Tracked modifications or untracked files that removal would discard.
     public var hasChanges: Bool
+    public var changedFiles: [ChangedFile]?
     public var unmergedCommits: Int?
     public var baseBranch: String?
     /// Commits the branch's remote counterpart lacks. Zero means everything is
@@ -78,9 +79,28 @@ public struct WorktreeDeletionPreview: Codable, Equatable, Sendable {
     public var unpushedCommits: Int?
     /// The remote branch the push state was measured against.
     public var remoteBranch: String?
-    public init(hasChanges: Bool, unmergedCommits: Int? = nil, baseBranch: String? = nil, unpushedCommits: Int? = nil, remoteBranch: String? = nil) {
+    public init(hasChanges: Bool, unmergedCommits: Int? = nil, baseBranch: String? = nil, unpushedCommits: Int? = nil, remoteBranch: String? = nil, changedFiles: [ChangedFile]? = nil) {
         self.hasChanges = hasChanges; self.unmergedCommits = unmergedCommits; self.baseBranch = baseBranch
         self.unpushedCommits = unpushedCommits; self.remoteBranch = remoteBranch
+        self.changedFiles = changedFiles
+    }
+    public struct ChangedFile: Codable, Equatable, Sendable, Identifiable {
+        public var path: String
+        public var status: String
+        public var id: String { path }
+        public init(path: String, status: String) {
+            self.path = path; self.status = status
+        }
+        public var description: String {
+            let kind: String
+            if status == "??" { kind = "Untracked" }
+            else if status.contains("U") || status == "AA" || status == "DD" { kind = "Conflicted" }
+            else if status.contains("D") { kind = "Deleted" }
+            else if status.contains("A") { kind = "Added" }
+            else if status.contains("T") { kind = "Type changed" }
+            else { kind = "Modified" }
+            return "\(kind): \(path)"
+        }
     }
     /// Every commit on the branch is on a remote, so removing the checkout cannot lose work.
     public var isPushed: Bool { remoteBranch != nil && unpushedCommits == 0 }
@@ -106,7 +126,7 @@ public struct WorktreeDeletionPreview: Codable, Equatable, Sendable {
         if checkoutMissing {
             items.append(Item(.note, "The checkout is already gone"))
         } else {
-            items.append(hasChanges ? Item(.loss, "Uncommitted, untracked, or ignored files will be permanently lost") : Item(.safe, "No uncommitted changes"))
+            items.append(hasChanges ? Item(.loss, "Uncommitted or untracked files will be permanently lost") : Item(.safe, "No uncommitted changes"))
             let base = baseBranch.map { " into \($0)" } ?? ""
             switch unmergedCommits {
             case nil:
