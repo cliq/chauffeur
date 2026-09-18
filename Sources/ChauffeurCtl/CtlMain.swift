@@ -60,6 +60,10 @@ import ChauffeurCore
         guard unlink(path) == 0 else { throw ChauffeurError("handoff_cleanup", "Cannot consume launch handoff") }
         _ = try Paths.directory(payload.directory)
         guard chdir(payload.directory) == 0 else { throw ChauffeurError("working_directory", "Cannot enter selected directory") }
+        if let preamble = payload.preamble, !preamble.isEmpty {
+            // Shown dimmed at the top of the terminal so the user sees what this session applied.
+            FileHandle.standardOutput.write(Data(("\u{1b}[2m" + preamble + "\u{1b}[0m\r\n").utf8))
+        }
         var argv = ([payload.executable] + payload.arguments).map { strdup($0) } + [nil]
         var envp = payload.environment.map { strdup("\($0.key)=\($0.value)") } + [nil]
         defer { argv.forEach { free($0) }; envp.forEach { free($0) } }

@@ -7,8 +7,11 @@ public struct ExecPayload: Codable, Sendable {
     public var arguments: [String]
     public var environment: [String: String]
     public var directory: String
-    public init(executable: String, arguments: [String], environment: [String: String], directory: String) {
-        self.executable = executable; self.arguments = arguments; self.environment = environment; self.directory = directory
+    /// A line the exec helper prints to the terminal before starting the process, so the user sees
+    /// what was applied (for example the `export` command for agent configuration directories).
+    public var preamble: String?
+    public init(executable: String, arguments: [String], environment: [String: String], directory: String, preamble: String? = nil) {
+        self.executable = executable; self.arguments = arguments; self.environment = environment; self.directory = directory; self.preamble = preamble
     }
 }
 

@@ -774,6 +774,8 @@ public actor RuntimeCoordinator {
             try Task.checkCancellation()
             var environment = try LaunchPolicy.environment(base: baseEnvironment, preset: preset, projectID: session.projectID, sessionID: session.id, token: token)
             environment["CHAUFFEUR_SOCKET"] = root.appendingPathComponent("runtime/runtime.sock").path
+            let shellExports = isShell ? shellAgentExports(project: project, snapshot: snapshot) : [:]
+            environment.merge(shellExports) { _, export in export }
             let coordination = !isShell && request.coordinationEnabled
             let integration = root.appendingPathComponent("runtime/integration/\(session.id)")
             if !isShell {
@@ -788,7 +790,7 @@ public actor RuntimeCoordinator {
             let arguments = try CLIAdapter.arguments(session: session, endpoint: endpoint ?? "", ctlPath: ctlPath, integrationDirectory: integration, coordination: coordination, resume: false)
             try await persist(session)
             try Task.checkCancellation()
-            let pane = try await terminals.spawn(session: session, payload: ExecPayload(executable: session.launch.executablePath, arguments: arguments, environment: environment, directory: session.launch.workingDirectory), scrollback: settings.scrollbackLines)
+            let pane = try await terminals.spawn(session: session, payload: ExecPayload(executable: session.launch.executablePath, arguments: arguments, environment: environment, directory: session.launch.workingDirectory, preamble: ShellAgentEnvironment.exportCommand(shellExports)), scrollback: settings.scrollbackLines)
             try Task.checkCancellation()
             session.processID = pane.processID; session.terminalIdentity = pane.paneID; session.state = .activityUnknown
             try await persist(session)
@@ -840,10 +842,15 @@ public actor RuntimeCoordinator {
             var preset = session.launch.preset; preset.configurationDirectory = session.launch.configurationPath
             var environment = try LaunchPolicy.environment(base: baseEnvironment, preset: preset, projectID: session.projectID, sessionID: sessionID, token: token)
             environment["CHAUFFEUR_SOCKET"] = root.appendingPathComponent("runtime/runtime.sock").path
+            var shellExports: [String: String] = [:]
+            if preset.kind == .shell, let project = (await store.refresh()).projects.first(where: { $0.value.id == session.projectID })?.value {
+                shellExports = shellAgentExports(project: project, snapshot: await store.refresh())
+                environment.merge(shellExports) { _, export in export }
+            }
             let integration = root.appendingPathComponent("runtime/integration/\(session.id)")
             try FileManager.default.createDirectory(at: integration, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
             let arguments = try CLIAdapter.arguments(session: session, endpoint: endpoint ?? "", ctlPath: ctlPath, integrationDirectory: integration, coordination: session.launch.preset.integration != .unavailable, resume: true)
-            let pane = try await terminals.spawn(session: session, payload: ExecPayload(executable: session.launch.executablePath, arguments: arguments, environment: environment, directory: session.launch.workingDirectory), scrollback: settings.scrollbackLines)
+            let pane = try await terminals.spawn(session: session, payload: ExecPayload(executable: session.launch.executablePath, arguments: arguments, environment: environment, directory: session.launch.workingDirectory, preamble: ShellAgentEnvironment.exportCommand(shellExports)), scrollback: settings.scrollbackLines)
             try Task.checkCancellation()
             session.processID = pane.processID; session.terminalIdentity = pane.paneID; session.state = .activityUnknown
             try await persist(session)
@@ -886,6 +893,15 @@ public actor RuntimeCoordinator {
         }
         session.updatedAt = Date(); try await persist(session, notification: notification); return .object(["accepted": .bool(true)])
     }
+    /// Configuration directories of the project's agent presets, exported into shell sessions so
+    /// `claude` and `codex` typed by hand use the same setup. Missing directories are skipped so a
+    /// shell still opens.
+    private func shellAgentExports(project: Project, snapshot: StoreSnapshot) -> [String: String] {
+        guard let set = snapshot.presetSets.first(where: { $0.value.id == project.presetSetID })?.value else { return [:] }
+        let variables = ShellAgentEnvironment.variables(presets: snapshot.presets.map(\.value), set: set)
+        return variables.filter { (try? Paths.directory($0.value)) != nil }
+    }
+
     public func attach(sessionID: UUID, sink: any TerminalOutputSink, cols: Int, rows: Int, takeControl: Bool) async throws -> AttachmentGeneration {
         guard sessions[sessionID]?.state.isLive == true else { throw ChauffeurError("not_live", "Session is not live. Inspect its details or resume explicitly") }
         return try await terminals.attach(sessionID: sessionID, sink: sink, cols: cols, rows: rows, takeControl: takeControl)
