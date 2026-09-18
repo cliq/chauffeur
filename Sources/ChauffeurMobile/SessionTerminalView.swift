@@ -120,6 +120,14 @@ struct SessionTerminalView: View {
                 ) {
                     model.closeTab(sessionID)
                 }
+            case .idle:
+                StatusBanner(
+                    title: "Not attached",
+                    message: "This tab is not showing the live terminal yet.",
+                    actionTitle: "Attach"
+                ) {
+                    Task { await model.retryTerminal(sessionID) }
+                }
             case .attaching:
                 HStack(spacing: 8) {
                     ProgressView()
@@ -305,6 +313,7 @@ struct KeyAccessoryBar: View {
 
     let adapter: any TerminalEngineAdapter
     @State private var controlArmed = false
+    @State private var keyboardVisible = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -328,6 +337,7 @@ struct KeyAccessoryBar: View {
                 .scrollIndicators(.hidden)
                 Divider()
             }
+            HStack(spacing: 0) {
             ScrollView(.horizontal) {
                 HStack(spacing: 8) {
                     key("Esc") { adapter.sendKey(.escape) }
@@ -365,8 +375,29 @@ struct KeyAccessoryBar: View {
                 .padding(.vertical, 8)
             }
             .scrollIndicators(.hidden)
+            Divider().frame(height: 24)
+            // Pinned outside the scrolling row so it is always reachable. Hiding the keyboard gives the
+            // terminal the full screen; a tap on the terminal or this button brings it back.
+            Button {
+                if keyboardVisible {
+                    adapter.makeView().endEditing(true)
+                } else {
+                    adapter.focus()
+                }
+            } label: {
+                Image(systemName: keyboardVisible ? "keyboard.chevron.compact.down" : "keyboard")
+                    .font(.subheadline)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(keyboardVisible ? "Hide keyboard" : "Show keyboard")
+            .accessibilityIdentifier("key-keyboard")
+            }
         }
         .background(Color(uiColor: .secondarySystemBackground))
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in keyboardVisible = true }
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in keyboardVisible = false }
     }
 
     private func key(_ title: String, label: String? = nil, action: @escaping () -> Void) -> some View {
