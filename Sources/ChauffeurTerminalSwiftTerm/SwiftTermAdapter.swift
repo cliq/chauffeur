@@ -94,7 +94,11 @@ public final class SwiftTermAdapter: NSObject, TerminalEngineAdapter {
     /// keyboard so Unicode input works, and installs NO SwiftTerm accessory bar: the app supplies
     /// its own key bar through `sendKey(_:)`.
     public convenience init(appearance: TerminalAppearance = .default) {
+        #if canImport(UIKit)
+        let view = WheelScrollingTerminalView(frame: CGRect(x: 0, y: 0, width: 800, height: 600), font: nil)
+        #else
         let view = TerminalView(frame: CGRect(x: 0, y: 0, width: 800, height: 600))
+        #endif
         self.init(view: view, appearance: appearance)
     }
 
