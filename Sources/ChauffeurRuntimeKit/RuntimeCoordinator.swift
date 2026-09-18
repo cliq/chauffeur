@@ -76,6 +76,7 @@ public actor RuntimeCoordinator {
     public func start() async throws {
         logs?.append(RuntimeLogEntry(.runtimeStarting, runtimeID: id))
         let snapshot = await store.reload()
+        try await normalizeDefaultTeam()
         // The ledger preserves accepted membership and orphaned live sessions
         // even if a project directory was removed while the service was running.
         let recorded = try await ledger.allSessions()
@@ -386,11 +387,21 @@ public actor RuntimeCoordinator {
             throw ChauffeurError("snapshot_unavailable", "No saved terminal history is available for this session")
         case "deletePresetSet":
             try await store.deletePresetSet(params.uuid("setID"), expectedVersion: params.requiredString("version"))
+            try await normalizeDefaultTeam()
             return .object(["deleted": .bool(true)])
-        case "savePresetSet": return try .from(await store.save(params["record"].decode(PresetSet.self), expectedVersion: params["version"].string))
+        case "savePresetSet":
+            let set = try params["record"].decode(PresetSet.self)
+            let saved = try await store.save(set, expectedVersion: params["version"].string)
+            try await normalizeDefaultTeam(preferring: set.isDefault ? set.id : nil)
+            return try .from(await store.refresh().presetSets.first { $0.value.id == set.id } ?? saved)
         case "savePreset": return try .from(await store.save(params["record"].decode(AgentPreset.self), expectedVersion: params["version"].string))
         case "saveProject":
-            let project = try params["record"].decode(Project.self)
+            var project = try params["record"].decode(Project.self)
+            // A project created without naming a team gets the default team.
+            let known = await store.refresh()
+            if !known.presetSets.contains(where: { $0.value.id == project.presetSetID }), let fallback = known.defaultPresetSet {
+                project.presetSetID = fallback.id
+            }
             let saved = try await store.save(project, expectedVersion: params["version"].string)
             // A new folder shows as loading in the app until it is observed; do not make it wait for the periodic tick.
             if project.folders.contains(where: { $0.registered && repositoryInventories.observation(for: $0.canonicalPath) == nil }) { rescanWorktrees() }
@@ -893,6 +904,26 @@ public actor RuntimeCoordinator {
         }
         session.updatedAt = Date(); try await persist(session, notification: notification); return .object(["accepted": .bool(true)])
     }
+    /// Keeps exactly one non-archived team flagged as default while any exists. `preferring`
+    /// names the team the user just made default; otherwise an already flagged team keeps the role,
+    /// and a store with none flagged (older data, or the default was deleted or archived) promotes
+    /// the first team by name.
+    private func normalizeDefaultTeam(preferring: UUID? = nil) async throws {
+        let stored = await store.refresh().presetSets
+        let usable = stored.map(\.value).filter { !$0.archived }
+        let byName = usable.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+        let winner = preferring.flatMap { id in usable.first { $0.id == id }?.id }
+            ?? byName.first { $0.isDefault }?.id
+            ?? byName.first?.id
+        for record in stored {
+            var set = record.value
+            let shouldBeDefault = set.id == winner
+            guard set.isDefault != shouldBeDefault else { continue }
+            set.isDefault = shouldBeDefault
+            try await store.save(set, expectedVersion: record.version)
+        }
+    }
+
     /// Configuration directories of the project's agent presets, exported into shell sessions so
     /// `claude` and `codex` typed by hand use the same setup. Missing directories are skipped so a
     /// shell still opens.

@@ -21,15 +21,17 @@ struct SettingsView: View {
                     Text("Teams").font(.headline).padding(.horizontal, 12).padding(.vertical, 10)
                     List(selection: $selectedSet) {
                         ForEach(model.presetSets) { set in
-                            HStack { Text(set.name); if set.archived { Text("Archived").font(.caption).foregroundStyle(.secondary) } }.tag(set.id)
+                            HStack { Text(set.name); if set.isDefault { Text("Default").font(.caption).foregroundStyle(.secondary) }; if set.archived { Text("Archived").font(.caption).foregroundStyle(.secondary) } }.tag(set.id)
                                 .contextMenu {
                                     Button("Edit Team…") { editedSet = set }
+                                    Button("Make Default Team") { makeDefault(set) }.disabled(set.isDefault || set.archived || !model.online)
                                     Button("Delete Team…", role: .destructive) { confirmDelete(set) }.disabled(deleting || !model.online)
                                 }
                         }
                     }.listStyle(.sidebar).frame(maxHeight: .infinity)
                     Divider()
                     HStack { Button("Add Team…") { newSet = true }; if let selectedSet, let set = model.presetSets.first(where: { $0.id == selectedSet }) { Button("Edit…") { editedSet = set }.accessibilityIdentifier("preset-set.edit")
+                        if !set.isDefault, !set.archived { Button("Make Default") { makeDefault(set) }.disabled(!model.online).accessibilityIdentifier("preset-set.make-default") }
                         Button(role: .destructive) { confirmDelete(set) } label: { Image(systemName: "trash") }
                             .help("Delete Team…").accessibilityLabel("Delete Team…").accessibilityIdentifier("preset-set.delete").disabled(deleting || !model.online) } }.padding(12)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -101,6 +103,13 @@ struct SettingsView: View {
             .sheet(item: $editedPreset) { preset in PresetEditor(setID: preset.setID, preset: preset) { revealedPresetID = $0 } }
             .sheet(item: $skillPreset) { preset in CoordinationSkillView(preset: preset) }
     }
+    /// Flags the team as default; the runtime clears the flag on the previous default.
+    private func makeDefault(_ set: PresetSet) {
+        var value = set; value.isDefault = true
+        let version = model.snapshot.store.presetSets.first { $0.value.id == set.id }?.version
+        model.perform { try await model.save("savePresetSet", value, version: version) }
+    }
+
     private func confirmDelete(_ set: PresetSet) {
         let projects = model.projects.filter { $0.presetSetID == set.id }
         guard projects.isEmpty else {
@@ -211,6 +220,7 @@ struct PresetSetEditor: View {
     @State private var name = ""
     @State private var defaultID: UUID?
     @State private var archived = false
+    @State private var isDefault = false
     @State private var version: String?
     @State private var failure: String?
     @State private var saving = false
@@ -224,8 +234,10 @@ struct PresetSetEditor: View {
                         Text("None").tag(UUID?.none)
                         ForEach(model.presets.filter { $0.setID == presetSet.id && !$0.archived }) { preset in Text(preset.name).tag(Optional(preset.id)) }
                     }.accessibilityIdentifier("preset-set.default-preset")
-                    Toggle("Archived", isOn: $archived)
+                    Toggle("Archived", isOn: $archived).disabled(isDefault)
                 }
+                Toggle("Default team", isOn: $isDefault).disabled(presetSet?.isDefault == true).accessibilityIdentifier("preset-set.default-team")
+                if presetSet?.isDefault == true { Text("Make another team the default to change this.").font(.caption).foregroundStyle(.secondary) }
             }
             if let failure { Text(failure).foregroundStyle(.red) }
             HStack {
@@ -233,12 +245,12 @@ struct PresetSetEditor: View {
                 Button(saving ? "Saving…" : "Save") {
                     guard !saving else { return }
                     saving = true; failure = nil
-                    var value = presetSet ?? PresetSet(name: name); value.name = name; value.defaultPresetID = defaultID; value.archived = archived
+                    var value = presetSet ?? PresetSet(name: name); value.name = name; value.defaultPresetID = defaultID; value.archived = archived; value.isDefault = isDefault
                     Task { defer { saving = false }; do { try await model.save("savePresetSet", value, version: version); completion(value.id); dismiss() } catch { failure = error.localizedDescription } }
                 }.keyboardShortcut(.defaultAction).disabled(saving || name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty).accessibilityIdentifier("preset-set.save")
             }
         }.padding(24).frame(width: 470)
-            .onAppear { name = presetSet?.name ?? ""; defaultID = presetSet?.defaultPresetID; archived = presetSet?.archived ?? false; version = model.snapshot.store.presetSets.first { $0.value.id == presetSet?.id }?.version }
+            .onAppear { name = presetSet?.name ?? ""; defaultID = presetSet?.defaultPresetID; archived = presetSet?.archived ?? false; isDefault = presetSet?.isDefault ?? model.presetSets.allSatisfy(\.archived); version = model.snapshot.store.presetSets.first { $0.value.id == presetSet?.id }?.version }
     }
 }
 

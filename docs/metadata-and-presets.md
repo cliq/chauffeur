@@ -7,6 +7,15 @@ change when you rename a project or team. The background service writes
 files by atomic replacement and checks the version last read by an editor.
 If a file changed or disappeared, reopen the editor before saving again.
 
+## Default team
+
+Exactly one non-archived team is the default while any team exists. It is preselected when
+a project is created, and a project saved without an existing team is assigned to it. Mark
+a team as default from the Teams list (**Make Default Team**) or the team editor; the
+service clears the flag on the previous default, refuses to archive the default team, and
+promotes the first team by name when the default is deleted or when older data has no
+flag.
+
 ## Agent Preteam revisions and defaults
 
 Adding, changing, or archiving an agent preset advances its parent team's revision.

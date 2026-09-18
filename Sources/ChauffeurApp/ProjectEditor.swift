@@ -58,7 +58,7 @@ struct ProjectEditor: View {
             if let failure { Text(failure).foregroundStyle(.red).font(.callout) }
             HStack { Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction); Spacer(); Button(saving ? "Saving…" : "Save Project") { save() }.buttonStyle(.borderedProminent).keyboardShortcut(.defaultAction).disabled(saving || name.trimmingCharacters(in: .whitespaces).isEmpty || setID == nil || discovering) }
         }.padding(24).frame(width: 720)
-            .onAppear { name = project?.name ?? initialFolderPath.map { URL(fileURLWithPath: $0).lastPathComponent } ?? ""; setID = project?.presetSetID ?? model.presetSets.first(where: { !$0.archived })?.id; folders = project?.folders ?? initialFolderPath.map { [ProjectFolder(path: $0)] } ?? []; discoveryFolder = project?.discoveryFolder; version = model.snapshot.store.projects.first { $0.value.id == project?.id }?.version }
+            .onAppear { name = project?.name ?? initialFolderPath.map { URL(fileURLWithPath: $0).lastPathComponent } ?? ""; setID = project?.presetSetID ?? model.snapshot.store.defaultPresetSet?.id; folders = project?.folders ?? initialFolderPath.map { [ProjectFolder(path: $0)] } ?? []; discoveryFolder = project?.discoveryFolder; version = model.snapshot.store.projects.first { $0.value.id == project?.id }?.version }
             .onDisappear { discoveryTask?.cancel() }
     }
     private var registeredFolders: [ProjectFolder] { folders.filter(\.registered) }

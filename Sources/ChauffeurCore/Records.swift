@@ -25,8 +25,24 @@ public struct PresetSet: Record, Equatable {
     public var defaultPresetID: UUID?
     public var revision = 1
     public var archived = false
+    /// The default team: preselected for new projects and used when nothing names a team.
+    /// The runtime keeps exactly one non-archived team flagged whenever any exists.
+    public var isDefault = false
     public init(name: String) { self.name = name }
-    public func validate() throws { try Validation.name(name); try Validation.require(revision > 0, "Revision must be positive") }
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        name = try container.decode(String.self, forKey: .name)
+        defaultPresetID = try container.decodeIfPresent(UUID.self, forKey: .defaultPresetID)
+        revision = try container.decodeIfPresent(Int.self, forKey: .revision) ?? 1
+        archived = try container.decodeIfPresent(Bool.self, forKey: .archived) ?? false
+        isDefault = try container.decodeIfPresent(Bool.self, forKey: .isDefault) ?? false
+    }
+    public func validate() throws {
+        try Validation.name(name)
+        try Validation.require(revision > 0, "Revision must be positive")
+        try Validation.require(!(isDefault && archived), "The default team cannot be archived")
+    }
 }
 
 public struct AgentPreset: Record, Equatable {
