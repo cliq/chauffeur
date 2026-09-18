@@ -196,6 +196,10 @@ public final class SwiftTermAdapter: NSObject, TerminalEngineAdapter {
         view.keyboardAppearance = .default
         // The app draws its own key bar and routes it through `sendKey(_:)`.
         view.inputAccessoryView = nil
+        // tmux runs with mouse mode on, and SwiftTerm would forward a finger pan to it as a mouse
+        // drag instead of scrolling. Keep panning local: it scrolls the buffer, and inside a
+        // full-screen program it sends cursor keys.
+        view.allowMouseReporting = false
         #endif
     }
 
