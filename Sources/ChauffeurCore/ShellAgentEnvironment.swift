@@ -29,12 +29,11 @@ public enum ShellAgentEnvironment {
         return result
     }
 
-    /// A POSIX `export` line the user can read and re-run, variables sorted by name.
+    /// POSIX `export` lines the user can read and re-run, one variable per line, sorted by name.
     /// Returns nil when there is nothing to export.
     public static func exportCommand(_ variables: [String: String]) -> String? {
         guard !variables.isEmpty else { return nil }
-        let assignments = variables.keys.sorted().map { "\($0)=\(shellQuoted(variables[$0]!))" }
-        return "export " + assignments.joined(separator: " ")
+        return variables.keys.sorted().map { "export \($0)=\(shellQuoted(variables[$0]!))" }.joined(separator: "\n")
     }
 
     /// Single-quoted so every character is literal; embedded quotes become `'\''`.

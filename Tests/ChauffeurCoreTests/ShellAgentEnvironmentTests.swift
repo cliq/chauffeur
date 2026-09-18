@@ -34,7 +34,7 @@ struct ShellAgentEnvironmentTests {
 
     @Test func exportCommandIsSortedQuotedAndNilWhenEmpty() {
         let command = ShellAgentEnvironment.exportCommand(["CODEX_HOME": "/Users/me/My Codex", "CLAUDE_CONFIG_DIR": "/Users/me/it's"])
-        #expect(command == "export CLAUDE_CONFIG_DIR='/Users/me/it'\\''s' CODEX_HOME='/Users/me/My Codex'")
+        #expect(command == "export CLAUDE_CONFIG_DIR='/Users/me/it'\\''s'\nexport CODEX_HOME='/Users/me/My Codex'")
         #expect(ShellAgentEnvironment.exportCommand([:]) == nil)
     }
 
