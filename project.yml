@@ -74,6 +74,7 @@ targets:
           - "$(TARGET_BUILD_DIR)/$(CONTENTS_FOLDER_PATH)/MacOS/chauffeurctl"
           - "$(TARGET_BUILD_DIR)/$(CONTENTS_FOLDER_PATH)/MacOS/chauffeur-launcher"
           - "$(TARGET_BUILD_DIR)/$(CONTENTS_FOLDER_PATH)/Library/ChauffeurNotifications.app"
+          - "$(TARGET_BUILD_DIR)/$(CONTENTS_FOLDER_PATH)/Library/ChauffeurSessions.app"
           - "$(TARGET_BUILD_DIR)/$(CONTENTS_FOLDER_PATH)/Library/LaunchAgents/dev.chauffeur.runtime.plist"
           - "$(TARGET_BUILD_DIR)/Chauffeur.signing-identity"
   ChauffeurAppUITests:

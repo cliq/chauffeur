@@ -61,14 +61,14 @@ public actor RuntimeCoordinator {
     /// `worktreeRoot` is where new managed checkouts are created; `nil` keeps
     /// them under the data root, as fixtures and earlier releases do. When it
     /// is set, checkouts under the data root remain managed.
-    public init(root: URL, worktreeRoot: URL? = nil, ctlPath: String, environment: [String: String], logs: RuntimeLogStore? = nil, id: UUID = UUID(), identity: RuntimeIdentity? = nil) throws {
+    public init(root: URL, worktreeRoot: URL? = nil, ctlPath: String, environment: [String: String], logs: RuntimeLogStore? = nil, id: UUID = UUID(), identity: RuntimeIdentity? = nil, sessionsApp: URL? = nil) throws {
         self.id = id
         self.identity = identity
         self.logs = logs ?? (try? RuntimeLogStore(root: RuntimeLogStore.directory(for: root)))
         self.root = root; self.ctlPath = ctlPath; self.baseEnvironment = environment
         store = try FileStore(root: root)
         ledger = try Ledger(path: root.appendingPathComponent("runtime/ledger.sqlite").path)
-        terminals = try TmuxHost(runtimeDirectory: root.appendingPathComponent("runtime"), ctlPath: ctlPath, environment: environment)
+        terminals = try TmuxHost(runtimeDirectory: root.appendingPathComponent("runtime"), ctlPath: ctlPath, environment: environment, sessionsApp: sessionsApp)
         let legacyWorktreeRoot = root.appendingPathComponent("worktrees")
         worktrees = WorktreeManager(root: worktreeRoot ?? legacyWorktreeRoot, legacyRoots: worktreeRoot == nil ? [] : [legacyWorktreeRoot])
         snapshots = try SnapshotStore(root: root.appendingPathComponent("runtime/snapshots"))

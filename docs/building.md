@@ -149,7 +149,17 @@ Structured runtime logs rotate within a 2 MiB budget. See
 [diagnostics and redaction](diagnostics.md) for included fields, path privacy,
 storage locations, and limits.
 
-Chauffeur uses its own tmux socket. A runtime restart reconciles recorded
-pane/process identities; missing ownership becomes Interrupted. Metadata files
+Packaged builds launch the signed Chauffeur Sessions helper on demand. It owns
+new tmux servers independently of the UI and runtime; the runtime also discovers
+legacy servers. A runtime restart reconciles recorded pane/process identities;
+missing ownership becomes Interrupted. Bare `.build` runtimes retain the direct,
+single-server backend for development. See [privacy prompts](privacy-prompts.md)
+for helper lifetimes, versioned caches, and installed Release acceptance.
+
+Older manual prototypes that address `runtime/tmux.sock` directly assume the
+single-server backend. Before running those against a packaged app, adapt their
+routing and cleanup to `runtime/session-owners/*/manifest.json`; otherwise their
+cleanup can leave helper-owned fixture sessions behind. Use
+`Prototypes/session_owner_acceptance.py` for the packaged lifetime/privacy check. Metadata files
 are human-readable JSON. External changes reload independently of the UI, and
 stale saves report a conflict with the affected path.

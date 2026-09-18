@@ -14,6 +14,7 @@ let package = Package(
         .library(name: "ChauffeurTerminalSwiftTerm", targets: ["ChauffeurTerminalSwiftTerm"]),
         .library(name: "ChauffeurTerminalTesting", targets: ["ChauffeurTerminalTesting"]),
         .executable(name: "ChauffeurRuntime", targets: ["ChauffeurRuntime"]),
+        .executable(name: "ChauffeurSessions", targets: ["ChauffeurSessions"]),
         .executable(name: "ChauffeurNotifications", targets: ["ChauffeurNotifications"]),
         .executable(name: "chauffeurctl", targets: ["ChauffeurCtl"]),
         .executable(name: "chauffeur", targets: ["ChauffeurLauncher"])
@@ -34,6 +35,7 @@ let package = Package(
         .target(name: "ChauffeurTerminalSwiftTerm", dependencies: ["ChauffeurTerminalInterface", .product(name: "SwiftTerm", package: "SwiftTerm")]),
         .target(name: "ChauffeurRemoteClient", dependencies: ["ChauffeurRemoteProtocol", "ChauffeurTerminalInterface"]),
         .executableTarget(name: "ChauffeurRuntime", dependencies: ["ChauffeurRuntimeKit"]),
+        .executableTarget(name: "ChauffeurSessions", dependencies: ["ChauffeurCore"]),
         .executableTarget(name: "ChauffeurNotifications", dependencies: ["ChauffeurCore"]),
         .executableTarget(name: "ChauffeurCtl", dependencies: ["ChauffeurCore", "CChauffeur"]),
         .executableTarget(name: "ChauffeurLauncher", dependencies: ["ChauffeurCore"]),

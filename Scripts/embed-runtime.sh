@@ -5,16 +5,21 @@ if [[ "${CONFIGURATION:-Debug}" == Release ]]; then task_config=release; fi
 task_service_label=dev.chauffeur.debug.runtime
 task_notification_identifier=dev.chauffeur.debug.notifications
 task_notification_name="Chauffeur Debug Notifications"
+task_sessions_identifier=dev.cliq.chauffeur.debug.sessions
+task_sessions_name="Chauffeur Debug Sessions"
 if [[ "$task_config" == release ]]; then
   task_service_label=dev.chauffeur.runtime
   task_notification_identifier=dev.chauffeur.notifications
   task_notification_name="Chauffeur Notifications"
+  task_sessions_identifier=dev.cliq.chauffeur.sessions
+  task_sessions_name="Chauffeur Sessions"
 fi
 cd "$SRCROOT"
 /usr/bin/env swift build -c "$task_config" --product ChauffeurRuntime
 /usr/bin/env swift build -c "$task_config" --product chauffeurctl
 /usr/bin/env swift build -c "$task_config" --product chauffeur
 /usr/bin/env swift build -c "$task_config" --product ChauffeurNotifications
+/usr/bin/env swift build -c "$task_config" --product ChauffeurSessions
 task_binary_dir=$(/usr/bin/env swift build -c "$task_config" --show-bin-path)
 task_app_dir="$TARGET_BUILD_DIR/$CONTENTS_FOLDER_PATH"
 task_identity=${EXPANDED_CODE_SIGN_IDENTITY:--}
@@ -52,6 +57,19 @@ if [[ -d "$task_app_dir/Library/ChauffeurNotifications.app" ]]; then
   mv "$task_app_dir/Library/ChauffeurNotifications.app" "$task_stage/previous-notifications.app"
 fi
 mv "$task_notification_app" "$task_app_dir/Library/ChauffeurNotifications.app"
+task_sessions_app="$task_stage/ChauffeurSessions.app"
+mkdir -p "$task_sessions_app/Contents/MacOS"
+cp "$task_binary_dir/ChauffeurSessions" "$task_sessions_app/Contents/MacOS/"
+cp "$SRCROOT/Resources/sessions/Info.plist" "$task_sessions_app/Contents/Info.plist"
+/usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier $task_sessions_identifier" "$task_sessions_app/Contents/Info.plist"
+/usr/libexec/PlistBuddy -c "Set :CFBundleName $task_sessions_name" "$task_sessions_app/Contents/Info.plist"
+/usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName $task_sessions_name" "$task_sessions_app/Contents/Info.plist"
+/usr/bin/codesign --force "${task_signing_flags[@]}" --sign "$task_identity" "$task_sessions_app"
+# Running owners use immutable copies in Application Support, never this path.
+if [[ -d "$task_app_dir/Library/ChauffeurSessions.app" ]]; then
+  mv "$task_app_dir/Library/ChauffeurSessions.app" "$task_stage/previous-sessions.app"
+fi
+mv "$task_sessions_app" "$task_app_dir/Library/ChauffeurSessions.app"
 cp "$SRCROOT/Resources/launchd/dev.chauffeur.runtime.plist" "$task_stage/dev.chauffeur.runtime.plist"
 /usr/libexec/PlistBuddy -c "Set :Label $task_service_label" "$task_stage/dev.chauffeur.runtime.plist"
 # Bind the job to the helper's signing identity, or its exact code hash for an
