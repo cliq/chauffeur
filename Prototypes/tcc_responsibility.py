@@ -7,10 +7,12 @@ Never resets TCC or answers consent dialogs. Run access cases one at a time.
 """
 import argparse
 import ctypes
+from datetime import datetime
 import json
 import os
 from pathlib import Path
 import plistlib
+import re
 import shutil
 import signal
 import subprocess
@@ -19,6 +21,29 @@ import time
 import uuid
 
 REPO = Path(__file__).resolve().parents[1]
+
+
+def capture_tcc(since, root, output, pids=()):
+    """Retain only fixture-related messages and their matching request IDs."""
+    result = run("/usr/bin/log", "show", "--start", since, "--style", "ndjson",
+                 "--predicate", 'subsystem == "com.apple.TCC"')
+    rows = []
+    for line in result.stdout.splitlines():
+        try:
+            rows.append(json.loads(line))
+        except ValueError:
+            pass
+    ids = set()
+    pids = {str(pid) for pid in pids}
+    def matches(message):
+        return str(root) in message or bool(pids.intersection(re.findall(r"\bpid=(\d+)", message)))
+    for row in rows:
+        message = row.get("eventMessage", "")
+        if matches(message):
+            ids.update(re.findall(r"msgID=([\d.]+)", message))
+    filtered = [row for row in rows if matches(row.get("eventMessage", "")) or
+                ids.intersection(re.findall(r"msgID=([\d.]+)", row.get("eventMessage", "")))]
+    output.write_text(json.dumps(filtered, indent=2) + "\n")
 
 
 def run(*args, check=True):
@@ -47,7 +72,17 @@ def main():
     parser.add_argument("--access-after-exit-only", action="store_true",
                         help="Skip access while owner lives, to avoid warming access caches")
     parser.add_argument("--adhoc-tool", action="store_true", help="Model a Homebrew tool with ad-hoc signing")
+    parser.add_argument("--python-tool", type=Path, help="Exec this actual Python interpreter from each native leaf")
+    parser.add_argument("--capture-tcc", action="store_true", help="Save scoped TCC attribution and request logs")
+    parser.add_argument("--live-panes", action="store_true", help="Test new tools while the original owner is alive")
+    parser.add_argument("--missing-owner", action="store_true", help="Unlink the fixture owner after exit, then restore a copy")
+    parser.add_argument("--stop-launcher", action="store_true", help="Stop the agent that opened the GUI owner, preserving that owner")
     args = parser.parse_args()
+    if args.missing_owner and (not args.case or args.case.startswith("direct")):
+        parser.error("--missing-owner requires one fixture-owned agent or launchservices case")
+    if args.stop_launcher and args.case != "agent-open":
+        parser.error("--stop-launcher requires --case agent-open")
+    since = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     args.artifacts.mkdir(parents=True, exist_ok=True, mode=0o700)
     root = Path(tempfile.mkdtemp(prefix="chauffeur-tcc-", dir="/private/tmp"))
     app = root / "Responsibility Probe.app"
@@ -83,13 +118,18 @@ def main():
     responsibility.argtypes = [ctypes.c_int]
     responsibility.restype = ctypes.c_int
     report = {"os": run("sw_vers").stdout, "root": str(root),
-              "tool_identifier": tool_identifier, "adhoc_tool": args.adhoc_tool, "cases": {}}
+              "tool_identifier": tool_identifier, "adhoc_tool": args.adhoc_tool,
+              "python_tool": str(args.python_tool) if args.python_tool else None, "cases": {}}
+    all_pids = set()
     try:
         for case in cases:
             if args.case and case != args.case:
                 continue
             directory = root / case
             directory.mkdir()
+            if args.python_tool:
+                (directory / "python-tool.txt").write_text(str(args.python_tool.resolve()))
+                shutil.copy2(REPO / "Prototypes/tcc_python_leaf.py", directory / "python-leaf.py")
             if args.access_file:
                 (directory / "access-path.txt").write_text(str(args.access_file.resolve()))
             if args.access_after_exit_only:
@@ -99,6 +139,8 @@ def main():
             pids = set()
             process = None
             is_agent = case.startswith("agent")
+            retired = None
+            owner_path = bare if "bare" in case else app
             try:
                 owner_binary = bare if "bare" in case else embedded if "embedded" in case else binary
                 command = [str(owner_binary),
@@ -127,16 +169,49 @@ def main():
                     row["external_responsible"] = responsibility(row["pid"])
                 access_before = (wait_file(directory / "access-before.json", 120)
                                  if args.access_file and not args.access_after_exit_only else None)
+                launcher = None
+                if args.stop_launcher:
+                    launcher = wait_file(directory / "launcher.json")
+                    pids.add(launcher["pid"])
+                    os.kill(launcher["pid"], signal.SIGTERM)
+                    time.sleep(0.5)
+                live = {}
+                if args.live_panes:
+                    upgraded = root / "tool-v2"
+                    shutil.copy2(leaf, upgraded)
+                    run("codesign", "--force", "--identifier", tool_identifier + ".v2", "--sign", "-", upgraded)
+                    for label, program in [("alive-new", leaf), ("alive-upgrade", upgraded)]:
+                        run(tmux, "-S", directory / "tmux.sock", "new-session", "-d", "-s", label,
+                            program, "leaf", directory, tmux, label)
+                        live[label] = wait_file(directory / f"{label}.json")
+                        pids.add(live[label]["pid"])
+                        if args.access_file:
+                            live[label]["access"] = wait_file(directory / f"access-{label}.json", 120)
                 os.kill(rows["owner"]["pid"], signal.SIGTERM)
                 time.sleep(0.5)
+                if args.missing_owner:
+                    retired = root / ("retired-" + owner_path.name)
+                    # Rename alone preserves the vnode and TCC follows the new
+                    # path. Copy then unlink models `make install` replacement.
+                    if owner_path.is_dir():
+                        shutil.copytree(owner_path, retired)
+                        shutil.rmtree(owner_path)
+                    else:
+                        shutil.copy2(owner_path, retired)
+                        owner_path.unlink()
                 (directory / "sample-after-exit").touch()
                 after = {name: wait_file(directory / f"{name}-after.json")
                          for name in ["plain", "pgroup", "daemon", "foundation", "pane"]}
+                access_after = wait_file(directory / "access-after.json", 120) if args.access_file else None
                 run(tmux, "-S", directory / "tmux.sock", "new-session", "-d", "-s", "later",
                     leaf, "leaf", directory, tmux, "later")
                 after["later"] = wait_file(directory / "later.json")
                 pids.add(after["later"]["pid"])
+                access_later = wait_file(directory / "access-later.json", 120) if args.access_file else None
                 after["server"] = {"pid": server, "responsible": responsibility(server)}
+                if retired:
+                    retired.rename(owner_path)
+                    retired = None
                 # A new process with the same signed identity cannot be assumed
                 # to adopt a server created by its previous incarnation.
                 run("open", "-n", "-a", app, "--args", "hold", directory, tmux, "replacement")
@@ -147,14 +222,17 @@ def main():
                 adopted = wait_file(directory / "after-replacement.json")
                 pids.add(adopted["pid"])
                 report["cases"][case] = {"before": rows, "after_owner_exit": after,
+                                         "while_owner_alive": live, "missing_owner": args.missing_owner,
+                                         "stopped_launcher": launcher,
                                          "replacement_owner": replacement, "pane_after_replacement": adopted}
                 if args.access_file:
                     report["cases"][case]["access"] = {"before": access_before,
-                        "after": wait_file(directory / "access-after.json", 120),
-                        "new_pane": wait_file(directory / "access-later.json", 120),
+                        "after": access_after, "new_pane": access_later,
                         "new_pane_after_replacement": wait_file(directory / "access-after-replacement.json", 120)}
                 print(case, json.dumps(report["cases"][case]), flush=True)
             finally:
+                if retired:
+                    retired.rename(owner_path)
                 if is_agent:
                     run("launchctl", "bootout", target, check=False)
                 run(tmux, "-S", directory / "tmux.sock", "kill-server", check=False)
@@ -166,9 +244,15 @@ def main():
                         os.kill(pid, signal.SIGTERM)
                     except ProcessLookupError:
                         pass
+                all_pids.update(pids)
                 if process:
                     process.wait(timeout=5)
     finally:
+        if args.capture_tcc:
+            try:
+                capture_tcc(since, root, args.artifacts / "tcc-events.json", all_pids)
+            except Exception as error:
+                report["tcc_capture_error"] = str(error)
         (args.artifacts / "summary.json").write_text(json.dumps(report, indent=2) + "\n")
         shutil.copytree(root, args.artifacts / root.name, ignore=shutil.ignore_patterns("*.sock"))
         shutil.rmtree(root)
