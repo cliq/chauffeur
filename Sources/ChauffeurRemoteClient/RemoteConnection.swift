@@ -25,15 +25,79 @@ public actor RemoteConnection {
     private var decoder = RemoteFrameDecoder()
     private var readyContinuation: CheckedContinuation<Void, any Error>?
     private var transportIsReady = false
+    private var pendingPings: [Data: CheckedContinuation<Bool, Never>] = [:]
+    private var keepaliveTask: Task<Void, Never>?
+    private let keepaliveInterval: Duration?
+    private let keepaliveTimeout: Duration
 
     private struct PendingRequest {
         var continuation: CheckedContinuation<RemoteResponse, any Error>
         var timeout: Task<Void, Never>
     }
 
-    public init(transport: any RemoteTransport, requestTimeout: Duration = .seconds(15)) {
+    /// `keepaliveInterval` nil disables the periodic ping. A host that misses a pong within
+    /// `keepaliveTimeout` fails the connection with `.timeout`, which is how a socket killed while
+    /// the app was suspended gets noticed instead of every later request timing out.
+    public init(transport: any RemoteTransport, requestTimeout: Duration = .seconds(15),
+                keepaliveInterval: Duration? = .seconds(10), keepaliveTimeout: Duration = .seconds(8)) {
         self.transport = transport
         self.requestTimeout = requestTimeout
+        self.keepaliveInterval = keepaliveInterval
+        self.keepaliveTimeout = keepaliveTimeout
+    }
+
+    // MARK: Liveness
+
+    /// Sends a ping and waits for its pong. False when the connection is not ready, the send
+    /// fails, or the host stays silent past `timeout`.
+    public func probe(timeout: Duration = .seconds(3)) async -> Bool {
+        guard case .ready = state else { return false }
+        var payload = Data(count: 16)
+        payload.withUnsafeMutableBytes { buffer in
+            for index in buffer.indices { buffer[index] = UInt8.random(in: .min ... .max) }
+        }
+        let answered = await withCheckedContinuation { (continuation: CheckedContinuation<Bool, Never>) in
+            pendingPings[payload] = continuation
+            Task {
+                do {
+                    try await self.send(RemoteFrame(type: .ping, payload: payload))
+                } catch {
+                    self.resolvePing(payload, answered: false)
+                }
+            }
+            Task {
+                try? await Task.sleep(for: timeout)
+                self.resolvePing(payload, answered: false)
+            }
+        }
+        return answered
+    }
+
+    private func resolvePing(_ payload: Data, answered: Bool) {
+        guard let continuation = pendingPings.removeValue(forKey: payload) else { return }
+        continuation.resume(returning: answered)
+    }
+
+    private func startKeepalive() {
+        guard let interval = keepaliveInterval else { return }
+        keepaliveTask?.cancel()
+        keepaliveTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: interval)
+                guard let self, !Task.isCancelled else { return }
+                guard case .ready = await self.state else { return }
+                if await !self.probe(timeout: self.keepaliveTimeout) {
+                    await self.keepaliveMissed()
+                    return
+                }
+            }
+        }
+    }
+
+    private func keepaliveMissed() {
+        guard case .ready = state else { return }
+        fail(with: .timeout)
+        transport.cancel()
     }
 
     // MARK: Observation
@@ -113,6 +177,7 @@ public actor RemoteConnection {
             throw error
         }
         setState(.ready(info))
+        startKeepalive()
         return info
     }
 
@@ -268,7 +333,9 @@ public actor RemoteConnection {
             Task {
                 try? await self.send(RemoteFrame(type: .pong, payload: frame.payload))
             }
-        case .pong, .input, .request:
+        case .pong:
+            resolvePing(frame.payload, answered: true)
+        case .input, .request:
             break
         }
     }
@@ -297,6 +364,9 @@ public actor RemoteConnection {
     private func finish(with terminalState: State) {
         guard !isTerminal(state) else { return }
         setState(terminalState)
+        keepaliveTask?.cancel()
+        keepaliveTask = nil
+        for payload in Array(pendingPings.keys) { resolvePing(payload, answered: false) }
 
         let failure: RemoteClientError
         if case .failed(let error) = terminalState {

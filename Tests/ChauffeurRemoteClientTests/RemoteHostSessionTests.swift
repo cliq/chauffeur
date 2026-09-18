@@ -215,3 +215,49 @@ struct RemoteHostSessionTests {
         #expect(UserDefaultsOperationJournal(defaults: defaults, key: "pending").pendingKeys() == [second])
     }
 }
+
+@MainActor
+struct RemoteHostSessionLivenessTests {
+    private final class SilentHostFactory {
+        private(set) var hosts: [FakeHost] = []
+        var answersPings = true
+
+        func makeConnection(_ savedHost: SavedHost) -> RemoteConnection {
+            let pair = InMemoryTransportPair()
+            let host = FakeHost(transport: pair.server)
+            host.answersPings = answersPings
+            host.start()
+            hosts.append(host)
+            return RemoteConnection(transport: pair.client, requestTimeout: .seconds(2), keepaliveInterval: nil)
+        }
+    }
+
+    @Test func verifyConnectionKeepsAResponsiveHost() async throws {
+        let factory = SilentHostFactory()
+        let session = RemoteHostSession(host: Fixtures.savedHost(), journal: InMemoryOperationJournal(), makeConnection: { factory.makeConnection($0) })
+        await session.connect()
+
+        #expect(await session.verifyConnection(timeout: .seconds(1)))
+        #expect(session.connectionState == .connected(FakeHost.hostInfo()))
+    }
+
+    @Test func verifyConnectionDropsASilentHostSoTheAppReconnects() async throws {
+        let factory = SilentHostFactory()
+        let session = RemoteHostSession(host: Fixtures.savedHost(), journal: InMemoryOperationJournal(), makeConnection: { factory.makeConnection($0) })
+        await session.connect()
+        factory.answersPings = false
+        factory.hosts[0].answersPings = false
+
+        #expect(await !session.verifyConnection(timeout: .milliseconds(200)))
+        guard case .unavailable = session.connectionState else {
+            Issue.record("expected unavailable, got \(session.connectionState)")
+            return
+        }
+        #expect(session.inventoryIsStale)
+
+        factory.answersPings = true
+        await session.connect()
+        #expect(session.connectionState == .connected(FakeHost.hostInfo()))
+        #expect(factory.hosts.count == 2)
+    }
+}

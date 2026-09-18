@@ -230,7 +230,11 @@ final class MobileAppModel {
             await connect()
             return
         case .connected:
-            break
+            // The socket may have died while the app was suspended without any close event.
+            if let session, await !session.verifyConnection() {
+                await connect()
+                return
+            }
         }
         guard let id = selectedTab, let controller = terminals[id] else { return }
         await controller.handleForeground()
@@ -342,6 +346,8 @@ final class MobileAppModel {
     /// "Reconnect" on the terminal banner: restores the connection first when it dropped.
     func retryTerminal(_ sessionID: UUID) async {
         if !isConnected {
+            await connect()
+        } else if let session, await !session.verifyConnection() {
             await connect()
         }
         guard isConnected, let controller = terminal(for: sessionID) else { return }

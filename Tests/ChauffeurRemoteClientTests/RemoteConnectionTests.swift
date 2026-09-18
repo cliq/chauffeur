@@ -215,3 +215,46 @@ struct RemoteConnectionTests {
         #expect(frames[1].bytes.count == 10)
     }
 }
+
+struct RemoteConnectionLivenessTests {
+    @Test func probeSucceedsWhenTheHostAnswersPings() async throws {
+        let pair = InMemoryTransportPair()
+        let host = FakeHost(transport: pair.server)
+        host.start()
+        let connection = RemoteConnection(transport: pair.client, requestTimeout: .seconds(2), keepaliveInterval: nil)
+        _ = try await connection.connect(hello: Fixtures.hello())
+
+        #expect(await connection.probe(timeout: .seconds(1)))
+        #expect(await connection.state != .closed)
+    }
+
+    @Test func probeFailsWhenTheHostIsSilent() async throws {
+        let pair = InMemoryTransportPair()
+        let host = FakeHost(transport: pair.server)
+        host.answersPings = false
+        host.start()
+        let connection = RemoteConnection(transport: pair.client, requestTimeout: .seconds(2), keepaliveInterval: nil)
+        _ = try await connection.connect(hello: Fixtures.hello())
+
+        #expect(await !connection.probe(timeout: .milliseconds(200)))
+    }
+
+    @Test func keepaliveFailsTheConnectionWhenPongsStop() async throws {
+        let pair = InMemoryTransportPair()
+        let host = FakeHost(transport: pair.server)
+        host.answersPings = false
+        host.start()
+        let connection = RemoteConnection(
+            transport: pair.client, requestTimeout: .seconds(2),
+            keepaliveInterval: .milliseconds(100), keepaliveTimeout: .milliseconds(200)
+        )
+        _ = try await connection.connect(hello: Fixtures.hello())
+
+        var failed = false
+        for _ in 0..<40 {
+            if case .failed(.timeout) = await connection.state { failed = true; break }
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        #expect(failed)
+    }
+}

@@ -16,6 +16,7 @@ final class FakeHost: @unchecked Sendable {
     private var _requests: [RemoteRequest] = []
     private var _inputFrames: [TerminalFramePayload] = []
     private var _pongs: [Data] = []
+    private var _answersPings = true
     private var _sendByteByByte = false
     private var _responder: @Sendable (RemoteRequest) -> RemoteResponse? = FakeHost.defaultResponse(for:)
     private var task: Task<Void, Never>?
@@ -27,6 +28,11 @@ final class FakeHost: @unchecked Sendable {
     var requests: [RemoteRequest] { lock.withLock { _requests } }
     var inputFrames: [TerminalFramePayload] { lock.withLock { _inputFrames } }
     var pongs: [Data] { lock.withLock { _pongs } }
+    /// Whether the fake answers client pings; false simulates a host that died silently.
+    var answersPings: Bool {
+        get { lock.withLock { _answersPings } }
+        set { lock.withLock { _answersPings = newValue } }
+    }
 
     func requests(ofKind kind: String) -> [RemoteRequest] {
         requests.filter { $0.operation.kind == kind }
@@ -115,7 +121,11 @@ final class FakeHost: @unchecked Sendable {
             }
         case .pong:
             lock.withLock { _pongs.append(frame.payload) }
-        case .ping, .response, .event, .output:
+        case .ping:
+            if lock.withLock({ _answersPings }) {
+                await send(.pong, payload: frame.payload)
+            }
+        case .response, .event, .output:
             break
         }
     }

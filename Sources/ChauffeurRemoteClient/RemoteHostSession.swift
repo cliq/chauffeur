@@ -172,6 +172,17 @@ public final class RemoteHostSession {
         }
     }
 
+    /// Confirms the Mac still answers on the current connection. A suspended iPhone can lose its
+    /// socket without any close event, so a silent host is treated as disconnected and the caller
+    /// reconnects instead of letting every later request time out.
+    public func verifyConnection(timeout: Duration = .seconds(3)) async -> Bool {
+        guard case .connected = connectionState, let connection else { return false }
+        if await connection.probe(timeout: timeout) { return true }
+        disconnect()
+        connectionState = .unavailable(message: "The Mac stopped answering. Reconnect to continue.")
+        return false
+    }
+
     public func disconnect() {
         eventsTask?.cancel()
         connectionStateTask?.cancel()
