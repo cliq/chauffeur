@@ -245,10 +245,26 @@ final class MobileAppModel {
         if !openTabs.contains(id) {
             openTabs.append(id)
         }
+        // A keyboard left up by the launch form would otherwise cover the terminal: SwiftUI only
+        // re-measures for a keyboard that appears while the terminal is on screen.
+        Self.dismissKeyboard()
         if path.last != .terminal {
             path = [.sessions, .terminal]
         }
         selectTab(id)
+        // Retry once the navigation transition has settled so the terminal view is in a window and
+        // can take focus; a no-op when the first attempt already attached.
+        Task {
+            try? await Task.sleep(for: .milliseconds(400))
+            await attachSelectedTerminalIfNeeded()
+        }
+    }
+
+    static func dismissKeyboard() {
+        for scene in UIApplication.shared.connectedScenes {
+            guard let windowScene = scene as? UIWindowScene else { continue }
+            for window in windowScene.windows { window.endEditing(true) }
+        }
     }
 
     /// Switching detaches the previous tab and attaches the new one; processes keep running.
@@ -318,7 +334,9 @@ final class MobileAppModel {
         if case .idle = controller.state {
             await controller.attach(takeControl: false)
         }
-        adapter(for: id).focus()
+        if case .attached = controller.state, selectedTab == id {
+            adapter(for: id).focus()
+        }
     }
 
     /// "Reconnect" on the terminal banner: restores the connection first when it dropped.

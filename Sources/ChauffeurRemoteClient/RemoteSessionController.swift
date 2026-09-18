@@ -140,6 +140,11 @@ public final class RemoteSessionController: TerminalEngineAdapterDelegate {
         } catch let error as RemoteClientError {
             heldWhileAttaching.removeAll()
             state = .disconnected(message: error.userMessage)
+        } catch is CancellationError {
+            // The caller went away (for example a SwiftUI task cancelled mid-transition); nothing
+            // was attached, so stay idle and let the next appearance attach again.
+            heldWhileAttaching.removeAll()
+            state = .idle
         } catch {
             heldWhileAttaching.removeAll()
             state = .disconnected(message: String(describing: error))
