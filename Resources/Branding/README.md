@@ -4,6 +4,13 @@
 The macOS PNG renditions (16–1024 pixels) are in
 `Sources/ChauffeurApp/Assets.xcassets/AppIcon.appiconset`.
 
+`AppIcon-iOS.svg` is the full-bleed variant for the iPhone app: iOS masks and
+rounds the corners itself, so it drops the macOS tile inset and edge highlight
+while keeping the same cap geometry and copper gradient. Its 1024 pixel
+rendition is in `Sources/ChauffeurMobile/Assets.xcassets/AppIcon.appiconset`.
+Render it with Quick Look (`qlmanage -t -s 1024 -o <dir> AppIcon-iOS.svg`);
+ImageMagick's built-in SVG renderer does not handle the gradients.
+
 The welcome screen uses the same cap geometry as a tintable vector in
 `Sources/ChauffeurApp/Assets.xcassets/ChauffeurHat.imageset/ChauffeurHat.svg`.
 Its view box trims the app-icon padding so SwiftUI can size the visible cap.
