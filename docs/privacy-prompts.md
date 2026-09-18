@@ -1,24 +1,40 @@
 # macOS privacy prompts
 
-Chauffeur sessions run under a signed background runtime and survive quitting
-the desktop app. macOS can attribute a session tool's file access to the runtime
-and its app even after the original runtime process exits. A diagnostic reporting
-that a tool is its own "responsible PID" does not by itself mean that macOS will
-request permission for that tool.
+New sessions started by the installed app use **Chauffeur Sessions**, a signed
+background app that owns their terminal server. It stays alive when you quit
+Chauffeur, restart the background service, or stop and restart that service.
+macOS can therefore ask for access on behalf of Chauffeur Sessions instead of
+separately for Python, rg and other tools.
 
-The 2026-09-18 [privacy spike](decisions/V7-session-privacy-attribution.md)
-confirmed app-level Documents consent for an isolated signed app, including
-ad-hoc tools and access first attempted after the app exited. The AppData
-follow-up found that one consent covers new tools only while their original
-responsible owner remains alive. When it exits, surviving processes and new
-panes can prompt again. Removing its signed app bundle can also make macOS name
-the tool instead. Relaunching the app does not restore the old consent lifetime.
+Documents consent is normally persistent. Other apps' data (AppData) has a
+shorter lifetime: one consent covers new tools and sessions while their original
+Sessions owner remains alive. It is **not** a permanent grant across all
+protected services. Reboot, logout, a helper crash, or explicitly quitting the
+helper ends that lifetime. An updated helper can start a new consent lifetime;
+updating a tool inside an existing session does not itself replace the owner.
+Desktop, Downloads and an actual Homebrew upgrade remain untested.
 
-The installed app already had Full Disk Access, so its successful reads are not
-proof of ordinary consent behavior. The isolated fixtures have no such grant.
-An independent session owner passed the fixture test across its launching
-agent's exit; no production Sessions helper has been added. Desktop and Downloads
-remain untested.
+Existing sessions are preserved, including sessions started before this change.
+They keep their previous attribution. Start a new session to use the new owner.
+If a Sessions helper crashes, its terminals survive and remain accessible, but
+those old terminals may prompt repeatedly for AppData again. New sessions use
+a fresh owner. Restarting a helper cannot adopt an old process tree.
+
+Chauffeur keeps signed helper copies under
+`~/Library/Application Support/Chauffeur/session-apps/` so replacing the installed
+app does not remove a live owner's executable. Do not delete these copies while
+sessions are running. Old helpers exit after their sessions drain when a newer
+helper has taken over new launches. The current helper stays alive while idle.
+Cached copies are retained; automatic disk cleanup is not implemented yet.
+
+See the [measurements](decisions/V7-session-privacy-attribution.md) and
+[implementation decision](decisions/V8-independent-session-owner.md). A tool
+reporting itself as its responsible PID does not alone identify TCC's consent
+subject. The main Chauffeur app already had Full Disk Access during the spike;
+that successful access was not proof of ordinary folder consent. The installed
+Sessions helper was then tested separately against synthetic protected AppData:
+TCC named `dev.cliq.chauffeur.sessions`, with one prompt shared across new Python
+sessions and runtime restarts, and a new prompt for the updated helper owner.
 
 ## Investigating repeated prompts
 
@@ -42,7 +58,7 @@ avoids those folder-specific protections, but not other apps' protected data.
 If appropriate for the task, the user can grant an affected tool Full Disk Access
 in System Settings. That is broad access, and a path/ad-hoc tool identity can
 change on a Homebrew update; it is a workaround rather than Chauffeur's desired
-consent model. The helper/runtime architecture is still under evaluation.
+consent model. For new sessions, the relevant app permission is Chauffeur Sessions.
 
 ## Reproducing the spike
 
@@ -124,3 +140,22 @@ Cleanup leaves OS-managed empty container metadata and any consent records in
 place. The [decision record](decisions/V7-session-privacy-attribution.md#orca-and-mori-source-comparison)
 also compares Orca's deliberate per-tool attribution and Mori's normal tmux
 launch path. Neither was copied into Chauffeur.
+
+## Installed helper acceptance
+
+After `make install` and restarting the installed runtime, run:
+
+```sh
+python3 Prototypes/session_owner_acceptance.py \
+  --identity 'Developer ID Application: Your Name (TEAMID)'
+```
+
+This uses the installed Release runtime with a unique temporary LaunchAgent,
+data root and servers. It checks shell/Python responsibility, runtime restart
+and stop/relaunch, signed helper updates, preserved bundle copies, retirement
+and owner-crash recovery. Add `--quit-ui` to exercise the normal desktop Quit
+choice that keeps terminals running (requires Accessibility for System Events).
+Add `--access-file '/synthetic/sentinel/path'` to check one-byte protected access;
+macOS may present dialogs, which the harness leaves for the user. Responsibility
+checks alone do not prove shared consent. Results go to
+`.local/sessions-acceptance/results.json`; no real app's private data is read.

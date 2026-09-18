@@ -42,22 +42,26 @@ app, reuse of the runtime on an unchanged relaunch, distinct build metadata, and
 rejection of a Release runtime by the Debug app. It uses a unique service label
 and empty temporary stores. Evidence is under `.local/service-installation-artifacts/`.
 
-The runtime has its own tmux socket. Restarting it reconciles surviving session
+The runtime reconciles its legacy tmux socket and the sockets owned by
+Chauffeur Sessions helpers. Restarting it reconciles surviving session
 processes; it does not replay tasks. Missing terminal ownership is recorded as
 **Interrupted**. Reattach a live session, or use **Resume Conversation** for an
 ended session with a recorded native conversation ID. See
 [terminal history](terminal-history.md) for retained output and its limits.
 
-Privacy attribution is separate from process survival. After a runtime exits,
-tools can report their own responsible PIDs while TCC still retains the original
-runtime's executable path. Restarting the runtime is not evidence that privacy
-attribution has been repaired or lost. See [privacy prompts](privacy-prompts.md)
-for the measured behavior and how to investigate repeated per-tool consent.
-AppData consent has a shorter lifetime than Documents consent: the isolated
-probe showed renewed prompts after the original responsible process exited,
-even with its signed bundle still present. Removing that bundle can additionally
-make macOS select a tool identity. Preserving sessions does not preserve every
-privacy grant, and sessions must not be killed automatically to repair one.
+New packaged-runtime sessions use an independent signed **Chauffeur Sessions**
+owner. It stays alive through UI quit and runtime restart/stop, preserving the
+original AppData consent lifetime. Updating Chauffeur keeps old owners and their
+signed cached apps available until their sessions drain. An owner crash leaves
+its terminals alive; the next new session gets a fresh owner/server. Existing
+pre-helper sessions keep their old attribution and are not migrated or killed.
+See [privacy prompts](privacy-prompts.md) for consent limits and recovery.
+
+Owner manifests live in `runtime/session-owners/`, and immutable signed helper
+copies in `session-apps/`, under the data root. Do not remove these while sessions
+are alive. A missing or invalid packaged helper prevents new launches, with an
+error asking for reinstallation; it does not fall back to starting a server from
+the runtime. Reinstalling the app preserves the separate cache and live owners.
 
 `Prototypes/real_repository_access.py` verifies this with the signed Release
 runtime and real Codex 0.154.0 (integration enabled) / Claude Code 2.1.273

@@ -52,7 +52,12 @@ import ChauffeurRuntimeKit
             environment["PATH"] = searchPaths.joined(separator: ":")
             // A custom data directory (fixtures, probes) keeps its checkouts inside it.
             let worktreeRoot = Paths.canonical(root.path) == Paths.canonical(Paths.applicationSupport.path) ? Paths.worktreeRoot : nil
-            let runtime = try RuntimeCoordinator(root: root, worktreeRoot: worktreeRoot, ctlPath: ctl, environment: environment, logs: logs, id: runtimeID, identity: identity)
+            // Packaged runtimes require the signed owner; bare swift builds retain
+            // the direct backend for development and isolated tests.
+            let contents = executable.deletingLastPathComponent().deletingLastPathComponent()
+            let sessionsApp: URL? = contents.lastPathComponent == "Contents"
+                ? contents.appendingPathComponent("Library/ChauffeurSessions.app") : nil
+            let runtime = try RuntimeCoordinator(root: root, worktreeRoot: worktreeRoot, ctlPath: ctl, environment: environment, logs: logs, id: runtimeID, identity: identity, sessionsApp: sessionsApp)
             if !loginEnvironmentLoaded { await runtime.record(ChauffeurError("login_environment_unavailable", "Could not load the login-shell environment. Using inherited environment and standard executable search paths; select full CLI paths if needed")) }
             let server = try IPCServer(root: root, runtime: runtime)
             try await runtime.start()

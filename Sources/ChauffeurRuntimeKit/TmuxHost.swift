@@ -16,6 +16,8 @@ public actor TmuxHost {
     public let socketPath: String
     private let runtimeDirectory: URL
     private let ctlPath: String
+    private let sessionOwner: SessionOwnerHost?
+    private var sessionSockets: [UUID: String] = [:]
     private struct Attachment {
         let generation: AttachmentGeneration
         let pty: PTYAttachment
@@ -29,21 +31,50 @@ public actor TmuxHost {
     private var spawning = Set<UUID>()
     /// Servers started by an older runtime keep `set-clipboard external`, which drops applications'
     /// OSC 52 writes; apply the current setting live once per host instead of restarting tmux.
-    private var clipboardForwardingEnsured = false
+    private var clipboardForwardingEnsured = Set<String>()
     private let environment: [String: String]
-    public init(runtimeDirectory: URL, ctlPath: String, environment: [String: String]) throws {
+    public init(runtimeDirectory: URL, ctlPath: String, environment: [String: String], sessionsApp: URL? = nil) throws {
         self.runtimeDirectory = runtimeDirectory; self.ctlPath = ctlPath
         self.executable = try Paths.executable("tmux", environment: environment)
         self.socketPath = runtimeDirectory.appendingPathComponent("tmux.sock").path
         self.environment = environment.filter { ["HOME", "USER", "LOGNAME", "PATH", "LANG", "LC_ALL", "TMPDIR"].contains($0.key) }
+        if let sessionsApp { sessionOwner = SessionOwnerHost(runtimeDirectory: runtimeDirectory, embeddedApp: sessionsApp, executable: self.executable, environment: self.environment) }
+        else { sessionOwner = nil }
     }
-    private func command(_ arguments: [String]) async throws -> CommandResult {
-        try await ProcessRunner.run(executable, ["-S", socketPath, "-f", "/dev/null"] + arguments, environment: environment)
+    private func command(_ arguments: [String], socket: String) async throws -> CommandResult {
+        try await ProcessRunner.run(executable, ["-N", "-S", socket, "-f", "/dev/null"] + arguments, environment: environment)
+    }
+    private func findSocket(for sessionID: UUID) async throws -> String? {
+        if let socket = sessionSockets[sessionID] { return socket }
+        _ = try await inventory()
+        return sessionSockets[sessionID]
+    }
+    private func socket(for sessionID: UUID) async throws -> String {
+        guard let socket = try await findSocket(for: sessionID) else { throw ChauffeurError("terminal_missing", "Session is no longer live") }
+        return socket
     }
     public func inventory() async throws -> [PaneIdentity] {
+        let sockets = [socketPath] + (try SessionOwnerHost.manifests(in: runtimeDirectory)).map { $0.1.socketPath }
+        var panes: [PaneIdentity] = []
+        var routes: [UUID: String] = [:]
+        for socket in sockets {
+            for pane in try await inventory(socket: socket) {
+                if let id = UUID(uuidString: pane.sessionName) {
+                    guard routes[id] == nil else { throw ChauffeurError("terminal_inventory", "Session exists on multiple terminal servers") }
+                    routes[id] = socket
+                }
+                panes.append(pane)
+            }
+        }
+        // Do not lose a concurrent spawn's route while inventory is suspended.
+        for (id, socket) in sessionSockets where spawning.contains(id) { routes[id] = socket }
+        sessionSockets = routes
+        return panes
+    }
+    private func inventory(socket: String) async throws -> [PaneIdentity] {
         // tmux replaces control characters such as tabs under the C locale.
         // All these generated identity/status fields have a printable delimiter.
-        let result = try await command(["list-panes", "-a", "-F", "#{session_name}|#{pane_id}|#{pane_pid}|#{pane_dead}|#{pane_dead_status}"])
+        let result = try await command(["list-panes", "-a", "-F", "#{session_name}|#{pane_id}|#{pane_pid}|#{pane_dead}|#{pane_dead_status}"], socket: socket)
         if result.status != 0 {
             if result.error.contains("no server running") || result.error.contains("no sessions") || result.error.contains("no current target") || result.error.contains("No such file") || result.error.contains("Connection refused") { return [] }
             throw ChauffeurError("terminal_inventory", "Cannot inspect terminal service")
@@ -62,10 +93,12 @@ public actor TmuxHost {
         defer { spawning.remove(session.id) }
         let name = session.id.uuidString
         guard !(try await inventory()).contains(where: { $0.sessionName == name }) else { throw ChauffeurError("already_running", "Session already has a terminal. Reattach instead") }
+        let socketPath = try await sessionOwner?.socket() ?? self.socketPath
+        sessionSockets[session.id] = socketPath
         let config = runtimeDirectory.appendingPathComponent("tmux.conf")
         // A separate socket/config keeps user tmux sessions and key bindings out
         // of Chauffeur. Direct argv launch never evaluates the task in a shell.
-        try Data("set -g status off\nset -g prefix None\nset -g prefix2 None\nset -g mouse on\nset -g set-clipboard on\nset -g history-limit \(scrollback)\nset -g remain-on-exit on\nset -g exit-empty off\nset -g update-environment ''\nset -g default-terminal tmux-256color\n".utf8).write(to: config, options: .atomic)
+        try SessionOwnerManifest.configuration(scrollback: scrollback).write(to: config, options: .atomic)
         let payloadPath = runtimeDirectory.appendingPathComponent("launch-\(session.id).json")
         guard FileManager.default.createFile(atPath: payloadPath.path, contents: try JSONCoding.encode(payload), attributes: [.posixPermissions: 0o600]) else { throw ChauffeurError("launch_file", "Cannot create private launch handoff") }
         defer { try? FileManager.default.removeItem(at: payloadPath) }
@@ -76,7 +109,8 @@ public actor TmuxHost {
             // Do not cancel the tmux client halfway through submitting creation:
             // the server could still have its command queued. Await its reply,
             // then honour cancellation and remove the terminal before returning.
-            let creation = Task { try await ProcessRunner.run(executable, ["-S", socketPath, "-f", config.path, "start-server", ";", "set-option", "-g", "history-limit", String(scrollback), ";", "new-session", "-d", "-s", name, "-x", "100", "-y", "30", "-c", payload.directory, ctlPath, "internal-exec", payloadPath.path], environment: environment) }
+            let serverFlags = sessionOwner == nil ? [] : ["-N"]
+            let creation = Task { try await ProcessRunner.run(executable, serverFlags + ["-S", socketPath, "-f", config.path, "start-server", ";", "set-option", "-g", "history-limit", String(scrollback), ";", "new-session", "-d", "-s", name, "-x", "100", "-y", "30", "-c", payload.directory, ctlPath, "internal-exec", payloadPath.path], environment: environment) }
             let result = try await creation.value
             try Task.checkCancellation()
             guard result.status == 0 else { throw ChauffeurError("terminal_launch", "tmux could not start the session", path: payload.directory) }
@@ -102,7 +136,8 @@ public actor TmuxHost {
     /// a stale client's concurrent input cannot slip in between the revocation
     /// and the hand-over.
     public func attach(sessionID: UUID, sink: any TerminalOutputSink, cols: Int, rows: Int, takeControl: Bool) async throws -> AttachmentGeneration {
-        await ensureClipboardForwarding()
+        let socketPath = try await socket(for: sessionID)
+        await ensureClipboardForwarding(socket: socketPath)
         let generation = nextGeneration; nextGeneration += 1
         if let previous = attachments[sessionID] {
             guard takeControl else { throw ChauffeurError("terminal_busy", "This terminal is controlled by another client. Take control to use it here") }
@@ -143,11 +178,11 @@ public actor TmuxHost {
     }
     /// The generation currently controlling a session's terminal, if any.
     public func currentGeneration(sessionID: UUID) -> AttachmentGeneration? { attachments[sessionID]?.generation }
-    private func ensureClipboardForwarding() async {
-        guard !clipboardForwardingEnsured else { return }
+    private func ensureClipboardForwarding(socket: String) async {
+        guard !clipboardForwardingEnsured.contains(socket) else { return }
         do {
-            _ = try await ProcessRunner.run(executable, ["-S", socketPath, "set-option", "-g", "set-clipboard", "on"], environment: environment, timeout: 3)
-            clipboardForwardingEnsured = true
+            let result = try await ProcessRunner.run(executable, ["-N", "-S", socket, "set-option", "-g", "set-clipboard", "on"], environment: environment, timeout: 3)
+            if result.status == 0 { clipboardForwardingEnsured.insert(socket) }
         } catch {
             // No server yet, or it is unreachable; the next attach tries again.
         }
@@ -166,21 +201,22 @@ public actor TmuxHost {
     }
     public func capture(sessionID: UUID, lines: Int) async throws -> TerminalSnapshot {
         let name = sessionID.uuidString
-        let metadata = try await command(["display-message", "-p", "-t", name, "#{pane_id}|#{pane_pid}|#{pane_width}|#{pane_height}|#{alternate_on}|#{history_size}"])
+        let socketPath = try await socket(for: sessionID)
+        let metadata = try await command(["display-message", "-p", "-t", name, "#{pane_id}|#{pane_pid}|#{pane_width}|#{pane_height}|#{alternate_on}|#{history_size}"], socket: socketPath)
         let fields = metadata.output.trimmingCharacters(in: .newlines).split(separator: "|").map(String.init)
         guard metadata.status == 0, fields.count == 6, let pid = Int32(fields[1]), let columns = Int(fields[2]), let rows = Int(fields[3]), let historySize = Int(fields[5]) else { throw ChauffeurError("snapshot_unavailable", "Terminal history is unavailable") }
         var history = "", truncated = historySize > lines
         if historySize > 0 {
-            let captured = try await capturePane(name, options: ["-S", "-\(min(lines, historySize))", "-E", "-1"])
+            let captured = try await capturePane(name, socket: socketPath, options: ["-S", "-\(min(lines, historySize))", "-E", "-1"])
             history = captured.output; truncated = truncated || captured.outputTruncated
         }
         if fields[4] == "1" {
             // In alternate-screen mode -a returns the saved normal screen;
             // the default capture still returns the active application's screen.
-            let normal = try await capturePane(name, options: ["-a"])
+            let normal = try await capturePane(name, socket: socketPath, options: ["-a"])
             history += normal.output; truncated = truncated || normal.outputTruncated
         }
-        let screen = try await capturePane(name, options: ["-S", "0", "-E", String(rows - 1)])
+        let screen = try await capturePane(name, socket: socketPath, options: ["-S", "0", "-E", String(rows - 1)])
         guard let owner = try await inventory().first(where: { $0.sessionName == name }), owner.paneID == fields[0], owner.processID == pid else { throw ChauffeurError("snapshot_unavailable", "Terminal changed while its history was captured") }
         return TerminalSnapshot(sessionID: sessionID, processID: pid, terminalIdentity: fields[0], columns: columns, rows: rows, lineLimit: lines, history: history, screen: screen.output, truncated: truncated || screen.outputTruncated)
     }
@@ -188,14 +224,15 @@ public actor TmuxHost {
     /// `nil` when the pane is gone or its process has exited. A shell waiting at
     /// its own prompt reports the shell itself.
     public func foregroundCommand(sessionID: UUID) async throws -> String? {
-        let result = try await command(["display-message", "-p", "-t", sessionID.uuidString, "#{pane_dead}|#{pane_current_command}"])
+        guard let socket = try await findSocket(for: sessionID) else { return nil }
+        let result = try await command(["display-message", "-p", "-t", sessionID.uuidString, "#{pane_dead}|#{pane_current_command}"], socket: socket)
         guard result.status == 0 else { return nil }
         // A process name may itself contain the delimiter; it is the last field.
         let fields = result.output.trimmingCharacters(in: .newlines).split(separator: "|", maxSplits: 1, omittingEmptySubsequences: false).map(String.init)
         guard fields.count == 2, fields[0] == "0", !fields[1].isEmpty else { return nil }
         return fields[1]
     }
-    private func capturePane(_ name: String, options: [String]) async throws -> CommandResult {
+    private func capturePane(_ name: String, socket socketPath: String, options: [String]) async throws -> CommandResult {
         var result = try await ProcessRunner.run(executable, ["-S", socketPath, "capture-pane", "-p", "-e", "-t", name] + options, environment: environment, timeout: 3, outputLimit: TerminalSnapshot.maximumFileBytes, keepOutputTail: true)
         guard result.status == 0 else { throw ChauffeurError("snapshot_unavailable", "Terminal history is unavailable") }
         if result.outputTruncated {
@@ -206,19 +243,20 @@ public actor TmuxHost {
     }
     public func retireDead(_ snapshot: TerminalSnapshot) async throws {
         try snapshot.validate()
+        guard let socket = try await findSocket(for: snapshot.sessionID) else { return }
         // tmux evaluates the owner and dead checks together, so a concurrent
         // explicit resume can never have its replacement pane retired here.
         let condition = "#{&&:#{pane_dead},#{&&:#{==:#{pane_id},\(snapshot.terminalIdentity)},#{==:#{pane_pid},\(snapshot.processID)}}}"
-        _ = try await command(["if-shell", "-F", "-t", snapshot.sessionID.uuidString, condition, "kill-session -t \(snapshot.sessionID.uuidString)"])
+        _ = try await command(["if-shell", "-F", "-t", snapshot.sessionID.uuidString, condition, "kill-session -t \(snapshot.sessionID.uuidString)"], socket: socket)
     }
     public func interrupt(sessionID: UUID) async throws {
-        let result = try await command(["send-keys", "-t", sessionID.uuidString, "C-c"])
+        let result = try await command(["send-keys", "-t", sessionID.uuidString, "C-c"], socket: socket(for: sessionID))
         guard result.status == 0 else { throw ChauffeurError("interrupt_failed", "Session is no longer live") }
     }
     public func stop(sessionID: UUID, force: Bool) async throws {
         guard let pane = try await inventory().first(where: { $0.sessionName == sessionID.uuidString }) else { return }
         if force || pane.dead {
-            let result = try await command(["kill-session", "-t", sessionID.uuidString])
+            let result = try await command(["kill-session", "-t", sessionID.uuidString], socket: socket(for: sessionID))
             guard result.status == 0 else { throw ChauffeurError("stop_failed", "Could not stop terminal session") }
         } else {
             // Positive tmux ownership check above. Each pane is a PTY session

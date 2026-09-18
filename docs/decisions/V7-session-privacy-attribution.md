@@ -1,7 +1,8 @@
 # V7 — Session privacy attribution
 
-Status: responsibility, Documents and AppData experiments complete; an independent
-session owner is validated in the fixture, production helper integration pending.
+Status: responsibility, Documents and AppData experiments complete. Production
+integration is recorded in [V8](V8-independent-session-owner.md); the initial
+helper deferral below is retained as experiment history.
 Recorded 2026-09-18 on macOS 26.6.2 (25G83).
 
 The AppData follow-up below supersedes the initial helper deferral rationale.
