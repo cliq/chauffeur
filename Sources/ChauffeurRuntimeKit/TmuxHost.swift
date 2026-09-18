@@ -27,6 +27,9 @@ public actor TmuxHost {
     /// from the client that replaced it.
     private var nextGeneration: AttachmentGeneration = 1
     private var spawning = Set<UUID>()
+    /// Servers started by an older runtime keep `set-clipboard external`, which drops applications'
+    /// OSC 52 writes; apply the current setting live once per host instead of restarting tmux.
+    private var clipboardForwardingEnsured = false
     private let environment: [String: String]
     public init(runtimeDirectory: URL, ctlPath: String, environment: [String: String]) throws {
         self.runtimeDirectory = runtimeDirectory; self.ctlPath = ctlPath
@@ -62,7 +65,7 @@ public actor TmuxHost {
         let config = runtimeDirectory.appendingPathComponent("tmux.conf")
         // A separate socket/config keeps user tmux sessions and key bindings out
         // of Chauffeur. Direct argv launch never evaluates the task in a shell.
-        try Data("set -g status off\nset -g prefix None\nset -g prefix2 None\nset -g mouse on\nset -g history-limit \(scrollback)\nset -g remain-on-exit on\nset -g exit-empty off\nset -g update-environment ''\nset -g default-terminal tmux-256color\n".utf8).write(to: config, options: .atomic)
+        try Data("set -g status off\nset -g prefix None\nset -g prefix2 None\nset -g mouse on\nset -g set-clipboard on\nset -g history-limit \(scrollback)\nset -g remain-on-exit on\nset -g exit-empty off\nset -g update-environment ''\nset -g default-terminal tmux-256color\n".utf8).write(to: config, options: .atomic)
         let payloadPath = runtimeDirectory.appendingPathComponent("launch-\(session.id).json")
         guard FileManager.default.createFile(atPath: payloadPath.path, contents: try JSONCoding.encode(payload), attributes: [.posixPermissions: 0o600]) else { throw ChauffeurError("launch_file", "Cannot create private launch handoff") }
         defer { try? FileManager.default.removeItem(at: payloadPath) }
@@ -99,6 +102,7 @@ public actor TmuxHost {
     /// a stale client's concurrent input cannot slip in between the revocation
     /// and the hand-over.
     public func attach(sessionID: UUID, sink: any TerminalOutputSink, cols: Int, rows: Int, takeControl: Bool) async throws -> AttachmentGeneration {
+        await ensureClipboardForwarding()
         let generation = nextGeneration; nextGeneration += 1
         if let previous = attachments[sessionID] {
             guard takeControl else { throw ChauffeurError("terminal_busy", "This terminal is controlled by another client. Take control to use it here") }
@@ -112,7 +116,7 @@ public actor TmuxHost {
         // survive redraws and reconnects to already-running tmux servers too.
         // SwiftTerm always decodes UTF-8. launchd may supply no locale; without
         // -u tmux replaces Unicode with underscores before it reaches the UI.
-        let pty = try PTYAttachment(executable: executable, arguments: ["-u", "-S", socketPath, "-T", "hyperlinks", "attach-session", "-t", sessionID.uuidString], directory: runtimeDirectory.path, environment: environment.merging(["TERM": "xterm-256color"], uniquingKeysWith: { _, new in new }), cols: cols, rows: rows)
+        let pty = try PTYAttachment(executable: executable, arguments: ["-u", "-S", socketPath, "-T", "hyperlinks,clipboard", "attach-session", "-t", sessionID.uuidString], directory: runtimeDirectory.path, environment: environment.merging(["TERM": "xterm-256color"], uniquingKeysWith: { _, new in new }), cols: cols, rows: rows)
         let pump = AttachmentPump(generation: generation, sink: sink) { [weak self] ended in
             guard let self else { return }
             Task { await self.attachmentEnded(sessionID: sessionID, generation: ended) }
@@ -139,6 +143,15 @@ public actor TmuxHost {
     }
     /// The generation currently controlling a session's terminal, if any.
     public func currentGeneration(sessionID: UUID) -> AttachmentGeneration? { attachments[sessionID]?.generation }
+    private func ensureClipboardForwarding() async {
+        guard !clipboardForwardingEnsured else { return }
+        do {
+            _ = try await ProcessRunner.run(executable, ["-S", socketPath, "set-option", "-g", "set-clipboard", "on"], environment: environment, timeout: 3)
+            clipboardForwardingEnsured = true
+        } catch {
+            // No server yet, or it is unreachable; the next attach tries again.
+        }
+    }
     private func current(_ sessionID: UUID, _ generation: AttachmentGeneration) throws -> Attachment {
         guard let attachment = attachments[sessionID] else { throw ChauffeurError("attachment_lost", "Terminal is not attached") }
         guard attachment.generation == generation else { throw ChauffeurError("attachment_revoked", "Another client took control of this terminal") }
