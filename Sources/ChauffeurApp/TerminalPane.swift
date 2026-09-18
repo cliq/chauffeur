@@ -31,6 +31,8 @@ enum TerminalControlState: Equatable { case detached, connecting, connected, con
     private var connection: SocketConnection?
     private var reader: Task<Void, Never>?
     private var writer: Task<Void, Never>?
+    private var retry: Task<Void, Never>?
+    private var retryAttempt = 0
     private var outgoing: AsyncStream<IPCRequest>.Continuation?
     private var generation = UUID()
     /// The runtime's identity for the current attachment; every input and
@@ -38,6 +40,7 @@ enum TerminalControlState: Equatable { case detached, connecting, connected, con
     private var attachmentGeneration: UInt64? { didSet { syncInputGate() } }
     #if DEBUG
     var debugEvents: [String] = []
+    func simulateConnectionDrop() { connection?.close() }
     private func trace(_ text: String) {
         debugEvents.append(text)
         if debugEvents.count > 40 { debugEvents.removeFirst(debugEvents.count - 40) }
@@ -91,7 +94,7 @@ enum TerminalControlState: Equatable { case detached, connecting, connected, con
     /// leave a terminal alone once another client took control of it; only an
     /// explicit `takeControl` reclaims it.
     func attach(socketPath: String, takeControl: Bool = false) {
-        guard !readOnly, reader == nil else { return }
+        guard !readOnly, reader == nil, retry == nil else { return }
         if case .controlLost = controlState, !takeControl { return }
         let current = UUID(); generation = current
         #if DEBUG
@@ -99,7 +102,8 @@ enum TerminalControlState: Equatable { case detached, connecting, connected, con
         #endif
         status = "Connecting…"; controlState = .connecting
         reader = Task { [weak self] in
-            guard let self else { return }
+            guard let self, generation == current, !Task.isCancelled else { return }
+            var shouldRetry = false
             do {
                 let socket = try SocketConnection(path: socketPath); connection = socket
                 let size = adapter.cellSize
@@ -139,7 +143,7 @@ enum TerminalControlState: Equatable { case detached, connecting, connected, con
                     }
                     if packet.kind == "error" { throw ChauffeurError("terminal_error", packet.message ?? "Terminal disconnected") }
                     if let bytes = packet.bytes {
-                        adapter.feed(bytes); connected = true; status = nil
+                        adapter.feed(bytes); connected = true; status = nil; retryAttempt = 0
                     }
                 }
             } catch {
@@ -150,10 +154,28 @@ enum TerminalControlState: Equatable { case detached, connecting, connected, con
                     } else {
                         status = failure?.message ?? "Terminal disconnected. Reconnect to the live session"; connected = false
                         controlState = .failed(status ?? "Terminal disconnected")
+                        shouldRetry = failure?.code != "protocol_mismatch" && failure?.code != "not_live"
                     }
                 }
             }
-            if generation == current { connection?.close(); outgoing?.finish(); writer?.cancel(); reader = nil; attachmentGeneration = nil }
+            if generation == current {
+                connection?.close(); connection = nil; outgoing?.finish(); outgoing = nil
+                writer?.cancel(); writer = nil; reader = nil; attachmentGeneration = nil
+                if shouldRetry { scheduleRetry(socketPath: socketPath, generation: current) }
+            }
+        }
+    }
+    /// Retry only while this tab remains attached. In particular, a retry never
+    /// carries takeControl forward or replays input queued before a disconnect.
+    private func scheduleRetry(socketPath: String, generation current: UUID) {
+        let delay = min(0.25 * pow(2, Double(min(retryAttempt, 5))), 5)
+        retryAttempt += 1
+        status = "Reconnecting…"; controlState = .connecting
+        retry = Task { [weak self] in
+            do { try await Task.sleep(for: .seconds(delay)) } catch { return }
+            guard let self, generation == current, !Task.isCancelled else { return }
+            retry = nil
+            attach(socketPath: socketPath)
         }
     }
     /// Another client owns the terminal now. No "disconnected" status: the user
@@ -168,7 +190,8 @@ enum TerminalControlState: Equatable { case detached, connecting, connected, con
         #if DEBUG
         if reader != nil { trace("detach \(generation)") }
         #endif
-        generation = UUID(); outgoing?.finish(); writer?.cancel(); reader?.cancel()
+        generation = UUID(); retry?.cancel(); retry = nil; retryAttempt = 0
+        outgoing?.finish(); writer?.cancel(); reader?.cancel()
         connection?.close(); connection = nil; reader = nil; writer = nil; outgoing = nil; connected = false; attachmentGeneration = nil
         // Lost control survives a detach so the next automatic attach still
         // leaves the terminal with the client that took it.
@@ -255,7 +278,7 @@ struct TerminalPane: View {
                 if case .controlLost = controller.controlState, session.state.isLive {
                     Button("Take Control") { controller.detach(); controller.attach(socketPath: model.socketPath, takeControl: true) }
                         .help("Take this terminal back from the client that controls it")
-                } else if !controller.connected && session.state.isLive {
+                } else if !controller.connected && controller.controlState != .connecting && session.state.isLive {
                     Button("Reconnect") { controller.detach(); controller.attach(socketPath: model.socketPath) }
                 }
             }.padding(.horizontal, 12).padding(.vertical, 7).background(.bar)

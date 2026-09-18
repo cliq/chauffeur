@@ -49,7 +49,7 @@ import ChauffeurCore
                     await model.finishPendingWindowWrites()
                     let result: JSONValue = .object(["passed": .bool(true), "phase": .string(phase), "routing": .string("Launch Services cold launch selected the recorded project/session with all project windows previously closed"), "processID": .number(Double(ProcessInfo.processInfo.processIdentifier))])
                     try JSONCoding.encode(result).write(to: root.appendingPathComponent("native-phase-route.json"), options: .atomic)
-                    model.quit(); return
+                    model.isTerminating = true; model.quit(); return
                 }
                 try await wait("four restored project windows") {
                     model.online && layouts.count == 4 && layouts.values.allSatisfy { $0.window?.isVisible == true }
@@ -89,6 +89,24 @@ import ChauffeurCore
                 }
                 let controller = first.controllers[selected]!
                 if phase == "1" {
+                    // A transient socket loss must recover without a button or
+                    // a new snapshot. Leaving the tab cancels a pending retry.
+                    controller.simulateConnectionDrop()
+                    try await wait("terminal scheduled automatic reconnect") { !controller.connected && controller.status == "Reconnecting…" }
+                    controller.detach()
+                    try await Task.sleep(for: .milliseconds(600))
+                    guard controller.controlState == .detached && !controller.connected else {
+                        throw ChauffeurError("native_probe", "Detached terminal retried in the background")
+                    }
+                    // Model a runtime socket that appears after the first attach.
+                    let delayedSocket = root.appendingPathComponent("delayed.sock")
+                    controller.attach(socketPath: delayedSocket.path)
+                    try await wait("unavailable runtime scheduled reconnect") { controller.status == "Reconnecting…" }
+                    try FileManager.default.createSymbolicLink(atPath: delayedSocket.path, withDestinationPath: model.socketPath)
+                    try await wait("terminal recovered when runtime became available") { controller.connected }
+                    controller.simulateConnectionDrop()
+                    try await wait("dropped stream scheduled reconnect") { !controller.connected && controller.status == "Reconnecting…" }
+                    try await wait("dropped stream recovered automatically") { controller.connected }
                     controller.terminal.insertText("native café 日本語", replacementRange: NSRange(location: NSNotFound, length: 0))
                     try await wait("native input echoed") { screen(controller).contains("INPUT=native café 日本語") }
                     let window = first.window!
@@ -158,7 +176,12 @@ import ChauffeurCore
                 let traces = Dictionary(uniqueKeysWithValues: layouts.values.flatMap { $0.controllers.values }.map { ($0.sessionID.uuidString, $0.debugEvents) })
                 try? JSONCoding.encode(traces).write(to: root.appendingPathComponent("native-phase-\(phase)-trace.json"), options: .atomic)
             }
-            if ProcessInfo.processInfo.environment["CHAUFFEUR_NATIVE_PROBE_HOLD"] != "1" { model.quit() }
+            if ProcessInfo.processInfo.environment["CHAUFFEUR_NATIVE_PROBE_HOLD"] != "1" {
+                // This isolated probe leaves its fake agents running. The quit
+                // confirmation itself belongs to the UI automation tests.
+                model.isTerminating = true
+                model.quit()
+            }
         }
     }
     private static func screen(_ controller: TerminalController) -> String {
