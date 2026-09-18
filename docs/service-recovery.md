@@ -52,6 +52,12 @@ processes; it does not replay tasks. Missing terminal ownership is recorded as
 ended session with a recorded native conversation ID. See
 [terminal history](terminal-history.md) for retained output and its limits.
 
+Privacy attribution is separate from process survival. After a runtime exits,
+tools can report their own responsible PIDs while TCC still retains the original
+runtime's executable path. Restarting the runtime is not evidence that privacy
+attribution has been repaired or lost. See [privacy prompts](privacy-prompts.md)
+for the measured behavior and how to investigate repeated per-tool consent.
+
 `Prototypes/real_repository_access.py` verifies this with the signed Release
 runtime and real Codex 0.154.0 (integration enabled) / Claude Code 2.1.273
 (basic-terminal mode) sessions.
