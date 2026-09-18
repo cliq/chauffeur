@@ -149,7 +149,7 @@ else:
         (root / 'fail-version').touch()
         set_id, preset_id, project_id, folder_id = uid(), uid(), uid(), uid()
         now = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
-        call('savePresetSet', {'record': {'id': set_id, 'name': 'Quick fixture', 'revision': 1, 'archived': False}})
+        call('savePresetSet', {'record': {'id': set_id, 'name': 'Quick fixture', 'agentSelection': 'custom', 'configurationDirectories': {'claude': str(root)}, 'revision': 1, 'archived': False}})
         call('savePreset', {'record': {'id': preset_id, 'setID': set_id, 'name': 'Fixture agent', 'kind': 'claude', 'executable': str(fake), 'configurationDirectory': str(root), 'arguments': [], 'integration': 'unverified', 'archived': False}})
         default_id = uid()
         call('savePreset', {'record': {'id': default_id, 'setID': set_id, 'name': 'Default agent', 'kind': 'claude', 'executable': str(fake), 'configurationDirectory': str(root), 'arguments': [], 'integration': 'unverified', 'archived': False}})
@@ -243,7 +243,7 @@ else:
         command('cancel')
         wait_for(lambda: state()['sheetWindow'] is None, 'sheet closed')
         empty_id = uid()
-        call('savePresetSet', {'record': {'id': empty_id, 'name': 'Empty fixture set', 'revision': 1, 'archived': False}})
+        call('savePresetSet', {'record': {'id': empty_id, 'name': 'Empty fixture set', 'agentSelection': 'custom', 'configurationDirectories': {}, 'revision': 1, 'archived': False}})
         project = call('snapshot')['store']['projects'][0]
         project['value']['presetSetID'] = empty_id
         project = call('saveProject', {'record': project['value'], 'version': project['version']})

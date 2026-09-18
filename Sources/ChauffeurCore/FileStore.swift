@@ -8,6 +8,7 @@ public struct Stored<Value: Record>: Codable, Sendable {
 }
 
 public struct StoreSnapshot: Codable, Sendable {
+    public var baseAgentPresets: [Stored<BaseAgentPreset>] = []
     public var presetSets: [Stored<PresetSet>] = []
     public var presets: [Stored<AgentPreset>] = []
     public var projects: [Stored<Project>] = []
@@ -16,6 +17,17 @@ public struct StoreSnapshot: Codable, Sendable {
     public var windows: [Stored<WindowState>] = []
     public var errors: [ChauffeurError] = []
     public init() {}
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        baseAgentPresets = try values.decodeIfPresent([Stored<BaseAgentPreset>].self, forKey: .baseAgentPresets) ?? []
+        presetSets = try values.decode([Stored<PresetSet>].self, forKey: .presetSets)
+        presets = try values.decode([Stored<AgentPreset>].self, forKey: .presets)
+        projects = try values.decode([Stored<Project>].self, forKey: .projects)
+        sessions = try values.decode([Stored<Session>].self, forKey: .sessions)
+        worktrees = try values.decode([Stored<Worktree>].self, forKey: .worktrees)
+        windows = try values.decode([Stored<WindowState>].self, forKey: .windows)
+        errors = try values.decode([ChauffeurError].self, forKey: .errors)
+    }
 }
 
 public enum JSONCoding {
@@ -51,7 +63,7 @@ public actor FileStore {
     func ioCounts() -> ReadCounts { readCounts }
     public init(root: URL = Paths.applicationSupport) throws {
         self.root = URL(fileURLWithPath: Paths.canonical(root.path))
-        for directory in ["preset-sets", "projects", "runtime", "runtime/snapshots", "worktrees"] {
+        for directory in ["base-agent-presets", "preset-sets", "projects", "runtime", "runtime/snapshots", "worktrees"] {
             try FileManager.default.createDirectory(at: root.appendingPathComponent(directory), withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
         }
         // Begin observing before the initial scan; changes during that scan
@@ -139,6 +151,9 @@ public actor FileStore {
                 return nil
             }
         }
+        for file in files(root.appendingPathComponent("base-agent-presets"), errors: &errors) {
+            read(BaseAgentPreset.self, file, into: &result.baseAgentPresets)
+        }
         for directory in directories(root.appendingPathComponent("preset-sets"), errors: &errors) {
             let metadata = directory.appendingPathComponent("preset-set.json")
             let set = read(PresetSet.self, metadata, into: &result.presetSets)
@@ -179,25 +194,141 @@ public actor FileStore {
 
     public func current() -> StoreSnapshot { snapshot }
 
+    @discardableResult public func save(_ value: BaseAgentPreset, expectedVersion: String? = nil) throws -> Stored<BaseAgentPreset> {
+        _ = reload()
+        var value = value
+        let existing = snapshot.baseAgentPresets.first { $0.value.id == value.id }
+        let url = existing.map { URL(fileURLWithPath: $0.path) }
+            ?? root.appendingPathComponent("base-agent-presets/\(value.id.uuidString).json")
+        if let existing {
+            value.revision = existing.value.revision
+            if value != existing.value { value.revision = try nextRevision(existing.value.revision) }
+        }
+        let saved = try write(value, at: url, expectedVersion: expectedVersion)
+        snapshot.baseAgentPresets.removeAll { $0.value.id == value.id }
+        snapshot.baseAgentPresets.append(saved)
+        return saved
+    }
+
+    /// Recoverable per-team migration: originals are backed up before writes,
+    /// base definitions are deduplicated on retry, and the team's selection field
+    /// is its atomic completion marker. Historical session records are untouched.
+    public func migrateTeamAgents() throws {
+        _ = reload()
+        let legacy = snapshot.presetSets.filter { $0.value.agentSelection == nil }
+        let backup = root.appendingPathComponent("migrations/team-agents-v2")
+        for stored in legacy {
+            let agents = snapshot.presets.filter { $0.value.setID == stored.value.id }
+            for recordPath in [stored.path] + agents.map(\.path) {
+                let relative = String(recordPath.dropFirst(root.path.count + 1))
+                let destination = backup.appendingPathComponent(relative)
+                if !manager.fileExists(atPath: destination.path) {
+                    try manager.createDirectory(at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
+                    try manager.copyItem(atPath: recordPath, toPath: destination.path)
+                }
+            }
+            for agent in agents.map(\.value).filter({ $0.kind.isAgent }) {
+                let existing = snapshot.baseAgentPresets.first {
+                    $0.value.name == agent.name && $0.value.kind == agent.kind
+                        && $0.value.executable == agent.executable && $0.value.arguments == agent.arguments
+                }
+                if let existing {
+                    if existing.value.archived && !agent.archived {
+                        var base = existing.value; base.archived = false
+                        try save(base, expectedVersion: existing.version)
+                    }
+                } else {
+                    var base = BaseAgentPreset(name: agent.name, kind: agent.kind, executable: agent.executable)
+                    base.arguments = agent.arguments; base.archived = agent.archived
+                    try save(base)
+                }
+            }
+            var team = stored.value
+            team.agentSelection = .custom; team.configurationDirectories = [:]
+            for kind in CLIKind.allCases where kind.isAgent {
+                let candidates = agents.map(\.value).filter { $0.kind == kind }.sorted {
+                    if $0.archived != $1.archived { return !$0.archived }
+                    return StoreSnapshot.agentOrder($0, $1)
+                }
+                if let chosen = candidates.first { team.configurationDirectories?[kind.rawValue] = chosen.configurationDirectory }
+            }
+            try save(team, expectedVersion: stored.version)
+        }
+        // Bootstrap once; an intentionally emptied/archived catalog stays empty.
+        let marker = root.appendingPathComponent("migrations/team-agents-v2/complete.json")
+        if !manager.fileExists(atPath: marker.path) {
+            if snapshot.baseAgentPresets.isEmpty {
+                try save(BaseAgentPreset(name: "Claude", kind: .claude, executable: "claude"))
+                try save(BaseAgentPreset(name: "Codex", kind: .codex, executable: "codex"))
+            }
+            try manager.createDirectory(at: marker.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try Data("{\"version\":2}".utf8).write(to: marker, options: .atomic)
+        }
+    }
+
     @discardableResult public func save(_ value: PresetSet, expectedVersion: String? = nil) throws -> Stored<PresetSet> {
         _ = reload()
         let existing = snapshot.presetSets.first { $0.value.id == value.id }
         let url = existing.map { URL(fileURLWithPath: $0.path) } ?? uniqueDirectory(parent: root.appendingPathComponent("preset-sets"), name: value.name).appendingPathComponent("preset-set.json")
-        if let id = value.defaultPresetID {
-            try reference(snapshot.presets.contains { $0.value.id == id && $0.value.setID == value.id }, "Choose a default agent preset from this team", at: url)
-        }
         var value = value
+        try value.validate()
+        try checkVersion(at: url, expectedVersion: expectedVersion)
+        try Validation.require(existing?.value.agentSelection == nil || value.agentSelection != nil, "Reload this team with the current app before saving")
+        if existing?.value.agentSelection == .allBase, value.agentSelection == .custom,
+           existing?.value.customAgentsInitialized != true {
+            for base in snapshot.baseAgentPresets.map(\.value).filter({ !$0.archived }) {
+                if let copy = snapshot.presets.first(where: { $0.value.setID == value.id && $0.value.sourceBaseID == base.id })?.value {
+                    if value.defaultPresetID == base.id { value.defaultPresetID = copy.id }
+                    continue
+                }
+                let copy = base.agent(in: value, copy: true)
+                let path = url.deletingLastPathComponent().appendingPathComponent("presets/\(copy.id.uuidString).json")
+                let stored = try write(copy, at: path, expectedVersion: nil)
+                snapshot.presets.append(stored)
+                if value.defaultPresetID == base.id { value.defaultPresetID = copy.id }
+            }
+        }
+        if value.agentSelection == .custom { value.customAgentsInitialized = true }
+        if existing?.value.agentSelection != value.agentSelection,
+           let id = value.defaultPresetID,
+           !snapshot.agents(in: value, includeArchived: true).contains(where: { $0.id == id }) {
+            value.defaultPresetID = nil
+        }
+        if let id = value.defaultPresetID {
+            try reference(snapshot.agents(in: value, includeArchived: true).contains { $0.id == id }, "Choose a default agent preset from this team", at: url)
+        }
         if let existing {
-            let changed = existing.value.name != value.name || existing.value.defaultPresetID != value.defaultPresetID || existing.value.archived != value.archived
+            let changed = existing.value.name != value.name || existing.value.defaultPresetID != value.defaultPresetID || existing.value.archived != value.archived || existing.value.isDefault != value.isDefault || existing.value.agentSelection != value.agentSelection || existing.value.configurationDirectories != value.configurationDirectories
             value.revision = changed ? try nextRevision(existing.value.revision) : existing.value.revision
         }
         let saved = try write(value, at: url, expectedVersion: expectedVersion)
         snapshot.presetSets.removeAll { $0.value.id == value.id }; snapshot.presetSets.append(saved)
+        if existing?.value.agentSelection != value.agentSelection {
+            let available = snapshot.agents(in: value)
+            for project in snapshot.projects where project.value.presetSetID == value.id {
+                guard let previous = project.value.lastPresetID, !available.contains(where: { $0.id == previous }) else { continue }
+                var updated = project.value
+                if value.agentSelection == .custom {
+                    updated.lastPresetID = available.first { $0.sourceBaseID == previous }?.id
+                } else {
+                    let source = snapshot.presets.first { $0.value.id == previous && $0.value.setID == value.id }?.value.sourceBaseID
+                    updated.lastPresetID = available.first { $0.id == source }?.id
+                }
+                let patched = try write(updated, at: URL(fileURLWithPath: project.path), expectedVersion: project.version)
+                snapshot.projects.removeAll { $0.value.id == updated.id }; snapshot.projects.append(patched)
+            }
+        }
         return saved
     }
     @discardableResult public func save(_ value: AgentPreset, expectedVersion: String? = nil) throws -> Stored<AgentPreset> {
         _ = reload()
         guard let set = snapshot.presetSets.first(where: { $0.value.id == value.setID }) else { throw ChauffeurError("missing_set", "Team is unresolved") }
+        var value = value
+        if set.value.agentSelection != nil {
+            try Validation.require(set.value.agentSelection == .custom, "Switch the team to Custom before editing its agents")
+            value.configurationDirectory = ""; value.baseRevision = nil
+        }
+        try Validation.require(value.kind.isAgent, "Shells are not agent presets")
         let existing = snapshot.presets.first { $0.value.id == value.id }
         let parent = URL(fileURLWithPath: set.path).deletingLastPathComponent().appendingPathComponent("presets")
         let url = existing.map { URL(fileURLWithPath: $0.path) } ?? uniqueFile(parent: parent, name: value.name)
@@ -223,7 +354,7 @@ public actor FileStore {
         try reference(snapshot.presetSets.contains { $0.value.id == value.presetSetID } || existing?.value.presetSetID == value.presetSetID, "Choose an existing team", at: url)
         if let previous = existing?.value, previous.presetSetID != value.presetSetID, value.lastPresetID == previous.lastPresetID { value.lastPresetID = nil }
         if let id = value.lastPresetID {
-            try reference(snapshot.presets.contains { $0.value.id == id && $0.value.setID == value.presetSetID } || (existing?.value.lastPresetID == id && existing?.value.presetSetID == value.presetSetID), "Last-used agent preset must belong to the project's set", at: url)
+            try reference(snapshot.agents(teamID: value.presetSetID, includeArchived: true).contains { $0.id == id } || (existing?.value.lastPresetID == id && existing?.value.presetSetID == value.presetSetID), "Last-used agent preset must belong to the project's set", at: url)
         }
         if let previous = existing?.value {
             let removedGroups = Set(previous.groups.map(\.id)).subtracting(value.groups.map(\.id))
@@ -285,7 +416,7 @@ public actor FileStore {
     public func rememberPreset(_ presetID: UUID, projectID: UUID, setID: UUID) throws {
         _ = reload()
         guard let stored = snapshot.projects.first(where: { $0.value.id == projectID }), stored.value.presetSetID == setID,
-              snapshot.presets.contains(where: { $0.value.id == presetID && $0.value.setID == setID && !$0.value.archived }),
+              snapshot.agents(teamID: setID).contains(where: { $0.id == presetID }),
               stored.value.lastPresetID != presetID else { return }
         var value = stored.value; value.lastPresetID = presetID
         let saved = try write(value, at: URL(fileURLWithPath: stored.path), expectedVersion: stored.version)

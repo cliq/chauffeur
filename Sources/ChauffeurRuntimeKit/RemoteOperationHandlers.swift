@@ -122,7 +122,7 @@ public actor RemoteOperationHandlers {
         var preset: AgentPreset?
         if let presetID = spec.agentPresetID {
             let set = snapshot.presetSets.first { $0.value.id == project.presetSetID }?.value
-            preset = set?.archived == false ? snapshot.presets.first { $0.value.id == presetID && $0.value.setID == project.presetSetID && !$0.value.archived }?.value : nil
+            preset = set?.archived == false ? snapshot.agents(teamID: project.presetSetID).first { $0.id == presetID } : nil
             guard preset != nil else {
                 return await fail(context, status, RemoteError(code: "unknown_preset", message: "This agent preset is no longer available for the project."))
             }

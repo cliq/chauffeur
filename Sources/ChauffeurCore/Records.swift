@@ -22,17 +22,26 @@ public enum IntegrationState: String, Codable, Sendable { case unverified, suppo
 public struct PresetSet: Record, Equatable {
     public var id = UUID()
     public var name: String
+    public var agentSelection: AgentSelection?
+    public var customAgentsInitialized: Bool?
+    public var configurationDirectories: [String: String]?
     public var defaultPresetID: UUID?
     public var revision = 1
     public var archived = false
     /// The default team: preselected for new projects and used when nothing names a team.
     /// The runtime keeps exactly one non-archived team flagged whenever any exists.
     public var isDefault = false
-    public init(name: String) { self.name = name }
+    public init(name: String, agentSelection: AgentSelection? = nil) {
+        self.name = name; self.agentSelection = agentSelection
+        self.configurationDirectories = agentSelection == nil ? nil : [:]
+    }
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(UUID.self, forKey: .id)
         name = try container.decode(String.self, forKey: .name)
+        customAgentsInitialized = try container.decodeIfPresent(Bool.self, forKey: .customAgentsInitialized)
+        agentSelection = try container.decodeIfPresent(AgentSelection.self, forKey: .agentSelection)
+        configurationDirectories = try container.decodeIfPresent([String: String].self, forKey: .configurationDirectories)
         defaultPresetID = try container.decodeIfPresent(UUID.self, forKey: .defaultPresetID)
         revision = try container.decodeIfPresent(Int.self, forKey: .revision) ?? 1
         archived = try container.decodeIfPresent(Bool.self, forKey: .archived) ?? false
@@ -40,6 +49,10 @@ public struct PresetSet: Record, Equatable {
     }
     public func validate() throws {
         try Validation.name(name)
+        for (kind, path) in configurationDirectories ?? [:] {
+            try Validation.require(kind == "claude" || kind == "codex", "Unknown agent")
+            if !path.isEmpty { try Validation.absolutePath(path) }
+        }
         try Validation.require(revision > 0, "Revision must be positive")
         try Validation.require(!(isDefault && archived), "The default team cannot be archived")
     }
@@ -51,7 +64,10 @@ public struct AgentPreset: Record, Equatable {
     public var name: String
     public var kind: CLIKind
     public var executable: String
+    /// Legacy on-disk field; resolved from the team for new-format definitions.
     public var configurationDirectory: String
+    public var sourceBaseID: UUID?
+    public var baseRevision: Int?
     public var arguments: [String] = []
     public var integration: IntegrationState = .unverified
     public var archived = false
@@ -62,7 +78,7 @@ public struct AgentPreset: Record, Equatable {
     public func validate() throws {
         try Validation.name(name)
         try Validation.require(!executable.isEmpty && !executable.contains("\0"), "Select an executable")
-        try Validation.absolutePath(configurationDirectory)
+        if !configurationDirectory.isEmpty { try Validation.absolutePath(configurationDirectory) }
         try LaunchPolicy.validateArguments(arguments, kind: kind)
     }
 }
@@ -148,6 +164,9 @@ public struct CheckoutIdentity: Codable, Equatable, Sendable {
 
 public struct LaunchSnapshot: Codable, Equatable, Sendable {
     public var preset: AgentPreset
+    public var teamID: UUID?
+    public var configurationEnvironment: [String: String]?
+    public var configurationUsesDefault: Bool?
     public var presetSetName: String
     public var presetSetRevision: Int
     public var executablePath: String
@@ -159,6 +178,7 @@ public struct LaunchSnapshot: Codable, Equatable, Sendable {
     public var checkoutIdentities: [CheckoutIdentity]?
     public var launchedAt = Date()
     public init(preset: AgentPreset, set: PresetSet, executablePath: String, executableVersion: String, workingDirectory: String, additionalPaths: [String]) {
+        self.teamID = set.id
         self.preset = preset; self.presetSetName = set.name; self.presetSetRevision = set.revision
         self.executablePath = executablePath; self.executableVersion = executableVersion
         self.configurationPath = Paths.canonical(preset.configurationDirectory)

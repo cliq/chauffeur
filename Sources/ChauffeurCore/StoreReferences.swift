@@ -10,14 +10,14 @@ enum StoreReferences {
         }
         for stored in snapshot.presetSets {
             if let id = stored.value.defaultPresetID {
-                require(snapshot.presets.contains { $0.value.id == id && $0.value.setID == stored.value.id }, "Default agent preset is missing or belongs to another team", stored.path)
+                require(snapshot.agents(in: stored.value, includeArchived: true).contains { $0.id == id }, "Default agent preset is missing or belongs to another team", stored.path)
             }
         }
         for stored in snapshot.projects {
             let project = stored.value
             require(snapshot.presetSets.contains { $0.value.id == project.presetSetID }, "Project's team is missing", stored.path, code: "unresolved_preset_set")
             if let id = project.lastPresetID {
-                require(snapshot.presets.contains { $0.value.id == id && $0.value.setID == project.presetSetID }, "Last-used agent preset is missing or belongs to another team", stored.path)
+                require(snapshot.agents(teamID: project.presetSetID, includeArchived: true).contains { $0.id == id }, "Last-used agent preset is missing or belongs to another team", stored.path)
             }
         }
         for stored in snapshot.sessions {

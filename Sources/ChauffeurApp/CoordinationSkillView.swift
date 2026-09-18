@@ -63,7 +63,7 @@ struct CoordinationSkillView: View {
     private func refresh() async {
         busy = true; failure = nil; defer { busy = false }
         do {
-            installation = try await model.call("skillStatus", .object(["presetID": .string(preset.id.uuidString)])).decode(SkillInstallation.self)
+            installation = try await model.call("skillStatus", .object(["teamID": .string(preset.setID.uuidString), "presetID": .string(preset.id.uuidString)])).decode(SkillInstallation.self)
             document = try await model.call("skillDocument").string ?? ""
         } catch { failure = error.localizedDescription }
     }
@@ -73,10 +73,10 @@ struct CoordinationSkillView: View {
         Task {
             defer { busy = false }
             do {
-                self.installation = try await model.call(method, .object(["presetID": .string(preset.id.uuidString), "revision": .string(installation.revision)])).decode(SkillInstallation.self)
+                self.installation = try await model.call(method, .object(["teamID": .string(preset.setID.uuidString), "presetID": .string(preset.id.uuidString), "revision": .string(installation.revision)])).decode(SkillInstallation.self)
             } catch {
                 failure = error.localizedDescription
-                self.installation = try? await model.call("skillStatus", .object(["presetID": .string(preset.id.uuidString)])).decode(SkillInstallation.self)
+                self.installation = try? await model.call("skillStatus", .object(["teamID": .string(preset.setID.uuidString), "presetID": .string(preset.id.uuidString)])).decode(SkillInstallation.self)
             }
         }
     }

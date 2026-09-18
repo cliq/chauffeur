@@ -120,7 +120,7 @@ with tempfile.TemporaryDirectory(prefix="chauffeur-smoke-", dir="/tmp") as direc
         health = wait_for(lambda: call("status"), lambda value: value.get("mcpEndpoint"))
         now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         set_id, preset_id, project_id, folder_id, group_id, outside_id = [uid() for _ in range(6)]
-        call("savePresetSet", {"record": {"id": set_id, "name": "Fixture set", "revision": 1, "archived": False}})
+        call("savePresetSet", {"record": {"id": set_id, "name": "Fixture set", "agentSelection": "custom", "configurationDirectories": {"codex": str(config)}, "revision": 1, "archived": False}})
         call("savePreset", {"record": {"id": preset_id, "setID": set_id, "name": "Fake Codex", "kind": "codex", "executable": str(fixture), "configurationDirectory": str(config), "arguments": [], "integration": "unverified", "archived": False}})
         call("saveProject", {"record": {"id": project_id, "name": "Runtime fixture", "presetSetID": set_id, "folders": [{"id": folder_id, "name": "Fixture checkout", "selectedPath": str(checkout), "canonicalPath": str(checkout.resolve()), "availability": "available", "registered": True}], "groups": [{"id": group_id, "name": "Default", "isDefault": True, "archived": False, "createdAt": now, "updatedAt": now}, {"id": outside_id, "name": "Other", "isDefault": False, "archived": False, "createdAt": now, "updatedAt": now}], "archived": False, "createdAt": now, "updatedAt": now, "lastOpenedAt": now}})
         worktree_args = {"projectID": project_id, "folderID": folder_id, "branch": "fixture/managed", "baseRef": "HEAD"}
@@ -207,6 +207,8 @@ with tempfile.TemporaryDirectory(prefix="chauffeur-smoke-", dir="/tmp") as direc
         assert "Chauffeur fixture" in saved_history["screen"]
         assert "unsent fixture input" in saved_history["screen"]
         settings = call("snapshot")["settings"]
+        # This fixture explicitly verifies retained history after clean exits.
+        settings["keepFinishedSessions"] = True
         settings["scrollbackLines"] = 100
         settings["snapshotBudgetBytes"] = 1048576
         call("saveSettings", settings)

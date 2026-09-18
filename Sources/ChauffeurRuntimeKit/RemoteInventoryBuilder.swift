@@ -30,7 +30,7 @@ public struct RemoteInventoryBuilder {
             let groups = project.groups.filter { !$0.archived }.map { GroupSummary(id: $0.id, name: $0.name, isDefault: $0.isDefault) }
             let set = store.presetSets.first { $0.value.id == project.presetSetID }?.value
             let presets: [PresetSummary] = set?.archived == false
-                ? store.presets.map(\.value).filter { $0.setID == project.presetSetID && !$0.archived }.map { PresetSummary(id: $0.id, name: $0.name, kind: kind($0.kind)) }
+                ? store.agents(teamID: project.presetSetID).map { PresetSummary(id: $0.id, name: $0.name, kind: kind($0.kind)) }
                 : []
             let folders = project.folders.filter(\.registered).map { folder -> FolderSummary in
                 let inventory = inventories.observation(for: folder.canonicalPath)

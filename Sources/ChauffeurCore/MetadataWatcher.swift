@@ -23,7 +23,7 @@ final class MetadataWatcher: @unchecked Sendable {
             let path = suppliedPath.count > 1 && suppliedPath.hasSuffix("/") ? String(suppliedPath.dropLast()) : suppliedPath
             let lost = flags & FSEventStreamEventFlags(kFSEventStreamEventFlagUserDropped | kFSEventStreamEventFlagKernelDropped | kFSEventStreamEventFlagEventIdsWrapped) != 0
             let movedRoot = flags & FSEventStreamEventFlags(kFSEventStreamEventFlagRootChanged | kFSEventStreamEventFlagUnmount) != 0
-            let metadataPath = path == root || ["preset-sets", "projects"].contains { path == root + "/" + $0 || path.hasPrefix(root + "/" + $0 + "/") }
+            let metadataPath = path == root || ["base-agent-presets", "preset-sets", "projects"].contains { path == root + "/" + $0 || path.hasPrefix(root + "/" + $0 + "/") }
             guard lost || movedRoot || metadataPath else { return }
             lock.withLock {
                 if lost || movedRoot || flags & FSEventStreamEventFlags(kFSEventStreamEventFlagMustScanSubDirs) != 0 {

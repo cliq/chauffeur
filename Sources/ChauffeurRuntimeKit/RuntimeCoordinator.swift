@@ -75,6 +75,7 @@ public actor RuntimeCoordinator {
     }
     public func start() async throws {
         logs?.append(RuntimeLogEntry(.runtimeStarting, runtimeID: id))
+        try await store.migrateTeamAgents()
         let snapshot = await store.reload()
         try await normalizeDefaultTeam()
         // The ledger preserves accepted membership and orphaned live sessions
@@ -359,7 +360,9 @@ public actor RuntimeCoordinator {
         case "skillStatus", "installSkill", "removeSkill":
             let presetID = try params.uuid("presetID")
             let snapshot = await store.reload()
-            guard let preset = snapshot.presets.first(where: { $0.value.id == presetID })?.value else { throw ChauffeurError("missing_preset", "Agent preset no longer exists") }
+            let teamID = params["teamID"].string.flatMap(UUID.init(uuidString:))
+                ?? snapshot.presets.first(where: { $0.value.id == presetID })?.value.setID
+            guard let teamID, let preset = snapshot.agents(teamID: teamID).first(where: { $0.id == presetID }) else { throw ChauffeurError("missing_preset", "Choose an available agent and team") }
             if skillInstaller == nil { skillInstaller = SkillInstaller(skill: try CoordinationSkill.bundled()) }
             let installer = skillInstaller!
             if request.method == "skillStatus" { return try .from(await installer.status(directory: preset.configurationDirectory)) }
@@ -382,7 +385,7 @@ public actor RuntimeCoordinator {
             guard sessions[sessionID] != nil else { throw ChauffeurError("missing_session", "Session not found") }
             // A disconnected or ended terminal can still expose its last archive.
             do { if let value = try await captureHistory(sessionID) { return try .from(value) } }
-            catch let error as ChauffeurError where error.code == "snapshot_unavailable" || error.code == "terminal_inventory" { }
+            catch let error as ChauffeurError where error.code == "snapshot_unavailable" || error.code == "terminal_inventory" || error.code == "terminal_missing" { }
             if let saved = try await snapshots.read(sessionID) { return try .from(saved) }
             throw ChauffeurError("snapshot_unavailable", "No saved terminal history is available for this session")
         case "deletePresetSet":
@@ -390,10 +393,14 @@ public actor RuntimeCoordinator {
             try await normalizeDefaultTeam()
             return .object(["deleted": .bool(true)])
         case "savePresetSet":
-            let set = try params["record"].decode(PresetSet.self)
+            var set = try params["record"].decode(PresetSet.self)
+            if set.agentSelection == nil, !(await store.refresh()).presetSets.contains(where: { $0.value.id == set.id }) {
+                set.agentSelection = .allBase; set.configurationDirectories = [:]
+            }
             let saved = try await store.save(set, expectedVersion: params["version"].string)
             try await normalizeDefaultTeam(preferring: set.isDefault ? set.id : nil)
             return try .from(await store.refresh().presetSets.first { $0.value.id == set.id } ?? saved)
+        case "saveBaseAgentPreset": return try .from(await store.save(params["record"].decode(BaseAgentPreset.self), expectedVersion: params["version"].string))
         case "savePreset": return try .from(await store.save(params["record"].decode(AgentPreset.self), expectedVersion: params["version"].string))
         case "saveProject":
             var project = try params["record"].decode(Project.self)
@@ -727,13 +734,16 @@ public actor RuntimeCoordinator {
             // A shell is not an preset. It runs the login shell in the
             // checkout, has no configuration directory and never coordinates.
             guard child == nil else { throw ChauffeurError("invalid_argument", "Delegated sessions must launch an agent") }
-            set = PresetSet(name: "Shell")
+            guard let team = snapshot.presetSets.first(where: { $0.value.id == project.presetSetID })?.value, !team.archived else {
+                throw ChauffeurError("missing_set", "Select an active team before opening a terminal")
+            }
+            set = team
             var shell = AgentPreset(setID: set.id, name: "Shell", kind: .shell, executable: baseEnvironment["SHELL"].flatMap { $0.hasPrefix("/") ? $0 : nil } ?? "/bin/zsh", configurationDirectory: workingDirectory)
             shell.arguments = ["-l"]; shell.integration = .unavailable
             preset = shell
         } else {
             guard let storedSet = snapshot.presetSets.first(where: { $0.value.id == project.presetSetID })?.value, !storedSet.archived,
-                  let storedPreset = snapshot.presets.first(where: { $0.value.id == request.presetID && $0.value.setID == storedSet.id && !$0.value.archived })?.value else {
+                  let storedPreset = snapshot.agents(in: storedSet).first(where: { $0.id == request.presetID }) else {
                 throw ChauffeurError("missing_preset", "Project's team is empty or selected agent preset is unavailable")
             }
             set = storedSet; preset = storedPreset
@@ -745,7 +755,11 @@ public actor RuntimeCoordinator {
         // Shells never claim a checkout: they neither block agents nor need sharing consent.
         try checkoutClaims.beginLaunch(sessionID, paths: [workingDirectory] + additionalPaths, worktreeID: request.worktreeID, allowSharedCheckout: isShell || request.allowSharedCheckout, occupies: !isShell)
         defer { checkoutClaims.endLaunch(sessionID) }
-        let launch = LaunchSnapshot(preset: preset, set: set, executablePath: preset.executable, executableVersion: isShell ? "shell" : "unverified", workingDirectory: workingDirectory, additionalPaths: additionalPaths)
+        var launch = LaunchSnapshot(preset: preset, set: set, executablePath: preset.executable, executableVersion: isShell ? "shell" : "unverified", workingDirectory: workingDirectory, additionalPaths: additionalPaths)
+        if set.agentSelection != nil {
+            launch.configurationEnvironment = snapshot.configurationEnvironment(in: set)
+            launch.configurationUsesDefault = !isShell && (set.configurationDirectories?[preset.kind.rawValue] ?? "").isEmpty
+        } else if isShell { launch.configurationEnvironment = shellAgentExports(project: project, snapshot: snapshot) }
         var session = Session(projectID: project.id, groupID: request.groupID, title: request.title, launch: launch, folderID: folder.id)
         session.id = sessionID; session.worktreeID = request.worktreeID; session.initialTask = request.task
         session.launchRequestFingerprint = fingerprint
@@ -776,7 +790,7 @@ public actor RuntimeCoordinator {
                     throw ChauffeurError("worktree_unavailable", "The selected checkout was replaced. Refresh the Git inventory and select its current record", path: session.launch.workingDirectory)
                 }
             }
-            session.launch.configurationPath = try Paths.directory(preset.configurationDirectory)
+            session.launch.configurationPath = launch.configurationUsesDefault == true ? Paths.canonical(preset.configurationDirectory) : try Paths.directory(preset.configurationDirectory)
             session.launch.executablePath = try Paths.executable(preset.executable, environment: baseEnvironment)
             let sharing = sessions.values.filter { peer in
                 peer.id != session.id && peer.state.isLive && peer.launch.preset.kind.isAgent && (peer.launch.workingDirectory == session.launch.workingDirectory
@@ -785,9 +799,9 @@ public actor RuntimeCoordinator {
             guard isShell || sharing.isEmpty || request.allowSharedCheckout else { throw ChauffeurError("shared_checkout", "Checkout is already used by: \(sharing.map(\.title).joined(separator: ", ")). Explicitly choose to share it", path: workingDirectory) }
             let token = isShell ? "" : try await ledger.issueGrant(sessionID: session.id)
             try Task.checkCancellation()
-            var environment = try LaunchPolicy.environment(base: baseEnvironment, preset: preset, projectID: session.projectID, sessionID: session.id, token: token)
+            var environment = try LaunchPolicy.environment(base: baseEnvironment, preset: preset, projectID: session.projectID, sessionID: session.id, token: token, configurationEnvironment: session.launch.configurationEnvironment, allowMissingConfiguration: session.launch.configurationUsesDefault == true)
             environment["CHAUFFEUR_SOCKET"] = root.appendingPathComponent("runtime/runtime.sock").path
-            let shellExports = isShell ? shellAgentExports(project: project, snapshot: snapshot) : [:]
+            let shellExports = isShell ? (session.launch.configurationEnvironment ?? shellAgentExports(project: project, snapshot: snapshot)) : [:]
             environment.merge(shellExports) { _, export in export }
             let coordination = !isShell && request.coordinationEnabled
             let integration = root.appendingPathComponent("runtime/integration/\(session.id)")
@@ -803,6 +817,9 @@ public actor RuntimeCoordinator {
             let arguments = try CLIAdapter.arguments(session: session, endpoint: endpoint ?? "", ctlPath: ctlPath, integrationDirectory: integration, coordination: coordination, resume: false)
             try await persist(session)
             try Task.checkCancellation()
+            if preset.kind == .shell {
+                environment = try ShellStartup.environment(executable: session.launch.executablePath, environment: environment, exports: shellExports, directory: root.appendingPathComponent("runtime/shell-startup/\(session.id)"))
+            }
             let pane = try await terminals.spawn(session: session, payload: ExecPayload(executable: session.launch.executablePath, arguments: arguments, environment: environment, directory: session.launch.workingDirectory, preamble: ShellAgentEnvironment.exportCommand(shellExports)), scrollback: settings.scrollbackLines)
             try Task.checkCancellation()
             session.processID = pane.processID; session.terminalIdentity = pane.paneID; session.state = .activityUnknown
@@ -843,7 +860,7 @@ public actor RuntimeCoordinator {
         // A rejected resume keeps the ended session and its saved terminal.
         // Preflight must finish before stopping the pane or persisting startup.
         try await worktrees.validateResume(session.launch)
-        _ = try Paths.directory(session.launch.configurationPath)
+        if session.launch.configurationUsesDefault != true { _ = try Paths.directory(session.launch.configurationPath) }
         try Task.checkCancellation()
         do {
             try await terminals.stop(sessionID: sessionID, force: true)
@@ -853,17 +870,12 @@ public actor RuntimeCoordinator {
             let token = try await ledger.issueGrant(sessionID: sessionID)
             try Task.checkCancellation()
             var preset = session.launch.preset; preset.configurationDirectory = session.launch.configurationPath
-            var environment = try LaunchPolicy.environment(base: baseEnvironment, preset: preset, projectID: session.projectID, sessionID: sessionID, token: token)
+            var environment = try LaunchPolicy.environment(base: baseEnvironment, preset: preset, projectID: session.projectID, sessionID: sessionID, token: token, configurationEnvironment: session.launch.configurationEnvironment, allowMissingConfiguration: session.launch.configurationUsesDefault == true)
             environment["CHAUFFEUR_SOCKET"] = root.appendingPathComponent("runtime/runtime.sock").path
-            var shellExports: [String: String] = [:]
-            if preset.kind == .shell, let project = (await store.refresh()).projects.first(where: { $0.value.id == session.projectID })?.value {
-                shellExports = shellAgentExports(project: project, snapshot: await store.refresh())
-                environment.merge(shellExports) { _, export in export }
-            }
             let integration = root.appendingPathComponent("runtime/integration/\(session.id)")
             try FileManager.default.createDirectory(at: integration, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
             let arguments = try CLIAdapter.arguments(session: session, endpoint: endpoint ?? "", ctlPath: ctlPath, integrationDirectory: integration, coordination: session.launch.preset.integration != .unavailable, resume: true)
-            let pane = try await terminals.spawn(session: session, payload: ExecPayload(executable: session.launch.executablePath, arguments: arguments, environment: environment, directory: session.launch.workingDirectory, preamble: ShellAgentEnvironment.exportCommand(shellExports)), scrollback: settings.scrollbackLines)
+            let pane = try await terminals.spawn(session: session, payload: ExecPayload(executable: session.launch.executablePath, arguments: arguments, environment: environment, directory: session.launch.workingDirectory), scrollback: settings.scrollbackLines)
             try Task.checkCancellation()
             session.processID = pane.processID; session.terminalIdentity = pane.paneID; session.state = .activityUnknown
             try await persist(session)
@@ -926,13 +938,11 @@ public actor RuntimeCoordinator {
         }
     }
 
-    /// Configuration directories of the project's agent presets, exported into shell sessions so
-    /// `claude` and `codex` typed by hand use the same setup. Missing directories are skipped so a
-    /// shell still opens.
+    /// Both team directories apply even without an enabled agent of that harness.
+    /// Keep missing paths explicit so a shell cannot fall back to another account.
     private func shellAgentExports(project: Project, snapshot: StoreSnapshot) -> [String: String] {
         guard let set = snapshot.presetSets.first(where: { $0.value.id == project.presetSetID })?.value else { return [:] }
-        let variables = ShellAgentEnvironment.variables(presets: snapshot.presets.map(\.value), set: set)
-        return variables.filter { (try? Paths.directory($0.value)) != nil }
+        return snapshot.configurationEnvironment(in: set)
     }
 
     public func attach(sessionID: UUID, sink: any TerminalOutputSink, cols: Int, rows: Int, takeControl: Bool) async throws -> AttachmentGeneration {
@@ -956,7 +966,7 @@ public actor RuntimeCoordinator {
             let peers = members.map { session -> JSONValue in
                 .object(["id": .string(session.id.uuidString), "title": .string(session.title), "status": .string(session.state.label), "workingDirectory": .string(session.launch.workingDirectory), "preset": .string(session.launch.preset.name), "parentID": session.parentID.map { .string($0.uuidString) } ?? .null])
             }
-            return .object(["sessionID": .string(caller.sessionID.uuidString), "parentID": current?.parentID.map { .string($0.uuidString) } ?? .null, "delegationID": current?.delegationID.map { .string($0.uuidString) } ?? .null, "projectID": .string(project.id.uuidString), "project": .string(project.name), "groupID": .string(caller.scope.groupID.uuidString), "group": .string(project.groups.first { $0.id == caller.scope.groupID }?.name ?? "Unavailable"), "repositories": try .from(project.folders.filter(\.registered)), "presets": .array(snapshot.presets.filter { $0.value.setID == project.presetSetID && !$0.value.archived }.map { .object(["id": .string($0.value.id.uuidString), "name": .string($0.value.name), "kind": .string($0.value.kind.rawValue)]) }), "peers": .array(peers)])
+            return .object(["sessionID": .string(caller.sessionID.uuidString), "parentID": current?.parentID.map { .string($0.uuidString) } ?? .null, "delegationID": current?.delegationID.map { .string($0.uuidString) } ?? .null, "projectID": .string(project.id.uuidString), "project": .string(project.name), "groupID": .string(caller.scope.groupID.uuidString), "group": .string(project.groups.first { $0.id == caller.scope.groupID }?.name ?? "Unavailable"), "repositories": try .from(project.folders.filter(\.registered)), "presets": .array(snapshot.agents(teamID: project.presetSetID).map { .object(["id": .string($0.id.uuidString), "name": .string($0.name), "kind": .string($0.kind.rawValue)]) }), "peers": .array(peers)])
         case "chauffeur_send_message":
             return try .from(await ledger.send(caller: caller, recipientID: arguments.uuid("recipientID"), body: arguments.requiredString("body"), references: arguments["references"].array.compactMap(\.string), retryKey: arguments.requiredString("retryKey")))
         case "chauffeur_inbox":
@@ -986,7 +996,7 @@ public actor RuntimeCoordinator {
                 let snapshot = await store.current()
                 guard let project = snapshot.projects.first(where: { $0.value.id == caller.scope.projectID })?.value,
                       let folder = project.folders.first(where: { $0.id == delegation.folderID && $0.registered }) else { throw ChauffeurError("missing_folder", "Delegation folder is unavailable in this project") }
-                guard snapshot.presets.contains(where: { $0.value.id == delegation.presetID && $0.value.setID == project.presetSetID && !$0.value.archived }) else { throw ChauffeurError("missing_preset", "Delegation agent preset is unavailable in this project's set") }
+                guard snapshot.agents(teamID: project.presetSetID).contains(where: { $0.id == delegation.presetID }) else { throw ChauffeurError("missing_preset", "Delegation agent preset is unavailable in this project's set") }
                 delegation.state = .launching; try await ledger.updateDelegation(delegation)
                 if !delegation.shareCheckout {
                     let worktree = try await worktrees.create(projectID: project.id, folder: folder, branch: "chauffeur/\(String(delegation.id.uuidString.prefix(12)).lowercased())", baseRef: "HEAD")

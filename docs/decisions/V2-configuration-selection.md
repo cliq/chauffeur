@@ -6,9 +6,9 @@ is deferred at the user's request.
 
 ## Decision
 
-Build each child environment separately from the login environment. Strip provider authentication/routing variables, inherited Codex/Claude identity, tmux identity, and shell/loader injection variables. Set only the selected CLI directory and Chauffeur session values for that child. Never mutate the app's global environment or create a native configuration directory.
+Build each child environment separately from the login environment. Strip provider authentication/routing variables, inherited Codex/Claude identity, tmux identity, and shell/loader injection variables. Resolve both harness directories from the project team and apply them with Chauffeur session values for that child. Base presets configure commands; independent custom copies can override those commands. Blank team paths use harness defaults. Never mutate the app's global environment or create a native configuration directory.
 
-Reject missing/inaccessible configuration or working directories before spawning. Resolve executable symlinks (including Homebrew installations) and canonicalize filesystem aliases with `realpath`, including `/var` versus `/private/var`. Arguments are a validated array; managed profile, directory, resume and MCP options cannot be overridden by freeform arguments.
+Reject missing/inaccessible explicitly configured directories for the selected agent harness, and invalid working directories, before spawning. Blank team paths permit the CLI to initialize its default directory. Shells preserve explicit path values even when absent; zsh reapplies them after normal user startup files. Resolve executable symlinks (including Homebrew installations) and canonicalize filesystem aliases with `realpath`, including `/var` versus `/private/var`. Arguments are a validated array; managed profile, directory, resume and MCP options cannot be overridden by freeform arguments.
 
 The private one-shot exec handoff is created with mode 0600 under the runtime directory, consumed and deleted by `chauffeurctl internal-exec`, and never returned by diagnostics. The ledger stores only a hash of session credentials.
 

@@ -73,6 +73,13 @@ struct SessionDetailsView: View {
                 DisclosureGroup("Launch Snapshot") {
                     VStack(alignment: .leading, spacing: 10) {
                         detail("Session ID", session.id.uuidString)
+                        detail("Team at launch", session.launch.presetSetName)
+                        if let teamID = session.launch.teamID, teamID != project.presetSetID {
+                            Text("This session uses a different team from the project’s current team.").font(.caption).foregroundStyle(.secondary)
+                        }
+                        if let environment = session.launch.configurationEnvironment {
+                            ForEach(environment.keys.sorted(), id: \.self) { key in detail(key, environment[key]!) }
+                        }
                         detail("Executable", session.launch.executablePath)
                         detail("CLI version", session.launch.executableVersion)
                         detail("Native conversation ID", session.nativeConversationID ?? "Not available")

@@ -128,6 +128,7 @@ struct ProjectWindow: View {
                 .navigationTitle(project.name)
                 .toolbar {
                     ToolbarItemGroup {
+                        ProjectTeamControl(project: project) { editingProject = true }
                         Button { showLaunch() } label: { Label("New Session", systemImage: "plus") }.disabled(!model.online || project.archived)
                         Button { layout.detailsVisible.toggle() } label: { Label("Session Details", systemImage: "sidebar.right") }.disabled(model.session(layout.state.selectedSessionID) == nil)
                         Menu {

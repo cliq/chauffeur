@@ -1,58 +1,86 @@
-# Metadata, agent presets, and launch defaults
+# Metadata, shared presets, and teams
 
-Chauffeur stores editable JSON metadata under
-`~/Library/Application Support/Chauffeur/preset-sets/` and `projects/`. Each
-record has a stable UUID; directory names are assigned at creation and do not
-change when you rename a project or team. The background service writes
-files by atomic replacement and checks the version last read by an editor.
-If a file changed or disappeared, reopen the editor before saving again.
+Chauffeur stores editable JSON metadata in its Application Support directory.
+Global launch definitions live in `base-agent-presets/`; team records and their
+custom agents remain in `preset-sets/`; projects and history live in `projects/`.
+Stable UUIDs identify records. The service uses atomic replacement and version
+checks so a stale editor cannot overwrite another edit.
 
-## Default team
+## Shared Agent Presets
 
-Exactly one non-archived team is the default while any team exists. It is preselected when
-a project is created, and a project saved without an existing team is assigned to it. Mark
-a team as default from the Teams list (**Make Default Team**) or the team editor; the
-service clears the flag on the previous default, refuses to archive the default team, and
-promotes the first team by name when the default is deleted or when older data has no
-flag.
+Settings → Shared Agent Presets defines a name, agent (Claude Code or Codex),
+executable and launch arguments. Configuration directories belong to teams.
+Examples include Claude, Claude with `--model opus`, Codex and Codex with
+`--yolo`. Existing managed-argument validation still applies.
 
-## Agent Preteam revisions and defaults
+Changes to a shared preset affect future launches in every team using all shared
+presets. Each shared preset has its own revision; changing it does not rewrite team files.
+Archiving a shared preset hides it from these teams while preserving existing sessions.
 
-Adding, changing, or archiving an agent preset advances its parent team's revision.
-Changing the set's name, default, or archived state also advances it. Saving
-unchanged values does not. The service owns revision increments, so editing a
-agent preset through another window or the local API follows the same rules.
+## Teams
 
-The team revision and the selected agent preset's values are copied into each launch
-snapshot. Editing agent presets changes future launches; running sessions and their
-recorded configuration directory remain unchanged. Native CLI configuration
-files continue to follow the CLI's own behavior.
+Settings → Teams provides `CLAUDE_CONFIG_DIR` and `CODEX_HOME` directory values.
+A blank value uses the normal agent default (`~/.claude` or `~/.codex`). The
+project team popover and launch sheet show effective paths. Explicit directories
+must be accessible before launching that agent. The app does not create them.
+A missing default directory is left for the CLI to initialize normally.
 
-The new-session sheet first selects the project's last successfully launched
-agent preset, then the team default, then the first available agent preset. Failed launches
-do not replace this preference. Delegated children and conversation resumes do
-not change the user's selection. Changing a project's team clears its
-previous choice; a launch finishing from the old set cannot restore it.
+New teams use **Use all shared presets**. Their available agents follow the global
+catalog automatically. **Custom** uses independent copies with editable names,
+agents, executables and arguments. **Add from Shared Presets…** creates a new copy;
+subsequent shared preset edits do not affect it. Multiple copies of a shared preset are allowed.
+Custom agents always use their team's directory for the selected agent.
 
-An empty team can be saved and assigned to a project. The launch sheet
-explains how to add an agent preset and keeps launch disabled. Missing and archived teams
-have separate recovery instructions; the runtime also rejects unavailable
-agent presets if a launch is requested directly through its API.
+The first switch from all-shared to Custom copies the available shared presets.
+Switching back retains these custom definitions inactive; switching to Custom
+again restores them. Archiving a custom agent removes it from launch choices.
 
-The choice is saved by updating that one field against current project metadata.
-Concurrent project edits remain intact, and a stale editor must reload before
-it can overwrite the resulting file.
+Exactly one active team is the default while any team exists. It supplies the
+initial selection for new projects. Changing the default does not move existing
+projects. A project window's **Team: …** toolbar control remains visible when its
+sidebar is hidden, shows both effective paths, and offers team/project editing.
 
-Each individual file is replaced atomically. An agent preset update writes the new team
-revision before its agent preset file, so an interrupted or failed second write can
-leave an unused revision number. It cannot silently put new agent preset values under
-an older revision. Hand edits are validated and reported without being rewritten;
-when changing agent preset JSON by hand, update the team revision yourself if you want
-that change reflected in the revision label.
+Both team variables are passed to every new agent and shell terminal, even if
+Custom has no agents of a agent. Missing explicit shell paths remain exported
+so typing a CLI cannot silently fall back to a different account. For zsh, a
+private startup wrapper sources normal user startup files and reapplies the team
+values afterward; it never edits those files. Other shells receive the same
+initial environment and retain their own startup-file behavior.
+
+## Launch defaults and history
+
+Agent selection prefers the project's last successful choice, then its team's
+default, then the first available agent. Unavailable choices fall back within the
+same team. Changing the project team clears its remembered selection. Shells do
+not require enabled agent presets, but do require an active project team.
+
+Launch snapshots capture the resolved definition, shared preset revision when inherited,
+team identity/revision and both configuration values. Edits affect future launches;
+running sessions and resumed agent conversations keep their recorded configuration.
+Shell sessions cannot be resumed; open a new shell to use current team settings.
+Native CLI files still follow the CLI's own behavior.
+
+Coordination skill operations resolve a team and agent together. Installation
+applies to the agent directory shared by all matching variants in that team.
+
+## Migration
+
+On service startup, legacy teams become Custom, preserving team, project, preset
+and default/last-used IDs. Historical sessions are not rewritten. Distinct legacy
+launch definitions seed the shared catalog, excluding their configuration paths
+from deduplication. Fresh installations start with basic Claude and Codex entries.
+
+Each team's directory comes from its first preset of that agent, preferring
+active presets, ordered by name with UUID as a tie-breaker. This also resolves
+conflicts automatically. Original team and preset records are backed up under
+`migrations/team-agents-v2/`. The migration is recoverable per team and repeatable;
+it never copies credentials or modifies external CLI directories. Legacy preset
+path fields remain readable for compatibility but no longer control launches
+once their team has migrated.
 
 ## Reference checks and recovery
 
-- Agent Presets must belong to the team whose directory contains them. Sessions,
+- Custom agent presets must belong to the team whose directory contains them. Shared presets are global. Sessions,
   worktrees, and window state must belong to their containing project. Records
   with mismatched ownership or invalid JSON are skipped and reported with their
   path; Chauffeur preserves the files for repair.
@@ -64,7 +92,7 @@ that change reflected in the revision label.
   Archiving agent presets or groups, changing teams, and unregistering folders preserve
   historical references. Use **Archive** or **Remove** in the app rather than
   deleting referenced groups or folder entries from JSON.
-- New writes reject defaults from another team, agent preset moves between teams,
+- New writes resolve defaults against the team’s effective catalog and reject custom agent moves between teams,
   worktrees assigned to another folder, and known foreign window tabs in legacy
   records. Session membership stays fixed. A window's selected worktree path must
   be absolute; its legacy `tabs` and `splitSessionID` fields are decoded and
@@ -105,7 +133,28 @@ approximately once a second, while snapshot requests can consume them sooner.
 Saves and launch preflight still perform an immediate disk reload and version
 check; they do not rely on notification latency to reject stale writes.
 
-## Verification
+## Refactor verification
+
+2026-09-18: all 284 Swift tests, the signed Debug build and
+`Prototypes/runtime_smoke.py` pass. The native team smoke script could not run
+because macOS Accessibility access was unavailable. No real provider requests
+were used for these checks.
+
+`TeamAgentsTests` covers inheritance, independent copies, mode switching, default
+paths and migration. `TeamAgentRuntimeTests` launches fixture processes and zsh
+terminals, checks startup-file overrides, verifies immutable resume configuration,
+and exercises inherited presets through remote inventory and launch.
+
+`Prototypes/team_agents_smoke.py` exercises native shared-preset/team editing, Add from
+Shared Presets and the project team control in an isolated signed app. It requires existing
+macOS Accessibility permission and exits before opening the app when unavailable.
+
+## Previous editor verification
+
+The following describes the pre-refactor editor fixture; its per-preset directory
+controls have been replaced by team fields. Use `team_agents_smoke.py` for the new
+flow.
+
 
 `Prototypes/editor_controls_smoke.py` exercises the native agent preset, project, and
 group editors in an isolated signed Debug app. It creates three projects across
@@ -146,7 +195,7 @@ in [implementation status](implementation-status.md#current-release--2026-09-16)
 
 ## Delete a team
 
-In Settings → Agent Presets, select a team and click the trash button beside Edit,
+In Settings → Teams, select a team and click the trash button beside Edit,
 or choose **Delete Team…** from its context menu. Confirm to remove the team and
 its agent preset definitions. External CLI configuration directories and session
 history are preserved. Switch all linked projects, including archived projects,

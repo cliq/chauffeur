@@ -39,7 +39,7 @@ struct SessionLaunchView: View {
     #endif
     private var currentProject: Project { model.project(project.id) ?? project }
     private var presetSet: PresetSet? { model.presetSets.first { $0.id == currentProject.presetSetID } }
-    private var presets: [AgentPreset] { presetSet?.archived == false ? model.presets.filter { $0.setID == currentProject.presetSetID && !$0.archived } : [] }
+    private var presets: [AgentPreset] { presetSet?.archived == false ? model.snapshot.store.agents(teamID: currentProject.presetSetID) : [] }
     private var unavailablePresetsMessage: String {
         guard let presetSet else { return "This project's team is missing. Choose an available team in Project Settings." }
         if presetSet.archived { return "This team is archived. Reopen it in Settings → Agent Presets or choose another team in Project Settings." }
