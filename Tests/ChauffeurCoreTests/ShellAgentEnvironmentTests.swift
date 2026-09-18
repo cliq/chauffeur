@@ -9,18 +9,17 @@ struct ShellAgentEnvironmentTests {
         return preset
     }
 
-    @Test func exportsOneDirectoryPerAgentKindPreferringTheSetDefault() {
-        var set = PresetSet(name: "Team")
+    @Test func exportsFirstActiveDirectoryPerAgentKind() {
+        let set = PresetSet(name: "Team")
         let claudeA = preset("Alpha", kind: .claude, set: set, directory: "/cfg/claude-a")
         let claudeB = preset("Beta", kind: .claude, set: set, directory: "/cfg/claude-b")
         let codex = preset("Codex", kind: .codex, set: set, directory: "/cfg/codex")
         let archived = preset("Old", kind: .codex, set: set, directory: "/cfg/old", archived: true)
-        set.defaultPresetID = claudeB.id
         let other = PresetSet(name: "Other")
         let foreign = preset("Foreign", kind: .claude, set: other, directory: "/cfg/foreign")
 
         let variables = ShellAgentEnvironment.variables(presets: [claudeA, claudeB, codex, archived, foreign], set: set)
-        #expect(variables == ["CLAUDE_CONFIG_DIR": "/cfg/claude-b", "CODEX_HOME": "/cfg/codex"])
+        #expect(variables == ["CLAUDE_CONFIG_DIR": "/cfg/claude-a", "CODEX_HOME": "/cfg/codex"])
     }
 
     @Test func fallsBackToTheFirstPresetByNameAndSkipsArchivedSets() {

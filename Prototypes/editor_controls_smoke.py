@@ -113,7 +113,7 @@ with tempfile.TemporaryDirectory(prefix='chauffeur-editors-', dir='/tmp') as dir
         wait_for(lambda: not control('Open'), 'native panel completed')
 
     def choose_popup(title, option):
-        identifiers = {'Default agent preset': 'preset-set.default-preset', 'Team': 'project.preset-set'}
+        identifiers = {'Team': 'project.preset-set'}
         if control(identifier=identifiers[title])['value'] == option:
             return
         press(identifier=identifiers[title])
@@ -220,11 +220,6 @@ with tempfile.TemporaryDirectory(prefix='chauffeur-editors-', dir='/tmp') as dir
         summary['literalHyphensAndQuotedArguments'] = True
         print('Preset validation and native file panels passed', flush=True)
 
-        press(identifier='preset-set.edit')
-        wait_for(lambda: control(identifier='preset-set.name'), 'set edit')
-        choose_popup('Default agent preset', 'Native fixture')
-        press('Save')
-        wait_for(lambda: next(s for s in records('presetSets') if s['id'] == client['id']).get('defaultPresetID') == preset['id'], 'default preset saved')
         ax('closeWindow', identifier='com_apple_SwiftUI_Settings_window')
         welcome()
         press('Create New Project…')

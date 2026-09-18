@@ -9,7 +9,7 @@ Base presets describe how an agent starts. Teams supply its configuration direct
 | Scope | Configurable fields |
 | --- | --- |
 | Base agent preset | Display name, harness (Claude Code or Codex), executable, launch arguments |
-| Team | Name, config directory for each harness, Use all base agents / Custom, existing default-team and default-agent choices |
+| Team | Name, config directory for each harness, Use all base agents / Custom, existing default-team choice |
 | Custom team agent | Independent copy of a base preset; editable name, harness, executable and arguments |
 | Project | Assigned team |
 
@@ -31,8 +31,8 @@ Example: Work and Personal both inherit “Claude”, “Claude Opus”, “Code
 
 - Settings has separate Base Agent Presets and Teams sections. Base editors have no config directory field. Teams show both harness directory fields regardless of which presets are enabled.
 - All-base mode shows the effective presets with a route to edit the global definition. Custom mode offers Add from Base, edit, duplicate and remove.
-- On first switching to Custom, seed copies of the currently available base agents so the list remains familiar. Remap the default choice to its copy. Switching back to all-base retains custom definitions inactive; returning to Custom restores them. Remap or clear stale default/last-used selections using the resolver.
-- Retain the current last-successful-agent → team default → first available selection order. The default team still only supplies the initial project assignment; changing the global default does not reassign existing projects.
+- On first switching to Custom, seed copies of the currently available base agents so the list remains familiar. Remap the project’s last-used choice to its copy. Switching back to all-base retains custom definitions inactive; returning to Custom restores them. Remap or clear stale last-used selections using the resolver.
+- Use last-successful-agent → first available selection order. Teams have no default agent preset. The default team still only supplies the initial project assignment; changing the global default does not reassign existing projects.
 - Add a persistent `Team: Work` control in the project window toolbar, visible with the sidebar collapsed. Its popover shows both variable names and effective directory values, and offers Edit Team and Change Project Team. Keep the existing sidebar team label consistent.
 - The new-agent sheet shows the resolved configuration directory. Shell launches use both team variables even when Custom contains no agents of one harness or no agents at all.
 - Team/project changes apply to new sessions. Existing sessions retain their launch configuration; session details show the team and paths captured at launch, including when the project's current team differs.
@@ -94,7 +94,7 @@ Current pitfalls identified in source:
 Preserve existing data:
 
 1. Add a versioned, recoverable migration with backups and a completion marker. Stage and validate migrated records before activation; make interruption/retry idempotent and reject legacy-shaped team updates through the current service. Older application binaries do not understand this schema and must not be run against migrated data.
-2. Keep team/project IDs, custom preset IDs, defaults and last-used choices. Convert existing teams to Custom so their available commands do not change unexpectedly.
+2. Keep team/project IDs, custom preset IDs, last-used choices. Ignore legacy default-preset fields. Convert existing teams to Custom so their available commands do not change unexpectedly.
 3. Move unambiguous per-harness directories onto each team. Do not rewrite historical launch snapshots.
 4. When presets of one harness have conflicting paths, choose the first using the deterministic order above and continue migration. Keep the original records in the migration backup and expose the selected directory in team settings. Historical snapshots and existing sessions retain their original paths; future launches use the selected team directory.
 5. Seed the global catalog from deduplicated existing definitions (name, harness, executable, argument array), excluding config paths from equivalence. Keep team copies independent. For an empty installation, propose basic Claude and Codex entries; additional model/permission variants are user-configured.

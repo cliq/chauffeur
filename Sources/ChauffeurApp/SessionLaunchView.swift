@@ -161,7 +161,7 @@ struct SessionLaunchView: View {
             .onAppear {
                 groupID = currentProject.groups.first { $0.id == initialGroupID && !$0.archived }?.id ?? currentProject.groups.first(where: \.isDefault)?.id
                 let choices = presets.map(\.id)
-                presetID = currentProject.lastPresetID.flatMap { choices.contains($0) ? $0 : nil } ?? model.presetSets.first { $0.id == currentProject.presetSetID }?.defaultPresetID.flatMap { choices.contains($0) ? $0 : nil } ?? presets.first?.id
+                presetID = currentProject.lastPresetID.flatMap { choices.contains($0) ? $0 : nil } ?? presets.first?.id
                 folderID = currentProject.folders.first { $0.id == initialFolderID && $0.registered }?.id ?? currentProject.folders.first(where: \.registered)?.id
                 checkout = startsInNewWorktree ? .newWorktree : .repository
                 if let initialWorktreeID, worktrees.contains(where: { $0.id == initialWorktreeID }) { checkout = .existing(initialWorktreeID) }

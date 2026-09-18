@@ -84,9 +84,6 @@ struct MetadataIntegrityTests {
 
     @Test func writesRejectForeignReferencesAndPreserveArchivedTargets() async throws {
         let fixture = try await MetadataFixture.make(); defer { fixture.cleanup() }
-        var set = try #require(await fixture.store.current().presetSets.first)
-        var badDefault = set.value; badDefault.defaultPresetID = UUID()
-        await #expect(throws: ChauffeurError.self) { try await fixture.store.save(badDefault, expectedVersion: set.version) }
         var foreign = fixture.preset.value; foreign.setID = try await fixture.store.save(PresetSet(name: "Other")).value.id
         await #expect(throws: ChauffeurError.self) { try await fixture.store.save(foreign, expectedVersion: fixture.preset.version) }
         await #expect(throws: ChauffeurError.self) { try await fixture.store.save(Project(name: "No set", presetSetID: UUID())) }
@@ -108,9 +105,6 @@ struct MetadataIntegrityTests {
         try await fixture.store.save(project, expectedVersion: updated.version)
         var archived = fixture.preset.value; archived.archived = true
         try await fixture.store.save(archived, expectedVersion: fixture.preset.version)
-        set = try #require(await fixture.store.current().presetSets.first { $0.value.id == fixture.set.id })
-        var defaultSet = set.value; defaultSet.defaultPresetID = archived.id
-        try await fixture.store.save(defaultSet, expectedVersion: set.version)
         let snapshot = await fixture.store.reload()
         #expect(snapshot.errors.isEmpty)
         #expect(try JSONCoding.encode(snapshot.sessions.first?.value.launch) == JSONCoding.encode(session.value.launch))

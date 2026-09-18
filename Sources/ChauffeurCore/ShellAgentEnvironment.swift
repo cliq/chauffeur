@@ -11,8 +11,8 @@ public enum ShellAgentEnvironment {
         }
     }
 
-    /// One variable per agent kind present in the set. The set's default preset wins for its kind;
-    /// otherwise the first non-archived preset by name. Archived presets and sets are ignored.
+    /// Compatibility for unmigrated teams: first non-archived preset by name
+    /// for each agent. Migrated teams read their configuration directly.
     public static func variables(presets: [AgentPreset], set: PresetSet) -> [String: String] {
         guard !set.archived else { return [:] }
         let candidates = presets.filter { $0.setID == set.id && !$0.archived && $0.kind.isAgent }
@@ -20,8 +20,7 @@ public enum ShellAgentEnvironment {
         for kind in CLIKind.allCases where kind.isAgent {
             guard let name = variableName(for: kind) else { continue }
             let ofKind = candidates.filter { $0.kind == kind }
-            let chosen = ofKind.first { $0.id == set.defaultPresetID }
-                ?? ofKind.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }.first
+            let chosen = ofKind.sorted(by: StoreSnapshot.agentOrder).first
             if let chosen, !chosen.configurationDirectory.isEmpty {
                 result[name] = chosen.configurationDirectory
             }

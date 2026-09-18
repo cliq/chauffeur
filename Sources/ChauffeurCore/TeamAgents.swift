@@ -66,7 +66,10 @@ public extension StoreSnapshot {
         return agents(in: team, includeArchived: includeArchived)
     }
     static func agentOrder(_ lhs: AgentPreset, _ rhs: AgentPreset) -> Bool {
-        let comparison = lhs.name.compare(rhs.name, options: [.numeric, .caseInsensitive], locale: Locale(identifier: "en_US_POSIX"))
+        let locale = Locale(identifier: "en_US_POSIX")
+        let left = lhs.name.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: locale)
+        let right = rhs.name.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: locale)
+        let comparison = left.compare(right, options: .numeric, locale: locale)
         return comparison == .orderedSame ? lhs.id.uuidString < rhs.id.uuidString : comparison == .orderedAscending
     }
     func configurationEnvironment(in team: PresetSet) -> [String: String] {

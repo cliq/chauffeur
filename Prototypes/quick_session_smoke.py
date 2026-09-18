@@ -154,8 +154,6 @@ else:
         default_id = uid()
         call('savePreset', {'record': {'id': default_id, 'setID': set_id, 'name': 'Default agent', 'kind': 'claude', 'executable': str(fake), 'configurationDirectory': str(root), 'arguments': [], 'integration': 'unverified', 'archived': False}})
         preset_set = call('snapshot')['store']['presetSets'][0]
-        preset_set['value']['defaultPresetID'] = default_id
-        preset_set = call('savePresetSet', {'record': preset_set['value'], 'version': preset_set['version']})
         call('saveProject', {'record': {'id': project_id, 'name': 'Quick Session Fixture', 'presetSetID': set_id, 'folders': [{'id': folder_id, 'name': repo.name, 'selectedPath': str(repo), 'canonicalPath': str(repo), 'availability': 'available', 'registered': True}, {'id': other_folder_id, 'name': other_repo.name, 'selectedPath': str(other_repo), 'canonicalPath': str(other_repo), 'availability': 'available', 'registered': True}], 'groups': [{'id': uid(), 'name': 'Default', 'isDefault': True, 'archived': False, 'createdAt': now, 'updatedAt': now}], 'archived': False, 'createdAt': now, 'updatedAt': now, 'lastOpenedAt': now}})
         subprocess.run([str(binary_dir / 'chauffeur-launcher'), str(repo)], capture_output=True, check=True)
         ready = wait_for(lambda: (s if (s := state())['online'] and s['ready'] else None), 'project window ready')
@@ -239,7 +237,7 @@ else:
         retained = next(s for s in updated['sessions'] if s['id'] == live[0]['id'])
         assert retained['launch'] == live[0]['launch']
         command('open', projectID=project_id, folderID=folder_id)
-        wait_for(lambda: state()['sheetWindow'] and state()['sheet'] and state()['sheet']['presetID'] == preset_id, 'last-used preset selected instead of set default')
+        wait_for(lambda: state()['sheetWindow'] and state()['sheet'] and state()['sheet']['presetID'] == preset_id, 'last-used preset selected instead of first available')
         command('cancel')
         wait_for(lambda: state()['sheetWindow'] is None, 'sheet closed')
         empty_id = uid()

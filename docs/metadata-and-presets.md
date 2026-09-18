@@ -49,8 +49,8 @@ initial environment and retain their own startup-file behavior.
 
 ## Launch defaults and history
 
-Agent selection prefers the project's last successful choice, then its team's
-default, then the first available agent. Unavailable choices fall back within the
+Agent selection prefers the project's last successful choice, then the first
+available preset by name. Teams do not have a default agent preset. Unavailable choices fall back within the
 same team. Changing the project team clears its remembered selection. Shells do
 not require enabled agent presets, but do require an active project team.
 
@@ -66,7 +66,7 @@ applies to the agent directory shared by all matching variants in that team.
 ## Migration
 
 On service startup, legacy teams become Custom, preserving team, project, preset
-and default/last-used IDs. Historical sessions are not rewritten. Distinct legacy
+and last-used IDs. Legacy team default-preset fields are ignored. Historical sessions are not rewritten. Distinct legacy
 launch definitions seed the shared catalog, excluding their configuration paths
 from deduplication. Fresh installations start with basic Claude and Codex entries.
 
@@ -84,7 +84,7 @@ once their team has migrated.
   worktrees, and window state must belong to their containing project. Records
   with mismatched ownership or invalid JSON are skipped and reported with their
   path; Chauffeur preserves the files for repair.
-- Missing defaults, teams, last-used agent presets, groups, folders, worktrees,
+- Missing teams, last-used agent presets, groups, folders, worktrees,
   parents, and window-tab targets are reported with the referring file's path.
   Well-formed historical records remain available. A missing team is never
   silently replaced by a different one.
@@ -92,7 +92,7 @@ once their team has migrated.
   Archiving agent presets or groups, changing teams, and unregistering folders preserve
   historical references. Use **Archive** or **Remove** in the app rather than
   deleting referenced groups or folder entries from JSON.
-- New writes resolve defaults against the team’s effective catalog and reject custom agent moves between teams,
+- New writes reject custom agent moves between teams,
   worktrees assigned to another folder, and known foreign window tabs in legacy
   records. Session membership stays fixed. A window's selected worktree path must
   be absolute; its legacy `tabs` and `splitSessionID` fields are decoded and
@@ -139,6 +139,11 @@ check; they do not rely on notification latency to reject stale writes.
 `Prototypes/runtime_smoke.py` pass. The native team smoke script could not run
 because macOS Accessibility access was unavailable. No real provider requests
 were used for these checks.
+
+Follow-up: removing the per-team default agent preset and revising the folder
+labels/layout passes all 285 tests with `swift test --no-parallel` after a clean
+rebuild. The parallel run encountered subprocess output-pipe failures; the serial
+run completed without failures.
 
 `TeamAgentsTests` covers inheritance, independent copies, mode switching, default
 paths and migration. `TeamAgentRuntimeTests` launches fixture processes and zsh

@@ -8,11 +8,6 @@ enum StoreReferences {
         func require(_ condition: Bool, _ message: String, _ path: String, code: String = "unresolved_reference") {
             if !condition { errors.append(ChauffeurError(code, message, path: path)) }
         }
-        for stored in snapshot.presetSets {
-            if let id = stored.value.defaultPresetID {
-                require(snapshot.agents(in: stored.value, includeArchived: true).contains { $0.id == id }, "Default agent preset is missing or belongs to another team", stored.path)
-            }
-        }
         for stored in snapshot.projects {
             let project = stored.value
             require(snapshot.presetSets.contains { $0.value.id == project.presetSetID }, "Project's team is missing", stored.path, code: "unresolved_preset_set")

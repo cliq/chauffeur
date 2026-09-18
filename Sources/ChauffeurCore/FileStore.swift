@@ -277,28 +277,18 @@ public actor FileStore {
         if existing?.value.agentSelection == .allBase, value.agentSelection == .custom,
            existing?.value.customAgentsInitialized != true {
             for base in snapshot.baseAgentPresets.map(\.value).filter({ !$0.archived }) {
-                if let copy = snapshot.presets.first(where: { $0.value.setID == value.id && $0.value.sourceBaseID == base.id })?.value {
-                    if value.defaultPresetID == base.id { value.defaultPresetID = copy.id }
+                if snapshot.presets.contains(where: { $0.value.setID == value.id && $0.value.sourceBaseID == base.id }) {
                     continue
                 }
                 let copy = base.agent(in: value, copy: true)
                 let path = url.deletingLastPathComponent().appendingPathComponent("presets/\(copy.id.uuidString).json")
                 let stored = try write(copy, at: path, expectedVersion: nil)
                 snapshot.presets.append(stored)
-                if value.defaultPresetID == base.id { value.defaultPresetID = copy.id }
             }
         }
         if value.agentSelection == .custom { value.customAgentsInitialized = true }
-        if existing?.value.agentSelection != value.agentSelection,
-           let id = value.defaultPresetID,
-           !snapshot.agents(in: value, includeArchived: true).contains(where: { $0.id == id }) {
-            value.defaultPresetID = nil
-        }
-        if let id = value.defaultPresetID {
-            try reference(snapshot.agents(in: value, includeArchived: true).contains { $0.id == id }, "Choose a default agent preset from this team", at: url)
-        }
         if let existing {
-            let changed = existing.value.name != value.name || existing.value.defaultPresetID != value.defaultPresetID || existing.value.archived != value.archived || existing.value.isDefault != value.isDefault || existing.value.agentSelection != value.agentSelection || existing.value.configurationDirectories != value.configurationDirectories
+            let changed = existing.value.name != value.name || existing.value.archived != value.archived || existing.value.isDefault != value.isDefault || existing.value.agentSelection != value.agentSelection || existing.value.configurationDirectories != value.configurationDirectories
             value.revision = changed ? try nextRevision(existing.value.revision) : existing.value.revision
         }
         let saved = try write(value, at: url, expectedVersion: expectedVersion)

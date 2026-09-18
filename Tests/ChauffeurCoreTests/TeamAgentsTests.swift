@@ -22,11 +22,11 @@ struct TeamAgentsTests {
         var snapshot = await store.reload()
         #expect(snapshot.agents(in: work).first?.configurationDirectory == "/work/claude")
         #expect(snapshot.agents(in: personal).first?.configurationDirectory == "/personal/claude")
-        work.agentSelection = .custom; work.defaultPresetID = opus.id
+        work.agentSelection = .custom
         let custom = try await store.save(work, expectedVersion: savedWork.version)
         snapshot = await store.reload()
         let copy = try #require(snapshot.agents(in: custom.value).first)
-        #expect(copy.id != opus.id && custom.value.defaultPresetID == copy.id)
+        #expect(copy.id != opus.id)
         #expect(snapshot.projects.first?.value.lastPresetID == copy.id)
         #expect(snapshot.agents(in: custom.value).allSatisfy { $0.id != opus.id })
         opus.arguments = ["--model", "sonnet"]
@@ -46,23 +46,19 @@ struct TeamAgentsTests {
     @Test func migrationPreservesIDsAndPicksFirstActiveDirectoryAndIsIdempotent() async throws {
         let root = temporaryRoot(); defer { try? FileManager.default.removeItem(at: root) }
         let store = try FileStore(root: root)
-        var team = PresetSet(name: "Legacy")
+        let team = PresetSet(name: "Legacy")
         try await store.save(team)
         let zeta = AgentPreset(setID: team.id, name: "Zeta", kind: .codex, executable: "codex", configurationDirectory: "/old/zeta")
         let alpha = AgentPreset(setID: team.id, name: "Alpha", kind: .codex, executable: "codex", configurationDirectory: "/old/alpha")
         var archived = AgentPreset(setID: team.id, name: "AAA", kind: .codex, executable: "codex", configurationDirectory: "/old/archived")
         archived.archived = true
         try await store.save(zeta); try await store.save(alpha); try await store.save(archived)
-        let oldTeam = try #require(await store.reload().presetSets.first)
-        team.defaultPresetID = zeta.id
-        try await store.save(team, expectedVersion: oldTeam.version)
         var project = Project(name: "Project", presetSetID: team.id); project.lastPresetID = zeta.id
         try await store.save(project)
         try await store.migrateTeamAgents()
         let first = await store.reload()
         let migrated = try #require(first.presetSets.first?.value)
         #expect(migrated.id == team.id && migrated.agentSelection == .custom)
-        #expect(migrated.defaultPresetID == zeta.id)
         #expect(migrated.configurationDirectories?["codex"] == "/old/alpha")
         #expect(Set(first.agents(in: migrated).map(\.id)) == [alpha.id, zeta.id])
         #expect(first.agents(in: migrated).allSatisfy { $0.configurationDirectory == "/old/alpha" })
@@ -90,6 +86,16 @@ struct TeamAgentsTests {
         }
         #expect(snapshot.agents(in: team.value).first?.arguments == ["--yolo"])
         #expect(snapshot.presetSets.first?.version == team.version)
+    }
+
+    @Test func legacyTeamDefaultIsIgnoredWhenReadingAndNotWrittenBack() throws {
+        let team = PresetSet(name: "Legacy")
+        var object = try #require(JSONSerialization.jsonObject(with: JSONCoding.encode(team)) as? [String: Any])
+        object["defaultPresetID"] = UUID().uuidString
+        let decoded = try JSONCoding.decode(PresetSet.self, from: JSONSerialization.data(withJSONObject: object))
+        #expect(decoded == team)
+        let saved = try #require(JSONSerialization.jsonObject(with: JSONCoding.encode(decoded)) as? [String: Any])
+        #expect(saved["defaultPresetID"] == nil)
     }
 
     @Test func oldSnapshotsDecodeWithoutAGlobalCatalog() throws {

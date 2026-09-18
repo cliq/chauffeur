@@ -25,7 +25,6 @@ public struct PresetSet: Record, Equatable {
     public var agentSelection: AgentSelection?
     public var customAgentsInitialized: Bool?
     public var configurationDirectories: [String: String]?
-    public var defaultPresetID: UUID?
     public var revision = 1
     public var archived = false
     /// The default team: preselected for new projects and used when nothing names a team.
@@ -42,7 +41,6 @@ public struct PresetSet: Record, Equatable {
         customAgentsInitialized = try container.decodeIfPresent(Bool.self, forKey: .customAgentsInitialized)
         agentSelection = try container.decodeIfPresent(AgentSelection.self, forKey: .agentSelection)
         configurationDirectories = try container.decodeIfPresent([String: String].self, forKey: .configurationDirectories)
-        defaultPresetID = try container.decodeIfPresent(UUID.self, forKey: .defaultPresetID)
         revision = try container.decodeIfPresent(Int.self, forKey: .revision) ?? 1
         archived = try container.decodeIfPresent(Bool.self, forKey: .archived) ?? false
         isDefault = try container.decodeIfPresent(Bool.self, forKey: .isDefault) ?? false

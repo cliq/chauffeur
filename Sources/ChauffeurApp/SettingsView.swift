@@ -43,7 +43,14 @@ struct SettingsView: View {
                         HStack { Text(set.name).font(.title2); Spacer(); Text("Revision \(set.revision)").foregroundStyle(.secondary) }
                         Text(set.agentSelection == .allBase ? "Uses all shared presets. Changes to shared presets apply to new launches." : "Custom presets are independent copies. Team directories apply to every agent.").font(.callout).foregroundStyle(.secondary)
                         ForEach(CLIKind.allCases.filter(\.isAgent), id: \.self) { kind in
-                            LabeledContent(ShellAgentEnvironment.variableName(for: kind)!, value: set.configurationDirectory(for: kind)).font(.caption).textSelection(.enabled)
+                            LabeledContent {
+                                Text(set.configurationDirectory(for: kind)).font(.caption).textSelection(.enabled)
+                            } label: {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(kind == .claude ? "Claude config folder" : "Codex config folder")
+                                    Text(ShellAgentEnvironment.variableName(for: kind)!).font(.caption.monospaced()).foregroundStyle(.secondary)
+                                }
+                            }
                         }
                         AgentPresetList(set: set, revealedPresetID: $revealedPresetID, edit: { agent in
                             if set.agentSelection == .allBase { editedBase = model.snapshot.store.baseAgentPresets.first { $0.value.id == agent.id }?.value }
@@ -184,7 +191,6 @@ struct AgentPresetList: View {
             }
             Text(preset.configurationDirectory).font(.caption).textSelection(.enabled)
             Button("Chauffeur Skill…") { showSkill(preset) }.accessibilityIdentifier("preset-skill-\(preset.id.uuidString)")
-            if set.defaultPresetID == preset.id { Text("Default agent preset").font(.caption).foregroundStyle(.tint) }
         }
         .padding(.horizontal, 12).padding(.vertical, 10).frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityElement(children: .contain).accessibilityIdentifier("preset.row-\(preset.id.uuidString)")
@@ -225,7 +231,6 @@ struct PresetSetEditor: View {
     @State private var selection: AgentSelection = .allBase
     @State private var claudeDirectory = ""
     @State private var codexDirectory = ""
-    @State private var defaultID: UUID?
     @State private var archived = false
     @State private var isDefault = false
     @State private var version: String?
@@ -234,46 +239,53 @@ struct PresetSetEditor: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
             Text(presetSet == nil ? "Create Team" : "Edit Team").font(.title2)
-            Form {
-                TextField("Name", text: $name).accessibilityIdentifier("preset-set.name")
+            VStack(alignment: .leading, spacing: 14) {
+                HStack {
+                    Text("Name")
+                    TextField("Name", text: $name).labelsHidden().accessibilityIdentifier("preset-set.name")
+                }
                 Picker("Agents", selection: $selection) {
                     Text("Use all shared presets").tag(AgentSelection.allBase)
                     Text("Custom").tag(AgentSelection.custom)
                 }.accessibilityIdentifier("team.agent-selection")
-                Text(selection == .allBase ? "Shared preset changes apply automatically to future launches." : "Add independent copies of shared presets and customize them.").font(.caption).foregroundStyle(.secondary)
-                directoryField("CLAUDE_CONFIG_DIR", value: $claudeDirectory)
-                directoryField("CODEX_HOME", value: $codexDirectory)
-                Text("Leave a directory blank to use the agent’s normal default. Both values apply to new shell terminals.").font(.caption).foregroundStyle(.secondary)
-                if let presetSet {
-                    Picker("Default agent preset", selection: $defaultID) {
-                        Text("None").tag(UUID?.none)
-                        ForEach(model.snapshot.store.agents(in: presetSet)) { preset in Text(preset.name).tag(Optional(preset.id)) }
-                    }.accessibilityIdentifier("preset-set.default-preset")
+                Text(selection == .allBase ? "Shared preset changes apply automatically to future launches." : "Add independent copies of shared presets and customize them.").font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                directoryField("Claude config folder", variable: "CLAUDE_CONFIG_DIR", value: $claudeDirectory)
+                directoryField("Codex config folder", variable: "CODEX_HOME", value: $codexDirectory)
+                Text("Leave a directory blank to use the agent’s normal default. Both values apply to new shell terminals.").font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                if presetSet != nil {
                     Toggle("Archived", isOn: $archived).disabled(isDefault)
                 }
                 Toggle("Default team", isOn: $isDefault).disabled(presetSet?.isDefault == true).accessibilityIdentifier("preset-set.default-team")
-                if presetSet?.isDefault == true { Text("Make another team the default to change this.").font(.caption).foregroundStyle(.secondary) }
+                if presetSet?.isDefault == true { Text("Make another team the default to change this.").font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true) }
             }
-            if let failure { Text(failure).foregroundStyle(.red) }
+            if let failure { Text(failure).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true) }
             HStack {
                 Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction).disabled(saving); Spacer()
                 Button(saving ? "Saving…" : "Save") {
                     guard !saving else { return }
                     saving = true; failure = nil
-                    var value = presetSet ?? PresetSet(name: name, agentSelection: selection); value.agentSelection = selection; value.configurationDirectories = ["claude": (claudeDirectory as NSString).expandingTildeInPath, "codex": (codexDirectory as NSString).expandingTildeInPath]; value.name = name; value.defaultPresetID = defaultID; value.archived = archived; value.isDefault = isDefault
+                    var value = presetSet ?? PresetSet(name: name, agentSelection: selection); value.agentSelection = selection; value.configurationDirectories = ["claude": (claudeDirectory as NSString).expandingTildeInPath, "codex": (codexDirectory as NSString).expandingTildeInPath]; value.name = name; value.archived = archived; value.isDefault = isDefault
                     Task { defer { saving = false }; do { try await model.save("savePresetSet", value, version: version); completion(value.id); dismiss() } catch { failure = error.localizedDescription } }
                 }.keyboardShortcut(.defaultAction).disabled(saving || name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty).accessibilityIdentifier("preset-set.save")
             }
-        }.padding(24).frame(width: 600)
-            .onAppear { selection = presetSet?.agentSelection ?? .allBase; claudeDirectory = presetSet?.configurationDirectories?["claude"] ?? ""; codexDirectory = presetSet?.configurationDirectories?["codex"] ?? ""; name = presetSet?.name ?? ""; defaultID = presetSet?.defaultPresetID; archived = presetSet?.archived ?? false; isDefault = presetSet?.isDefault ?? model.presetSets.allSatisfy(\.archived); version = model.snapshot.store.presetSets.first { $0.value.id == presetSet?.id }?.version }
+        }.frame(width: 552, alignment: .leading).padding(24)
+            .onAppear { selection = presetSet?.agentSelection ?? .allBase; claudeDirectory = presetSet?.configurationDirectories?["claude"] ?? ""; codexDirectory = presetSet?.configurationDirectories?["codex"] ?? ""; name = presetSet?.name ?? ""; archived = presetSet?.archived ?? false; isDefault = presetSet?.isDefault ?? model.presetSets.allSatisfy(\.archived); version = model.snapshot.store.presetSets.first { $0.value.id == presetSet?.id }?.version }
     }
-    private func directoryField(_ label: String, value: Binding<String>) -> some View {
-        HStack {
-            TextField(label, text: value).accessibilityIdentifier("team.\(label)")
-            Button("Choose…") {
-                if let path = FilePanels.directory(title: "Choose \(label)", startingAt: FileManager.default.homeDirectoryForCurrentUser, showsHiddenFiles: true) { value.wrappedValue = path }
+    private func directoryField(_ title: String, variable: String, value: Binding<String>) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title).fontWeight(.medium)
+                Text(variable).font(.caption.monospaced()).foregroundStyle(.secondary)
             }
-        }
+            HStack {
+                TextField(title, text: value).labelsHidden()
+                    .accessibilityIdentifier("team.\(variable)")
+                    .frame(minWidth: 0, maxWidth: .infinity)
+                Button("Choose…") {
+                    if let path = FilePanels.directory(title: "Choose \(title)", startingAt: FileManager.default.homeDirectoryForCurrentUser, showsHiddenFiles: true) { value.wrappedValue = path }
+                }
+            }
+        }.frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
