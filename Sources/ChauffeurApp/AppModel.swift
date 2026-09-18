@@ -350,8 +350,16 @@ struct AppSnapshot: Decodable, Sendable {
     private func completeServiceRestart() async throws {
         defer { isRestartingService = false }
         do {
+            serviceMessage = "Restarting background service…"
             if service.status == .enabled { try await service.unregister() }
-            try service.register(); serviceRegistrationError = nil; serviceDiagnosticError = nil; reconnect()
+            try service.register()
+            if service.status == .enabled {
+                // Refreshing SMAppService registration can leave the previous
+                // process alive. Explicitly replace the registered launchd job's
+                // process, using the bundled label (including private test jobs).
+                try await restartRuntimeProcess()
+            }
+            serviceRegistrationError = nil; serviceDiagnosticError = nil; reconnect()
             // Record this registration only after a matching runtime connects.
             // The subscription reconnects when startup finishes. An immediate
             // snapshot request would report a spurious error during shell setup.
@@ -361,6 +369,29 @@ struct AppSnapshot: Decodable, Sendable {
             serviceMessage = serviceRegistrationError!
             throw error
         }
+    }
+    private func restartRuntimeProcess() async throws {
+        let plist = Bundle.main.bundleURL.appendingPathComponent("Contents/Library/LaunchAgents/dev.chauffeur.runtime.plist")
+        let configuration = try PropertyListSerialization.propertyList(from: Data(contentsOf: plist), format: nil)
+        guard let label = (configuration as? [String: Any])?["Label"] as? String, !label.isEmpty else {
+            throw ChauffeurError("service_restart_failed", "The bundled background service has no launchd label")
+        }
+        let job = "gui/\(getuid())/\(label)"
+        try await Task.detached {
+            let process = Process()
+            let errors = Pipe()
+            process.executableURL = URL(fileURLWithPath: "/bin/launchctl")
+            process.arguments = ["kickstart", "-k", job]
+            process.standardOutput = FileHandle.nullDevice
+            process.standardError = errors
+            try process.run()
+            process.waitUntilExit()
+            guard process.terminationStatus == 0 else {
+                let detail = String(decoding: errors.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                throw ChauffeurError("service_restart_failed", "launchd could not restart the background service (\(process.terminationStatus)): \(detail)")
+            }
+        }.value
     }
     func openServiceSettings() { SMAppService.openSystemSettingsLoginItems() }
     func call(_ method: String, _ params: JSONValue = .object([:])) async throws -> JSONValue {

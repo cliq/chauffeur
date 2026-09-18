@@ -101,7 +101,7 @@ with tempfile.TemporaryDirectory(prefix='chauffeur-install-', dir='/tmp') as tem
     (app / launch_plist).write_bytes(plistlib.dumps(config))
     subprocess.run(['codesign', '--force', '--sign', signing, '--preserve-metadata=entitlements,flags,runtime', str(app)], check=True)
 
-    def probe(name, connection=socket_path, unregister=False, expected_online=True, stop=False):
+    def probe(name, connection=socket_path, unregister=False, expected_online=True, stop=False, restart=False):
         directory = root / 'probe-reports' / name
         directory.mkdir(parents=True, exist_ok=True)
         report = directory / 'service-probe.json'
@@ -112,6 +112,8 @@ with tempfile.TemporaryDirectory(prefix='chauffeur-install-', dir='/tmp') as tem
             environment['CHAUFFEUR_SERVICE_PROBE_ACTION'] = 'unregister'
         if stop:
             environment['CHAUFFEUR_SERVICE_PROBE_ACTION'] = 'stop'
+        if restart:
+            environment['CHAUFFEUR_SERVICE_PROBE_RESTART'] = '1'
         with (directory / 'app.log').open('w') as log:
             process = subprocess.Popen([str(app / 'Contents/MacOS/Chauffeur')], env=environment, cwd=root, stdout=log, stderr=log)
             try:
@@ -148,6 +150,13 @@ with tempfile.TemporaryDirectory(prefix='chauffeur-install-', dir='/tmp') as tem
         stable = probe('unchanged-relaunch')
         assert stable['health']['runtimeID'] == relocated['health']['runtimeID'], 'Unchanged app unnecessarily restarted its service'
 
+        for attempt in range(2):
+            restarted = probe(f'explicit-restart-{attempt + 1}', restart=True)
+            assert restarted['health']['runtimeID'] != stable['health']['runtimeID'], 'Restart Service kept the old runtime instance'
+            assert restarted['health']['pid'] != stable['health']['pid'], 'Restart Service kept the old process'
+            assert restarted['health']['identity'] == stable['health']['identity']
+            stable = restarted
+
         stopped = probe('stop', expected_online=False, stop=True)
         assert stopped['stopped'] and stopped['status'] == 'notRegistered', stopped
         assert subprocess.run(['launchctl', 'print', job], capture_output=True).returncode != 0
@@ -167,7 +176,7 @@ with tempfile.TemporaryDirectory(prefix='chauffeur-install-', dir='/tmp') as tem
         rejected = probe('reject-foreign-runtime', connection=release_socket, expected_online=False)
         assert 'different app build or location' in rejected['message'], rejected
         assert call(release_socket)['runtimeID'] == foreign['runtimeID'], 'Identity recovery changed the foreign runtime'
-        summary = {'passed': True, 'separateBuildIdentities': True, 'moveRefreshesRegistration': True, 'unchangedLaunchKeepsRuntime': True, 'foreignRuntimeRejected': True, 'quitServiceStaysStopped': True, 'reopenStartsService': True}
+        summary = {'passed': True, 'separateBuildIdentities': True, 'moveRefreshesRegistration': True, 'unchangedLaunchKeepsRuntime': True, 'explicitRestartReplacesProcess': True, 'foreignRuntimeRejected': True, 'quitServiceStaysStopped': True, 'reopenStartsService': True}
         (artifacts / 'summary.json').write_text(json.dumps(summary, indent=2) + '\n')
         print(json.dumps(summary, indent=2))
     finally:

@@ -33,12 +33,16 @@ logs, URL schemes, and terminal commands are independent. An explicit
 `CHAUFFEUR_SOCKET` override remains a custom connection and is not marked verified.
 
 Use **Settings → Runtime → Restart Service** when the service is
-unavailable. This unregisters the existing job, waits for
-macOS to finish stopping it, registers the current bundle, and reconnects the UI.
-Registration failures are shown with their original macOS error.
+unavailable or still running an older build. This refreshes the current bundle's
+registration, then explicitly replaces the registered job's process with
+`launchctl kickstart -k` before reconnecting the UI. Refreshing registration alone
+can leave the previous process alive. The job label comes from the bundled
+LaunchAgent plist, so Debug, Release, and private test services stay separate.
+Registration and process-restart failures are shown with their original error.
 
 `Prototypes/service_installation_smoke.py` checks relocation of an unchanged signed
-app, reuse of the runtime on an unchanged relaunch, distinct build metadata, and
+app, reuse of the runtime on an unchanged relaunch, process replacement on repeated
+explicit restarts, distinct build metadata, and
 rejection of a Release runtime by the Debug app. It uses a unique service label
 and empty temporary stores. Evidence is under `.local/service-installation-artifacts/`.
 
