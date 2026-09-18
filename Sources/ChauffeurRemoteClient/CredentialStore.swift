@@ -166,7 +166,11 @@ public final class FileCredentialStore: CredentialStore {
     public func save(_ host: SavedHost) throws {
         try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         let data = try JSONEncoder().encode(host)
-        try data.write(to: url, options: [.atomic, .completeFileProtection])
+        var options: Data.WritingOptions = [.atomic]
+        #if os(iOS)
+        options.insert(.completeFileProtection)
+        #endif
+        try data.write(to: url, options: options)
         try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
     }
 
