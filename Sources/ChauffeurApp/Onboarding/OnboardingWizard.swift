@@ -41,6 +41,10 @@ struct OnboardingWizard: View {
                     Text(error).textSelection(.enabled)
                     Spacer()
                     Button("Reload setup") { Task { await setup.perform { try await setup.reload() } } }
+                    Button("Close Setup") { dismiss() }
+                        .keyboardShortcut(.cancelAction)
+                        .help("Close without discarding the saved draft. Changes that could not be saved may be lost.")
+                        .accessibilityIdentifier("onboarding.closeAfterError")
                 }.font(.callout).foregroundStyle(.red).accessibilityIdentifier("onboarding.error")
             }
             Divider()
