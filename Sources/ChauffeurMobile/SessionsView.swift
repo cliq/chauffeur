@@ -2,7 +2,7 @@ import SwiftUI
 import ChauffeurRemoteProtocol
 import ChauffeurRemoteClient
 
-/// 02 / All live sessions, grouped by project then checkout. Projects without sessions still appear.
+/// 02 / All live sessions, grouped by project then checkout.
 struct SessionsView: View {
     var model: MobileAppModel
 
@@ -36,9 +36,10 @@ struct SessionsView: View {
             }
 
             if let inventory = model.inventory {
-                let projects = inventory.projects.filter { !$0.archived }
+                let activeProjectIDs = Set(model.liveSessions.map(\.projectID))
+                let projects = inventory.projects.filter { !$0.archived && activeProjectIDs.contains($0.id) }
                 if projects.isEmpty {
-                    ContentUnavailableView("No projects yet", systemImage: "folder", description: Text("Projects registered on your Mac appear here."))
+                    ContentUnavailableView("No active sessions", systemImage: "terminal", description: Text("Tap + to start a new session."))
                 } else {
                     ForEach(projects) { project in
                         ProjectSection(model: model, inventory: inventory, project: project)
@@ -120,26 +121,13 @@ private struct ProjectSection: View {
 
     var body: some View {
         Section {
-            if sessions.isEmpty {
-                HStack {
-                    Text("No active sessions")
-                        .foregroundStyle(.secondary)
-                    Spacer()
-                    Button("Launch here") {
-                        model.path.append(.location(projectID: project.id))
+            ForEach(checkoutGroups) { group in
+                CheckoutHeader(group: group)
+                ForEach(group.sessions) { session in
+                    SessionRow(session: session) {
+                        model.openSession(session.id)
                     }
-                    .font(.subheadline)
                     .disabled(!model.isConnected)
-                }
-            } else {
-                ForEach(checkoutGroups) { group in
-                    CheckoutHeader(group: group)
-                    ForEach(group.sessions) { session in
-                        SessionRow(session: session) {
-                            model.openSession(session.id)
-                        }
-                        .disabled(!model.isConnected)
-                    }
                 }
             }
         } header: {

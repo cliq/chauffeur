@@ -23,7 +23,7 @@ struct LaunchLocation: Hashable {
 enum MobileRoute: Hashable {
     case sessions
     case terminal
-    /// `projectID` preselects the project ("Launch here" from Sessions).
+    /// `projectID` optionally preselects the project for a new session.
     case location(projectID: UUID?)
     case launch(LaunchLocation)
 }
