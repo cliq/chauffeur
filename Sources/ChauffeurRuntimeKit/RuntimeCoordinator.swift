@@ -38,6 +38,7 @@ public actor RuntimeCoordinator {
     private var lastMessageCleanup = Date.distantPast
     private var snapshotStorage = SnapshotStorageStatus(budgetBytes: RetentionSettings().snapshotBudgetBytes)
     private var skillInstaller: SkillInstaller?
+    private let onboarding: OnboardingCoordinator
     private var notificationAuthorization = NotificationAuthorization.unknown
     private var notificationHeartbeat: Date?
     private var notificationHelperAvailable = false
@@ -72,12 +73,14 @@ public actor RuntimeCoordinator {
         let legacyWorktreeRoot = root.appendingPathComponent("worktrees")
         worktrees = WorktreeManager(root: worktreeRoot ?? legacyWorktreeRoot, legacyRoots: worktreeRoot == nil ? [] : [legacyWorktreeRoot])
         snapshots = try SnapshotStore(root: root.appendingPathComponent("runtime/snapshots"))
+        onboarding = try OnboardingCoordinator(store: store, root: root, environment: environment)
     }
     public func start() async throws {
         logs?.append(RuntimeLogEntry(.runtimeStarting, runtimeID: id))
         try await store.migrateTeamAgents()
         let snapshot = await store.reload()
         try await normalizeDefaultTeam()
+        try await onboarding.recover()
         // The ledger preserves accepted membership and orphaned live sessions
         // even if a project directory was removed while the service was running.
         let recorded = try await ledger.allSessions()
@@ -319,6 +322,15 @@ public actor RuntimeCoordinator {
     }
     public func handle(_ request: IPCRequest) async throws -> JSONValue {
         guard request.version == WireProtocol.major else { throw ChauffeurError("protocol_mismatch", "App and runtime protocol versions differ. Restart the background service") }
+        if OnboardingCoordinator.methods.contains(request.method) {
+            let result = try await onboarding.handle(request)
+            if request.method == "finishSetup" {
+                let preferred = (try? await store.setupDraft())?.value.defaultTeamID
+                try await normalizeDefaultTeam(preferring: preferred)
+                try await onboarding.refreshTeamVersions()
+            }
+            return result
+        }
         let params = request.params
         switch request.method {
         case "hello", "version", "status": return health()

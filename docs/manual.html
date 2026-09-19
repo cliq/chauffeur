@@ -83,11 +83,11 @@
 
     <section id="start">
       <h2>1. First launch</h2>
-      <p>This personal build targets Apple silicon and macOS 15 or later. Install the CLIs you intend to use, Git, and tmux, and sign in through each CLI before creating a Chauffeur agent preset. Chauffeur bundles its own background runtime and helpers; it does not install or upgrade Codex, Claude Code, or tmux.</p>
+      <p>This personal build targets Apple silicon and macOS 15 or later. Install the CLIs you intend to use, Git, and tmux. The team setup wizard can help you sign in. Chauffeur bundles its own background runtime and helpers; it does not install or upgrade Codex, Claude Code, or tmux.</p>
       <ol>
         <li>Open <code>build/Build/Products/Release/Chauffeur.app</code> from the project checkout. This build is signed with Leonardo Lobato’s Developer ID certificate.</li>
         <li>Check the service line in Welcome. If macOS requires background-service approval, use its link to <strong>System Settings → General → Login Items &amp; Extensions</strong>, then return to Chauffeur.</li>
-        <li>Choose <strong>Manage Agent Presets…</strong>. Create a team and at least one agent preset.</li>
+        <li>Choose <strong>Set Up Teams…</strong>. Select your agents and create a team using existing or new configurations.</li>
         <li>Return to Welcome and choose <strong>Create New Project…</strong>. Give it a name, choose that team, and add a repository or folder.</li>
         <li>In the project window, press <kbd>⌘N</kbd>, review the agent preset and working directory, and choose <strong>Launch Session</strong>.</li>
         <li>Complete any native trust, sign-in, or approval prompt in the embedded CLI, then type your task.</li>
@@ -114,18 +114,19 @@
 
     <section id="presets">
       <h2>3. Agent Presets and accounts</h2>
-      <h3>Create a team and agent preset</h3>
+      <h3>Set up teams and accounts</h3>
       <ol>
-        <li>Open <strong>Chauffeur → Settings → Agent Presets</strong>.</li>
-        <li>Choose <strong>Add Team…</strong>, enter a name, and save.</li>
-        <li>Select the team and choose <strong>Add Agent Preset…</strong>.</li>
-        <li>Select <strong>Codex</strong> or <strong>Claude Code</strong>. Optionally enter a custom name; a blank name uses the agent’s name.</li>
-        <li>Use an executable name such as <code>codex</code> or <code>claude</code>, or choose its full path. Full paths are useful when your login-shell environment cannot be loaded.</li>
-        <li>Choose the <strong>Existing configuration directory</strong>. This picker starts in your home folder with hidden folders visible, so you can select <code>~/.claude</code> or <code>~/.codex</code>. You can also type a path beginning with <code>~/</code>.</li>
-        <li>Add optional launch arguments, then choose <strong>Save Agent Preset</strong>.</li>
+        <li>Choose <strong>Set Up Teams…</strong> on Welcome or <strong>Settings → Teams → Add Team…</strong>.</li>
+        <li>Select <strong>Codex</strong>, <strong>Claude Code</strong>, or both. Choose one account, multiple accounts, or not sure separately for each agent. Missing executables have installation instructions and a recheck action.</li>
+        <li>Name your teams, such as Personal and Work, and select their agents.</li>
+        <li>Use the current configuration, choose an existing folder, or create a separate configuration. Detected folders include claudewho and codexwho profiles. Teams can share an agent configuration while keeping the other agent separate.</li>
+        <li>For new folders, choose a source (normally <code>~/.claude</code> or <code>~/.codex</code>) or start fresh. New destinations default to <code>~/.claude-&lt;team&gt;</code> or <code>~/.codex-&lt;team&gt;</code>. Select settings to copy and preview the files. Plugins, connections, hooks, and Claude project history require explicit selection.</li>
+        <li>Sign in through the embedded login terminal. Check the account shown by your browser. The wizard checks CLI authentication status and displays account identity when available; use Recheck or sign in again if needed.</li>
+        <li>Choose a default team and open your first project, or finish setup and return to Welcome.</li>
       </ol>
-      <p>The directory must already exist. Chauffeur selects it for that child process and removes inherited provider/profile overrides that could select a different account. It does not create profiles, copy credentials, or manage sign-in. Claude credentials on macOS can live in Keychain separately from the directory.</p>
-      <p>An agent preset name is your label, not proof of the signed-in account. Check the CLI’s native account/status screen when confirming a new setup. Agent Presets that share a canonical configuration directory show a shared-directory indicator and continue to share that CLI’s native state.</p>
+      <p>Copying preserves the source and excludes credential files and recognized secret fields. Unsupported files or fields are reported in the preview. Existing destinations are not overwritten. Authentication stays in the agent's native storage, which can include macOS Keychain.</p>
+      <p>Shared configuration labels mean that login and setting changes affect every team using that folder. Team names are labels, not proof of account identity. Connected means the CLI reported sign-in; it does not establish model access or remaining quota. Unknown status formats show Unable to verify.</p>
+      <p><strong>Save and Finish Later</strong> keeps unfinished choices. Use <strong>Resume Setup…</strong> to continue. Closing the wizard detaches the login view; Cancel login explicitly stops that login. Created folders remain in place. Direct team editing and reusable launch presets remain available in Settings.</p>
       <h3>Delete a team</h3>
       <p>Select a team and click the trash button beside <strong>Edit…</strong>, or right-click it and choose <strong>Delete Team…</strong>. Confirm to delete the team and its agent preset definitions. External CLI configuration directories and session history stay intact. Teams assigned to projects, including archived projects, cannot be deleted until those projects choose another team.</p>
       <h3>Write launch arguments normally</h3>

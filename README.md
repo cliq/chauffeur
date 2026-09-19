@@ -38,7 +38,7 @@ You'll need:
 
 - macOS 15 or newer on Apple Silicon
 - Git and tmux available in your login shell
-- Codex and/or Claude Code installed and signed in
+- Codex and/or Claude Code installed (the setup wizard can help you sign in)
 - Xcode 26.3 (Swift 6.2) and XcodeGen
 
 To build from source, copy the local signing configuration and set
@@ -68,15 +68,25 @@ won't start.
 
 ## Set up your first project
 
-1. In **Settings → Agent Presets**, add a team, such as *Personal* or a client
-   name. Add a preset for each agent you want to use, choosing its executable and
-   an existing CLI configuration directory. Set up profiles and sign in through
-   the CLI first.
+1. Choose **Set Up Teams…** on Welcome, or **Settings → Teams → Add Team…**.
+   Choose your agents, say whether each uses one or several accounts, and name
+   teams such as *Personal*, *Work*, or a client. Use existing configurations or
+   create `~/.codex-<team>` / `~/.claude-<team>` folders with selected settings
+   copied from an editable source. Source folders stay unchanged and login
+   credentials are excluded. The wizard opens each new profile's sign-in and
+   checks its CLI authentication status.
 2. Create a project and choose its team. Select a parent folder to discover
    repositories, or add repository folders individually.
 3. Open the project and start a session. Choose a group, an agent preset, and an
    existing checkout or a new worktree. Add any other repositories the agent
    needs access to.
+
+Teams can share a configuration—for example, separate Claude accounts with one
+shared Codex account. Shared folders also share login and settings changes.
+**Save and Finish Later** preserves unfinished setup; **Resume Setup…** returns
+to it. Sign-in verification reports what the CLI can establish, with identity
+shown when available; it does not test model access or quota. Missing executables,
+unrecognized status output, and unavailable directories remain visible for retry.
 
 Select a checkout in the sidebar to switch between its sessions or start another
 one. **Session Details** shows launch information and controls for stopping a

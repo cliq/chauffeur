@@ -63,7 +63,7 @@ public actor FileStore {
     func ioCounts() -> ReadCounts { readCounts }
     public init(root: URL = Paths.applicationSupport) throws {
         self.root = URL(fileURLWithPath: Paths.canonical(root.path))
-        for directory in ["base-agent-presets", "preset-sets", "projects", "runtime", "runtime/snapshots", "worktrees"] {
+        for directory in ["base-agent-presets", "preset-sets", "projects", "runtime", "runtime/snapshots", "worktrees", "onboarding", "onboarding/operations"] {
             try FileManager.default.createDirectory(at: root.appendingPathComponent(directory), withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
         }
         // Begin observing before the initial scan; changes during that scan

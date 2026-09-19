@@ -129,6 +129,22 @@ shared diagnostics. See [V3](decisions/V3-mcp-and-status.md) for verified scope.
 Both supplied Claude profiles use the same account; the different-account Claude
 check was deferred by the user. Full coordination/tool acceptance remains in V2.
 
+## Verify team onboarding
+
+The onboarding suites live in `Tests/ChauffeurCoreTests/Onboarding`,
+`Tests/ChauffeurRuntimeTests/Onboarding`, and
+`Tests/ChauffeurAppUITests/Onboarding`. They use temporary folders and fake
+authentication commands. Run the package checks with `make test` and the native
+wizard checks with:
+
+```sh
+make test-ui XCODEBUILD_ARGS='-only-testing:ChauffeurAppUITests/OnboardingWizardTests'
+python3 Prototypes/onboarding_smoke.py
+```
+
+Real browser login acceptance should use designated test accounts/configurations;
+automated tests do not read personal credentials or make inference requests.
+
 ## Inspect the runtime
 
 ```sh

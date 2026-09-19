@@ -2,7 +2,7 @@
 
 Date: 2026-09-19
 Branch: `feat/onboarding-wizard`
-Status: Approved by the user; implementation has not started.
+Status: Implemented. See [validation results](../../onboarding-validation.md) for checks and remaining native UI/provider acceptance gaps.
 
 ## Intent and agreed direction
 

@@ -48,7 +48,7 @@ struct AppSnapshot: Decodable, Sendable {
     struct Navigation: Equatable { var id = UUID(); let route: SessionRoute }
     struct ProjectNavigation: Equatable { var id = UUID(); let match: ProjectFolderMatch }
     struct FolderSelection: Identifiable { let id = UUID(); let path: String; let matches: [ProjectFolderMatch] }
-    struct ProjectCreation: Identifiable { let id = UUID(); var folderPath: String? = nil }
+    struct ProjectCreation: Identifiable { let id = UUID(); var folderPath: String? = nil; var teamID: UUID? = nil }
     @Published var projectCreation: ProjectCreation?
     @Published var pendingSessionRoute: Navigation?
     @Published var pendingProjectRoute: ProjectNavigation?

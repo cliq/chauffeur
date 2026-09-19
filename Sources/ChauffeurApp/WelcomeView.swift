@@ -11,6 +11,9 @@ struct WelcomeView: View {
     @State private var createdProjectID: UUID?
     @State private var editingProject: Project?
     @State private var restored = false
+    @State private var showingSetup = false
+    @State private var resumeSetup = false
+    @State private var setupProjectTeam: UUID?
     private var projects: [Project] { model.projects.filter { showArchived || !$0.archived } }
     var body: some View {
         VStack(spacing: 0) {
@@ -27,7 +30,9 @@ struct WelcomeView: View {
                     Text("Version \(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.1.0") · \(AppBuild.current.rawValue)").foregroundStyle(.secondary)
                     Button("Create New Project…", systemImage: "plus") { model.projectCreation = AppModel.ProjectCreation() }.buttonStyle(.borderedProminent).disabled(!model.online || model.presetSets.filter { !$0.archived }.isEmpty)
                     Button("Manage Agent Presets…") { openSettings() }
-                    if model.presetSets.isEmpty { Text("Add a team in Settings to create your first project.").font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.center) }
+                    Button(resumeSetup ? "Resume Setup…" : "Set Up Teams…") { showingSetup = true }
+                        .disabled(!model.online).accessibilityIdentifier("onboarding.open")
+                    if model.presetSets.isEmpty { Text("Set up a team to choose which accounts your projects use.").font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.center) }
                 }.padding(32).frame(width: 290)
                 Divider()
                 VStack(alignment: .leading, spacing: 8) {
@@ -64,12 +69,16 @@ struct WelcomeView: View {
             Divider()
             ServiceHealthView().padding(10)
         }.frame(minWidth: 780, minHeight: 460)
+            .sheet(isPresented: $showingSetup, onDismiss: {
+                if let teamID = setupProjectTeam { setupProjectTeam = nil; model.projectCreation = AppModel.ProjectCreation(teamID: teamID) }
+                Task { await inspectSetup(autoPresent: false) }
+            }) { OnboardingWizard { teamID in setupProjectTeam = teamID; showingSetup = false } }
             .sheet(item: $model.projectCreation, onDismiss: {
                 // Closing a window while its creation sheet is still attached
                 // can be ignored by macOS. Navigate after the sheet is gone.
                 if let id = createdProjectID { createdProjectID = nil; open(id) }
             }) { creation in
-                ProjectEditor(initialFolderPath: creation.folderPath) { id in
+                ProjectEditor(initialFolderPath: creation.folderPath, initialTeamID: creation.teamID) { id in
                     createdProjectID = id
                     model.projectCreation = nil
                 }.id(creation.id)
@@ -98,10 +107,20 @@ struct WelcomeView: View {
             }
             .onChange(of: model.online) { _, online in
                 guard online, !restored else { return }; restored = true
+                Task { await inspectSetup(autoPresent: true) }
                 if model.hasPendingNavigation || model.skipAutomaticWindowRestore { return }
                 let windows = model.snapshot.store.windows.filter { $0.value.wasOpen && model.project($0.value.id) != nil }
                 if !windows.isEmpty { for window in windows { openWindow(id: "project", value: window.value.id) }; dismissWindow(id: "welcome") }
             }
+            .task { if model.online { await inspectSetup(autoPresent: true) } }
+    }
+    private func inspectSetup(autoPresent: Bool) async {
+        guard let result = try? await model.call("setupDraft"), let stored = try? result.decode(Optional<Stored<SetupDraft>>.self) else {
+            if autoPresent, model.online, model.presetSets.isEmpty, model.projects.isEmpty, !model.hasPendingNavigation { showingSetup = true }
+            return
+        }
+        resumeSetup = !stored.value.completed
+        if autoPresent, model.presetSets.isEmpty, model.projects.isEmpty, !stored.value.dismissed, !stored.value.completed, !model.hasPendingNavigation { showingSetup = true }
     }
     private func open(_ id: UUID) { openWindow(id: "project", value: id); dismissWindow(id: "welcome") }
 }

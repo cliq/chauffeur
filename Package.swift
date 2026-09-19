@@ -21,13 +21,14 @@ let package = Package(
     ],
     dependencies: [
         .package(url: "https://github.com/migueldeicaza/SwiftTerm.git", exact: "1.20.0"),
-        .package(url: "https://github.com/hummingbird-project/hummingbird.git", exact: "2.26.0")
+        .package(url: "https://github.com/hummingbird-project/hummingbird.git", exact: "2.26.0"),
+        .package(url: "https://github.com/LebJe/TOMLKit.git", exact: "0.6.0")
     ],
     targets: [
         .target(name: "ChauffeurCore", dependencies: ["CChauffeur"], resources: [.copy("Resources/Skills")]),
         .systemLibrary(name: "CSQLite", pkgConfig: "sqlite3"),
         .target(name: "CChauffeur", publicHeadersPath: "include"),
-        .target(name: "ChauffeurRuntimeKit", dependencies: ["ChauffeurCore", "ChauffeurRemoteProtocol", "CSQLite", "CChauffeur", .product(name: "Hummingbird", package: "hummingbird")]),
+        .target(name: "ChauffeurRuntimeKit", dependencies: ["ChauffeurCore", "ChauffeurRemoteProtocol", "CSQLite", "CChauffeur", .product(name: "Hummingbird", package: "hummingbird"), .product(name: "TOMLKit", package: "TOMLKit")]),
         // Portable modules
         .target(name: "ChauffeurRemoteProtocol"),
         .target(name: "ChauffeurTerminalInterface"),

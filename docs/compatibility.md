@@ -26,6 +26,24 @@ prompts are sent by this check.
 
 ## Capability behavior
 
+### Team setup authentication
+
+The onboarding adapters were checked against Codex 0.155.0 and Claude Code
+2.1.278 help and unauthenticated status commands in fresh, isolated temporary
+profiles. Codex reports `Not logged in` on stderr; Claude returns JSON status.
+Parser fixtures also cover successful status, unknown output, and errors.
+Login PTY lifecycle, environment isolation, and verification use fake CLIs in
+automated tests. Real browser OAuth completion with separate provider accounts
+has not been exercised for this wizard.
+
+Setup uses `codex login` / `codex login status` and
+`claude auth login` / `claude auth status --json`. Unsupported status output is
+reported as Unable to verify, never inferred from credential-file presence.
+This authentication check is independent of the coordination capability matrix
+below and does not send a model prompt.
+
+### Agent sessions
+
 The adapter checks `--version` and `--help` before spawning an agent. Codex
 0.154.0 is the baseline version with a candidate coordination configuration,
 recorded as unverified; other Codex versions require an explicit basic-terminal

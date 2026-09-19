@@ -62,9 +62,17 @@ public enum LaunchPolicy {
     // parent agent. Strip provider routing/auth and nested CLI session identity.
     public static let deniedPrefixes = ["CODEX_", "CLAUDE_", "CLAUDECODE", "OPENAI_", "ANTHROPIC_", "AZURE_OPENAI_", "CHAUFFEUR_", "AWS_", "GOOGLE_", "VERTEX_", "BEDROCK_"]
     public static let deniedNames: Set<String> = ["TMUX", "TMUX_PANE", "GOOGLE_APPLICATION_CREDENTIALS", "CLOUD_ML_REGION", "BASH_ENV", "ENV", "ZDOTDIR", "NODE_OPTIONS", "DYLD_INSERT_LIBRARIES", "DYLD_LIBRARY_PATH"]
+    /// Removes inherited provider credentials, alternate profile selectors and
+    /// nested Chauffeur/session state. Callers add only the explicit profile
+    /// selector and grants appropriate to the process they are launching.
+    public static func sanitizedEnvironment(base: [String: String]) -> [String: String] {
+        base.filter { key, _ in
+            !deniedNames.contains(key) && !deniedPrefixes.contains(where: key.hasPrefix)
+        }
+    }
     public static func environment(base: [String: String], preset: AgentPreset, projectID: UUID, sessionID: UUID, token: String, configurationEnvironment: [String: String]? = nil, allowMissingConfiguration: Bool = false) throws -> [String: String] {
         let directory = allowMissingConfiguration ? Paths.canonical(preset.configurationDirectory) : try Paths.directory(preset.configurationDirectory)
-        var result = base.filter { key, _ in !deniedNames.contains(key) && !deniedPrefixes.contains(where: key.hasPrefix) }
+        var result = sanitizedEnvironment(base: base)
         switch preset.kind {
         case .codex: result["CODEX_HOME"] = directory
         case .claude: result["CLAUDE_CONFIG_DIR"] = directory

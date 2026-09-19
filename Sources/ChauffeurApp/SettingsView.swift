@@ -3,6 +3,8 @@ import ChauffeurCore
 
 struct SettingsView: View {
     @EnvironmentObject private var model: AppModel
+    @Environment(\.openWindow) private var openWindow
+    @State private var setupProjectTeam: UUID?
     @State private var selectedSet: UUID?
     @State private var newSet = false
     @State private var editedSet: PresetSet?
@@ -112,7 +114,13 @@ struct SettingsView: View {
             } message: {
                 Text("Deletes this team and its agent preset definitions. Existing CLI configuration folders and session history are preserved.")
             }
-            .sheet(isPresented: $newSet) { PresetSetEditor { id in selectedSet = id; newSet = false } }
+            .sheet(isPresented: $newSet, onDismiss: {
+                if let id = setupProjectTeam {
+                    setupProjectTeam = nil
+                    model.projectCreation = AppModel.ProjectCreation(teamID: id)
+                    openWindow(id: "welcome")
+                }
+            }) { OnboardingWizard { id in if let id { selectedSet = id; setupProjectTeam = id }; newSet = false } }
             .sheet(item: $editedSet) { set in PresetSetEditor(presetSet: set) { id in selectedSet = id; editedSet = nil } }
             .sheet(isPresented: $newPreset) { if let selectedSet { AddBaseAgentView(teamID: selectedSet) { revealedPresetID = $0 } } }
             .sheet(item: $editedBase) { base in BaseAgentEditor(preset: base) }

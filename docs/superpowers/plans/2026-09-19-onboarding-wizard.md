@@ -1,5 +1,11 @@
 # Team Onboarding Wizard Implementation Plan
 
+Implementation was executed with Agent Team and implementation-progress, without
+the Superpowers execution workflow, per the user's subsequent instruction. See
+[validation results](../../onboarding-validation.md) for the implemented outcome
+and checks that remain unavailable in this environment. The checklist below is
+the original planning artifact, not the live progress tracker.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Let people configure teams, copy selected agent settings, and sign in to isolated Codex/Claude configurations without preparing folders manually.
