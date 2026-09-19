@@ -17,6 +17,21 @@ struct SetupSummaryStep: View {
                     ForEach(team.agents) { pair in
                         VStack(alignment: .leading, spacing: 3) {
                             HStack { Text(pair.kind.displayName).bold(); Spacer(); Text(pair.auth.setupLabel) }
+                            if pair.auth.phase == .connected {
+                                if let email = pair.auth.email, !email.isEmpty {
+                                    Text(email).textSelection(.enabled)
+                                        .accessibilityIdentifier("onboarding.summaryAccount.\(pair.id)")
+                                } else {
+                                    Text("Account identity isn't available from this CLI.")
+                                        .font(.caption).foregroundStyle(.secondary)
+                                }
+                                if let organization = pair.auth.organization, !organization.isEmpty {
+                                    Text(organization).font(.caption)
+                                }
+                                if let method = pair.auth.method, !method.isEmpty {
+                                    Text("Authentication: \(method)").font(.caption).foregroundStyle(.secondary)
+                                }
+                            }
                             Text(pair.destinationPath).font(.caption).textSelection(.enabled)
                             let sharing = setup.draft.teams.filter { other in other.id != team.id && other.agents.contains { $0.kind == pair.kind && Paths.canonical($0.destinationPath) == Paths.canonical(pair.destinationPath) } }.map(\.name)
                             if !sharing.isEmpty { Text("Shared with \(sharing.joined(separator: ", "))").font(.caption).foregroundStyle(.secondary) }

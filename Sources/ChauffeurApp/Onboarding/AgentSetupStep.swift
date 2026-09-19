@@ -9,34 +9,30 @@ struct AgentSetupStep: View {
         ForEach(CLIKind.allCases.filter(\.isAgent), id: \.self) { kind in
             GroupBox {
                 VStack(alignment: .leading, spacing: 12) {
-                    Toggle(kind.displayName, isOn: Binding(get: { setup.draft.accountCounts[kind.rawValue] != nil }, set: {
-                        setup.draft.accountCounts[kind.rawValue] = $0 ? .single : nil
-                    })).font(.headline).accessibilityIdentifier("onboarding.agent.\(kind.rawValue)")
-                    if setup.draft.accountCounts[kind.rawValue] != nil {
-                        HStack {
-                            TextField("Executable", text: Binding(get: { setup.executables[kind.rawValue] ?? "" }, set: { setup.executables[kind.rawValue] = $0 }))
-                                .accessibilityIdentifier("onboarding.executable.\(kind.rawValue)")
-                            Button("Choose…") {
-                                let panel = NSOpenPanel(); panel.canChooseDirectories = false; panel.canChooseFiles = true
-                                if panel.runModal() == .OK, let path = panel.url?.path { setup.executables[kind.rawValue] = path }
-                            }
+                    let detected = setup.inventory?.executables[kind.rawValue] != nil
+                    HStack {
+                        Toggle(kind.displayName, isOn: Binding(get: {
+                            detected && setup.draft.accountCounts[kind.rawValue] != nil
+                        }, set: {
+                            setup.draft.accountCounts[kind.rawValue] = $0 ? .single : nil
+                        }))
+                        .font(.headline)
+                        .disabled(!detected)
+                        .accessibilityIdentifier("onboarding.agent.\(kind.rawValue)")
+                        Spacer()
+                        if detected {
+                            Label("Detected", systemImage: "checkmark.circle.fill")
+                                .foregroundStyle(.green)
+                                .accessibilityIdentifier("onboarding.detected.\(kind.rawValue)")
+                        } else {
+                            Text("Not detected").foregroundStyle(.secondary)
+                            Link("Install \(kind.displayName)", destination: URL(string: kind == .codex
+                                ? "https://developers.openai.com/codex/cli"
+                                : "https://code.claude.com/docs/en/setup")!)
+                                .accessibilityIdentifier("onboarding.install.\(kind.rawValue)")
                         }
-                        if setup.executables[kind.rawValue, default: ""].isEmpty || (setup.executables[kind.rawValue, default: ""].hasPrefix("/") && !FileManager.default.isExecutableFile(atPath: setup.executables[kind.rawValue, default: ""])) {
-                            HStack {
-                                Text("Not installed or not found.").foregroundStyle(.orange)
-                                Link("Installation instructions", destination: URL(string: kind == .codex ? "https://developers.openai.com/codex/cli" : "https://code.claude.com/docs/en/setup")!)
-                                Button("Recheck") { Task { await setup.perform {
-                                    let previous = setup.inventory?.executables ?? [:]
-                                    setup.inventory = try await setup.call("setupInventory").decode(SetupInventory.self)
-                                    for candidate in CLIKind.allCases where candidate.isAgent {
-                                        let key = candidate.rawValue
-                                        if setup.executables[key] == previous[key] || setup.executables[key, default: ""].isEmpty {
-                                            setup.executables[key] = setup.inventory?.executables[key]
-                                        }
-                                    }
-                                } } }
-                            }.font(.caption)
-                        }
+                    }
+                    if detected && setup.draft.accountCounts[kind.rawValue] != nil {
                         Picker("Accounts", selection: Binding(get: { setup.draft.accountCounts[kind.rawValue] ?? .single }, set: { setup.draft.accountCounts[kind.rawValue] = $0 })) {
                             Text("One account").tag(AccountCount.single)
                             Text("Multiple accounts").tag(AccountCount.multiple)
@@ -49,5 +45,8 @@ struct AgentSetupStep: View {
                 }.padding(8).frame(maxWidth: .infinity, alignment: .leading)
             }
         }
+        Button("Recheck installed agents") {
+            Task { await setup.perform { try await setup.refreshAgentDetection() } }
+        }.accessibilityIdentifier("onboarding.recheckAgents")
     }
 }

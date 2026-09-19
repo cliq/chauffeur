@@ -247,6 +247,12 @@ else:
         assert not (claude_personal / "skills/fixture.md").exists()
         assert (claude_work / "skills/fixture.md").read_text() == "Fixture reusable skill\n"
 
+        # Teams can be saved before any account signs in, then resumed later.
+        pending_ids = versioned("finishSetup")
+        assert len(pending_ids) == 2
+        assert stored_draft()["value"]["completed"] is False
+        assert all(agent["auth"]["phase"] != "connected" for team in stored_draft()["value"]["teams"] for agent in team["agents"])
+
         login(codex_personal["id"])
         shared_status = stored_draft()["value"]
         codex_statuses = [agent["auth"]["phase"] for team in shared_status["teams"] for agent in team["agents"] if agent["kind"] == "codex"]

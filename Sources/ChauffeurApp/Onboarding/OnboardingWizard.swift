@@ -62,7 +62,7 @@ struct OnboardingWizard: View {
                         Task { if await setup.finish() != nil { onFinished(nil); dismiss() } }
                     }.accessibilityIdentifier("onboarding.finish")
                 } else {
-                    Button(setup.draft.step == .copy ? "Create configurations" : "Continue") { Task { await setup.next() } }
+                    Button(continueTitle) { Task { await setup.next() } }
                         .buttonStyle(.borderedProminent).keyboardShortcut(.defaultAction).accessibilityIdentifier("onboarding.continue")
                 }
             }.disabled(setup.busy || !setup.loaded)
@@ -77,6 +77,12 @@ struct OnboardingWizard: View {
             .task { await setup.load(app: app) }
             .onChange(of: setup.draft) { _, _ in setup.scheduleSave() }
             .onDisappear { setup.stopObserving() }
+    }
+
+    private var continueTitle: String {
+        if setup.draft.step == .copy { return "Create configurations" }
+        if setup.draft.step == .login && setup.pairs.contains(where: { $0.auth.phase != .connected }) { return "Sign in later" }
+        return "Continue"
     }
 }
 

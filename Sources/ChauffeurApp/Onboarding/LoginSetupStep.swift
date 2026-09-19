@@ -6,7 +6,7 @@ struct LoginSetupStep: View {
     @ObservedObject var setup: OnboardingModel
     var body: some View {
         Text("Sign in to each account").font(.headline)
-        Text("Check the browser account before completing sign-in. You can finish one team now and resume the others later.").foregroundStyle(.secondary)
+        Text("Check the browser account before completing sign-in. You can sign in now or continue and sign in later. New configurations don't copy the source account's login.").foregroundStyle(.secondary)
         ForEach(setup.draft.teams) { team in
             ForEach(team.agents) { pair in
                 GroupBox {

@@ -25,7 +25,9 @@ import ChauffeurCore
             || (codex.value as? Int) == 1
             || (codex.value as? String) == "1"
         if !selected { codex.click() }
-        XCTAssertEqual(fixture.app.textFields["onboarding.executable.codex"].value as? String, fixture.executable.path)
+        XCTAssertTrue(codex.isEnabled)
+        XCTAssertTrue(fixture.app.descendants(matching: .any)["onboarding.detected.codex"].exists)
+        XCTAssertFalse(fixture.app.textFields["onboarding.executable.codex"].exists)
         fixture.app.buttons["onboarding.continue"].click()
 
         let teamName = fixture.app.textFields["onboarding.teamName"]

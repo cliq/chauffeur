@@ -38,6 +38,7 @@ import ChauffeurCore
                 }
                 self.version = stored?.version
             }
+            if self.draft.step == .agents { self.useDetectedExecutables() }
             let active = try await app.call("activeSetupLogin")
             if let pairID = active["pairID"].string.flatMap(UUID.init(uuidString:)) {
                 self.login = try active["handle"].decode(SetupLoginHandle.self)
@@ -46,6 +47,23 @@ import ChauffeurCore
             self.loaded = true
         }
         if loaded { startPolling() }
+    }
+
+    private func useDetectedExecutables() {
+        executables = inventory?.executables ?? [:]
+        for kind in CLIKind.allCases where kind.isAgent && executables[kind.rawValue] == nil {
+            draft.accountCounts[kind.rawValue] = nil
+        }
+    }
+
+    func refreshAgentDetection() async throws {
+        let previouslyDetected = inventory?.executables ?? [:]
+        inventory = try await call("setupInventory").decode(SetupInventory.self)
+        useDetectedExecutables()
+        for kind in CLIKind.allCases where kind.isAgent && previouslyDetected[kind.rawValue] == nil && executables[kind.rawValue] != nil {
+            draft.accountCounts[kind.rawValue] = .single
+        }
+        try await save()
     }
 
     func scheduleSave() {
@@ -114,6 +132,7 @@ import ChauffeurCore
         await perform {
             switch self.draft.step {
             case .agents:
+                self.useDetectedExecutables()
                 guard !self.selectedKinds.isEmpty else { throw ChauffeurError("setup_agents", "Choose at least one agent.") }
                 if self.draft.teams.isEmpty { self.addTeam(name: "Personal") }
                 for i in self.draft.teams.indices {
@@ -143,7 +162,13 @@ import ChauffeurCore
                     try await self.reload()
                 }
                 self.draft.step = .login
-            case .login: self.draft.step = .summary
+            case .login:
+                if let login = self.login {
+                    _ = try await self.call("cancelSetupLogin", extras: ["operationID": .string(login.operationID.uuidString)])
+                    self.login = nil; self.loginPairID = nil
+                    try await self.reload()
+                }
+                self.draft.step = .summary
             case .summary: break
             }
             try await self.save()
