@@ -1,4 +1,4 @@
-# Metadata, shared presets, and teams
+# Metadata, agent presets, and teams
 
 Chauffeur stores editable JSON metadata in its Application Support directory.
 Global launch definitions live in `base-agent-presets/`; team records and their
@@ -6,16 +6,16 @@ custom agents remain in `preset-sets/`; projects and history live in `projects/`
 Stable UUIDs identify records. The service uses atomic replacement and version
 checks so a stale editor cannot overwrite another edit.
 
-## Shared Agent Presets
+## Agent Presets
 
-Settings → Shared Agent Presets defines a name, agent (Claude Code or Codex),
+Settings → Agent Presets defines a name, agent (Claude Code or Codex),
 executable and launch arguments. Configuration directories belong to teams.
 Examples include Claude, Claude with `--model opus`, Codex and Codex with
 `--yolo`. Existing managed-argument validation still applies.
 
-Changes to a shared preset affect future launches in every team using all shared
-presets. Each shared preset has its own revision; changing it does not rewrite team files.
-Archiving a shared preset hides it from these teams while preserving existing sessions.
+Changes to an agent preset affect future launches in every team using all agent
+presets. Each agent preset has its own revision; changing it does not rewrite team files.
+Archiving an agent preset hides it from these teams while preserving existing sessions.
 
 ## Teams
 
@@ -25,13 +25,13 @@ project team popover and launch sheet show effective paths. Explicit directories
 must be accessible before launching that agent. The app does not create them.
 A missing default directory is left for the CLI to initialize normally.
 
-New teams use **Use all shared presets**. Their available agents follow the global
+New teams use **Use all agent presets**. Their available agents follow the global
 catalog automatically. **Custom** uses independent copies with editable names,
-agents, executables and arguments. **Add from Shared Presets…** creates a new copy;
-subsequent shared preset edits do not affect it. Multiple copies of a shared preset are allowed.
+agents, executables and arguments. **Add Agent…** creates a new copy;
+subsequent agent preset edits do not affect it. Multiple copies of an agent preset are allowed.
 Custom agents always use their team's directory for the selected agent.
 
-The first switch from all-shared to Custom copies the available shared presets.
+The first switch from all-presets to Custom copies the available agent presets.
 Switching back retains these custom definitions inactive; switching to Custom
 again restores them. Archiving a custom agent removes it from launch choices.
 
@@ -54,7 +54,7 @@ available preset by name. Teams do not have a default agent preset. Unavailable 
 same team. Changing the project team clears its remembered selection. Shells do
 not require enabled agent presets, but do require an active project team.
 
-Launch snapshots capture the resolved definition, shared preset revision when inherited,
+Launch snapshots capture the resolved definition, agent preset revision when inherited,
 team identity/revision and both configuration values. Edits affect future launches;
 running sessions and resumed agent conversations keep their recorded configuration.
 Shell sessions cannot be resumed; open a new shell to use current team settings.
@@ -80,7 +80,7 @@ once their team has migrated.
 
 ## Reference checks and recovery
 
-- Custom agent presets must belong to the team whose directory contains them. Shared presets are global. Sessions,
+- Custom agent presets must belong to the team whose directory contains them. Agent presets are global. Sessions,
   worktrees, and window state must belong to their containing project. Records
   with mismatched ownership or invalid JSON are skipped and reported with their
   path; Chauffeur preserves the files for repair.
@@ -150,8 +150,7 @@ paths and migration. `TeamAgentRuntimeTests` launches fixture processes and zsh
 terminals, checks startup-file overrides, verifies immutable resume configuration,
 and exercises inherited presets through remote inventory and launch.
 
-`Prototypes/team_agents_smoke.py` exercises native shared-preset/team editing, Add from
-Shared Presets and the project team control in an isolated signed app. It requires existing
+`Prototypes/team_agents_smoke.py` exercises native agent-preset/team editing, Add Agent… and the project team control in an isolated signed app. It requires existing
 macOS Accessibility permission and exits before opening the app when unavailable.
 
 ## Previous editor verification

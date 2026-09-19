@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Exercise shared presets, custom teams and project team context through native controls.
+"""Exercise agent presets, custom teams and project team context through native controls.
 
 Uses an isolated signed Debug copy and temporary repositories/configuration
 directories. No provider credentials, user projects or default runtime writes.
@@ -120,13 +120,13 @@ with tempfile.TemporaryDirectory(prefix='chauffeur-teams-', dir='/tmp') as direc
         pid = json.loads(probe.stdout)['pid']
         wait_for(lambda: 'Custom service running' in text(), 'app connected')
         press('Settings…', role='AXMenuItem', includeMenus=True)
-        wait_for(lambda: control('Shared Agent Presets'), 'settings')
-        press('Shared Agent Presets')
-        press('Add Shared Agent Preset…')
+        wait_for(lambda: control('Agent Presets'), 'settings')
+        press('Agent Presets')
+        press('Add Agent Preset…')
         wait_for(lambda: control(identifier='base-agent.name'), 'base editor')
         type_text('Shared fixture', identifier='base-agent.name')
         type_text('/bin/echo', identifier='base-agent.executable')
-        press('Save Shared Agent Preset')
+        press('Save Agent Preset')
         wait_for(lambda: not any(c['role'] == 'AXSheet' for c in ax()), 'base saved')
         base = next(b for b in records('baseAgentPresets') if b['name'] == 'Shared fixture')
         assert 'configurationDirectory' not in base
@@ -144,7 +144,7 @@ with tempfile.TemporaryDirectory(prefix='chauffeur-teams-', dir='/tmp') as direc
         wait_for(lambda: control(identifier='team.agent-selection'), 'team editor')
         choose('team.agent-selection', 'Custom')
         press('Save')
-        wait_for(lambda: control('Add from Shared Presets…'), 'custom team')
+        wait_for(lambda: control('Add Agent…'), 'custom team')
         copies = [p for p in records('presets') if p['setID'] == personal['id']]
         copy = next(p for p in copies if p['sourceBaseID'] == base['id'])
         assert copy['id'] != base['id']
@@ -160,7 +160,7 @@ with tempfile.TemporaryDirectory(prefix='chauffeur-teams-', dir='/tmp') as direc
         custom = next(p for p in records('presets') if p['id'] == copy['id'])
         assert custom['executable'] == '/bin/cat'
         summary['customCopiesEditableAndIndependent'] = True
-        press('Add from Shared Presets…')
+        press('Add Agent…')
         wait_for(lambda: control('Shared fixture'), 'base picker')
         press('Shared fixture')
         wait_for(lambda: control(identifier='preset.name'), 'copy editor')

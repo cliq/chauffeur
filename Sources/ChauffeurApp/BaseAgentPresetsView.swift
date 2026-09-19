@@ -7,13 +7,16 @@ struct BaseAgentPresetsView: View {
     @State private var editing: BaseAgentPreset?
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("Shared Agent Presets").font(.title2)
-            Text("Define launch commands once. Teams using all shared presets inherit changes; custom copies remain independent.")
+            Text("Agent Presets").font(.title2)
+            Text("Define launch commands once. Teams using all agent presets inherit changes; custom copies remain independent.")
                 .foregroundStyle(.secondary)
             List(model.snapshot.store.baseAgentPresets.map(\.value).sorted { $0.name < $1.name }) { preset in
                 HStack {
                     VStack(alignment: .leading) {
-                        Text(preset.name).font(.headline)
+                        HStack {
+                            Text(preset.name).font(.headline)
+                            AgentKindBadge(kind: preset.kind)
+                        }
                         Text(preset.kind.displayName + " · " + ArgumentText.format([preset.executable] + preset.arguments)).font(.caption).textSelection(.enabled)
                     }
                     Spacer()
@@ -21,7 +24,7 @@ struct BaseAgentPresetsView: View {
                     Button("Edit…") { editing = preset }
                 }.padding(.vertical, 6)
             }
-            Button("Add Shared Agent Preset…") { adding = true }.disabled(!model.online)
+            Button("Add Agent Preset…") { adding = true }.disabled(!model.online)
         }.padding(20)
             .sheet(isPresented: $adding) { BaseAgentEditor() }
             .sheet(item: $editing) { BaseAgentEditor(preset: $0) }
@@ -42,7 +45,7 @@ struct BaseAgentEditor: View {
     @State private var saving = false
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text(preset == nil ? "Create Shared Agent Preset" : "Edit Shared Agent Preset").font(.title2)
+            Text(preset == nil ? "Create Agent Preset" : "Edit Agent Preset").font(.title2)
             Form {
                 TextField("Name", text: $name, prompt: Text(kind.displayName)).accessibilityIdentifier("base-agent.name")
                 Picker("Agent", selection: $kind) {
@@ -65,7 +68,7 @@ struct BaseAgentEditor: View {
             HStack {
                 Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
                 Spacer()
-                Button("Save Shared Agent Preset") { save() }.keyboardShortcut(.defaultAction).disabled(saving)
+                Button("Save Agent Preset") { save() }.keyboardShortcut(.defaultAction).disabled(saving)
             }
         }.padding(24).frame(width: 620).onAppear {
             name = preset?.name ?? ""; kind = preset?.kind ?? .codex; executable = preset?.executable ?? "codex"
@@ -97,23 +100,65 @@ struct AddBaseAgentView: View {
     @State private var editing: AgentPreset?
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("Add from Shared Presets").font(.title2)
+            Text("Pick Agent Preset").font(.title2)
             Text("Choose a preset to make an independent, editable copy.").foregroundStyle(.secondary)
             if model.snapshot.store.baseAgentPresets.allSatisfy({ $0.value.archived }) {
-                Text("No active shared presets. Add one in Shared Agent Presets first.").foregroundStyle(.secondary)
+                Text("No active agent presets. Create one in Agent Presets first.").foregroundStyle(.secondary)
             }
-            List(model.snapshot.store.baseAgentPresets.map(\.value).filter { !$0.archived }.sorted { $0.name < $1.name }) { base in
-                Button {
-                    guard let team = model.presetSets.first(where: { $0.id == teamID }) else { return }
-                    editing = base.agent(in: team, copy: true)
-                } label: {
-                    HStack { Text(base.name); Spacer(); Text(base.kind.displayName).foregroundStyle(.secondary) }
-                }.buttonStyle(.plain)
+            ScrollView {
+                LazyVStack(spacing: 10) {
+                    ForEach(model.snapshot.store.baseAgentPresets.map(\.value).filter { !$0.archived }.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }) { base in
+                        AgentPresetCard(preset: base) {
+                            guard let team = model.presetSets.first(where: { $0.id == teamID }) else { return }
+                            editing = base.agent(in: team, copy: true)
+                        }
+                    }
+                }.padding(2)
             }.frame(height: 260)
             Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
-        }.padding(24).frame(width: 500)
+        }.frame(width: 452, alignment: .leading).padding(24)
             .sheet(item: $editing) { agent in
                 PresetEditor(setID: teamID, preset: agent) { id in completion(id); dismiss() }
             }
+    }
+}
+
+struct AgentKindBadge: View {
+    let kind: CLIKind
+
+    var body: some View {
+        AgentBadge(label: kind.displayName, color: kind == .claude ? .orange : kind == .codex ? .blue : .gray)
+    }
+}
+
+private struct AgentPresetCard: View {
+    let preset: BaseAgentPreset
+    let pick: () -> Void
+    @State private var hovered = false
+
+    var body: some View {
+        Button(action: pick) {
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(preset.name).font(.headline)
+                    Text(ArgumentText.format([preset.executable] + preset.arguments))
+                        .font(.caption.monospaced()).foregroundStyle(.secondary)
+                        .lineLimit(2).truncationMode(.middle)
+                }
+                Spacer(minLength: 8)
+                AgentKindBadge(kind: preset.kind)
+                Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+            }
+            .padding(14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(RoundedRectangle(cornerRadius: 10))
+        }
+        .buttonStyle(.plain)
+        .background(hovered ? Color.accentColor.opacity(0.12) : Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 10))
+        .overlay(RoundedRectangle(cornerRadius: 10).stroke(hovered ? Color.accentColor : Color.primary.opacity(0.15), lineWidth: 1))
+        .onHover { hovered = $0 }
+        .accessibilityLabel(preset.name)
+        .accessibilityHint("Customize a copy of this \(preset.kind.displayName) preset for the team")
+        .accessibilityIdentifier("agent-preset.pick-\(preset.id.uuidString)")
     }
 }

@@ -237,12 +237,7 @@ struct KindBadge: View {
     let kind: RemoteSessionKind
 
     var body: some View {
-        Text(kind.label)
-            .font(.caption2.weight(.semibold))
-            .padding(.horizontal, 6)
-            .padding(.vertical, 2)
-            .background(color.opacity(0.15), in: Capsule())
-            .foregroundStyle(color)
+        AgentBadge(label: kind.label, color: color)
     }
 
     private var color: Color {

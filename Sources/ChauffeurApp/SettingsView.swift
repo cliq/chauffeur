@@ -17,7 +17,7 @@ struct SettingsView: View {
     @State private var retention = RetentionSettings()
     var body: some View {
         TabView {
-            BaseAgentPresetsView().tabItem { Label("Shared Agent Presets", systemImage: "terminal") }
+            BaseAgentPresetsView().tabItem { Label("Agent Presets", systemImage: "terminal") }
             HSplitView {
                 VStack(alignment: .leading, spacing: 0) {
                     Text("Teams").font(.headline).padding(.horizontal, 12).padding(.vertical, 10)
@@ -41,7 +41,7 @@ struct SettingsView: View {
                 VStack(alignment: .leading, spacing: 14) {
                     if let selectedSet, let set = model.presetSets.first(where: { $0.id == selectedSet }) {
                         HStack { Text(set.name).font(.title2); Spacer(); Text("Revision \(set.revision)").foregroundStyle(.secondary) }
-                        Text(set.agentSelection == .allBase ? "Uses all shared presets. Changes to shared presets apply to new launches." : "Custom presets are independent copies. Team directories apply to every agent.").font(.callout).foregroundStyle(.secondary)
+                        Text(set.agentSelection == .allBase ? "Uses all agent presets. Changes to agent presets apply to new launches." : "Custom presets are independent copies. Team directories apply to every agent.").font(.callout).foregroundStyle(.secondary)
                         ForEach(CLIKind.allCases.filter(\.isAgent), id: \.self) { kind in
                             LabeledContent {
                                 Text(set.configurationDirectory(for: kind)).font(.caption).textSelection(.enabled)
@@ -56,7 +56,7 @@ struct SettingsView: View {
                             if set.agentSelection == .allBase { editedBase = model.snapshot.store.baseAgentPresets.first { $0.value.id == agent.id }?.value }
                             else { editedPreset = agent }
                         }, showSkill: { skillPreset = $0 })
-                        if set.agentSelection != .allBase { Button("Add from Shared Presets…") { newPreset = true }.disabled(set.archived) }
+                        if set.agentSelection != .allBase { Button("Add Agent…") { newPreset = true }.disabled(set.archived) }
                     } else {
                         ContentUnavailableView("Choose a team", systemImage: "person.crop.rectangle.stack", description: Text("Create teams such as Personal or Client 1, then choose their configuration directories."))
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -165,7 +165,7 @@ struct AgentPresetList: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
                     if presets.isEmpty {
-                        Text("No agents available. Add a shared preset or choose Add from Shared Presets in Custom mode.").foregroundStyle(.secondary).padding(12)
+                        Text("No agents available. Create an agent preset in Agent Presets, or choose Add Agent… in Custom mode.").foregroundStyle(.secondary).padding(12)
                     }
                     ForEach(presets) { preset in
                         row(preset).id(preset.id)
@@ -184,10 +184,11 @@ struct AgentPresetList: View {
     private func row(_ preset: AgentPreset) -> some View {
         VStack(alignment: .leading, spacing: 5) {
             HStack {
-                Text(preset.name).fontWeight(.semibold); Text(preset.kind.displayName).foregroundStyle(.secondary)
+                Text(preset.name).fontWeight(.semibold)
+                AgentKindBadge(kind: preset.kind)
                 if preset.archived { Text("Archived").font(.caption) }
                 Spacer()
-                Button(set.agentSelection == .allBase ? "Edit Shared Preset…" : "Edit…") { edit(preset) }.accessibilityIdentifier("preset.edit-\(preset.id.uuidString)")
+                Button(set.agentSelection == .allBase ? "Edit Agent Preset…" : "Edit…") { edit(preset) }.accessibilityIdentifier("preset.edit-\(preset.id.uuidString)")
             }
             Text(preset.configurationDirectory).font(.caption).textSelection(.enabled)
             Button("Chauffeur Skill…") { showSkill(preset) }.accessibilityIdentifier("preset-skill-\(preset.id.uuidString)")
@@ -245,10 +246,10 @@ struct PresetSetEditor: View {
                     TextField("Name", text: $name).labelsHidden().accessibilityIdentifier("preset-set.name")
                 }
                 Picker("Agents", selection: $selection) {
-                    Text("Use all shared presets").tag(AgentSelection.allBase)
+                    Text("Use all agent presets").tag(AgentSelection.allBase)
                     Text("Custom").tag(AgentSelection.custom)
                 }.accessibilityIdentifier("team.agent-selection")
-                Text(selection == .allBase ? "Shared preset changes apply automatically to future launches." : "Add independent copies of shared presets and customize them.").font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                Text(selection == .allBase ? "Agent preset changes apply automatically to future launches." : "Add independent copies of agent presets and customize them.").font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 directoryField("Claude config folder", variable: "CLAUDE_CONFIG_DIR", value: $claudeDirectory)
                 directoryField("Codex config folder", variable: "CODEX_HOME", value: $codexDirectory)
                 Text("Leave a directory blank to use the agent’s normal default. Both values apply to new shell terminals.").font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)

@@ -37,6 +37,7 @@ targets:
       Release: Configuration/Base.xcconfig
     sources:
       - Sources/ChauffeurApp
+      - Sources/ChauffeurSharedUI
     dependencies:
       - package: Chauffeur
         product: ChauffeurCore
@@ -104,6 +105,7 @@ targets:
       Release: Configuration/Base.xcconfig
     sources:
       - Sources/ChauffeurMobile
+      - Sources/ChauffeurSharedUI
     dependencies:
       - package: Chauffeur
         product: ChauffeurRemoteProtocol
