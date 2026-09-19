@@ -2,7 +2,7 @@
 
 Date: 2026-09-19
 Branch: `feat/onboarding-wizard`
-Status: Design for review; implementation has not started.
+Status: Approved by the user; implementation has not started.
 
 ## Intent and agreed direction
 
@@ -62,7 +62,7 @@ Use “Copy settings” in the UI. Show selectable categories with item counts a
 
 Categories must map to parsed content as well as files: a settings file can mix preferences, hooks, connections, and credentials. Never blindly copy that whole file under Preferences. Exclude known credential fields, authentication files, credential-store material, caches, locks, and transient runtime state. If a configuration format cannot be parsed safely, skip that file with a visible explanation; do not claim arbitrary secret detection.
 
-Treat the local claudewho and codexwho implementations as behavioral references, not runtime dependencies. Their default directory names differ from this design. Preserve useful handling such as Claude plugin metadata path repair. Rewrite only recognized source-root references in supported metadata, not arbitrary strings in user content. Preview skipped or unsupported items.
+Treat the local claudewho and codexwho implementations as the primary behavioral references, not runtime dependencies. The user confirmed both are battle-tested and requested reusing their proven behavior. Their default directory names differ from this design. Preserve useful handling such as Claude plugin metadata path repair. Rewrite only recognized source-root references in supported metadata, not arbitrary strings in user content. Preview skipped or unsupported items.
 
 Reject source/destination equality, nested destinations, unwritable destinations, and existing destination collisions. An existing destination offers Use existing folder or Choose another destination; this flow does not merge into an unrelated directory. Resolve path aliases and symlinks before these checks. Internal copied links may be remapped to their copied targets; external or broken symlinks are skipped and reported rather than creating unannounced shared state.
 
