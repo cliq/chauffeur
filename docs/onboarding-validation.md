@@ -32,7 +32,7 @@ The native UI test target builds. Two runs of
 `make test-ui XCODEBUILD_ARGS='-only-testing:ChauffeurAppUITests/OnboardingWizardTests'`
 stopped before any test method with `Timed out while enabling automation mode`.
 The separate native accessibility probe reported `Accessibility access is
-unavailable`; no permissions were changed. The UI tests cover project handoff,
+unavailable`; no permissions were changed. The UI tests cover returning to Welcome after finishing setup,
 saved draft resumption, and returning-user window restoration, but their runtime
 assertions remain unverified on this machine.
 

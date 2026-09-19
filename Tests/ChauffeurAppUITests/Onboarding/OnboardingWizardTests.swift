@@ -15,7 +15,7 @@ import ChauffeurCore
         await fixture?.stop()
     }
 
-    func testSingleProfileLoginSummaryAndProjectHandoff() async throws {
+    func testSingleProfileLoginSummaryAndReturnToWelcome() async throws {
         fixture.launch()
         fixture.openWizard()
 
@@ -53,19 +53,19 @@ import ChauffeurCore
         fixture.app.buttons["onboarding.continue"].click()
         XCTAssertTrue(fixture.app.staticTexts["Your teams are ready"].waitForExistence(timeout: 10))
         XCTAssertTrue(fixture.app.staticTexts["UI Personal"].exists)
-        fixture.app.buttons["onboarding.openProject"].click()
+        XCTAssertFalse(fixture.app.buttons["onboarding.openProject"].exists)
+        XCTAssertFalse(fixture.app.buttons["onboarding.discard"].exists)
+        XCTAssertFalse(fixture.app.buttons["onboarding.finishLater"].exists)
+        fixture.app.buttons["onboarding.finish"].click()
 
-        XCTAssertTrue(fixture.app.staticTexts["Create Project"].waitForExistence(timeout: 15))
-        let projectTeam = fixture.app.descendants(matching: .any)["project.preset-set"]
-        XCTAssertTrue(projectTeam.exists)
-        XCTAssertTrue(String(describing: projectTeam.value).contains("UI Personal"))
-        fixture.app.textFields["project.name"].replaceText(with: "First UI Project")
-        fixture.app.buttons["Save Project"].click()
-        XCTAssertTrue(fixture.app.windows["First UI Project"].waitForExistence(timeout: 15))
+        let createProject = fixture.app.buttons["Create New Project…"]
+        XCTAssertTrue(createProject.waitForExistence(timeout: 15))
+        XCTAssertTrue(createProject.isEnabled)
+        XCTAssertFalse(fixture.app.staticTexts["Create Project"].exists)
+        XCTAssertFalse(fixture.app.buttons["onboarding.finish"].exists)
+        let finished = try await fixture.setupDraft()
+        XCTAssertTrue(finished.value.completed)
 
-        let snapshot = try await fixture.call("snapshot")
-        let project = try XCTUnwrap(snapshot["store"]["projects"].array.compactMap { try? $0["value"].decode(Project.self) }.first { $0.name == "First UI Project" })
-        XCTAssertEqual(project.presetSetID, stored.value.teams[0].id)
     }
 
     func testSaveAndFinishLaterResumesPartiallyTypedTeamName() async throws {

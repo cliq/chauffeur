@@ -6,7 +6,7 @@ struct OnboardingWizard: View {
     @Environment(\.dismiss) private var dismiss
     @StateObject private var setup = OnboardingModel()
     @State private var confirmingDiscard = false
-    let onFinished: (UUID?) -> Void
+    let onFinished: (UUID) -> Void
     private let steps: [SetupStep] = [.agents, .teams, .configurations, .copy, .login, .summary]
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
@@ -45,22 +45,21 @@ struct OnboardingWizard: View {
             }
             Divider()
             HStack {
-                Button("Discard Setup…", role: .destructive) { confirmingDiscard = true }.accessibilityIdentifier("onboarding.discard")
-                Button("Save and Finish Later") {
-                    Task { if await setup.finishLater() { dismiss() } }
-                }.accessibilityIdentifier("onboarding.finishLater")
+                if setup.draft.step != .summary {
+                    Button("Discard Setup…", role: .destructive) { confirmingDiscard = true }.accessibilityIdentifier("onboarding.discard")
+                    Button("Save and Finish Later") {
+                        Task { if await setup.finishLater() { dismiss() } }
+                    }.accessibilityIdentifier("onboarding.finishLater")
+                }
                 Spacer()
                 if setup.busy { ProgressView().controlSize(.small) }
                 if setup.draft.step != .agents {
                     Button("Back") { setup.back() }.accessibilityIdentifier("onboarding.back")
                 }
                 if setup.draft.step == .summary {
-                    Button("Open your first project") {
-                        Task { if let team = await setup.finish() { onFinished(team); dismiss() } }
-                    }.buttonStyle(.borderedProminent).accessibilityIdentifier("onboarding.openProject")
                     Button("Finish") {
-                        Task { if await setup.finish() != nil { onFinished(nil); dismiss() } }
-                    }.accessibilityIdentifier("onboarding.finish")
+                        Task { if let team = await setup.finish() { onFinished(team); dismiss() } }
+                    }.buttonStyle(.borderedProminent).keyboardShortcut(.defaultAction).accessibilityIdentifier("onboarding.finish")
                 } else {
                     Button(continueTitle) { Task { await setup.next() } }
                         .buttonStyle(.borderedProminent).keyboardShortcut(.defaultAction).accessibilityIdentifier("onboarding.continue")

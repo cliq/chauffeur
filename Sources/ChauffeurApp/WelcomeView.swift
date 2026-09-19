@@ -13,7 +13,6 @@ struct WelcomeView: View {
     @State private var restored = false
     @State private var showingSetup = false
     @State private var resumeSetup = false
-    @State private var setupProjectTeam: UUID?
     private var projects: [Project] { model.projects.filter { showArchived || !$0.archived } }
     var body: some View {
         VStack(spacing: 0) {
@@ -70,9 +69,8 @@ struct WelcomeView: View {
             ServiceHealthView().padding(10)
         }.frame(minWidth: 780, minHeight: 460)
             .sheet(isPresented: $showingSetup, onDismiss: {
-                if let teamID = setupProjectTeam { setupProjectTeam = nil; model.projectCreation = AppModel.ProjectCreation(teamID: teamID) }
                 Task { await inspectSetup(autoPresent: false) }
-            }) { OnboardingWizard { teamID in setupProjectTeam = teamID; showingSetup = false } }
+            }) { OnboardingWizard { _ in showingSetup = false } }
             .sheet(item: $model.projectCreation, onDismiss: {
                 // Closing a window while its creation sheet is still attached
                 // can be ignored by macOS. Navigate after the sheet is gone.
