@@ -21,6 +21,7 @@ struct SessionLaunchView: View {
     @State private var folderID: UUID?
     @State private var checkout = Checkout.repository
     @State private var branchOverride: String?
+    @FocusState private var branchFocused: Bool
     @State private var baseRef = "HEAD"
     private struct DestinationRequest: Equatable {
         let folderID: UUID
@@ -236,9 +237,18 @@ struct SessionLaunchView: View {
                     ForEach(worktrees) { tree in Text("\(tree.branch.isEmpty ? "Detached HEAD" : tree.branch) · \(tree.availability.rawValue)").tag(Checkout.existing(tree.id)) }
                     Divider()
                     Text("New worktree…").tag(Checkout.newWorktree)
-                }.onChange(of: checkout) { _, _ in shared = false }
+                }.onChange(of: checkout) { _, value in
+                    shared = false
+                    if value != .newWorktree { branchFocused = false }
+                }
                 if checkout == .newWorktree {
                     TextField("New branch", text: branchBinding).autocorrectionDisabled().accessibilityIdentifier("session.branch")
+                        .focused($branchFocused)
+                        .task {
+                            await Task.yield()
+                            guard !Task.isCancelled else { return }
+                            branchFocused = true
+                        }
                     TextField("Base ref", text: $baseRef).autocorrectionDisabled()
                 }
             }
