@@ -32,13 +32,54 @@ enum MigrationSupport {
         "account.json", "login.json", "session.json", ".session", "keychain"
     ]
 
-    static func excludedAsset(_ path: String) -> Bool {
-        path.split(separator: "/").contains { component in
-            let name = component.lowercased()
-            return credentialNames.contains(name) || [".git", ".cache", "logs", "debug", "tmp", ".ds_store"].contains(name)
-                || name == ".env" || name.hasPrefix(".env.") || name.hasSuffix(".lock") || name.hasSuffix(".sock")
-                || name == "credentials" || name == "tokens" || name == "auth"
+    enum AssetExclusion {
+        case credential
+        case transient
+
+        var previewExplanation: String {
+            switch self {
+            case .credential: "credentials are not copied."
+            case .transient: "source-root transient state is not copied."
+            }
         }
+
+        var writeExplanation: String {
+            switch self {
+            case .credential: "Credentials cannot be copied."
+            case .transient: "Source-root transient state cannot be copied."
+            }
+        }
+
+        var linkedTargetExplanation: String {
+            switch self {
+            case .credential: "its link targets a credential file, which is not copied."
+            case .transient: "its link targets source-root transient state, which is not copied."
+            }
+        }
+    }
+
+    private static let sourceRootTransientDirectories: Set<String> = [
+        ".git", ".cache", "logs", "debug", "tmp"
+    ]
+
+    static func assetExclusion(_ path: String, isDirectory: Bool = false) -> AssetExclusion? {
+        let components = path.split(separator: "/", omittingEmptySubsequences: false)
+        guard let last = components.last else { return nil }
+        let name = last.lowercased()
+        if !isDirectory, (credentialNames.contains(name) || name == ".env" || name.hasPrefix(".env.")) {
+            return .credential
+        }
+        if let first = components.first?.lowercased(), sourceRootTransientDirectories.contains(first) {
+            return .transient
+        }
+        if components.count == 1, name == ".ds_store" || name.hasSuffix(".lock") || name.hasSuffix(".sock") {
+            return .transient
+        }
+        return nil
+    }
+
+    static func excludedAsset(_ path: String) -> Bool {
+        assetExclusion(path) != nil
     }
 
     static func digest(_ data: Data) -> String {
@@ -97,6 +138,10 @@ enum MigrationSupport {
         try validateRelativePath(relativeRoot)
         let root = sourceRoot.appendingPathComponent(relativeRoot, isDirectory: true)
         guard FileManager.default.fileExists(atPath: root.path) else { return }
+        if let exclusion = assetExclusion(relativeRoot, isDirectory: true) {
+            warnings.append("Skipped \(relativeRoot): \(exclusion.previewExplanation)")
+            return
+        }
         let resolvedRoot = root.resolvingSymlinksInPath().standardizedFileURL
         guard resolvedRoot.path.hasPrefix(sourceRoot.path + "/") else {
             warnings.append("Skipped \(relativeRoot): its folder points outside the source.")
@@ -111,24 +156,25 @@ enum MigrationSupport {
             let descendant = url.pathComponents.suffix(enumerator.level).joined(separator: "/")
             let relative = relativeRoot + (descendant.isEmpty ? "" : "/" + descendant)
             let values = try url.resourceValues(forKeys: keys)
-            if excludedAsset(relative) {
+            if let exclusion = assetExclusion(relative, isDirectory: values.isDirectory == true) {
                 if values.isDirectory == true { enumerator.skipDescendants() }
-                warnings.append("Skipped \(relative): credentials or transient state are not copied.")
+                warnings.append("Skipped \(relative): \(exclusion.previewExplanation)")
                 continue
             }
             if values.isSymbolicLink == true {
                 if values.isDirectory == true { enumerator.skipDescendants() }
                 let target = url.resolvingSymlinksInPath().standardizedFileURL
-                if excludedAsset(String(target.path.dropFirst(sourceRoot.path.count + 1))) {
-                    warnings.append("Skipped \(relative): its link targets excluded state.")
-                    continue
-                }
                 guard target.path.hasPrefix(sourceRoot.path + "/"), FileManager.default.fileExists(atPath: target.path) else {
                     warnings.append("Skipped \(relative): its link is broken or points outside the source folder.")
                     continue
                 }
                 guard (try? target.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true else {
                     warnings.append("Skipped \(relative): linked directories are not copied.")
+                    continue
+                }
+                let targetRelative = String(target.path.dropFirst(sourceRoot.path.count + 1))
+                if let exclusion = assetExclusion(targetRelative) {
+                    warnings.append("Skipped \(relative): \(exclusion.linkedTargetExplanation)")
                     continue
                 }
                 let file = try digestFile(target)
@@ -159,16 +205,16 @@ enum MigrationSupport {
         for entry in preview.entries {
             try validateRelativePath(entry.sourceRelativePath)
             try validateRelativePath(entry.destinationRelativePath)
-            guard !excludedAsset(entry.sourceRelativePath), !excludedAsset(entry.destinationRelativePath) else {
-                throw ConfigurationMigrationError.unsafePath("Credentials and transient state cannot be copied.")
+            if let exclusion = assetExclusion(entry.sourceRelativePath) ?? assetExclusion(entry.destinationRelativePath) {
+                throw ConfigurationMigrationError.unsafePath(exclusion.writeExplanation)
             }
             let sourceURL = source.appendingPathComponent(entry.sourceRelativePath)
             let resolvedSource = sourceURL.resolvingSymlinksInPath().standardizedFileURL
             guard resolvedSource.path.hasPrefix(source.path + "/") else {
                 throw ConfigurationMigrationError.sourceChanged("A selected link now points outside the source folder: \(entry.sourceRelativePath)")
             }
-            guard !excludedAsset(String(resolvedSource.path.dropFirst(source.path.count + 1))) else {
-                throw ConfigurationMigrationError.sourceChanged("A selected link now points at excluded state.")
+            if let exclusion = assetExclusion(String(resolvedSource.path.dropFirst(source.path.count + 1))) {
+                throw ConfigurationMigrationError.sourceChanged("A selected link now points at excluded state. \(exclusion.writeExplanation)")
             }
             let data = try Data(contentsOf: resolvedSource, options: [.mappedIfSafe])
             guard digest(data) == entry.sourceDigest else {

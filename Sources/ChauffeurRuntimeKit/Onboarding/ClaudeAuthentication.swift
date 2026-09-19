@@ -17,12 +17,12 @@ public struct ClaudeAuthentication<Runner: SetupCommandRunning>: AgentAuthentica
         guard context.kind == .claude else { return AuthenticationSupport.unavailable("This authentication adapter only supports Claude Code.") }
         do {
             let help = try await runner.run(AuthenticationSupport.command(context, arguments: ["auth", "status", "--help"]), timeout: AuthenticationSupport.timeout, outputLimit: AuthenticationSupport.outputLimit)
-            guard help.status == 0, !help.outputTruncated, help.error.isEmpty,
+            guard help.status == 0, !help.outputTruncated,
                   help.output.contains("--json") else {
                 return AuthenticationSupport.unavailable("This Claude Code version does not expose the supported JSON authentication status command. Update Claude Code and recheck.")
             }
             let result = try await runner.run(AuthenticationSupport.command(context, arguments: ["auth", "status", "--json"]), timeout: AuthenticationSupport.timeout, outputLimit: AuthenticationSupport.outputLimit)
-            guard !result.outputTruncated, result.error.isEmpty,
+            guard !result.outputTruncated,
                   let data = result.output.data(using: .utf8),
                   let decoded = try? JSONSerialization.jsonObject(with: data),
                   let object = decoded as? [String: Any],

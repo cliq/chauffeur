@@ -26,7 +26,8 @@ struct ConfigurationDiscoveryTests {
         let inventory = try discovery.inventory()
 
         #expect(inventory.homePath == Paths.canonical(home.path))
-        #expect(inventory.executables[CLIKind.codex.rawValue] == Paths.canonical(codex.path))
+        #expect(inventory.executables[CLIKind.codex.rawValue] == "codex")
+        #expect(try Paths.executable("codex", environment: ["PATH": bin.path]) == Paths.canonical(codex.path))
         #expect(inventory.missingAgents == [.claude])
         #expect(inventory.configurations.contains { $0.kind == .codex && $0.path == Paths.canonical(currentCodex.path) && $0.isCurrent && $0.available })
         #expect(inventory.configurations.contains { $0.path == Paths.canonical(missingImported.path) && !$0.available })

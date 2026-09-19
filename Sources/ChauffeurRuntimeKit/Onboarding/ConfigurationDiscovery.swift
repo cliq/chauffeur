@@ -71,7 +71,13 @@ public struct ConfigurationDiscovery: Sendable {
         var missingAgents: [CLIKind] = []
         for kind in CLIKind.allCases where kind.isAgent {
             let override = environment["CHAUFFEUR_\(kind.rawValue.uppercased())_EXECUTABLE"]
-            do { executables[kind.rawValue] = try Paths.executable(override ?? kind.rawValue, environment: environment) }
+            do {
+                // Validate now, but persist the stable command/symlink rather than
+                // a versioned installation target that an auto-update removes.
+                let command = override ?? kind.rawValue
+                _ = try Paths.executable(command, environment: environment)
+                executables[kind.rawValue] = command
+            }
             catch { missingAgents.append(kind) }
         }
         return SetupInventory(

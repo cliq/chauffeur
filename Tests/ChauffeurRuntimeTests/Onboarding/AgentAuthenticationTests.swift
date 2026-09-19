@@ -25,6 +25,26 @@ import Testing
         #expect(commands.allSatisfy { $0.environment["OPENAI_API_KEY"] == nil })
     }
 
+    @Test func codexAcceptsAPIKeySuffixWithoutRetainingCredentialText() async throws {
+        let runner = FakeAuthenticationRunner([
+            .success(.init(status: 0, output: "status", error: "")),
+            .success(.init(status: 0, output: "", error: "Logged in using an API key - sk-fixture-sensitive\n"))
+        ])
+        let result = await CodexAuthentication(runner: runner).status(context: fixtureContext(kind: .codex))
+        #expect(result.phase == .connected)
+        #expect(result.method == "API key")
+        #expect(!String(decoding: try JSONCoding.encode(result), as: UTF8.self).contains("sk-fixture-sensitive"))
+    }
+
+    @Test func claudeToleratesStderrNoticesWithValidDirectoryScopedJSON() async {
+        let runner = FakeAuthenticationRunner([
+            .success(.init(status: 0, output: "--json", error: "Update available\n")),
+            .success(.init(status: 0, output: #"{"loggedIn":true,"authMethod":"oauth","configDirectory":"/profiles/work"}"#, error: "Update available\n"))
+        ])
+        let result = await ClaudeAuthentication(runner: runner).status(context: fixtureContext(kind: .claude))
+        #expect(result.phase == .connected)
+    }
+
     @Test func knownCodexNegativeRequiresSignIn() async {
         let runner = FakeAuthenticationRunner([
             .success(.init(status: 0, output: "status Show login status", error: "")),

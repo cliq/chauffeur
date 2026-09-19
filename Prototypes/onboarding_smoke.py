@@ -202,7 +202,7 @@ else:
         runtime = start_runtime()
         first_health = wait_for(lambda: call("status"), lambda value: value.get("status") == "running")
         inventory = call("setupInventory")
-        assert inventory["executables"] == {"claude": str(fake_cli.resolve()), "codex": str(fake_cli.resolve())}
+        assert inventory["executables"] == {"claude": str(fake_cli), "codex": str(fake_cli)}
         assert inventory["missingAgents"] == []
 
         personal_id, work_id = uid(), uid()

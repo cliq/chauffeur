@@ -41,10 +41,16 @@ public struct CodexAuthentication<Runner: SetupCommandRunning>: AgentAuthenticat
                 return AuthenticationSupport.unavailable("Codex could not verify authentication for this configuration.")
             }
             let prefix = "Logged in using "
-            guard line.hasPrefix(prefix), line.count > prefix.count, !line.contains("\n") else {
+            guard line.hasPrefix(prefix), line.count > prefix.count, line.rangeOfCharacter(from: .newlines) == nil else {
                 return AuthenticationSupport.unavailable("This Codex version returned an unsupported authentication status. Update Codex and recheck.")
             }
-            let method = String(line.dropFirst(prefix.count))
+            let reportedMethod = String(line.dropFirst(prefix.count))
+            // CLI versions append a masked key after this exact delimiter. Do
+            // not persist or display that suffix, even if a CLI fails to mask it.
+            let method: String
+            if reportedMethod.hasPrefix("an API key - "), reportedMethod.count > "an API key - ".count {
+                method = "API key"
+            } else { method = reportedMethod }
             let supported = ["ChatGPT", "an API key", "API key"]
             guard supported.contains(method) else {
                 return AuthenticationSupport.unavailable("Codex reported an authentication method this version of Chauffeur cannot verify.")

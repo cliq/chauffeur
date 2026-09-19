@@ -23,6 +23,9 @@ public struct CodexConfigurationMigration: ConfigurationMigration {
         var warnings: [String] = []
         if pair.categories.contains(.history) { warnings.append("Codex conversation history cannot be copied by this setup flow.") }
         if pair.categories.contains(.hooks) { warnings.append("Codex does not expose a separate hooks category for migration.") }
+        if FileManager.default.fileExists(atPath: source.appendingPathComponent("hooks.json").path) {
+            warnings.append("Codex hooks.json is not imported because its migration behavior has not been verified.")
+        }
         if pair.categories.contains(.instructions) { addFile("AGENTS.md", category: .instructions, source: source, entries: &entries, warnings: &warnings) }
         try addConfiguration(source: source, pair: pair, entries: &entries, warnings: &warnings)
         if pair.categories.contains(.reusable) {
@@ -56,10 +59,15 @@ public struct CodexConfigurationMigration: ConfigurationMigration {
         guard FileManager.default.fileExists(atPath: url.path) else { return }
         do {
             let data = try Data(contentsOf: url)
-            let output = try ConfigurationDocument.codexTOML(data, categories: pair.categories)
-            let omitted = try ConfigurationDocument.omittedCodexKeys(data)
-            if !omitted.isEmpty { warnings.append("Omitted unsupported or credential-bearing fields from config.toml: \(omitted.joined(separator: ", ")).") }
-            guard !String(decoding: output, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            let sanitized = try ConfigurationDocument.sanitizedCodexTOML(data, categories: pair.categories)
+            if !sanitized.omittedPaths.isEmpty {
+                warnings.append("Omitted unsupported, unselected, or credential-bearing fields from config.toml: \(sanitized.omittedPaths.joined(separator: ", ")).")
+            }
+            let references = try ConfigurationDocument.codexAbsoluteReferences(sanitized.data, sourcePath: source.path)
+            if !references.isEmpty {
+                warnings.append("Retained absolute source-folder references in config.toml: \(references.joined(separator: ", ")). Referenced files are not copied automatically.")
+            }
+            guard !String(decoding: sanitized.data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
                 warnings.append("Skipped config.toml: none of its supported fields are in the selected categories.")
                 return
             }

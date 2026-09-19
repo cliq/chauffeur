@@ -94,6 +94,19 @@ public actor OnboardingCoordinator {
         }
     }
 
+    private func sameExecutable(_ lhs: String, _ rhs: String) -> Bool {
+        if lhs == rhs { return true }
+        guard let resolved = try? Paths.executable(lhs, environment: environment) else { return false }
+        return resolved == (try? Paths.executable(rhs, environment: environment))
+    }
+
+    private func canRepairExecutable(_ old: SetupAgentPair, with updated: SetupAgentPair) -> Bool {
+        guard activeLogin == nil, (try? Paths.executable(old.executable, environment: environment)) == nil else { return false }
+        let detected = environment["CHAUFFEUR_\(old.kind.rawValue.uppercased())_EXECUTABLE"] ?? old.kind.rawValue
+        return sameExecutable(updated.executable, detected)
+            && (try? Paths.executable(detected, environment: environment)) != nil
+    }
+
     func saveDraft(_ params: JSONValue) async throws -> Stored<SetupDraft> {
         var draft = try params["record"].decode(SetupDraft.self)
         let prior = try await store.setupDraft()
@@ -106,12 +119,14 @@ public actor OnboardingCoordinator {
                 for old in oldTeam.agents {
                     let updated = draft.teams.flatMap(\.agents).first { $0.id == old.id }
                     if old.operationID != nil || activeLogin?.pairID == old.id {
-                        guard let updated, updated.destinationPath == old.destinationPath, updated.executable == old.executable, updated.kind == old.kind else {
+                        guard let updated, Paths.canonical(updated.destinationPath) == Paths.canonical(old.destinationPath),
+                              updated.kind == old.kind,
+                              sameExecutable(updated.executable, old.executable) || canRepairExecutable(old, with: updated) else {
                             throw ChauffeurError("setup_in_use", "This configuration is already created or signing in. Keep its folder and executable unchanged.")
                         }
                     }
                     guard let updated else { continue }
-                    let configChanged = updated.destinationPath != old.destinationPath || updated.executable != old.executable || updated.kind != old.kind
+                    let configChanged = Paths.canonical(updated.destinationPath) != Paths.canonical(old.destinationPath) || !sameExecutable(updated.executable, old.executable) || updated.kind != old.kind
                     let copyChanged = configChanged || updated.sourcePath != old.sourcePath || updated.categories != old.categories || updated.projectPaths != old.projectPaths
                     updatePair(&draft, id: old.id) { value in
                         value.operationID = old.operationID
@@ -169,7 +184,7 @@ public actor OnboardingCoordinator {
 
     func applyStatus(_ status: SetupAuthStatus, pair source: SetupAgentPair, draftID: UUID) async throws {
         guard var saved = try await store.setupDraft(), saved.value.id == draftID else { return }
-        for pair in saved.value.teams.flatMap(\.agents) where pair.kind == source.kind && pair.executable == source.executable && Paths.canonical(pair.destinationPath) == Paths.canonical(source.destinationPath) {
+        for pair in saved.value.teams.flatMap(\.agents) where pair.kind == source.kind && sameExecutable(pair.executable, source.executable) && Paths.canonical(pair.destinationPath) == Paths.canonical(source.destinationPath) {
             updatePair(&saved.value, id: pair.id) { $0.auth = status }
         }
         _ = try await store.saveSetupDraft(saved.value, expectedVersion: saved.version)
@@ -245,34 +260,43 @@ public actor OnboardingCoordinator {
     func finish(_ params: JSONValue) async throws -> [UUID] {
         var saved = try await requireDraft(params)
         var ids: [UUID] = []
+        // Validate the entire draft before saving any presets or teams. A typo
+        // must not make Finish silently omit a requested agent or team.
+        guard !saved.value.teams.isEmpty else { throw ChauffeurError("setup_no_ready_teams", "Add at least one team before finishing setup.") }
+        for team in saved.value.teams {
+            try Validation.name(team.name)
+            guard !team.agents.isEmpty else { throw ChauffeurError("setup_team_unavailable", "\(team.name): select at least one installed agent before finishing setup.") }
+            for pair in team.agents {
+                do { _ = try Paths.directory(pair.destinationPath) }
+                catch {
+                    let remedy = pair.operationID == nil ? "Go back and choose an existing folder." : "Restore the created folder at its original location before finishing setup."
+                    throw ChauffeurError("setup_configuration_unavailable", "\(team.name) · \(pair.kind.displayName): the configuration folder is missing or unavailable. \(remedy)", path: pair.destinationPath)
+                }
+                do { _ = try Paths.executable(pair.executable, environment: environment) }
+                catch { throw ChauffeurError("setup_executable_unavailable", "\(team.name) · \(pair.kind.displayName): the agent is no longer installed at this location. Go back to the first step and recheck installed agents.", path: pair.executable) }
+            }
+        }
         // Resolve the complete catalog before deciding whether any team should
         // inherit all presets; later teams must not expand an earlier subset.
         for pair in saved.value.teams.flatMap(\.agents) {
-            guard (try? Paths.directory(pair.destinationPath)) != nil,
-                  let executable = try? Paths.executable(pair.executable, environment: environment) else { continue }
             let snapshot = await store.reload()
-            if !snapshot.baseAgentPresets.contains(where: { $0.value.kind == pair.kind && !$0.value.archived && (try? Paths.executable($0.value.executable, environment: environment)) == executable }) {
-                _ = try await store.save(BaseAgentPreset(name: pair.kind.displayName, kind: pair.kind, executable: executable))
+            // Equivalent binaries are not equivalent persistent references: an
+            // old base may point directly at a version target that will vanish.
+            if !snapshot.baseAgentPresets.contains(where: { $0.value.kind == pair.kind && !$0.value.archived && $0.value.executable == pair.executable }) {
+                _ = try await store.save(BaseAgentPreset(name: pair.kind.displayName, kind: pair.kind, executable: pair.executable))
             }
         }
         for index in saved.value.teams.indices {
             var team = saved.value.teams[index]
             try Validation.name(team.name)
-            var available: [SetupAgentPair] = []
-            for pair in team.agents {
-                guard (try? Paths.directory(pair.destinationPath)) != nil,
-                      (try? Paths.executable(pair.executable, environment: environment)) != nil else { continue }
-                available.append(pair)
-            }
-            guard !available.isEmpty else { continue }
+            let available = team.agents
             var bases: [UUID: BaseAgentPreset] = [:]
             for pair in available {
                 let latest = await store.reload()
-                let resolved = try Paths.executable(pair.executable, environment: environment)
-                if let base = latest.baseAgentPresets.first(where: { $0.value.kind == pair.kind && !$0.value.archived && (try? Paths.executable($0.value.executable, environment: environment)) == resolved }) {
+                if let base = latest.baseAgentPresets.first(where: { $0.value.kind == pair.kind && !$0.value.archived && $0.value.executable == pair.executable }) {
                     bases[pair.id] = base.value
                 } else {
-                    bases[pair.id] = try await store.save(BaseAgentPreset(name: pair.kind.displayName, kind: pair.kind, executable: resolved)).value
+                    bases[pair.id] = try await store.save(BaseAgentPreset(name: pair.kind.displayName, kind: pair.kind, executable: pair.executable)).value
                 }
             }
             let snapshot = await store.reload()

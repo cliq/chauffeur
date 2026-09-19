@@ -206,12 +206,8 @@ import ChauffeurCore
             _ = try await call("verifySetupAuthentication", pairID: pair.id)
             try await reload()
         }
-        // Newly created profiles proceed directly into their first sign-in.
-        if let pair = pairs.first(where: { $0.choice == .create && $0.auth.phase == .signInRequired }) {
-            login = try await call("startSetupLogin", pairID: pair.id).decode(SetupLoginHandle.self)
-            loginPairID = pair.id
-            try await reload()
-        }
+        // Show verified status first. Starting OAuth requires an explicit Sign
+        // in action so browser cookies cannot choose an account before review.
     }
 
     func signIn(_ id: UUID) async {
