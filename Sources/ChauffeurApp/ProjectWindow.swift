@@ -29,7 +29,7 @@ import ChauffeurCore
         state.selectedFolderID = folderID
         state.selectedWorktreePath = path
         if let current = state.selectedSessionID, sessions.contains(where: { $0.id == current }) { requestFocus(current); return }
-        state.selectedSessionID = path == nil ? nil : sessions.first(where: \.state.isLive)?.id
+        state.selectedSessionID = path == nil ? nil : WorktreeSessions.selection(in: sessions, selectedID: nil)
         requestFocus(state.selectedSessionID)
     }
     func selectSession(_ id: UUID, folderID: UUID?, path: String?) {
@@ -184,7 +184,12 @@ struct ProjectWindow: View {
             .onChange(of: model.snapshot.store.worktrees.map(\.value.id)) { _, ids in
                 if let pendingWorktree, ids.contains(pendingWorktree.id) { self.pendingWorktree = nil }
             }
-            .onChange(of: model.snapshot.sessions) { _, _ in if layout.loaded { layout.synchronizeTerminals(model: model) } }
+            .onChange(of: model.snapshot.sessions) { previous, _ in
+                if layout.loaded {
+                    reconcileSelection(previousSessions: previous)
+                    layout.synchronizeTerminals(model: model)
+                }
+            }
             .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { notification in
                 guard let window = notification.object as? NSWindow, window === layout.window else { return }
                 model.recordRecentProject(projectID)
@@ -478,12 +483,13 @@ struct ProjectWindow: View {
             if let path = layout.state.selectedWorktreePath {
                 let row = checkout(folder: folder, path: path, project: project)
                 let sessions = openSessions(in: folder, path: path)
+                let selectedID = WorktreeSessions.selection(in: sessions, selectedID: layout.state.selectedSessionID)
                 VStack(spacing: 0) {
                     if !sessions.isEmpty {
-                        SessionStrip(sessions: sessions, project: project, keepFinishedSessions: model.snapshot.settings.keepFinishedSessions, delete: { deletingSession = $0 }, selectedID: layout.state.selectedSessionID, select: { selectSession($0.id) }, details: { selectSession($0.id); layout.detailsVisible = true }, revealPath: { FilePanels.reveal($0.launch.workingDirectory) })
+                        SessionStrip(sessions: sessions, project: project, keepFinishedSessions: model.snapshot.settings.keepFinishedSessions, delete: { deletingSession = $0 }, selectedID: selectedID, select: { selectSession($0.id) }, details: { selectSession($0.id); layout.detailsVisible = true }, revealPath: { FilePanels.reveal($0.launch.workingDirectory) })
                         Divider()
                     }
-                    if let selected = model.session(layout.state.selectedSessionID), sessions.contains(where: { $0.id == selected.id }) {
+                    if let selected = sessions.first(where: { $0.id == selectedID }) {
                         // Per-session identity so a new selection hosts its own
                         // terminal view instead of updating the previous one's.
                         TerminalPane(session: selected, controller: layout.controller(for: selected.id, scrollback: model.snapshot.settings.scrollbackLines)).frame(minWidth: 240).id(selected.id)
@@ -572,6 +578,13 @@ struct ProjectWindow: View {
     private func openSessions(in folder: ProjectFolder, path: String) -> [Session] {
         sessions(in: folder, path: path).filter { !layout.closedSessionIDs.contains($0.id) }
     }
+    private func reconcileSelection(previousSessions: [Session] = []) {
+        guard let folder = selectedFolder, let path = layout.selectedWorktreePath else { return }
+        let previous = WorktreeSessions.sessions(previousSessions, folder: folder, path: path, worktrees: worktreeRecords)
+        let next = WorktreeSessions.selection(in: openSessions(in: folder, path: path), selectedID: layout.state.selectedSessionID, previousOrder: previous.map(\.id))
+        guard next != layout.state.selectedSessionID else { return }
+        if let next { selectSession(next) } else { layout.state.selectedSessionID = nil }
+    }
     private var openTabs: [Session] {
         if let folder = selectedFolder, let path = layout.selectedWorktreePath { return openSessions(in: folder, path: path) }
         return model.session(layout.state.selectedSessionID).map { [$0] } ?? []
@@ -602,26 +615,16 @@ struct ProjectWindow: View {
         guard !checkingTab, model.online else { return }
         checkingTab = true
         let tabs = openTabs
-        let index = tabs.firstIndex { $0.id == session.id } ?? 0
-        let remaining = tabs.filter { $0.id != session.id }
         model.perform {
             defer { checkingTab = false }
             _ = try await model.call(method, .object(["sessionID": .string(session.id.uuidString)]))
             layout.controllers.removeValue(forKey: session.id)?.detach()
             layout.closedSessionIDs.remove(session.id)
             if layout.state.selectedSessionID == session.id {
-                // Focus the tab that takes the closed one's place, preferring a live session and
-                // otherwise the nearest tab; selecting it also focuses its terminal.
-                let positions = Dictionary(uniqueKeysWithValues: tabs.enumerated().map { ($1.id, $0) })
-                let live = remaining.filter { $0.state.isLive }
-                let pool = live.isEmpty ? remaining : live
-                let next = pool.min { lhs, rhs in
-                    let l = abs((positions[lhs.id] ?? 0) - index), r = abs((positions[rhs.id] ?? 0) - index)
-                    return l != r ? l < r : (positions[lhs.id] ?? 0) > (positions[rhs.id] ?? 0)
-                }
-                if let next {
-                    selectSession(next.id)
-                    markRead(next.id)
+                let remaining = openTabs.filter { $0.id != session.id }
+                if let next = WorktreeSessions.selection(in: remaining, selectedID: session.id, previousOrder: tabs.map(\.id)) {
+                    selectSession(next)
+                    markRead(next)
                 } else {
                     layout.state.selectedSessionID = nil
                 }
@@ -845,6 +848,7 @@ struct ProjectWindow: View {
             layout.state.selectedFolderID = location.folderID; layout.state.selectedWorktreePath = location.path
         }
         if let folderID = layout.state.selectedFolderID { collapsedRepositories.remove(folderID) }
+        reconcileSelection()
         layout.state.wasOpen = true; model.projectOpened(projectID); saveLayout()
         layout.synchronizeTerminals(model: model)
         consumeSessionRoute()

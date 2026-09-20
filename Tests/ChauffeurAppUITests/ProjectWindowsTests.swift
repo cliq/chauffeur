@@ -92,6 +92,22 @@ import ChauffeurCore
         XCTAssertEqual(before["sessions"].array.count, restored["sessions"].array.count)
         XCTAssertEqual(Set(before["sessions"].array.compactMap { $0["processID"].int }), Set(restored["sessions"].array.compactMap { $0["processID"].int }))
     }
+    func testRemovedSessionSelectsItsLeftNeighbor() async throws {
+        app.launch()
+        let window = app.windows[projects[0].name]
+        XCTAssertTrue(window.waitForExistence(timeout: 15))
+        let closing = window.buttons["session.card.\(sessions[1].id.uuidString)"]
+        XCTAssertTrue(closing.waitForExistence(timeout: 10))
+        closing.click()
+        // A service-side close exercises selection recovery independently of Cmd-W.
+        _ = try await call("closeSession", .object(["sessionID": .string(sessions[1].id.uuidString)]))
+        XCTAssertTrue(closing.waitForNonExistence(timeout: 10))
+        let left = window.buttons["session.card.\(sessions[0].id.uuidString)"]
+        let selected = XCTNSPredicateExpectation(predicate: NSPredicate(format: "selected == true"), object: left)
+        await fulfillment(of: [selected], timeout: 10)
+        XCTAssertFalse(window.staticTexts["No sessions on this worktree"].exists)
+    }
+
     func testTabShortcutsStayInSelectedWindow() async throws {
         app.launch()
         let window = app.windows[projects[0].name]
@@ -138,6 +154,7 @@ import ChauffeurCore
         app.typeKey("w", modifierFlags: .command)
         XCTAssertTrue(window.buttons["session.card.\(terminal.id.uuidString)"].waitForNonExistence(timeout: 10))
         XCTAssertFalse(window.sheets.firstMatch.exists)
+        XCTAssertTrue(window.buttons["session.card.\(sessions[2].id.uuidString)"].isSelected)
         // Closing the final tab leaves its window open until the next Cmd-W.
         for _ in 0..<3 {
             app.typeKey("w", modifierFlags: .command)

@@ -24,6 +24,21 @@ public enum WorktreeSessions {
         if first.state.isLive != second.state.isLive { return first.state.isLive }
         return first.createdAt < second.createdAt
     }
+    /// Preserve a valid selection; otherwise choose the nearest live tab,
+    /// preferring the left neighbor. Finished history is a fallback when no live tab remains.
+    public static func selection(in sessions: [Session], selectedID: UUID?, previousOrder: [UUID] = []) -> UUID? {
+        if let selectedID, sessions.contains(where: { $0.id == selectedID }) { return selectedID }
+        let live = live(sessions)
+        let candidates = live.isEmpty ? sessions : live
+        guard let selectedID, let index = previousOrder.firstIndex(of: selectedID) else { return candidates.first?.id }
+        let available = Set(candidates.map(\.id))
+        for distance in 1...max(previousOrder.count, 1) {
+            let left = index - distance, right = index + distance
+            if left >= 0, available.contains(previousOrder[left]) { return previousOrder[left] }
+            if right < previousOrder.count, available.contains(previousOrder[right]) { return previousOrder[right] }
+        }
+        return candidates.first?.id
+    }
     public static func live(_ sessions: [Session]) -> [Session] { sessions.filter(\.state.isLive) }
     public static func finished(_ sessions: [Session]) -> [Session] { sessions.filter { !$0.state.isLive } }
     /// Sessions a checkout badge counts: only live work still needs attention,

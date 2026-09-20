@@ -37,6 +37,30 @@ struct WorktreeNavigationTests {
         #expect(WorktreeSessions.finished(mainSessions).map(\.id) == [finishedMain.id])
     }
 
+    @Test func removedSelectionFallsBackToNearestLiveTabOnTheLeft() {
+        let project = Project(name: "P", presetSetID: UUID())
+        let folder = ProjectFolder(path: "/tmp/repo")
+        let left = session(folder: folder, project: project, directory: folder.canonicalPath)
+        let closing = session(folder: folder, project: project, directory: folder.canonicalPath)
+        let right = session(folder: folder, project: project, directory: folder.canonicalPath)
+        let order = [left.id, closing.id, right.id]
+        #expect(WorktreeSessions.selection(in: [left, right], selectedID: closing.id, previousOrder: order) == left.id)
+        #expect(WorktreeSessions.selection(in: [right], selectedID: closing.id, previousOrder: order) == right.id)
+        #expect(WorktreeSessions.selection(in: [left, right], selectedID: right.id, previousOrder: order) == right.id)
+        #expect(WorktreeSessions.selection(in: [], selectedID: closing.id, previousOrder: order) == nil)
+    }
+
+    @Test func missingSelectionAlwaysSelectsAnAvailableSession() {
+        let project = Project(name: "P", presetSetID: UUID())
+        let folder = ProjectFolder(path: "/tmp/repo")
+        let finished = session(folder: folder, project: project, directory: folder.canonicalPath, state: .exited)
+        let live = session(folder: folder, project: project, directory: folder.canonicalPath)
+        #expect(WorktreeSessions.selection(in: [finished, live], selectedID: nil) == live.id)
+        #expect(WorktreeSessions.selection(in: [finished], selectedID: nil) == finished.id)
+        #expect(WorktreeSessions.selection(in: [finished, live], selectedID: finished.id) == finished.id)
+        #expect(WorktreeSessions.selection(in: [finished, live], selectedID: UUID(), previousOrder: [finished.id, live.id]) == live.id)
+    }
+
     @Test func legacyWindowRecordsDecodeAndNewFieldsRoundTrip() throws {
         let projectID = UUID(), sessionID = UUID()
         let legacy = """

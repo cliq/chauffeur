@@ -7,13 +7,19 @@ struct WelcomeView: View {
     @Environment(\.dismissWindow) private var dismissWindow
     @Environment(\.openSettings) private var openSettings
     @State private var showArchived = false
+    @State private var projectSearch = ""
     @State private var selectedProject: UUID?
     @State private var createdProjectID: UUID?
     @State private var editingProject: Project?
     @State private var restored = false
     @State private var showingSetup = false
     @State private var resumeSetup = false
-    private var projects: [Project] { model.projects.filter { showArchived || !$0.archived } }
+    private var projects: [Project] {
+        let query = projectSearch.trimmingCharacters(in: .whitespacesAndNewlines)
+        return model.projects.filter {
+            (showArchived || !$0.archived) && (query.isEmpty || $0.name.localizedCaseInsensitiveContains(query))
+        }
+    }
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 0) {
@@ -36,6 +42,17 @@ struct WelcomeView: View {
                 Divider()
                 VStack(alignment: .leading, spacing: 8) {
                     HStack { Text("Projects").font(.headline); Spacer(); Toggle("Archived", isOn: $showArchived).toggleStyle(.checkbox).font(.caption) }.padding(.horizontal).padding(.top)
+                    HStack {
+                        Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                        TextField("Search projects", text: $projectSearch)
+                            .textFieldStyle(.plain)
+                            .accessibilityIdentifier("projects.search")
+                        if !projectSearch.isEmpty {
+                            Button { projectSearch = "" } label: { Image(systemName: "xmark.circle.fill") }
+                                .buttonStyle(.plain).foregroundStyle(.secondary)
+                                .accessibilityLabel("Clear project search")
+                        }
+                    }.padding(8).background(.quaternary, in: RoundedRectangle(cornerRadius: 6)).padding(.horizontal)
                     List(selection: $selectedProject) {
                         ForEach(projects) { project in
                             let sessions = model.sessions(in: project.id)
@@ -49,6 +66,14 @@ struct WelcomeView: View {
                                 }.font(.caption)
                             }.frame(maxWidth: .infinity, alignment: .leading).padding(.vertical, 6).tag(project.id).contentShape(Rectangle()).accessibilityIdentifier("project-\(project.id.uuidString)")
                         }
+                    }
+                    .overlay {
+                        if projects.isEmpty, !projectSearch.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                            Text("No matching projects").foregroundStyle(.secondary).allowsHitTesting(false)
+                        }
+                    }
+                    .onChange(of: projects.map(\.id)) { _, ids in
+                        if let selectedProject, !ids.contains(selectedProject) { self.selectedProject = nil }
                     }
                     // Native list activation keeps selection immediate while supporting double-click to open.
                     .contextMenu(forSelectionType: UUID.self) { ids in
