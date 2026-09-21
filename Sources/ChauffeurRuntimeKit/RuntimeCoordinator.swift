@@ -467,6 +467,11 @@ public actor RuntimeCoordinator {
             if let launch { _ = await launch.result }
             try await terminals.stop(sessionID: sessionID, force: closing || (params["force"].bool ?? false))
             try await reconcile()
+            // A coalesced refresh may have captured its inventory before Stop.
+            // Read again after it finishes before applying history retention.
+            if sessions[sessionID]?.state.isLive == true {
+                try await performReconcile(startup: false)
+            }
             if closing {
                 if keepHistory, var session = sessions[sessionID] {
                     session.unread = false

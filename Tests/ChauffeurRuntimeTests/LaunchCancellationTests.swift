@@ -329,6 +329,22 @@ struct LaunchCancellationTests {
 }
 
 struct ShellSessionTests {
+    @Test func closingDuringAnOlderInventoryRefreshDiscardsHistory() async throws {
+        let fixture = try await LaunchFixture.make(gatedCreation: true); defer { fixture.cleanup() }
+        let session = try await fixture.runtime.launch(fixture.request)
+        try Data().write(to: fixture.path("block-inventory"))
+        let refresh = Task { try await fixture.runtime.reconcile() }
+        try await fixture.wait { FileManager.default.fileExists(atPath: fixture.path("inventory-entered").path) }
+        let close = Task {
+            try await fixture.runtime.handle(IPCRequest("closeSession", params: .object(["sessionID": .string(session.id.uuidString)])))
+        }
+        try await fixture.wait { FileManager.default.fileExists(atPath: fixture.path("kill-finished").path) }
+        try FileManager.default.removeItem(at: fixture.path("block-inventory"))
+        try await refresh.value
+        _ = try await close.value
+        #expect(await fixture.runtime.store.current().sessions.allSatisfy { $0.value.id != session.id })
+    }
+
     @Test func legacyRetentionSettingsDefaultToDiscardingClosedSessions() throws {
         let legacy = Data(#"{"scrollbackLines":1234,"snapshotBudgetBytes":1048576,"completedMessageDays":30,"maxLiveChildren":2}"#.utf8)
         let settings = try JSONCoding.decode(RetentionSettings.self, from: legacy)
@@ -434,7 +450,7 @@ struct LaunchFixture: Sendable {
         let executable = root.appendingPathComponent("fixture.py")
         try Data(#"""
         #!/usr/bin/python3
-        import json, os, signal, sys, time
+        import json, os, signal, subprocess, sys, time
         from pathlib import Path
         root = Path(__file__).resolve().parent
         if Path(sys.argv[0]).name == 'tmux': root = root.parent
@@ -446,6 +462,17 @@ struct LaunchFixture: Sendable {
                 mark('creation-entered', os.getpid())
                 while (root / 'block-creation').exists(): time.sleep(0.01)
             real = (root / 'real-tmux').read_text()
+            if 'list-panes' in sys.argv and (root / 'block-inventory').exists() and not (root / 'inventory-entered').exists():
+                result = subprocess.run([real, *sys.argv[1:]], capture_output=True)
+                mark('inventory-entered', os.getpid())
+                while (root / 'block-inventory').exists(): time.sleep(0.01)
+                sys.stdout.buffer.write(result.stdout)
+                sys.stderr.buffer.write(result.stderr)
+                sys.exit(result.returncode)
+            if 'kill-session' in sys.argv:
+                result = subprocess.run([real, *sys.argv[1:]])
+                mark('kill-finished', result.returncode)
+                sys.exit(result.returncode)
             os.execv(real, [real, *sys.argv[1:]])
         elif '--version' in sys.argv:
             mark('probe-token', os.environ['CHAUFFEUR_SESSION_TOKEN'])
