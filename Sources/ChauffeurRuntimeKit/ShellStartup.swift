@@ -28,6 +28,12 @@ enum ShellStartup {
             """,
             ".zshrc": """
             ZDOTDIR="$_chauffeur_user_zdotdir"
+            # macOS /etc/zshrc derives its default history path from ZDOTDIR,
+            # which still points at our wrapper while global startup files run.
+            # Repair only that generated default, before user history overrides.
+            if [[ "$HISTFILE" == \(wrapper)/.zsh_history ]]; then
+                HISTFILE="$ZDOTDIR/.zsh_history"
+            fi
             if [[ -r "$ZDOTDIR/.zshrc" ]]; then source "$ZDOTDIR/.zshrc"; fi
             _chauffeur_user_zdotdir="${ZDOTDIR:-$HOME}"
             export ZDOTDIR=\(wrapper)
