@@ -192,6 +192,7 @@ struct ProjectWindow: View {
             .onChange(of: layout.state) { _, _ in
                 guard layout.loaded else { return }
                 saveLayout(); layout.synchronizeTerminals(model: model)
+                if layout.window?.isKeyWindow == true { model.recordSessionSelection(layout.state.selectedSessionID) }
             }
             .onChange(of: model.snapshot.store.worktrees.map(\.value.id)) { _, ids in
                 if let pendingWorktree, ids.contains(pendingWorktree.id) { self.pendingWorktree = nil }
@@ -200,11 +201,13 @@ struct ProjectWindow: View {
                 if layout.loaded {
                     reconcileSelection(previousSessions: previous)
                     layout.synchronizeTerminals(model: model)
+                    if layout.window?.isKeyWindow == true { model.recordSessionSelection(layout.state.selectedSessionID) }
                 }
             }
             .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { notification in
                 guard let window = notification.object as? NSWindow, window === layout.window else { return }
                 model.recordRecentProject(projectID)
+                model.recordSessionSelection(layout.state.selectedSessionID)
             }
             .onReceive(NotificationCenter.default.publisher(for: .chauffeurCommand)) { notification in
                 guard layout.window?.isKeyWindow == true, let command = notification.object as? String else { return }
@@ -618,6 +621,7 @@ struct ProjectWindow: View {
         guard closingTab == nil, !checkingTab else { return }
         if let id = layout.state.selectedSessionID, layout.pendingTabs.contains(where: { $0.id == id }) {
             layout.pendingTabs.removeAll { $0.id == id }
+            model.forgetSessionSelection(id)
             layout.closedSessionIDs.insert(id)
             layout.state.selectedSessionID = layout.pendingTabs.last(where: {
                 $0.folderID == layout.selectedFolderID && $0.path == layout.selectedWorktreePath
@@ -647,6 +651,7 @@ struct ProjectWindow: View {
         guard !checkingTab, model.online else { return }
         let tabs = openTabs
         let wasSelected = layout.state.selectedSessionID == session.id
+        model.forgetSessionSelection(session.id)
         layout.closedSessionIDs.insert(session.id)
         layout.controllers.removeValue(forKey: session.id)?.detach()
         if wasSelected {
@@ -728,6 +733,10 @@ struct ProjectWindow: View {
         }
         if event.keyCode == 48 && (modifiers == .control || modifiers == [.control, .shift]) {
             cycle(modifiers.contains(.shift) ? -1 : 1)
+            return true
+        }
+        if modifiers == [.control, .command], event.keyCode == 123 || event.keyCode == 124 {
+            model.navigateSessionHistory(event.keyCode == 123 ? -1 : 1)
             return true
         }
         guard modifiers == .command else { return false }
@@ -950,6 +959,7 @@ struct ProjectWindow: View {
         dismissWindow(id: "welcome")
         layout.window?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+        model.recordSessionSelection(session.id)
     }
     private func saveLayout() { if layout.loaded { model.saveWindow(layout.state) } }
 }

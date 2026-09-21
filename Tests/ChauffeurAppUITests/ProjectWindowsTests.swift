@@ -171,6 +171,35 @@ import ChauffeurCore
         XCTAssertFalse(window.staticTexts["No sessions on this worktree"].exists)
     }
 
+    func testSelectionHistoryCrossesProjectWindows() async throws {
+        app.launch()
+        let first = app.windows[projects[0].name]
+        let second = app.windows[projects[1].name]
+        XCTAssertTrue(first.waitForExistence(timeout: 15))
+        XCTAssertTrue(second.waitForExistence(timeout: 15))
+        app.menuBars.menuBarItems["Window"].click()
+        app.menuBars.menuBarItems["Window"].menus.menuItems[projects[0].name].click()
+        let a = first.buttons["session.card.\(sessions[0].id.uuidString)"]
+        let b = first.buttons["session.card.\(sessions[1].id.uuidString)"]
+        a.click(); b.click()
+        app.menuBars.menuBarItems["Window"].click()
+        app.menuBars.menuBarItems["Window"].menus.menuItems[projects[1].name].click()
+        let c = second.buttons["session.card.\(sessions[3].id.uuidString)"]
+        XCTAssertTrue(c.isSelected)
+        app.typeKey(.leftArrow, modifierFlags: [.control, .command])
+        XCTAssertTrue(b.isSelected)
+        app.typeKey(.leftArrow, modifierFlags: [.control, .command])
+        XCTAssertTrue(a.isSelected)
+        app.typeKey(.rightArrow, modifierFlags: [.control, .command])
+        XCTAssertTrue(b.isSelected)
+        app.typeKey(.rightArrow, modifierFlags: [.control, .command])
+        XCTAssertTrue(c.isSelected)
+        // A subsequent ordinary tab selection must happen in the destination window.
+        let d = second.buttons["session.card.\(sessions[4].id.uuidString)"]
+        app.typeKey("]", modifierFlags: [.command, .shift])
+        XCTAssertTrue(d.isSelected)
+    }
+
     func testTabCreationAndClosureDoNotWaitForRuntime() async throws {
         continueAfterFailure = true
         app.launch()

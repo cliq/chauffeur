@@ -62,6 +62,7 @@ struct AppSnapshot: Decodable, Sendable {
     var openWelcomeWindow: (() -> Void)?
     private var openedRouteID: UUID?
     func openSessionURL(_ url: URL) {
+        historyDestination = nil
         if url == WelcomeRoute.url {
             skipAutomaticWindowRestore = true
             pendingSessionRoute = nil; pendingProjectRoute = nil; pendingFolderRoute = nil
@@ -128,6 +129,28 @@ struct AppSnapshot: Decodable, Sendable {
         pendingProjectRoute = ProjectNavigation(match: match)
         openProjectWindow?(match.projectID)
         NSApp.activate(ignoringOtherApps: true)
+    }
+    private var selectionHistory = SessionSelectionHistory()
+    private var historyDestination: UUID?
+    func recordSessionSelection(_ id: UUID?) {
+        if let destination = historyDestination, session(destination) == nil { historyDestination = nil }
+        guard let id, session(id) != nil else { return }
+        if let destination = historyDestination {
+            guard id == destination else { return }
+            historyDestination = nil
+        }
+        selectionHistory.record(id)
+    }
+    func forgetSessionSelection(_ id: UUID) {
+        selectionHistory.remove(id)
+        if historyDestination == id { historyDestination = nil }
+    }
+    func navigateSessionHistory(_ direction: Int) {
+        let available = Set(snapshot.sessions.filter { project($0.projectID)?.archived == false }.map(\.id))
+        guard let id = selectionHistory.move(direction, available: available), let target = session(id) else { return }
+        historyDestination = id
+        pendingSessionRoute = Navigation(route: SessionRoute(projectID: target.projectID, sessionID: id))
+        processPendingRoute()
     }
     var didRestoreWorkspace = false
     @Published var snapshot = AppSnapshot()

@@ -29,6 +29,9 @@ import ChauffeurCore
                 Button("New Session…") { NotificationCenter.default.post(name: .chauffeurCommand, object: "new-session") }.keyboardShortcut("n")
             }
             CommandMenu("Session") {
+                Button("Go Back to Previous Tab") { model.navigateSessionHistory(-1) }.keyboardShortcut(.leftArrow, modifiers: [.control, .command])
+                Button("Go Forward to Next Tab") { model.navigateSessionHistory(1) }.keyboardShortcut(.rightArrow, modifiers: [.control, .command])
+                Divider()
                 Button("Next Session") { command("next") }.keyboardShortcut("]", modifiers: [.command, .shift])
                 Button("Previous Session") { command("previous") }.keyboardShortcut("[", modifiers: [.command, .shift])
                 Button("Next Sidebar Item") { command("sidebar-next") }.keyboardShortcut(.downArrow, modifiers: .command)
