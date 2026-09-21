@@ -592,7 +592,9 @@ struct ProjectWindow: View {
     // MARK: Actions
 
     private func openSessions(in folder: ProjectFolder, path: String) -> [Session] {
-        sessions(in: folder, path: path).filter { !layout.closedSessionIDs.contains($0.id) }
+        sessions(in: folder, path: path).filter { session in
+            !layout.closedSessionIDs.contains(session.id) && !layout.pendingTabs.contains { $0.id == session.id }
+        }
     }
     private func reconcileSelection(previousSessions: [Session] = []) {
         guard !layout.pendingTabs.contains(where: { $0.id == layout.state.selectedSessionID }) else { return }
@@ -612,6 +614,7 @@ struct ProjectWindow: View {
         guard closingTab == nil, !checkingTab else { return }
         if let id = layout.state.selectedSessionID, layout.pendingTabs.contains(where: { $0.id == id }) {
             layout.pendingTabs.removeAll { $0.id == id }
+            layout.closedSessionIDs.insert(id)
             layout.state.selectedSessionID = layout.pendingTabs.last(where: {
                 $0.folderID == layout.selectedFolderID && $0.path == layout.selectedWorktreePath
             })?.id
@@ -791,7 +794,7 @@ struct ProjectWindow: View {
         model.perform {
             do {
                 let worktreeID = try await model.worktreeID(for: row, project: project)
-                let session = try await model.launchShell(project: project, folder: folder, worktreeID: worktreeID, branch: row.branch)
+                let session = try await model.launchShell(project: project, folder: folder, worktreeID: worktreeID, branch: row.branch, sessionID: pending.id)
                 // A loading tab can be closed before launch returns.
                 guard layout.pendingTabs.contains(where: { $0.id == pending.id }) else {
                     layout.closedSessionIDs.insert(session.id)

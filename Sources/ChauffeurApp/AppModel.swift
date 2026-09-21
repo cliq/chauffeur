@@ -465,12 +465,12 @@ struct AppSnapshot: Decodable, Sendable {
         return stored.value.id
     }
     /// Starts a login shell in a checkout as a service-backed session.
-    func launchShell(project: Project, folder: ProjectFolder, worktreeID: UUID?, branch: String) async throws -> Session {
+    func launchShell(project: Project, folder: ProjectFolder, worktreeID: UUID?, branch: String, sessionID: UUID = UUID()) async throws -> Session {
         guard let group = project.groups.first(where: { $0.isDefault && !$0.archived }) ?? project.groups.first(where: { !$0.archived }) else {
             throw ChauffeurError("missing_group", "Add an active group to this project before opening a shell")
         }
         let title = "Shell · \(branch.isEmpty ? folder.name : branch)"
-        let request = LaunchRequest.shell(projectID: project.id, groupID: group.id, folderID: folder.id, title: title, worktreeID: worktreeID)
+        let request = LaunchRequest.shell(projectID: project.id, groupID: group.id, folderID: folder.id, title: title, worktreeID: worktreeID, retryKey: sessionID)
         let session = try await call("launch", .from(request)).decode(Session.self)
         try await refresh()
         return session

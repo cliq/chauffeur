@@ -168,12 +168,14 @@ import ChauffeurCore
         let pending = window.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "session.pending.")).firstMatch
         XCTAssertTrue(pending.waitForExistence(timeout: 2))
         XCTAssertTrue(pending.isSelected)
+        let pendingID = String(pending.identifier.dropFirst("session.pending.".count))
         XCTAssertTrue(window.staticTexts.matching(NSPredicate(format: "value BEGINSWITH %@", "Starting Shell")).firstMatch.exists)
         kill(runtime.processIdentifier, SIGCONT)
         XCTAssertTrue(pending.waitForNonExistence(timeout: 15))
         let snapshot = try await call("snapshot")
         let shell = try XCTUnwrap(try snapshot["sessions"].array.map { try $0.decode(Session.self) }.first { $0.projectID == projects[0].id && !$0.launch.preset.kind.isAgent })
         sessions.append(shell)
+        XCTAssertEqual(shell.id.uuidString, pendingID, "Loading and live tabs must share one identity")
         XCTAssertTrue(window.buttons["session.card.\(shell.id.uuidString)"].isSelected)
     }
 
