@@ -171,10 +171,6 @@ struct ServiceHealthView: View {
         HStack {
             Image(systemName: model.online ? "checkmark.circle.fill" : "exclamationmark.triangle.fill").foregroundStyle(model.online ? .green : .orange)
             Text(model.serviceMessage).font(.caption).lineLimit(2)
-            let errors = model.snapshot.store.errors + model.snapshot.errors
-            if !errors.isEmpty {
-                Button("\(errors.count) issues…") { model.error = errors.map(\.localizedDescription).joined(separator: "\n\n") }.font(.caption)
-            }
             Spacer()
             if !model.online {
                 Button("Start Service") { model.registerService(forceRestart: true); model.reconnect() }.font(.caption).disabled(model.isStoppingService || model.isRestartingService)
