@@ -127,8 +127,27 @@ struct AppSnapshot: Decodable, Sendable {
         openProjectWindow?(match.projectID)
         NSApp.activate(ignoringOtherApps: true)
     }
+    var didRestoreWorkspace = false
     @Published var snapshot = AppSnapshot()
     @Published var online = false
+    @Published private(set) var isConnecting = true
+    private var connectionTimeout: Task<Void, Never>?
+
+    private func beginConnecting() {
+        connectionTimeout?.cancel()
+        isConnecting = true
+        serviceMessage = "Connecting to background service…"
+        connectionTimeout = Task { [weak self] in
+            do { try await Task.sleep(for: .seconds(15)) } catch { return }
+            guard let self, !online else { return }
+            isConnecting = false
+            serviceMessage = "The background service is taking longer than expected. Try starting it again."
+        }
+    }
+    private func finishConnecting() {
+        connectionTimeout?.cancel(); connectionTimeout = nil
+        isConnecting = false
+    }
     @Published var serviceMessage = "Connecting to background service…"
     @Published private(set) var serviceRegistrationError: String?
     @Published private(set) var isRestartingService = false
@@ -190,6 +209,7 @@ struct AppSnapshot: Decodable, Sendable {
 
     func start() {
         guard observation == nil else { return }
+        beginConnecting()
         #if DEBUG
         NativeProbe.start(model: self)
         LauncherProbe.start(model: self)
@@ -234,6 +254,7 @@ struct AppSnapshot: Decodable, Sendable {
                         }
                         snapshot = received
                         snapshotReceivedAt = Date()
+                        finishConnecting()
                         online = true; serviceMessage = "\(usesCustomSocket ? "Custom" : AppBuild.current.rawValue) service running\(usesCustomSocket ? "" : " · verified") · \(snapshot.sessions.filter { $0.state.isLive }.count) live sessions"
                         processPendingRoute()
                     }
@@ -241,11 +262,16 @@ struct AppSnapshot: Decodable, Sendable {
                     guard generation == connectionGeneration else { continue }
                     online = false
                     if ProcessInfo.processInfo.environment["CHAUFFEUR_SOCKET"] == nil && service.status == .requiresApproval {
+                        finishConnecting()
                         serviceMessage = "Allow Chauffeur in System Settings → Login Items & Extensions"
-                    } else if let serviceRegistrationError { serviceMessage = serviceRegistrationError }
-                    else { serviceMessage = (error as? ChauffeurError)?.message ?? "Background service disconnected" }
+                    } else if let serviceRegistrationError {
+                        finishConnecting(); serviceMessage = serviceRegistrationError
+                    } else if !isConnecting || !["service_unavailable", "connection_closed"].contains((error as? ChauffeurError)?.code ?? "") {
+                        finishConnecting()
+                        serviceMessage = (error as? ChauffeurError)?.message ?? "Background service disconnected"
+                    }
                 }
-                try? await Task.sleep(for: .seconds(1))
+                try? await Task.sleep(for: .milliseconds(isConnecting ? 200 : 1000))
             }
         }
     }
@@ -253,8 +279,9 @@ struct AppSnapshot: Decodable, Sendable {
         connection?.close()
     }
     func registerService(forceRestart: Bool = false) {
-        guard ProcessInfo.processInfo.environment["CHAUFFEUR_SOCKET"] == nil else { reconnect(); return }
         guard !isRestartingService, !isStoppingService else { return }
+        if !online { beginConnecting() }
+        guard ProcessInfo.processInfo.environment["CHAUFFEUR_SOCKET"] == nil else { reconnect(); return }
         isServiceStopped = false
         if initialServiceStatus == nil { initialServiceStatus = service.status.rawValue }
         do {
@@ -263,13 +290,14 @@ struct AppSnapshot: Decodable, Sendable {
             let needsRegistration = service.status == .notRegistered || service.status == .notFound
             if needsRegistration { try service.register() }
             serviceRegistrationError = nil; serviceDiagnosticError = nil
-            if service.status == .requiresApproval { serviceMessage = "Allow Chauffeur in System Settings → Login Items & Extensions" }
+            if service.status == .requiresApproval { finishConnecting(); serviceMessage = "Allow Chauffeur in System Settings → Login Items & Extensions" }
             else if service.status == .enabled && !needsRegistration && (forceRestart || preferences.string(forKey: "registeredRuntimeBuild") != runtimeBuildFingerprint) {
                 // SMAppService can retain a previous helper's launch constraint,
                 // even after unregistering it. Refresh registration for new code.
                 restartService()
             }
         } catch {
+            finishConnecting()
             serviceRegistrationError = "Background service could not register: \(error.localizedDescription)"
             serviceDiagnosticError = error as NSError
             serviceMessage = serviceRegistrationError!
@@ -301,6 +329,7 @@ struct AppSnapshot: Decodable, Sendable {
         try await finishStoppingService()
     }
     private func finishStoppingService() async throws {
+        finishConnecting()
         defer { isStoppingService = false }
         await finishPendingWindowWrites()
         connectionGeneration += 1
@@ -343,6 +372,7 @@ struct AppSnapshot: Decodable, Sendable {
         isServiceStopped = false
         // Set this synchronously, before startup can subscribe to the old helper.
         isRestartingService = true
+        beginConnecting()
         connectionGeneration += 1
         connection?.close(); online = false
         return true
@@ -360,10 +390,15 @@ struct AppSnapshot: Decodable, Sendable {
                 try await restartRuntimeProcess()
             }
             serviceRegistrationError = nil; serviceDiagnosticError = nil; reconnect()
+            if service.status == .requiresApproval {
+                finishConnecting()
+                serviceMessage = "Allow Chauffeur in System Settings → Login Items & Extensions"
+            }
             // Record this registration only after a matching runtime connects.
             // The subscription reconnects when startup finishes. An immediate
             // snapshot request would report a spurious error during shell setup.
         } catch {
+            finishConnecting()
             serviceRegistrationError = "Background service could not restart: \(error.localizedDescription)"
             serviceDiagnosticError = error as NSError
             serviceMessage = serviceRegistrationError!

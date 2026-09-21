@@ -11,7 +11,6 @@ struct WelcomeView: View {
     @State private var selectedProject: UUID?
     @State private var createdProjectID: UUID?
     @State private var editingProject: Project?
-    @State private var restored = false
     @State private var showingSetup = false
     @State private var resumeSetup = false
     private var projects: [Project] {
@@ -22,75 +21,84 @@ struct WelcomeView: View {
     }
     var body: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 0) {
-                VStack(spacing: 18) {
-                    Image("ChauffeurHat")
-                        .renderingMode(.template)
-                        .resizable()
-                        .scaledToFit()
-                        .frame(width: 92, height: 76)
-                        .foregroundStyle(.tint)
-                        .accessibilityHidden(true)
-                    Text("Chauffeur").font(.system(size: 32, weight: .semibold))
-                    Text("Version \(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.1.0") · \(AppBuild.current.rawValue)").foregroundStyle(.secondary)
-                    Button("Create New Project…", systemImage: "plus") { model.projectCreation = AppModel.ProjectCreation() }.buttonStyle(.borderedProminent).disabled(!model.online || model.presetSets.filter { !$0.archived }.isEmpty)
-                    Button("Manage Agent Presets…") { openSettings() }
-                    Button(resumeSetup ? "Resume Setup…" : "Set Up Teams…") { showingSetup = true }
-                        .disabled(!model.online).accessibilityIdentifier("onboarding.open")
-                    if model.presetSets.isEmpty { Text("Set up a team to choose which accounts your projects use.").font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.center) }
-                }.padding(32).frame(width: 290)
-                Divider()
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack { Text("Projects").font(.headline); Spacer(); Toggle("Archived", isOn: $showArchived).toggleStyle(.checkbox).font(.caption) }.padding(.horizontal).padding(.top)
-                    HStack {
-                        Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-                        TextField("Search projects", text: $projectSearch)
-                            .textFieldStyle(.plain)
-                            .accessibilityIdentifier("projects.search")
-                            .onKeyPress(.downArrow) { moveProjectSelection(1); return .handled }
-                            .onKeyPress(.upArrow) { moveProjectSelection(-1); return .handled }
-                            .onSubmit { if let selectedProject { open(selectedProject) } }
-                        if !projectSearch.isEmpty {
-                            Button { projectSearch = "" } label: { Image(systemName: "xmark.circle.fill") }
-                                .buttonStyle(.plain).foregroundStyle(.secondary)
-                                .accessibilityLabel("Clear project search")
+            if model.isConnecting && !model.online {
+                VStack(spacing: 16) {
+                    ProgressView().controlSize(.large)
+                    Text("Opening your workspace…").font(.title2).fontWeight(.semibold)
+                    Text("Connecting to the background service. Your previously open projects will reopen automatically.")
+                        .foregroundStyle(.secondary).multilineTextAlignment(.center).frame(maxWidth: 420)
+                }.frame(maxWidth: .infinity, maxHeight: .infinity).padding(32)
+            } else {
+                HStack(spacing: 0) {
+                    VStack(spacing: 18) {
+                        Image("ChauffeurHat")
+                            .renderingMode(.template)
+                            .resizable()
+                            .scaledToFit()
+                            .frame(width: 92, height: 76)
+                            .foregroundStyle(.tint)
+                            .accessibilityHidden(true)
+                        Text("Chauffeur").font(.system(size: 32, weight: .semibold))
+                        Text("Version \(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.1.0") · \(AppBuild.current.rawValue)").foregroundStyle(.secondary)
+                        Button("Create New Project…", systemImage: "plus") { model.projectCreation = AppModel.ProjectCreation() }.buttonStyle(.borderedProminent).disabled(!model.online || model.presetSets.filter { !$0.archived }.isEmpty)
+                        Button("Manage Agent Presets…") { openSettings() }
+                        Button(resumeSetup ? "Resume Setup…" : "Set Up Teams…") { showingSetup = true }
+                            .disabled(!model.online).accessibilityIdentifier("onboarding.open")
+                        if model.presetSets.isEmpty { Text("Set up a team to choose which accounts your projects use.").font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.center) }
+                    }.padding(32).frame(width: 290)
+                    Divider()
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack { Text("Projects").font(.headline); Spacer(); Toggle("Archived", isOn: $showArchived).toggleStyle(.checkbox).font(.caption) }.padding(.horizontal).padding(.top)
+                        HStack {
+                            Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                            TextField("Search projects", text: $projectSearch)
+                                .textFieldStyle(.plain)
+                                .accessibilityIdentifier("projects.search")
+                                .onKeyPress(.downArrow) { moveProjectSelection(1); return .handled }
+                                .onKeyPress(.upArrow) { moveProjectSelection(-1); return .handled }
+                                .onSubmit { if let selectedProject { open(selectedProject) } }
+                            if !projectSearch.isEmpty {
+                                Button { projectSearch = "" } label: { Image(systemName: "xmark.circle.fill") }
+                                    .buttonStyle(.plain).foregroundStyle(.secondary)
+                                    .accessibilityLabel("Clear project search")
+                            }
+                        }.padding(8).background(.quaternary, in: RoundedRectangle(cornerRadius: 6)).padding(.horizontal)
+                        List(selection: $selectedProject) {
+                            ForEach(projects) { project in
+                                let sessions = model.sessions(in: project.id)
+                                VStack(alignment: .leading, spacing: 5) {
+                                    HStack { Text(project.name).fontWeight(.medium); if project.archived { Text("Archived").font(.caption).foregroundStyle(.secondary) } }
+                                    Text(model.setName(project.presetSetID)).font(.caption).foregroundStyle(.secondary)
+                                    if project.folders.filter(\.registered).count == 1, let folder = project.folders.first(where: \.registered) { Text(folder.selectedPath).font(.caption).foregroundStyle(.secondary).lineLimit(1).help(folder.selectedPath) }
+                                    HStack(spacing: 12) {
+                                        Label("\(sessions.filter { $0.state.isLive }.count) running", systemImage: "terminal")
+                                        if sessions.contains(where: \.needsAttention) { Label("\(sessions.filter(\.needsAttention).count) need attention", systemImage: "bell.badge").foregroundStyle(.orange) }
+                                    }.font(.caption)
+                                }.frame(maxWidth: .infinity, alignment: .leading).padding(.vertical, 6).tag(project.id).contentShape(Rectangle()).accessibilityIdentifier("project-\(project.id.uuidString)")
+                            }
                         }
-                    }.padding(8).background(.quaternary, in: RoundedRectangle(cornerRadius: 6)).padding(.horizontal)
-                    List(selection: $selectedProject) {
-                        ForEach(projects) { project in
-                            let sessions = model.sessions(in: project.id)
-                            VStack(alignment: .leading, spacing: 5) {
-                                HStack { Text(project.name).fontWeight(.medium); if project.archived { Text("Archived").font(.caption).foregroundStyle(.secondary) } }
-                                Text(model.setName(project.presetSetID)).font(.caption).foregroundStyle(.secondary)
-                                if project.folders.filter(\.registered).count == 1, let folder = project.folders.first(where: \.registered) { Text(folder.selectedPath).font(.caption).foregroundStyle(.secondary).lineLimit(1).help(folder.selectedPath) }
-                                HStack(spacing: 12) {
-                                    Label("\(sessions.filter { $0.state.isLive }.count) running", systemImage: "terminal")
-                                    if sessions.contains(where: \.needsAttention) { Label("\(sessions.filter(\.needsAttention).count) need attention", systemImage: "bell.badge").foregroundStyle(.orange) }
-                                }.font(.caption)
-                            }.frame(maxWidth: .infinity, alignment: .leading).padding(.vertical, 6).tag(project.id).contentShape(Rectangle()).accessibilityIdentifier("project-\(project.id.uuidString)")
+                        .overlay {
+                            if projects.isEmpty, !projectSearch.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                                Text("No matching projects").foregroundStyle(.secondary).allowsHitTesting(false)
+                            }
                         }
-                    }
-                    .overlay {
-                        if projects.isEmpty, !projectSearch.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                            Text("No matching projects").foregroundStyle(.secondary).allowsHitTesting(false)
+                        .onChange(of: projects.map(\.id)) { _, ids in
+                            if let selectedProject, !ids.contains(selectedProject) { self.selectedProject = nil }
                         }
-                    }
-                    .onChange(of: projects.map(\.id)) { _, ids in
-                        if let selectedProject, !ids.contains(selectedProject) { self.selectedProject = nil }
-                    }
-                    // Native list activation keeps selection immediate while supporting double-click to open.
-                    .contextMenu(forSelectionType: UUID.self) { ids in
-                        if let id = ids.first, let project = projects.first(where: { $0.id == id }) {
-                            Button("Open") { open(project.id) }
-                            Button("Rename…") { editingProject = project }
-                            Button(project.archived ? "Reopen Project" : "Archive Project") { let version = model.projectVersion(project.id); var changed = project; changed.archived.toggle(); model.perform { try await model.saveProject(changed, version: version) } }
-                            Button("Reveal in Finder") { if let path = model.snapshot.store.projects.first(where: { $0.value.id == project.id })?.path { FilePanels.reveal(URL(fileURLWithPath: path).deletingLastPathComponent().path) } }
+                        // Native list activation keeps selection immediate while supporting double-click to open.
+                        .contextMenu(forSelectionType: UUID.self) { ids in
+                            if let id = ids.first, let project = projects.first(where: { $0.id == id }) {
+                                Button("Open") { open(project.id) }
+                                Button("Rename…") { editingProject = project }
+                                Button(project.archived ? "Reopen Project" : "Archive Project") { let version = model.projectVersion(project.id); var changed = project; changed.archived.toggle(); model.perform { try await model.saveProject(changed, version: version) } }
+                                Button("Reveal in Finder") { if let path = model.snapshot.store.projects.first(where: { $0.value.id == project.id })?.path { FilePanels.reveal(URL(fileURLWithPath: path).deletingLastPathComponent().path) } }
+                            }
+                        } primaryAction: { ids in
+                            if let id = ids.first { open(id) }
                         }
-                    } primaryAction: { ids in
-                        if let id = ids.first { open(id) }
+                        .onSubmit { if let selectedProject { open(selectedProject) } }
+                        HStack { Spacer(); Button("Open Project") { if let selectedProject { open(selectedProject) } }.disabled(selectedProject == nil).keyboardShortcut(.defaultAction) }.padding()
                     }
-                    .onSubmit { if let selectedProject { open(selectedProject) } }
-                    HStack { Spacer(); Button("Open Project") { if let selectedProject { open(selectedProject) } }.disabled(selectedProject == nil).keyboardShortcut(.defaultAction) }.padding()
                 }
             }
             Divider()
@@ -132,13 +140,20 @@ struct WelcomeView: View {
                 }.padding(24).frame(width: 500)
             }
             .onChange(of: model.online) { _, online in
-                guard online, !restored else { return }; restored = true
-                Task { await inspectSetup(autoPresent: true) }
-                if model.hasPendingNavigation || model.skipAutomaticWindowRestore { return }
-                let windows = model.snapshot.store.windows.filter { $0.value.wasOpen && model.project($0.value.id) != nil }
-                if !windows.isEmpty { for window in windows { openWindow(id: "project", value: window.value.id) }; dismissWindow(id: "welcome") }
+                if online { restoreWorkspace() }
             }
-            .task { if model.online { await inspectSetup(autoPresent: true) } }
+            .task { if model.online { restoreWorkspace() } }
+    }
+    private func restoreWorkspace() {
+        Task { await inspectSetup(autoPresent: true) }
+        guard !model.didRestoreWorkspace else { return }
+        model.didRestoreWorkspace = true
+        if model.hasPendingNavigation || model.skipAutomaticWindowRestore { return }
+        let windows = model.snapshot.store.windows.filter { $0.value.wasOpen && model.project($0.value.id) != nil }
+        if !windows.isEmpty {
+            for window in windows { openWindow(id: "project", value: window.value.id) }
+            dismissWindow(id: "welcome")
+        }
     }
     private func inspectSetup(autoPresent: Bool) async {
         guard let result = try? await model.call("setupDraft"), let stored = try? result.decode(Optional<Stored<SetupDraft>>.self) else {
@@ -169,10 +184,11 @@ struct ServiceHealthView: View {
     @EnvironmentObject private var model: AppModel
     var body: some View {
         HStack {
-            Image(systemName: model.online ? "checkmark.circle.fill" : "exclamationmark.triangle.fill").foregroundStyle(model.online ? .green : .orange)
+            if model.isConnecting { ProgressView().controlSize(.small) }
+            else { Image(systemName: model.online ? "checkmark.circle.fill" : "exclamationmark.triangle.fill").foregroundStyle(model.online ? .green : .orange) }
             Text(model.serviceMessage).font(.caption).lineLimit(2)
             Spacer()
-            if !model.online {
+            if !model.online && !model.isConnecting {
                 Button("Start Service") { model.registerService(forceRestart: true); model.reconnect() }.font(.caption).disabled(model.isStoppingService || model.isRestartingService)
                 Button("System Settings…") { model.openServiceSettings() }.font(.caption)
             }

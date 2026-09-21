@@ -100,6 +100,28 @@ import ChauffeurCore
         XCTAssertEqual(before["sessions"].array.count, restored["sessions"].array.count)
         XCTAssertEqual(Set(before["sessions"].array.compactMap { $0["processID"].int }), Set(restored["sessions"].array.compactMap { $0["processID"].int }))
     }
+    func testStartupWaitsForServiceBeforeRestoringProjects() async throws {
+        let socket = URL(fileURLWithPath: socketPath)
+        let waiting = socket.appendingPathExtension("waiting")
+        try FileManager.default.moveItem(at: socket, to: waiting)
+        defer {
+            if FileManager.default.fileExists(atPath: waiting.path) {
+                try? FileManager.default.moveItem(at: waiting, to: socket)
+            }
+        }
+        app.launch()
+        let welcome = app.windows["Welcome to Chauffeur Debug"]
+        XCTAssertTrue(welcome.staticTexts["Opening your workspace…"].waitForExistence(timeout: 5))
+        XCTAssertFalse(welcome.buttons["Start Service"].exists)
+        XCTAssertFalse(welcome.textFields["projects.search"].exists)
+        // A service that never arrives must expose recovery instead of spinning forever.
+        XCTAssertTrue(welcome.buttons["Start Service"].waitForExistence(timeout: 20))
+        XCTAssertFalse(welcome.staticTexts["Opening your workspace…"].exists)
+        try FileManager.default.moveItem(at: waiting, to: socket)
+        for project in projects { XCTAssertTrue(app.windows[project.name].waitForExistence(timeout: 15)) }
+        XCTAssertTrue(welcome.waitForNonExistence(timeout: 5))
+    }
+
     func testProjectSearchKeyboardNavigationAndReset() async throws {
         app.launch()
         XCTAssertTrue(app.windows[projects[0].name].waitForExistence(timeout: 15))
