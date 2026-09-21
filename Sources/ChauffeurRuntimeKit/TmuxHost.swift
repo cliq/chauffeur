@@ -256,8 +256,18 @@ public actor TmuxHost {
     public func stop(sessionID: UUID, force: Bool) async throws {
         guard let pane = try await inventory().first(where: { $0.sessionName == sessionID.uuidString }) else { return }
         if force || pane.dead {
-            let result = try await command(["kill-session", "-t", sessionID.uuidString], socket: socket(for: sessionID))
-            guard result.status == 0 else { throw ChauffeurError("stop_failed", "Could not stop terminal session") }
+            do {
+                let result = try await command(["kill-session", "-t", sessionID.uuidString], socket: socket(for: sessionID))
+                guard result.status == 0 else { throw ChauffeurError("stop_failed", "Could not stop terminal session") }
+            } catch {
+                try Task.checkCancellation()
+                // Exit, dead-pane retirement, and explicit close can overlap
+                // across the awaits above. A failed command is harmless only
+                // when a fresh inventory verifies the session is already gone.
+                if try await inventory().contains(where: { $0.sessionName == sessionID.uuidString }) {
+                    throw error
+                }
+            }
         } else {
             // Positive tmux ownership check above. Each pane is a PTY session
             // leader; signal this execution's process group only.
