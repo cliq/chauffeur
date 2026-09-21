@@ -383,7 +383,8 @@ public actor RuntimeCoordinator {
             return try .from(await installer.remove(directory: preset.configurationDirectory, revision: revision))
         case "sessionActivity":
             let sessionID = try params.uuid("sessionID")
-            guard let session = sessions[sessionID] else { throw ChauffeurError("missing_session", "Session not found") }
+            // Natural-exit cleanup may finish before the UI checks whether Close is safe.
+            guard let session = sessions[sessionID] else { return try .from(TerminalActivity(idle: true, command: nil)) }
             guard session.state.isLive, !launching.contains(sessionID) else { return try .from(TerminalActivity(idle: true, command: nil)) }
             let foreground = try await terminals.foregroundCommand(sessionID: sessionID)
             // An agent CLI is its own pane's foreground process, so only a shell
@@ -448,7 +449,10 @@ public actor RuntimeCoordinator {
             return .object(["stopped": .bool(true)])
         case "stop", "closeSession":
             let sessionID = try params.uuid("sessionID")
-            guard sessions[sessionID] != nil || launchTasks[sessionID] != nil else { throw ChauffeurError("missing_session", "Session not found") }
+            guard sessions[sessionID] != nil || launchTasks[sessionID] != nil else {
+                if request.method == "closeSession" { return .object(["requested": .bool(true)]) }
+                throw ChauffeurError("missing_session", "Session not found")
+            }
             guard stopRequests.insert(sessionID).inserted else { throw ChauffeurError("stop_pending", "Stop is already in progress") }
             defer {
                 stopRequests.remove(sessionID)
@@ -563,7 +567,8 @@ public actor RuntimeCoordinator {
         }
     }
     private func deleteFinishedSession(_ sessionID: UUID) async throws {
-        guard let session = sessions[sessionID] else { throw ChauffeurError("missing_session", "Session not found") }
+        // Natural-exit retention and an explicit close can finish the same cleanup.
+        guard let session = sessions[sessionID] else { return }
         guard !session.state.isLive, !launching.contains(sessionID) else {
             throw ChauffeurError("active_session", "Stop the session before deleting its history")
         }

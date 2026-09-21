@@ -106,6 +106,7 @@ struct ProjectWindow: View {
     }
     @State private var closingTab: TabClosure?
     @State private var checkingTab = false
+    @State private var tabError: String?
     @State private var deletingSession: Session?
     @FocusState private var searchFocused: Bool
     init(projectID: UUID) { self.projectID = projectID; _layout = StateObject(wrappedValue: ProjectLayout(projectID: projectID)) }
@@ -170,6 +171,9 @@ struct ProjectWindow: View {
             }
         }.frame(minWidth: 880, minHeight: 560)
             .overlay { if layout.newTabPresented { newTabPrompt } }
+            .alert("Could not close tab", isPresented: Binding(get: { tabError != nil }, set: { if !$0 { tabError = nil } })) {
+                Button("OK") { tabError = nil }
+            } message: { Text(tabError ?? "") }
             .background(WindowObserver(projectID: projectID, layout: layout, handleKey: handleKey, didChangeFrame: saveLayout, didShow: {
                 // Wait for the native project window to be visible before
                 // closing Welcome. Preserve any other project-creation draft.
@@ -653,14 +657,15 @@ struct ProjectWindow: View {
                 layout.state.selectedSessionID = nil
             }
         }
-        model.perform {
+        Task {
             do {
                 _ = try await model.call(method, .object(["sessionID": .string(session.id.uuidString)]))
             } catch {
                 layout.closedSessionIDs.remove(session.id)
                 if wasSelected && layout.state.selectedSessionID == nil { selectSession(session.id) }
-                throw error
+                tabError = "\(session.title): \(error.localizedDescription)"
             }
+            try? await model.refresh()
             // Keep the tab closed after cleanup too. History remains available
             // through the session sidebar, which explicitly reopens it on selection.
         }

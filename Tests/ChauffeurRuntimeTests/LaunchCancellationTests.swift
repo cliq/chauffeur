@@ -329,6 +329,23 @@ struct LaunchCancellationTests {
 }
 
 struct ShellSessionTests {
+    @Test func closingAfterNaturalExitCleanupIsIdempotent() async throws {
+        let fixture = try await LaunchFixture.make(); defer { fixture.cleanup() }
+        let session = try await fixture.runtime.launch(.shell(projectID: fixture.request.projectID, groupID: fixture.request.groupID, folderID: fixture.request.folderID, title: "Exiting shell"))
+        try await fixture.wait { try await fixture.activity(session.id).idle }
+        try fixture.sendKeys(sessionID: session.id, "exit")
+        try await fixture.wait { try await fixture.runtime.terminals.inventory().contains { $0.dead } }
+        try await fixture.runtime.reconcile()
+        #expect(await fixture.runtime.store.current().sessions.allSatisfy { $0.value.id != session.id })
+        let params: JSONValue = .object(["sessionID": .string(session.id.uuidString)])
+        let activity = try await fixture.runtime.handle(IPCRequest("sessionActivity", params: params)).decode(TerminalActivity.self)
+        #expect(activity.idle)
+        for _ in 0..<2 {
+            #expect(try await fixture.runtime.handle(IPCRequest("closeSession", params: params))["requested"].bool == true)
+        }
+        #expect(try await fixture.runtime.terminals.inventory().isEmpty)
+    }
+
     @Test func closingDuringAnOlderInventoryRefreshDiscardsHistory() async throws {
         let fixture = try await LaunchFixture.make(gatedCreation: true); defer { fixture.cleanup() }
         let session = try await fixture.runtime.launch(fixture.request)
