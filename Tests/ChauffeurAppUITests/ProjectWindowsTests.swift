@@ -92,6 +92,31 @@ import ChauffeurCore
         XCTAssertEqual(before["sessions"].array.count, restored["sessions"].array.count)
         XCTAssertEqual(Set(before["sessions"].array.compactMap { $0["processID"].int }), Set(restored["sessions"].array.compactMap { $0["processID"].int }))
     }
+    func testProjectSearchKeyboardNavigationAndReset() async throws {
+        app.launch()
+        XCTAssertTrue(app.windows[projects[0].name].waitForExistence(timeout: 15))
+        app.typeKey("o", modifierFlags: [.command, .shift])
+        let search = app.textFields["projects.search"]
+        XCTAssertTrue(search.waitForExistence(timeout: 5))
+        search.click()
+        search.typeText("Window Fixture")
+        app.typeKey(.downArrow, modifierFlags: [])
+        let openButton = app.buttons["Open Project"]
+        XCTAssertTrue(openButton.isEnabled)
+        app.typeKey(.downArrow, modifierFlags: [])
+        app.typeKey(.upArrow, modifierFlags: [])
+        app.typeKey(.return, modifierFlags: [])
+        XCTAssertTrue(search.waitForNonExistence(timeout: 5))
+        app.typeKey("o", modifierFlags: [.command, .shift])
+        XCTAssertTrue(search.waitForExistence(timeout: 5))
+        XCTAssertEqual(search.value as? String, "")
+        XCTAssertFalse(openButton.isEnabled)
+        search.click()
+        search.typeText("no matching project")
+        app.typeKey(.downArrow, modifierFlags: [])
+        XCTAssertFalse(openButton.isEnabled)
+    }
+
     func testRemovedSessionSelectsItsLeftNeighbor() async throws {
         app.launch()
         let window = app.windows[projects[0].name]

@@ -47,6 +47,9 @@ struct WelcomeView: View {
                         TextField("Search projects", text: $projectSearch)
                             .textFieldStyle(.plain)
                             .accessibilityIdentifier("projects.search")
+                            .onKeyPress(.downArrow) { moveProjectSelection(1); return .handled }
+                            .onKeyPress(.upArrow) { moveProjectSelection(-1); return .handled }
+                            .onSubmit { if let selectedProject { open(selectedProject) } }
                         if !projectSearch.isEmpty {
                             Button { projectSearch = "" } label: { Image(systemName: "xmark.circle.fill") }
                                 .buttonStyle(.plain).foregroundStyle(.secondary)
@@ -145,7 +148,21 @@ struct WelcomeView: View {
         resumeSetup = !stored.value.completed
         if autoPresent, model.presetSets.isEmpty, model.projects.isEmpty, !stored.value.dismissed, !stored.value.completed, !model.hasPendingNavigation { showingSetup = true }
     }
-    private func open(_ id: UUID) { openWindow(id: "project", value: id); dismissWindow(id: "welcome") }
+    private func moveProjectSelection(_ offset: Int) {
+        let ids = projects.map(\.id)
+        guard !ids.isEmpty else { selectedProject = nil; return }
+        if let selectedProject, let index = ids.firstIndex(of: selectedProject) {
+            self.selectedProject = ids[min(max(index + offset, 0), ids.count - 1)]
+        } else {
+            selectedProject = ids.first
+        }
+    }
+    private func open(_ id: UUID) {
+        projectSearch = ""
+        selectedProject = nil
+        openWindow(id: "project", value: id)
+        dismissWindow(id: "welcome")
+    }
 }
 
 struct ServiceHealthView: View {
