@@ -658,11 +658,8 @@ struct ProjectWindow: View {
                 if wasSelected && layout.state.selectedSessionID == nil { selectSession(session.id) }
                 throw error
             }
-            // Keep stale snapshots from bringing the live tab back while cleanup finishes.
-            try await model.refresh()
-            if model.session(session.id)?.state.isLive != true {
-                layout.closedSessionIDs.remove(session.id)
-            }
+            // Keep the tab closed after cleanup too. History remains available
+            // through the session sidebar, which explicitly reopens it on selection.
         }
     }
 
@@ -701,6 +698,7 @@ struct ProjectWindow: View {
                 Button("Cancel") { layout.newTabPresented = false }.font(.caption)
             }.buttonStyle(.plain).padding(20).frame(width: 280)
                 .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12)).shadow(radius: 20)
+                .accessibilityElement(children: .contain)
                 .accessibilityIdentifier("new-tab.prompt")
         }
     }
@@ -975,12 +973,15 @@ private struct SessionStrip: View {
                         Button { selectPending(tab.id) } label: {
                             VStack(alignment: .leading, spacing: 4) {
                                 Text(tab.title).fontWeight(.medium).lineLimit(1)
-                                HStack { ProgressView().controlSize(.small); Text("Starting…").font(.caption).foregroundStyle(.secondary) }
+                                HStack { ProgressView().controlSize(.small).accessibilityHidden(true); Text("Starting…").font(.caption).foregroundStyle(.secondary) }
                             }.frame(minWidth: 120, maxWidth: 220, alignment: .leading)
                                 .padding(.horizontal, 10).padding(.vertical, 6)
                                 .background(tab.id == selectedID ? Color.accentColor.opacity(0.15) : Color.clear, in: RoundedRectangle(cornerRadius: 6))
                         }.buttonStyle(.plain)
                             .id(tab.id)
+                            .accessibilityElement(children: .ignore)
+                            .accessibilityLabel("\(tab.title), Starting")
+                            .accessibilityAddTraits(.isButton)
                             .accessibilityIdentifier("session.pending.\(tab.id.uuidString)")
                             .accessibilityAddTraits(tab.id == selectedID ? .isSelected : [])
                     }

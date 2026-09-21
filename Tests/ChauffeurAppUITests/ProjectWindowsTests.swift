@@ -1,5 +1,6 @@
 import XCTest
 import Foundation
+import AppKit
 import ChauffeurCore
 
 /// Exercises actual native windows and terminal views against an isolated runtime.
@@ -36,7 +37,9 @@ import ChauffeurCore
         let config = root.appendingPathComponent("existing fixture profile")
         try FileManager.default.createDirectory(at: config, withIntermediateDirectories: true)
         for name in ["fake_cli.py", "fake_tui.py"] {
-            try FileManager.default.copyItem(at: sourceRoot.appendingPathComponent("Prototypes/\(name)"), to: root.appendingPathComponent(name))
+            let destination = root.appendingPathComponent(name)
+            try Data(contentsOf: sourceRoot.appendingPathComponent("Prototypes/\(name)")).write(to: destination)
+            try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: destination.path)
         }
         let preset = AgentPreset(setID: set.id, name: "Fake Codex", kind: .codex, executable: root.appendingPathComponent("fake_cli.py").path, configurationDirectory: config.path)
         _ = try await call("savePreset", .object(["record": try .from(preset)]))
@@ -54,6 +57,10 @@ import ChauffeurCore
                 if window.selectedSessionID == nil { window.selectedSessionID = session.id }
             }
             window.selectedFolderID = folder.id; window.selectedWorktreePath = folder.canonicalPath; window.wasOpen = true
+            // Keep fixtures on the main display instead of inheriting window positions
+            // from a developer's multi-monitor workspace.
+            let screen = NSScreen.screens.first?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
+            window.frame = NSStringFromRect(NSRect(x: screen.minX + 20, y: screen.minY + 20, width: 1000, height: 700))
             _ = try await call("saveWindow", .object(["record": try .from(window)]))
             projects.append(project)
         }
@@ -63,6 +70,7 @@ import ChauffeurCore
     }
     override func tearDown() async throws {
         app?.terminate()
+        if runtime?.isRunning == true { kill(runtime.processIdentifier, SIGCONT) }
         for session in sessions { _ = try? await call("stop", .object(["sessionID": .string(session.id.uuidString), "force": .bool(true)])) }
         if runtime?.isRunning == true { runtime.terminate(); runtime.waitUntilExit() }
         if let root {
@@ -121,6 +129,8 @@ import ChauffeurCore
         app.launch()
         let window = app.windows[projects[0].name]
         XCTAssertTrue(window.waitForExistence(timeout: 15))
+        app.menuBars.menuBarItems["Window"].click()
+        app.menuBars.menuBarItems["Window"].menus.menuItems[projects[0].name].click()
         let closing = window.buttons["session.card.\(sessions[1].id.uuidString)"]
         XCTAssertTrue(closing.waitForExistence(timeout: 10))
         closing.click()
@@ -134,9 +144,12 @@ import ChauffeurCore
     }
 
     func testTabCreationAndClosureDoNotWaitForRuntime() async throws {
+        continueAfterFailure = true
         app.launch()
         let window = app.windows[projects[0].name]
         XCTAssertTrue(window.waitForExistence(timeout: 15))
+        app.menuBars.menuBarItems["Window"].click()
+        app.menuBars.menuBarItems["Window"].menus.menuItems[projects[0].name].click()
         let first = window.buttons["session.card.\(sessions[0].id.uuidString)"]
         XCTAssertTrue(first.waitForExistence(timeout: 10))
         first.click()
@@ -168,6 +181,8 @@ import ChauffeurCore
         app.launch()
         let window = app.windows[projects[0].name]
         XCTAssertTrue(window.waitForExistence(timeout: 15))
+        app.menuBars.menuBarItems["Window"].click()
+        app.menuBars.menuBarItems["Window"].menus.menuItems[projects[0].name].click()
         let firstCard = window.buttons["session.card.\(sessions[0].id.uuidString)"]
         XCTAssertTrue(firstCard.waitForExistence(timeout: 10))
         firstCard.click()
@@ -220,8 +235,15 @@ import ChauffeurCore
         }
         XCTAssertTrue(window.exists)
         XCTAssertEqual(window.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "session.card.")).count, 0)
-        let snapshot = try await call("snapshot")
-        XCTAssertEqual(snapshot["sessions"].array.count, 11)
+        // Tab disappearance now precedes background session cleanup.
+        let remainingSessionCount = sessions.count - 4
+        let cleanupDeadline = ContinuousClock.now.advanced(by: .seconds(10))
+        var snapshot = try await call("snapshot")
+        while snapshot["sessions"].array.count != remainingSessionCount && ContinuousClock.now < cleanupDeadline {
+            try await Task.sleep(for: .milliseconds(100))
+            snapshot = try await call("snapshot")
+        }
+        XCTAssertEqual(snapshot["sessions"].array.count, remainingSessionCount)
         app.typeKey("w", modifierFlags: .command)
         XCTAssertTrue(window.waitForNonExistence(timeout: 5))
         XCTAssertTrue(app.windows[projects[1].name].exists)
