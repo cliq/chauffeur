@@ -53,6 +53,7 @@ struct AppSnapshot: Decodable, Sendable {
     @Published var pendingSessionRoute: Navigation?
     @Published var pendingProjectRoute: ProjectNavigation?
     @Published var folderSelection: FolderSelection?
+    @Published private(set) var welcomePresentationID = UUID()
     private var pendingWelcomeRoute = false
     private var pendingFolderRoute: FolderRoute?
     private(set) var skipAutomaticWindowRestore = false
@@ -87,6 +88,7 @@ struct AppSnapshot: Decodable, Sendable {
     func processPendingRoute() {
         if pendingWelcomeRoute, let openWelcomeWindow {
             pendingWelcomeRoute = false
+            welcomePresentationID = UUID()
             openWelcomeWindow()
             NSApp.activate(ignoringOtherApps: true)
         }

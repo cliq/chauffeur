@@ -125,11 +125,14 @@ import ChauffeurCore
     func testProjectSearchKeyboardNavigationAndReset() async throws {
         app.launch()
         XCTAssertTrue(app.windows[projects[0].name].waitForExistence(timeout: 15))
-        app.typeKey("o", modifierFlags: [.command, .shift])
+        let configuration = NSWorkspace.OpenConfiguration()
+        configuration.activates = true
+        let appURL = URL(fileURLWithPath: try XCTUnwrap(ProcessInfo.processInfo.environment["CHAUFFEUR_TEST_APP"]))
+        _ = try await NSWorkspace.shared.open([WelcomeRoute.url], withApplicationAt: appURL, configuration: configuration)
         let search = app.textFields["projects.search"]
         XCTAssertTrue(search.waitForExistence(timeout: 5))
-        search.click()
-        search.typeText("Window Fixture")
+        app.typeText("Window Fixture")
+        XCTAssertEqual(search.value as? String, "Window Fixture")
         app.typeKey(.downArrow, modifierFlags: [])
         let openButton = app.buttons["Open Project"]
         XCTAssertTrue(openButton.isEnabled)
@@ -141,10 +144,13 @@ import ChauffeurCore
         XCTAssertTrue(search.waitForExistence(timeout: 5))
         XCTAssertEqual(search.value as? String, "")
         XCTAssertFalse(openButton.isEnabled)
-        search.click()
-        search.typeText("no matching project")
+        app.typeText("no matching project")
+        XCTAssertEqual(search.value as? String, "no matching project")
         app.typeKey(.downArrow, modifierFlags: [])
         XCTAssertFalse(openButton.isEnabled)
+        app.typeKey(.escape, modifierFlags: [])
+        XCTAssertTrue(search.waitForNonExistence(timeout: 5))
+        XCTAssertTrue(app.windows[projects[0].name].exists)
     }
 
     func testRemovedSessionSelectsItsLeftNeighbor() async throws {

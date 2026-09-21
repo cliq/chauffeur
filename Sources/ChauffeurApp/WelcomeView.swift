@@ -6,6 +6,7 @@ struct WelcomeView: View {
     @Environment(\.openWindow) private var openWindow
     @Environment(\.dismissWindow) private var dismissWindow
     @Environment(\.openSettings) private var openSettings
+    @FocusState private var searchFocused: Bool
     @State private var showArchived = false
     @State private var projectSearch = ""
     @State private var selectedProject: UUID?
@@ -53,6 +54,8 @@ struct WelcomeView: View {
                             Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
                             TextField("Search projects", text: $projectSearch)
                                 .textFieldStyle(.plain)
+                                .focused($searchFocused)
+                                .onAppear { searchFocused = true }
                                 .accessibilityIdentifier("projects.search")
                                 .onKeyPress(.downArrow) { moveProjectSelection(1); return .handled }
                                 .onKeyPress(.upArrow) { moveProjectSelection(-1); return .handled }
@@ -141,6 +144,12 @@ struct WelcomeView: View {
             }
             .onChange(of: model.online) { _, online in
                 if online { restoreWorkspace() }
+            }
+            .defaultFocus($searchFocused, true)
+            .onChange(of: model.welcomePresentationID) { _, _ in searchFocused = true }
+            .onExitCommand {
+                guard !showingSetup, editingProject == nil, model.projectCreation == nil, model.folderSelection == nil else { return }
+                dismissWindow(id: "welcome")
             }
             .task { if model.online { restoreWorkspace() } }
     }
