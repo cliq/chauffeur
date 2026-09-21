@@ -30,7 +30,7 @@ import ChauffeurCore
             try await Task.sleep(for: .milliseconds(100))
         }
         _ = try await call("status")
-        let set = PresetSet(name: "Fixture Personal")
+        let set = PresetSet(name: "Fixture Personal", agentSelection: .custom)
         _ = try await call("savePresetSet", .object(["record": try .from(set)]))
         let sourceRoot = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
         let config = root.appendingPathComponent("existing fixture profile")
@@ -131,6 +131,37 @@ import ChauffeurCore
         let selected = XCTNSPredicateExpectation(predicate: NSPredicate(format: "selected == true"), object: left)
         await fulfillment(of: [selected], timeout: 10)
         XCTAssertFalse(window.staticTexts["No sessions on this worktree"].exists)
+    }
+
+    func testTabCreationAndClosureDoNotWaitForRuntime() async throws {
+        app.launch()
+        let window = app.windows[projects[0].name]
+        XCTAssertTrue(window.waitForExistence(timeout: 15))
+        let first = window.buttons["session.card.\(sessions[0].id.uuidString)"]
+        XCTAssertTrue(first.waitForExistence(timeout: 10))
+        first.click()
+
+        // Agent confirmation is local. Pause the runtime before confirming cleanup.
+        app.typeKey("w", modifierFlags: .command)
+        let confirmation = window.sheets.buttons["Close Tab"]
+        XCTAssertTrue(confirmation.waitForExistence(timeout: 5))
+        kill(runtime.processIdentifier, SIGSTOP)
+        defer { kill(runtime.processIdentifier, SIGCONT) }
+        confirmation.click()
+        XCTAssertTrue(first.waitForNonExistence(timeout: 2))
+
+        app.typeKey("t", modifierFlags: .command)
+        app.typeKey("t", modifierFlags: [])
+        let pending = window.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "session.pending.")).firstMatch
+        XCTAssertTrue(pending.waitForExistence(timeout: 2))
+        XCTAssertTrue(pending.isSelected)
+        XCTAssertTrue(window.staticTexts.matching(NSPredicate(format: "value BEGINSWITH %@", "Starting Shell")).firstMatch.exists)
+        kill(runtime.processIdentifier, SIGCONT)
+        XCTAssertTrue(pending.waitForNonExistence(timeout: 15))
+        let snapshot = try await call("snapshot")
+        let shell = try XCTUnwrap(try snapshot["sessions"].array.map { try $0.decode(Session.self) }.first { $0.projectID == projects[0].id && !$0.launch.preset.kind.isAgent })
+        sessions.append(shell)
+        XCTAssertTrue(window.buttons["session.card.\(shell.id.uuidString)"].isSelected)
     }
 
     func testTabShortcutsStayInSelectedWindow() async throws {

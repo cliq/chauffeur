@@ -287,6 +287,16 @@ struct TerminalPane: View {
             } else if let status = controller.status, !controller.connected { Text(status).font(.caption).padding(8).frame(maxWidth: .infinity, alignment: .leading).background(.orange.opacity(0.12)) }
             if session.state.isLive {
                 TerminalHost(controller: controller)
+                    .overlay {
+                        if !controller.connected && (controller.controlState == .connecting || controller.controlState == .detached || controller.controlState == .connected) {
+                            VStack(spacing: 12) {
+                                ProgressView()
+                                Text("Connecting to terminal…").foregroundStyle(.secondary)
+                            }.frame(maxWidth: .infinity, maxHeight: .infinity)
+                                .background(Color(nsColor: .textBackgroundColor))
+                                .allowsHitTesting(false)
+                        }
+                    }
             } else {
                 VStack(spacing: 16) {
                     Image(systemName: session.state == .failed ? "exclamationmark.triangle" : "terminal").font(.largeTitle)

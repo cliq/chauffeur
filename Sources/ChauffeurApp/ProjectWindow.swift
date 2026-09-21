@@ -3,12 +3,20 @@ import AppKit
 import Combine
 import ChauffeurCore
 
+struct PendingTerminalTab: Identifiable {
+    let id = UUID()
+    let folderID: UUID
+    let path: String
+    let title: String
+}
+
 @MainActor final class ProjectLayout: ObservableObject {
     @Published var state: WindowState
     @Published var search = ""
     @Published var detailsVisible = false
     @Published var closedSessionIDs = Set<UUID>()
     @Published var newTabPresented = false
+    @Published var pendingTabs: [PendingTerminalTab] = []
     var controllers: [UUID: TerminalController] = [:]
     weak var window: NSWindow?
     var loaded = false
@@ -483,13 +491,21 @@ struct ProjectWindow: View {
             if let path = layout.state.selectedWorktreePath {
                 let row = checkout(folder: folder, path: path, project: project)
                 let sessions = openSessions(in: folder, path: path)
-                let selectedID = WorktreeSessions.selection(in: sessions, selectedID: layout.state.selectedSessionID)
+                let pending = layout.pendingTabs.filter { $0.folderID == folder.id && $0.path == path }
+                let selectedPending = pending.first { $0.id == layout.state.selectedSessionID }
+                let selectedID = selectedPending?.id ?? WorktreeSessions.selection(in: sessions, selectedID: layout.state.selectedSessionID)
                 VStack(spacing: 0) {
-                    if !sessions.isEmpty {
-                        SessionStrip(sessions: sessions, project: project, keepFinishedSessions: model.snapshot.settings.keepFinishedSessions, delete: { deletingSession = $0 }, selectedID: selectedID, select: { selectSession($0.id) }, details: { selectSession($0.id); layout.detailsVisible = true }, revealPath: { FilePanels.reveal($0.launch.workingDirectory) })
+                    if !sessions.isEmpty || !pending.isEmpty {
+                        SessionStrip(pendingTabs: pending, selectPending: { layout.state.selectedSessionID = $0 }, sessions: sessions, project: project, keepFinishedSessions: model.snapshot.settings.keepFinishedSessions, delete: { deletingSession = $0 }, selectedID: selectedID, select: { selectSession($0.id) }, details: { selectSession($0.id); layout.detailsVisible = true }, revealPath: { FilePanels.reveal($0.launch.workingDirectory) })
                         Divider()
                     }
-                    if let selected = sessions.first(where: { $0.id == selectedID }) {
+                    if let selectedPending {
+                        VStack(spacing: 12) {
+                            ProgressView()
+                            Text("Starting \(selectedPending.title)…").foregroundStyle(.secondary)
+                        }.frame(maxWidth: .infinity, maxHeight: .infinity)
+                            .accessibilityIdentifier("terminal.launching")
+                    } else if let selected = sessions.first(where: { $0.id == selectedID }) {
                         // Per-session identity so a new selection hosts its own
                         // terminal view instead of updating the previous one's.
                         TerminalPane(session: selected, controller: layout.controller(for: selected.id, scrollback: model.snapshot.settings.scrollbackLines)).frame(minWidth: 240).id(selected.id)
@@ -579,6 +595,7 @@ struct ProjectWindow: View {
         sessions(in: folder, path: path).filter { !layout.closedSessionIDs.contains($0.id) }
     }
     private func reconcileSelection(previousSessions: [Session] = []) {
+        guard !layout.pendingTabs.contains(where: { $0.id == layout.state.selectedSessionID }) else { return }
         guard let folder = selectedFolder, let path = layout.selectedWorktreePath else { return }
         let previous = WorktreeSessions.sessions(previousSessions, folder: folder, path: path, worktrees: worktreeRecords)
         let next = WorktreeSessions.selection(in: openSessions(in: folder, path: path), selectedID: layout.state.selectedSessionID, previousOrder: previous.map(\.id))
@@ -593,6 +610,14 @@ struct ProjectWindow: View {
     /// progress. A shell waiting at its own prompt closes without asking.
     private func closeCurrentTab() {
         guard closingTab == nil, !checkingTab else { return }
+        if let id = layout.state.selectedSessionID, layout.pendingTabs.contains(where: { $0.id == id }) {
+            layout.pendingTabs.removeAll { $0.id == id }
+            layout.state.selectedSessionID = layout.pendingTabs.last(where: {
+                $0.folderID == layout.selectedFolderID && $0.path == layout.selectedWorktreePath
+            })?.id
+            reconcileSelection()
+            return
+        }
         let tabs = openTabs
         guard !tabs.isEmpty else { layout.window?.performClose(nil); return }
         let closing = tabs[tabs.firstIndex { $0.id == layout.state.selectedSessionID } ?? 0]
@@ -613,24 +638,34 @@ struct ProjectWindow: View {
     }
     private func finishTab(_ session: Session, method: String) {
         guard !checkingTab, model.online else { return }
-        checkingTab = true
         let tabs = openTabs
+        let wasSelected = layout.state.selectedSessionID == session.id
+        layout.closedSessionIDs.insert(session.id)
+        layout.controllers.removeValue(forKey: session.id)?.detach()
+        if wasSelected {
+            let remaining = tabs.filter { $0.id != session.id }
+            if let next = WorktreeSessions.selection(in: remaining, selectedID: session.id, previousOrder: tabs.map(\.id)) {
+                selectSession(next)
+            } else {
+                layout.state.selectedSessionID = nil
+            }
+        }
         model.perform {
-            defer { checkingTab = false }
-            _ = try await model.call(method, .object(["sessionID": .string(session.id.uuidString)]))
-            layout.controllers.removeValue(forKey: session.id)?.detach()
-            layout.closedSessionIDs.remove(session.id)
-            if layout.state.selectedSessionID == session.id {
-                let remaining = openTabs.filter { $0.id != session.id }
-                if let next = WorktreeSessions.selection(in: remaining, selectedID: session.id, previousOrder: tabs.map(\.id)) {
-                    selectSession(next)
-                    markRead(next)
-                } else {
-                    layout.state.selectedSessionID = nil
-                }
+            do {
+                _ = try await model.call(method, .object(["sessionID": .string(session.id.uuidString)]))
+            } catch {
+                layout.closedSessionIDs.remove(session.id)
+                if wasSelected && layout.state.selectedSessionID == nil { selectSession(session.id) }
+                throw error
+            }
+            // Keep stale snapshots from bringing the live tab back while cleanup finishes.
+            try await model.refresh()
+            if model.session(session.id)?.state.isLive != true {
+                layout.closedSessionIDs.remove(session.id)
             }
         }
     }
+
     private func closeMessage(_ closing: TabClosure?) -> String {
         let running = closing?.command.map { "“\($0)” is running in this terminal." } ?? "This session is still running."
         return running + (model.snapshot.settings.keepFinishedSessions
@@ -751,13 +786,39 @@ struct ProjectWindow: View {
     }
     private func openShell(in row: CheckoutRow, folder: ProjectFolder) {
         guard let project, canLaunch(in: row) else { return }
+        let pending = PendingTerminalTab(folderID: folder.id, path: row.path, title: "Shell · \(row.branch.isEmpty ? folder.name : row.branch)")
+        layout.pendingTabs.append(pending)
+        layout.selectSession(pending.id, folderID: folder.id, path: row.path)
+        collapsedRepositories.remove(folder.id)
         model.perform {
-            let worktreeID = try await model.worktreeID(for: row, project: project)
-            let session = try await model.launchShell(project: project, folder: folder, worktreeID: worktreeID, branch: row.branch)
-            layout.selectSession(session.id, folderID: folder.id, path: row.path)
-            collapsedRepositories.remove(folder.id)
+            do {
+                let worktreeID = try await model.worktreeID(for: row, project: project)
+                let session = try await model.launchShell(project: project, folder: folder, worktreeID: worktreeID, branch: row.branch)
+                // A loading tab can be closed before launch returns.
+                guard layout.pendingTabs.contains(where: { $0.id == pending.id }) else {
+                    layout.closedSessionIDs.insert(session.id)
+                    do {
+                        _ = try await model.call("closeSession", .object(["sessionID": .string(session.id.uuidString)]))
+                    } catch {
+                        layout.closedSessionIDs.remove(session.id)
+                        throw error
+                    }
+                    return
+                }
+                let stillSelected = layout.state.selectedSessionID == pending.id
+                layout.pendingTabs.removeAll { $0.id == pending.id }
+                if stillSelected { layout.selectSession(session.id, folderID: folder.id, path: row.path) }
+            } catch {
+                layout.pendingTabs.removeAll { $0.id == pending.id }
+                if layout.state.selectedSessionID == pending.id {
+                    layout.state.selectedSessionID = nil
+                    reconcileSelection()
+                }
+                throw error
+            }
         }
     }
+
     private func prepareDeletion(_ row: CheckoutRow) {
         guard let project, !checkingDeletion else { return }
         checkingDeletion = true
@@ -890,6 +951,8 @@ struct ProjectWindow: View {
 /// Cards for every session in the selected checkout. Live sessions come first;
 /// finished ones stay behind a disclosure so history remains reachable.
 private struct SessionStrip: View {
+    var pendingTabs: [PendingTerminalTab] = []
+    var selectPending: (UUID) -> Void = { _ in }
     let sessions: [Session]
     let project: Project
     let keepFinishedSessions: Bool
@@ -904,20 +967,35 @@ private struct SessionStrip: View {
     private var visible: [Session] { sessions.filter { !keepFinishedSessions || $0.state.isLive || $0.needsAttention } }
     private var finished: [Session] { keepFinishedSessions ? WorktreeSessions.finished(sessions).filter { !$0.needsAttention } : [] }
     var body: some View {
-        ScrollView(.horizontal) {
-            HStack(spacing: 6) {
-                ForEach(visible) { card($0).opacity($0.state.isLive ? 1 : 0.85) }
-                if !finished.isEmpty {
-                    Button { showFinished.toggle() } label: {
-                        Label("Finished (\(finished.count))", systemImage: showFinished ? "chevron.down" : "chevron.right")
-                    }.buttonStyle(.plain).font(.caption).foregroundStyle(.secondary).padding(.horizontal, 8)
-                        .accessibilityIdentifier("session.strip.finished")
-                    if showFinished { ForEach(finished) { card($0).opacity(0.75) } }
-                }
-            }.padding(.horizontal, 10).padding(.vertical, 6)
-        }.scrollIndicators(.hidden).frame(height: 70).background(.bar)
-            .onAppear { revealSelectedFinished() }
-            .onChange(of: selectedID) { _, _ in revealSelectedFinished() }
+        ScrollViewReader { proxy in
+            ScrollView(.horizontal) {
+                HStack(spacing: 6) {
+                    ForEach(visible) { card($0).id($0.id).opacity($0.state.isLive ? 1 : 0.85) }
+                    ForEach(pendingTabs) { tab in
+                        Button { selectPending(tab.id) } label: {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(tab.title).fontWeight(.medium).lineLimit(1)
+                                HStack { ProgressView().controlSize(.small); Text("Starting…").font(.caption).foregroundStyle(.secondary) }
+                            }.frame(minWidth: 120, maxWidth: 220, alignment: .leading)
+                                .padding(.horizontal, 10).padding(.vertical, 6)
+                                .background(tab.id == selectedID ? Color.accentColor.opacity(0.15) : Color.clear, in: RoundedRectangle(cornerRadius: 6))
+                        }.buttonStyle(.plain)
+                            .id(tab.id)
+                            .accessibilityIdentifier("session.pending.\(tab.id.uuidString)")
+                            .accessibilityAddTraits(tab.id == selectedID ? .isSelected : [])
+                    }
+                    if !finished.isEmpty {
+                        Button { showFinished.toggle() } label: {
+                            Label("Finished (\(finished.count))", systemImage: showFinished ? "chevron.down" : "chevron.right")
+                        }.buttonStyle(.plain).font(.caption).foregroundStyle(.secondary).padding(.horizontal, 8)
+                            .accessibilityIdentifier("session.strip.finished")
+                        if showFinished { ForEach(finished) { card($0).id($0.id).opacity(0.75) } }
+                    }
+                }.padding(.horizontal, 10).padding(.vertical, 6)
+            }.scrollIndicators(.hidden).frame(height: 70).background(.bar)
+                .onAppear { revealSelectedFinished(); if let selectedID { proxy.scrollTo(selectedID) } }
+                .onChange(of: selectedID) { _, _ in revealSelectedFinished(); if let selectedID { proxy.scrollTo(selectedID) } }
+        }
     }
     private func revealSelectedFinished() {
         if finished.contains(where: { $0.id == selectedID }) { showFinished = true }
