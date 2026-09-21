@@ -198,11 +198,10 @@ import ChauffeurCore
         app.typeKey(.escape, modifierFlags: [])
         XCTAssertFalse(window.buttons["new-tab.terminal"].exists)
 
-        // Keep Command down across the chord, including the choice key.
-        XCUIElement.perform(withKeyModifiers: .command) {
-            app.typeKey("t", modifierFlags: [])
-            app.typeKey("t", modifierFlags: [])
-        }
+        // Send Command with both chord keys. typeKey's explicit modifier flags
+        // override perform(withKeyModifiers:), so each event must include it.
+        app.typeKey("t", modifierFlags: .command)
+        app.typeKey("t", modifierFlags: .command)
         let deadline = ContinuousClock.now.advanced(by: .seconds(10))
         var shell: Session?
         while ContinuousClock.now < deadline {
