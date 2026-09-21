@@ -6,6 +6,20 @@ import ChauffeurCore
     private var statusItem: NSStatusItem?
     private var entries: [ActiveProject] = []
     private var tracking = false
+    private let hotkey = GlobalMenuHotkeyController()
+    private var sharedPreferences: UserDefaults? {
+        guard let identifier = Bundle(url: parentAppURL)?.bundleIdentifier else { return nil }
+        return UserDefaults(suiteName: identifier)
+    }
+    override init() {
+        super.init()
+        hotkey.openMenu = { [weak self] in self?.statusItem?.button?.performClick(nil) }
+        DistributedNotificationCenter.default().addObserver(self, selector: #selector(updateHotkey), name: Notification.Name(GlobalMenuHotkey.changedNotification), object: nil)
+    }
+    @objc private func updateHotkey() {
+        guard statusItem != nil, let preferences = sharedPreferences else { return }
+        hotkey.update(preferences: preferences)
+    }
     private var parentAppURL: URL {
         Bundle.main.bundleURL.deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
     }
@@ -27,9 +41,11 @@ import ChauffeurCore
             statusItem = item
         }
         if !tracking { rebuild() }
+        updateHotkey()
     }
 
     func disconnect() {
+        hotkey.disconnect()
         statusItem?.menu?.cancelTracking()
         if let statusItem { NSStatusBar.system.removeStatusItem(statusItem) }
         statusItem = nil
