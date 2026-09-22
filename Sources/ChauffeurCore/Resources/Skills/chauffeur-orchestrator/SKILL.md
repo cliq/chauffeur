@@ -65,13 +65,31 @@ role as a sandbox or claim its no-edit guidance is technically enforced.
 
 ## Wait for completion
 
-While a worker is active, keep the coordinator turn active using
-`chauffeur_inbox` with bounded waits (`waitSeconds: 25`). Read and acknowledge
-messages after recording their result. Do not finish the coordinator turn just
-because the inbox is temporarily empty: queued messages do not wake an idle CLI.
-Use delegation status to reconcile a missing report, failed process, or uncertain
-operation. A worker's attributed report is the completion notification; terminal
-silence and process exit are not acceptance criteria.
+While a worker is active, keep the coordinator turn active with one outstanding
+`chauffeur_inbox({"waitSeconds": 300})` call. Chauffeur suspends the call until a
+message or worker state event arrives, or five minutes pass. Messages and result
+reports return immediately; 300 is a maximum wait, not a delivery delay. Do not
+alternate short inbox calls with shell sleeps, repeated file reads, or progress
+pings just to stay busy.
+
+After processing and recording messages, pass their IDs in `acknowledge` on the
+next long wait. Unacknowledged messages return again immediately. On an empty
+response, check `chauffeur_delegation_status` for the active worker: the wait may
+have timed out or ended early because the worker finished a turn, needs attention,
+or stopped. Reconcile a missing report, failed process, or uncertain operation;
+if the worker is still working, start another 300-second wait. Update the user
+and progress panel on meaningful changes, without narrating every empty wait.
+
+Do not finish the coordinator turn just because the inbox is temporarily empty:
+queued messages do not wake an idle CLI. A worker's attributed report is the
+completion notification; terminal silence and process exit are not acceptance
+criteria. Capacity errors visible only in terminal text may still require
+inspection; the wait cannot detect provider errors that Chauffeur has not observed.
+
+Newly launched or resumed sessions get a six-minute Chauffeur MCP tool timeout.
+If an older running CLI cuts a long wait short, use 25-second waits temporarily
+and explain that relaunching or resuming the coordinator loads the new timeout.
+Do not retry in a rapid loop or launch duplicate workers after a tool timeout.
 
 ## Review and advance
 

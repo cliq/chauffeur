@@ -46,6 +46,30 @@ struct CLIAdapterTests {
 
     }
 
+    @Test func coordinatedSessionsAllowLongInboxCallsWithoutChangingOtherServers() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("chauffeur-timeout-\(UUID())")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let set = PresetSet(name: "Fixture")
+        for kind in [CLIKind.codex, .claude] {
+            let preset = AgentPreset(setID: set.id, name: "Fixture", kind: kind, executable: "/bin/false", configurationDirectory: root.path)
+            let launch = LaunchSnapshot(preset: preset, set: set, executablePath: "/bin/false", executableVersion: "fixture", workingDirectory: root.path, additionalPaths: [])
+            var session = Session(projectID: UUID(), groupID: UUID(), title: "Fixture", launch: launch, folderID: UUID())
+            session.nativeConversationID = UUID().uuidString
+            for resume in [false, true] {
+                let args = try CLIAdapter.arguments(session: session, endpoint: "http://127.0.0.1:1/mcp", ctlPath: "/bin/false", integrationDirectory: root, coordination: true, resume: resume)
+                if kind == .codex {
+                    #expect(args.contains("mcp_servers.chauffeur.tool_timeout_sec=360"))
+                } else {
+                    let config = try JSONCoding.decode(JSONValue.self, from: Data(contentsOf: root.appendingPathComponent("mcp.json")))
+                    #expect(config["mcpServers"]["chauffeur"]["timeout"].int == 360_000)
+                }
+            }
+            let basic = try CLIAdapter.arguments(session: session, endpoint: "", ctlPath: "/bin/false", integrationDirectory: root, coordination: false, resume: false)
+            #expect(!basic.contains(where: { $0.contains("tool_timeout") || $0 == "--mcp-config" }))
+        }
+    }
+
     @Test func claudeAttentionNotificationsRequireUserInput() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("chauffeur-hook-filter-\(UUID())")
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])

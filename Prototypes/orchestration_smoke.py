@@ -4,6 +4,7 @@
 No provider calls or real profiles. Proves same-worktree launch, overrides,
 YOLO, durable messages, retained close, retries, replacement and restart.
 """
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 import http.client
 import json
@@ -44,7 +45,7 @@ def main():
         log = (root / 'runtime.log').open('w')
         runtime = None
         def start():
-            return subprocess.Popen([str(BINARY), '--data-dir', str(root)], stdout=log, stderr=log)
+            return subprocess.Popen([str(BINARY), '--data-dir', str(root)], stdout=log, stderr=log, env=dict(os.environ, HOME=str(root), SHELL='/bin/false'))
         def call(method, params=None):
             with socket.socket(socket.AF_UNIX) as connection:
                 connection.settimeout(35)
@@ -63,7 +64,7 @@ def main():
                 return response.get('result')
         def tool(token, name, args=None):
             port = json.loads((root / 'runtime/mcp-port.json').read_text())
-            connection = http.client.HTTPConnection('127.0.0.1', port, timeout=35)
+            connection = http.client.HTTPConnection('127.0.0.1', port, timeout=360)
             connection.request('POST', '/mcp', json.dumps({'jsonrpc': '2.0', 'id': 1, 'method': 'tools/call', 'params': {'name': name, 'arguments': args or {}}}), {'Content-Type': 'application/json', 'Accept': 'application/json, text/event-stream', 'Authorization': 'Bearer '+token})
             response = connection.getresponse(); result = json.loads(response.read())['result']; connection.close()
             assert not result.get('isError'), result
@@ -96,7 +97,19 @@ def main():
             child_token = data['token']
             message = tool(token, 'chauffeur_send_message', {'recipientID': child['id'], 'body': 'context', 'retryKey': 'context'})
             assert tool(child_token, 'chauffeur_inbox')[0]['id'] == message['id']
-            tool(child_token, 'chauffeur_report_result', {'delegationID': first['id'], 'turnID': first['currentTurnID'], 'result': 'Needs correction', 'retryKey': 'report'})
+            # Exercise the real HTTP transport while the coordinator is suspended.
+            # Set CHAUFFEUR_INBOX_PROBE_DELAY=65 to cross the usual MCP timeout.
+            delay = float(os.environ.get('CHAUFFEUR_INBOX_PROBE_DELAY', '1'))
+            with ThreadPoolExecutor(max_workers=1) as executor:
+                waiting = executor.submit(tool, token, 'chauffeur_inbox', {'waitSeconds': 300})
+                time.sleep(delay)
+                assert not waiting.done(), 'Inbox wait returned before a message arrived'
+                started = time.monotonic()
+                report = tool(child_token, 'chauffeur_report_result', {'delegationID': first['id'], 'turnID': first['currentTurnID'], 'result': 'Needs correction', 'retryKey': 'report'})
+                assert waiting.result(timeout=5)[0]['id'] == report['id']
+                assert time.monotonic() - started < 5
+            assert tool(token, 'chauffeur_inbox', {'acknowledge': [report['id']]}) == []
+            print(f'PASS: HTTP inbox remained suspended for {delay:g}s and woke on result', flush=True)
             status = tool(token, 'chauffeur_delegation_status', {'delegationID': first['id']})
             assert status['result'] == 'Needs correction'
             follow = tool(token, 'chauffeur_follow_up', {'delegationID': first['id'], 'expectedTurnID': first['currentTurnID'], 'prompt': 'Correction', 'retryKey': 'follow'})

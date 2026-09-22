@@ -51,6 +51,7 @@ public enum CLIAdapter {
             for path in session.launch.additionalPaths { arguments += ["--add-dir", path] }
             if coordination {
                 arguments += ["-c", "mcp_servers.chauffeur.url=\(try tomlLiteral(endpoint))", "-c", "mcp_servers.chauffeur.bearer_token_env_var=\(try tomlLiteral("CHAUFFEUR_SESSION_TOKEN"))"]
+                arguments += ["-c", "mcp_servers.chauffeur.tool_timeout_sec=360"]
                 let notify = [ctlPath, "event", "--session", session.id.uuidString, "turn-finished"]
                 arguments += ["-c", "notify=\(try tomlLiteral(notify))"]
             }
@@ -66,7 +67,7 @@ public enum CLIAdapter {
             for path in session.launch.additionalPaths { arguments += ["--add-dir", path] }
             if coordination {
                 let config: JSONValue = .object(["mcpServers": .object(["chauffeur": .object([
-                    "type": .string("http"), "url": .string(endpoint),
+                    "type": .string("http"), "url": .string(endpoint), "timeout": .number(360_000),
                     "headers": .object(["Authorization": .string("Bearer ${CHAUFFEUR_SESSION_TOKEN}")])
                 ])])])
                 let configPath = integrationDirectory.appendingPathComponent("mcp.json")

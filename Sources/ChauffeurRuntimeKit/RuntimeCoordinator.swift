@@ -1204,15 +1204,7 @@ public actor RuntimeCoordinator {
                 guard let value = item.string.flatMap(UUID.init(uuidString:)) else { throw ChauffeurError("invalid_argument", "Acknowledge IDs must be UUIDs") }; return value
             }
             let wait = arguments["waitSeconds"].int ?? 0
-            try Validation.require((0...25).contains(wait), "Inbox wait must be between 0 and 25 seconds")
-            var incoming = try await ledger.inbox(caller: caller, acknowledge: acknowledge)
-            let deadline = ContinuousClock.now.advanced(by: .seconds(wait))
-            while incoming.isEmpty && ContinuousClock.now < deadline {
-                try await Task.sleep(for: .milliseconds(200))
-                let currentCaller = try await ledger.authenticate(token)
-                incoming = try await ledger.inbox(caller: currentCaller)
-            }
-            return try .from(incoming)
+            return try .from(await ledger.waitForInbox(token: token, acknowledge: acknowledge, waitSeconds: wait))
         case "chauffeur_reply":
             let message = try await ledger.message(arguments.uuid("messageID"), caller: caller)
             return try .from(await ledger.send(caller: caller, recipientID: message.senderID, body: arguments.requiredString("body"), references: arguments["references"].array.compactMap(\.string), retryKey: arguments.requiredString("retryKey"), replyToID: message.id))

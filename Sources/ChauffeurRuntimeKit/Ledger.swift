@@ -24,6 +24,43 @@ private final class SQLiteConnection: @unchecked Sendable {
 public actor Ledger {
     private let connection: SQLiteConnection
     private var transactionCounter = 0
+    private var inboxWaiters: [UUID: (UUID, AsyncStream<Bool>.Continuation)] = [:]
+    var pendingInboxWaitCount: Int { inboxWaiters.count }
+
+    private func wakeInbox(_ sessionID: UUID, healthCheck: Bool = false) {
+        for (recipient, continuation) in inboxWaiters.values where recipient == sessionID {
+            continuation.yield(healthCheck)
+        }
+    }
+
+    /// Register before reading on this actor so arrival cannot race subscription.
+    /// The durable mailbox remains authoritative; notifications are only wake hints.
+    public func waitForInbox(token: String, acknowledge: [UUID] = [], waitSeconds: Int) async throws -> [Message] {
+        try Validation.require((0...300).contains(waitSeconds), "Inbox wait must be between 0 and 300 seconds")
+        try Task.checkCancellation()
+        let caller = try authenticate(token)
+        let (stream, continuation) = AsyncStream<Bool>.makeStream()
+        let id = UUID()
+        inboxWaiters[id] = (caller.sessionID, continuation)
+        let timer = Task {
+            do { try await Task.sleep(for: .seconds(waitSeconds)); continuation.finish() }
+            catch { /* The waiter completed or was cancelled. */ }
+        }
+        defer {
+            timer.cancel()
+            continuation.finish()
+            inboxWaiters.removeValue(forKey: id)
+        }
+        let initial = try inbox(caller: caller, acknowledge: acknowledge)
+        if !initial.isEmpty || waitSeconds == 0 { return initial }
+        for await healthCheck in stream {
+            try Task.checkCancellation()
+            let incoming = try inbox(caller: authenticate(token))
+            if !incoming.isEmpty || healthCheck { return incoming }
+        }
+        try Task.checkCancellation()
+        return try inbox(caller: authenticate(token))
+    }
     public init(path: String) throws {
         connection = try SQLiteConnection(path: path)
         let schema = """
@@ -125,6 +162,7 @@ public actor Ledger {
     private func scopeValues(_ caller: Caller) -> [String?] { [caller.scope.projectID.uuidString, caller.scope.groupID.uuidString] }
     private func denied() -> ChauffeurError { ChauffeurError("not_found", "Record not found in this session's group") }
     public func register(_ session: Session, notification: AttentionReason? = nil) throws {
+        let previous = try rows("SELECT record FROM sessions WHERE id=?", [session.id.uuidString]).first.map { try decode(Session.self, $0[0]) }
         try transaction {
             guard try !isForgotten(sessionID: session.id) else { throw ChauffeurError("missing_session", "This session was explicitly deleted") }
             if let existing = try rows("SELECT project_id,group_id,parent_id FROM sessions WHERE id=?", [session.id.uuidString]).first {
@@ -134,6 +172,13 @@ public actor Ledger {
             }
             try execute("INSERT INTO sessions(id,project_id,group_id,parent_id,live,record) VALUES(?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET live=excluded.live,record=excluded.record", [session.id.uuidString, session.projectID.uuidString, session.groupID.uuidString, session.parentID?.uuidString, session.state.isLive ? "1" : "0", try encode(session)])
             if let notification { try enqueueNotification(session: session, reason: notification) }
+        }
+        if !session.state.isLive { wakeInbox(session.id, healthCheck: true) }
+        if previous?.state != session.state,
+           [.needsAttention, .turnFinished, .exited, .failed, .interrupted].contains(session.state),
+           let row = try rows("SELECT record FROM delegations WHERE child_id=?", [session.id.uuidString]).first {
+            let delegation = try decode(Delegation.self, row[0])
+            wakeInbox(delegation.controllingParentID, healthCheck: true)
         }
     }
     public func notificationsEnabled() throws -> Bool {
@@ -186,6 +231,7 @@ public actor Ledger {
     /// Deletes a finished session and everything the ledger holds for it,
     /// including messages and delegations it took part in.
     public func forget(sessionID: UUID) throws {
+        defer { wakeInbox(sessionID, healthCheck: true) }
         let id = sessionID.uuidString
         try transaction {
             for item in try allDelegations() where item.controllingParentID == sessionID {
@@ -210,7 +256,10 @@ public actor Ledger {
         }
     }
     public func isForgotten(sessionID: UUID) throws -> Bool { try !rows("SELECT id FROM deleted_sessions WHERE id=?", [sessionID.uuidString]).isEmpty }
-    public func revoke(sessionID: UUID) throws { try execute("UPDATE grants SET revoked=1 WHERE session_id=?", [sessionID.uuidString]) }
+    public func revoke(sessionID: UUID) throws {
+        try execute("UPDATE grants SET revoked=1 WHERE session_id=?", [sessionID.uuidString])
+        wakeInbox(sessionID, healthCheck: true)
+    }
     public func authenticate(_ token: String) throws -> Caller {
         guard !token.isEmpty, token.utf8.count <= 512,
               let row = try rows("SELECT s.id,s.project_id,s.group_id FROM grants g JOIN sessions s ON s.id=g.session_id WHERE g.hash=? AND g.revoked=0 AND s.live=1", [JSONCoding.digest(Data(token.utf8))]).first,
@@ -253,6 +302,7 @@ public actor Ledger {
             message.turnID = turnID
             try execute("INSERT INTO messages(id,project_id,group_id,sender_id,recipient_id,retry_key,request_hash,state,record) VALUES(?,?,?,?,?,?,?,?,?)", [message.id.uuidString] + scopeValues(caller) + [caller.sessionID.uuidString, recipientID.uuidString, retryKey, requestHash, message.state.rawValue, try encode(message)])
             try enqueueNotification(session: peer(recipientID, caller: caller), reason: delegationID == nil ? .message : .result)
+            wakeInbox(recipientID)
             return message
         }
     }

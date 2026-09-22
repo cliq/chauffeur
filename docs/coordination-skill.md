@@ -13,6 +13,26 @@ through one visible worker at a time. Its six role references provide freely
 overridable model/reasoning suggestions. Installing guidance does not launch an
 agent or join a session to a group.
 
+## Waiting during orchestration
+
+The coordinator uses `chauffeur_inbox` with `waitSeconds: 300`. The runtime
+suspends that call until message arrival, a worker state change, or the deadline;
+it does not poll SQLite. Processed message IDs belong in the next call's
+`acknowledge` array. An empty response prompts a delegation status check, not a
+claim of completion. An idle coordinator still needs a new turn to resume work.
+
+Launch and resume configure only Chauffeur's MCP server with a six-minute tool
+timeout: Codex's `mcp_servers.chauffeur.tool_timeout_sec=360` and Claude Code's
+per-server `timeout: 360000`. These settings follow the providers' documented
+[Codex configuration](https://developers.openai.com/codex/config-reference) and
+[Claude Code timeout behavior](https://code.claude.com/docs/en/env-vars).
+Existing CLI processes retain their startup configuration; use shorter waits
+until they are resumed or relaunched.
+
+`CHAUFFEUR_INBOX_PROBE_DELAY=65 python3 Prototypes/orchestration_smoke.py`
+verifies that an actual HTTP inbox request survives beyond 60 seconds and wakes
+when a worker reports. It uses isolated fixture CLIs, without provider inference.
+
 ## Discovery paths
 
 | CLI | Links |
