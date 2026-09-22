@@ -62,7 +62,8 @@ struct SessionDetailsView: View {
                             Text("\(groupName(message.scope.groupID)) · \(deliveryLabel(message.state))").font(.caption).foregroundStyle(.secondary)
                             Text(message.body).textSelection(.enabled)
                             ForEach(message.references, id: \.self) { Text($0).font(.system(.caption, design: .monospaced)).textSelection(.enabled) }
-                            Text(message.createdAt, style: .date).font(.caption2).foregroundStyle(.secondary)
+                            Text(message.createdAt, format: .dateTime.day().month(.abbreviated).year().hour().minute().second())
+                                .font(.caption2).foregroundStyle(.secondary)
                             if message.state == .queued { Button("Cancel Queued Message") { model.perform { _ = try await model.call("cancelMessage", .object(["messageID": .string(message.id.uuidString)])) } }.font(.caption) }
                         }.padding(10).frame(maxWidth: .infinity, alignment: .leading).background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
                     }
