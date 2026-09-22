@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 import ChauffeurCore
 
@@ -7,6 +8,7 @@ struct RemoteAccessSettingsSection: View {
     @State private var portFailure: String?
     @State private var revokingDevice: RemoteAccessStatus.Device?
     @State private var confirmingReset = false
+    @State private var copiedPairingCode = false
     private var status: RemoteAccessStatus? { model.snapshot.remoteAccess }
     var body: some View {
         Group {
@@ -34,6 +36,7 @@ struct RemoteAccessSettingsSection: View {
             }
         }
         .onAppear { if let status { portText = String(status.port) } }
+        .onChange(of: status?.pairing?.code) { _, _ in copiedPairingCode = false }
         .onChange(of: status?.port) { _, port in if let port, !(status?.enabled ?? false) { portText = String(port) } }
         .confirmationDialog("Reset remote access?", isPresented: $confirmingReset, titleVisibility: .visible) {
             Button("Reset Remote Access", role: .destructive) { resetAccess() }
@@ -72,7 +75,21 @@ struct RemoteAccessSettingsSection: View {
     }
     @ViewBuilder private func pairingSection(_ status: RemoteAccessStatus) -> some View {
         if let pairing = status.pairing {
-            Text(pairing.code).font(.system(.largeTitle, design: .monospaced)).accessibilityIdentifier("remote-access-code")
+            HStack(spacing: 12) {
+                Text(pairing.code)
+                    .font(.system(.largeTitle, design: .monospaced))
+                    .textSelection(.enabled)
+                    .accessibilityIdentifier("remote-access-code")
+                Button {
+                    NSPasteboard.general.clearContents()
+                    copiedPairingCode = NSPasteboard.general.setString(pairing.code, forType: .string)
+                } label: {
+                    Label(copiedPairingCode ? "Copied" : "Copy", systemImage: copiedPairingCode ? "checkmark" : "doc.on.doc")
+                }
+                .help("Copy pairing code")
+                .accessibilityLabel(copiedPairingCode ? "Pairing code copied" : "Copy pairing code")
+                .accessibilityIdentifier("remote-access-copy-code")
+            }
             TimelineView(.periodic(from: .now, by: 1)) { context in
                 Text("Enter this code in the iPhone app together with one of the addresses above. It expires in \(countdown(pairing.expiresAt, now: context.date)).")
                     .font(.caption).foregroundStyle(.secondary)
