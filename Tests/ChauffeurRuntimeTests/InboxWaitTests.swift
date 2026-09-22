@@ -75,6 +75,42 @@ struct InboxWaitTests {
         #expect(await ledger.pendingInboxWaitCount == 0)
     }
 
+    @Test(arguments: [false, true])
+    func registeredProgressWakesOnContentChangesButNotTimestamps(atomic: Bool) async throws {
+        let (ledger, token, parent, _, _, root) = try await fixture()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let path = root.appendingPathComponent("progress.json")
+        func write(_ now: String, updated: String) throws {
+            let data = try JSONSerialization.data(withJSONObject: ["title": "Work", "now": now, "phases": [], "updated": updated])
+            try data.write(to: path, options: atomic ? .atomic : [])
+        }
+        try write("Building", updated: "2026-09-22T12:00:00Z")
+        let (delegation, _) = try await ledger.reserveDelegation(caller: parent, task: "Work", presetID: UUID(), folderID: UUID(), shareCheckout: true, retryKey: "worker", limit: 4)
+        var child = LedgerTests().session(project: parent.scope.projectID, group: parent.scope.groupID, parent: parent.sessionID)
+        child.id = delegation.childID
+        try await ledger.register(child)
+        let registrationWait = Task { try await ledger.waitForInbox(token: token, waitSeconds: 10) }
+        defer { registrationWait.cancel() }
+        try await subscribed(ledger)
+        child.progress = ProgressRegistration(jsonPath: path.path)
+        try await ledger.register(child)
+        #expect(try await registrationWait.value.isEmpty)
+
+        let waiting = Task { try await ledger.waitForInbox(token: token, waitSeconds: 10) }
+        defer { waiting.cancel() }
+        try await subscribed(ledger)
+        try write("Building", updated: "2026-09-22T12:00:01Z")
+        try Data("Unrelated".utf8).write(to: root.appendingPathComponent("other.txt"))
+        try await Task.sleep(for: .milliseconds(700))
+        #expect(await ledger.pendingInboxWaitCount == 1)
+        let changed = ContinuousClock.now
+        try write("Capturing dark appearance", updated: "2026-09-22T12:00:02Z")
+        #expect(try await waiting.value.isEmpty)
+        #expect(changed.duration(to: .now) < .seconds(5))
+        #expect(try await ledger.inbox(caller: parent).isEmpty)
+        #expect(await ledger.pendingInboxWaitCount == 0)
+    }
+
     @Test func unrelatedInboxDoesNotEndWaitAndBoundsAreEnforced() async throws {
         let (ledger, _, sender, recipient, token, root) = try await fixture()
         defer { try? FileManager.default.removeItem(at: root) }

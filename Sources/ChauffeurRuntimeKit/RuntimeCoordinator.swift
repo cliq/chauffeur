@@ -1031,6 +1031,7 @@ public actor RuntimeCoordinator {
         value["currentTurnID"] = .string(item.currentTurnID.uuidString)
         value["controllerID"] = .string(item.controllingParentID.uuidString)
         value["sessionState"] = sessions[item.childID].map { .string($0.state.rawValue) } ?? .null
+        value["progress"] = try sessions[item.childID]?.progress.map { try .from($0) } ?? .null
         value["historyProtected"] = .bool(sessions[item.childID]?.historyProtected == true)
         value["followUpSupported"] = .bool(sessions[item.childID].map { TmuxHost.supportsFollowUp(kind: $0.launch.preset.kind, version: $0.launch.executableVersion) } ?? false)
         return .object(value)

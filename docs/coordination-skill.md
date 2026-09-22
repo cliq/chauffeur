@@ -16,8 +16,11 @@ agent or join a session to a group.
 ## Waiting during orchestration
 
 The coordinator uses `chauffeur_inbox` with `waitSeconds: 300`. The runtime
-suspends that call until message arrival, a worker state change, or the deadline;
-it does not poll SQLite. Processed message IDs belong in the next call's
+suspends that call until message arrival, a worker state change, registered
+worker progress changes, or the deadline;
+it does not poll SQLite. Registered progress files use filesystem events that
+handle atomic replacement; timestamp-only updates are ignored. Delegation status
+includes the worker’s `progress.jsonPath` for the coordinator to inspect. Processed message IDs belong in the next call's
 `acknowledge` array. An empty response prompts a delegation status check, not a
 claim of completion. An idle coordinator still needs a new turn to resume work.
 

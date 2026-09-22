@@ -41,12 +41,20 @@ public actor Ledger {
         let caller = try authenticate(token)
         let (stream, continuation) = AsyncStream<Bool>.makeStream()
         let id = UUID()
+        let progressWatchers = try allDelegations()
+            .filter { $0.controllingParentID == caller.sessionID && $0.scope == caller.scope }
+            .compactMap { item -> ProgressWatcher? in
+                guard let child = try? peer(item.childID, caller: caller), child.state.isLive,
+                      let path = child.progress?.jsonPath else { return nil }
+                return ProgressWatcher(path: path) { continuation.yield(true) }
+            }
         inboxWaiters[id] = (caller.sessionID, continuation)
         let timer = Task {
             do { try await Task.sleep(for: .seconds(waitSeconds)); continuation.finish() }
             catch { /* The waiter completed or was cancelled. */ }
         }
         defer {
+            withExtendedLifetime(progressWatchers) {}
             timer.cancel()
             continuation.finish()
             inboxWaiters.removeValue(forKey: id)
@@ -174,8 +182,9 @@ public actor Ledger {
             if let notification { try enqueueNotification(session: session, reason: notification) }
         }
         if !session.state.isLive { wakeInbox(session.id, healthCheck: true) }
-        if previous?.state != session.state,
-           [.needsAttention, .turnFinished, .exited, .failed, .interrupted].contains(session.state),
+        let workerChanged = previous?.progress != session.progress ||
+            (previous?.state != session.state && [.needsAttention, .turnFinished, .exited, .failed, .interrupted].contains(session.state))
+        if workerChanged,
            let row = try rows("SELECT record FROM delegations WHERE child_id=?", [session.id.uuidString]).first {
             let delegation = try decode(Delegation.self, row[0])
             wakeInbox(delegation.controllingParentID, healthCheck: true)
