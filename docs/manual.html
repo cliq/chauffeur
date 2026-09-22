@@ -36,6 +36,8 @@
     th,td { padding:12px 14px; text-align:left; vertical-align:top; border-bottom:1px solid var(--line); }
     th { font-weight:650; background:var(--soft); }
     tr:last-child td { border-bottom:0; }
+    .tool-reference th:first-child,.tool-reference td:first-child { width:1%; white-space:nowrap; }
+    .tool-reference td:first-child code { white-space:nowrap; overflow-wrap:normal; }
     code,kbd,pre { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:.88em; }
     code { overflow-wrap:anywhere; }
     kbd { white-space:nowrap; }
@@ -68,7 +70,7 @@
     <a href="#appearance">11. Appearance</a>
     <a href="#launcher">12. Terminal launcher</a>
     <a href="#history">13. History and retention</a>
-    <a href="#coordination">14. Coordination and skill</a>
+    <a href="#coordination">14. MCP and orchestration</a>
     <a href="#recovery">15. Recovery and diagnostics</a>
     <a href="#shortcuts">16. Keyboard reference</a>
     <a href="#limits">17. Current release boundaries</a>
@@ -78,7 +80,7 @@
       <div class="eyebrow">Personal-use release · Version 0.1.0</div>
       <h1>Chauffeur<br>App manual</h1>
       <p class="intro">Chauffeur keeps real Codex and Claude Code terminals organized by project, profile, group, and Git checkout. The agents keep running when you close the app.</p>
-      <p class="meta">App manual · Updated 16 September 2026 · Covers the implemented personal build. Messaging/delegation completion and final workload testing are planned for V2.</p>
+      <p class="meta">App manual · Updated 22 September 2026 · Covers the implemented personal build, MCP communication, and orchestration. Broader release workload testing remains planned for V2.</p>
     </header>
 
     <section id="start">
@@ -185,13 +187,14 @@
         <li>Optionally enter a title. Select the group and agent preset, and check the displayed configuration path.</li>
         <li>Choose the repository and <strong>Work in</strong> location: its registered checkout, a registered existing worktree, or <strong>New worktree…</strong>.</li>
         <li>Review the exact working directory. Expand <strong>Additional repository access</strong> and select any other project repositories the agent needs.</li>
+        <li>Optionally override the model and reasoning effort for this session; the saved preset remains unchanged.</li>
         <li>Optionally enter an initial task. It is passed as the CLI’s initial prompt; you can leave it empty and type after startup.</li>
         <li>Review the integration toggle, then choose <strong>Launch Session</strong> or <strong>Create &amp; Launch</strong>.</li>
       </ol>
       <p>If another Chauffeur session uses the checkout, the sheet names it and requires <strong>Share this checkout with these sessions</strong>. Sharing is intentional collaboration on the same files. Choose a new worktree when you want a separate checkout.</p>
       <p>Additional repositories use their displayed existing paths. A primary worktree isolates only its own repository; the other repositories remain shared checkouts. The primary repository’s main checkout is not added automatically. Codex 0.154.0 rejects additional directories with a read-only sandbox; choose a compatible native sandbox option explicitly or remove the additional paths.</p>
       <h3>Integration and basic terminal mode</h3>
-      <p>New sessions start in basic terminal mode: the real terminal is fully usable, with Chauffeur messaging, delegation, and semantic activity signals unavailable. Turn on <strong>Enable Chauffeur messaging and delegation</strong> for a launch to try the experimental integration, which also enables Chauffeur’s completion/attention integration for candidate CLI versions. The integration remains labelled unverified while the V2 coordination work is incomplete, and the choice applies only to that launch and its retries; running sessions are unaffected.</p>
+      <p>New sessions start in basic terminal mode: the real terminal is fully usable, with Chauffeur messaging, delegation, and semantic activity signals unavailable. Turn on <strong>Enable Chauffeur messaging and delegation</strong> for a launch to try the experimental integration, which also enables Chauffeur’s completion/attention integration for candidate CLI versions. The integration remains labelled unverified; tested versions and practical workflows are described in <a href="#coordination">MCP communication and orchestration</a>. The choice applies only to that launch and its retries; running sessions are unaffected.</p>
       <p>An unrecognized CLI version can require basic terminal mode. Invalid configuration paths or executables fail explicitly; Chauffeur does not substitute another profile. If startup fails, correct the reported cause before choosing a fresh <strong>Launch Session</strong>. <strong>Check Previous Attempt</strong> retrieves the previous result after an uncertain response and does not silently rerun an already-recorded task.</p>
     </section>
 
@@ -305,7 +308,7 @@ chauffeur -- ./-example</code></pre>
         <tr><td>Completed message history (days)</td><td>90</td><td>Cleans up old acknowledged, failed, and cancelled coordination messages. Queued and received messages remain.</td></tr>
         <tr><td>Live delegated children per parent</td><td>4</td><td>Bounds experimental delegation. The control allows 1–32; nested delegation is not supported.</td></tr>
       </tbody></table></div>
-      <p>Settings shows saved-history file count and size. An evicted capture cannot be recovered by Chauffeur. Output produced since the last capture can be lost if the terminal owner is lost. Retention does not delete native CLI conversations, credentials, project files, or worktrees.</p>
+      <p>Coordinators and delegated workers retain protected captures that are excluded from automatic budget eviction; scrollback and per-capture limits still apply. Settings shows saved-history file count and size. An evicted capture cannot be recovered by Chauffeur. Output produced since the last capture can be lost if the terminal owner is lost. Retention does not delete native CLI conversations, credentials, project files, or worktrees.</p>
       <h3>Where things live</h3>
       <pre><code>~/Library/Application Support/Chauffeur/
   preset-sets/       Team and agent preset metadata
@@ -319,29 +322,94 @@ chauffeur -- ./-example</code></pre>
     </section>
 
     <section id="coordination">
-      <h2>14. Coordination and the Chauffeur skill</h2>
-      <div class="note"><p><strong>V2 boundary.</strong> Messaging/delegation controls and tools are present, but completing Codex ↔ Claude coordination and its full acceptance tests was moved to V2. The current build continues to label this integration unverified.</p></div>
-      <p>When integration is enabled, Chauffeur supplies a local MCP connection to the session. MCP is the tool interface the CLI uses to ask Chauffeur about peers, messages, and delegated work. The runtime determines the session’s project/group; an agent cannot choose another group by changing a request field.</p>
-      <div class="table"><table><thead><tr><th>Tool</th><th>Purpose</th></tr></thead><tbody>
-        <tr><td><code>chauffeur_discover</code></td><td>Read the caller’s context, available project paths/agent presets, and same-group peers.</td></tr>
-        <tr><td><code>chauffeur_send_message</code></td><td>Queue an attributed message and explicit references for a same-group peer.</td></tr>
-        <tr><td><code>chauffeur_inbox</code></td><td>Read the caller’s messages, optionally wait for up to 25 seconds, and acknowledge processed messages.</td></tr>
-        <tr><td><code>chauffeur_reply</code></td><td>Reply to a received message with attribution.</td></tr>
-        <tr><td><code>chauffeur_delegate</code></td><td>Create a visible child in the same project/group using an allowed agent preset and folder. A new worktree is the default; sharing is explicit.</td></tr>
-        <tr><td><code>chauffeur_delegation_status</code></td><td>Inspect a delegation’s launch state and separately reported result.</td></tr>
-        <tr><td><code>chauffeur_report_result</code></td><td>Let the delegated child report a result to its parent while keeping its CLI available.</td></tr>
-      </tbody></table></div>
-      <p>In a controlled coordination session, ask the agent to use Chauffeur’s discovery and inbox tools to inspect its context. A busy or idle agent does not automatically receive injected terminal text. If it needs to read its inbox, prompt it explicitly in its terminal. “Queued” does not mean “read.”</p>
-      <p><strong>Session Details → Messages</strong> shows sender/recipient, body, references, time, and delivery state. <strong>Received by integration</strong> means the tool fetched it; <strong>Acknowledged by agent</strong> records acknowledgement. <strong>Cancel Queued Message</strong> is available while a message is still queued. Delegations show their parent/child, task, state, result/error, and worktree context.</p>
-      <p>Only user-created sessions can delegate, with the configured live-child limit. Stopping a parent preserves its children. A reported result is separate from process exit; ending a child does not establish task success. Group isolation governs Chauffeur communication and does not sandbox repositories from other processes under your macOS account.</p>
-      <h3>Install the optional guidance</h3>
+      <h2>14. MCP communication and orchestration</h2>
+      <p>Chauffeur’s local MCP connection gives an agent tools to discover peers, exchange messages, and launch or manage workers. You ask the agent to use these tools in its normal terminal; you do not need to configure an MCP server or copy session credentials yourself. Codex and Claude Code can communicate with each other.</p>
+
+      <h3 id="coordination-setup">Prepare sessions and skills</h3>
       <ol>
-        <li>Open <strong>Settings → Agent Presets</strong>, select a team, and choose <strong>Chauffeur Skill…</strong> on an agent preset.</li>
-        <li>Review the bundled guidance, version, destination, and current installation.</li>
-        <li>Choose <strong>Install Skill</strong>, update an unchanged installation when available, or use <strong>Remove Skill…</strong> and confirm.</li>
+        <li>Choose a project and an active agent group. Sessions must belong to the <strong>same project and group</strong> to communicate. A shared folder alone does not put them in the same group.</li>
+        <li>Launch each participating session with <strong>Enable Chauffeur messaging and delegation</strong> turned on. A session already running in basic terminal mode needs a fresh launch with integration enabled.</li>
+        <li>Check <strong>Settings → Agent Presets → Chauffeur Skill…</strong>. Both <code>chauffeur</code> and <code>chauffeur-orchestrator</code> are linked automatically. The sheet shows their status, paths, versions, and guidance.</li>
       </ol>
-      <p>The skill lives in the selected profile’s <code>skills/chauffeur/</code> directory. All sessions sharing that profile can discover it, including those launched outside Chauffeur. Installation starts no agent and does not change its group or grant permissions. Native CLI policy can still disable loading.</p>
-      <p>Edited or unmanaged files are preserved. Use <strong>Show in Finder</strong> to review a conflict and preserve any changes before retrying. Removing the skill stops future discovery; content already loaded in a conversation remains in that conversation. Restart the CLI if its skill list does not refresh.</p>
+      <p>The <code>chauffeur</code> skill teaches the operational tools. The <code>chauffeur-orchestrator</code> skill teaches a coordinator to break down a plan, assign fresh workers, and review their results. Codex discovers both through <code>~/.agents/skills/</code>, shared across Codex profiles. Claude discovers them in each team’s configured Claude home under <code>skills/</code>, or <code>~/.claude/skills/</code> when no custom home is set.</p>
+      <p>Links are created at runtime startup, setup completion, and team creation or directory changes. They point to one managed source that updates when the updated Chauffeur runtime starts. <strong>Refresh</strong> repairs missing links. An existing unrelated file, directory, or link is preserved as a conflict; use <strong>Show in Finder</strong>, move the conflicting item aside if appropriate, then refresh. CLI policies can disable skill loading; restart the CLI if its skill list does not refresh. Skills are also discoverable outside Chauffeur, but its MCP connection is supplied only to sessions launched with integration enabled.</p>
+
+      <h3 id="coordination-messaging">Example: ask another agent for a review</h3>
+      <p>Launch two sessions in the same group, with clear titles such as <strong>Implementation</strong> and <strong>Review</strong>. In the Implementation terminal, enter:</p>
+      <pre><code>Use the chauffeur skill. Discover the sessions in this group and send
+Review a message asking it to inspect my changes to Sources/Search.swift.
+Include the file path and ask for findings without editing files.
+Wait for its reply in the Chauffeur inbox.</code></pre>
+      <p>In the Review terminal, enter:</p>
+      <pre><code>Use the chauffeur skill. Read my Chauffeur inbox, review the requested
+changes without editing files, and reply to the original message with
+findings and any verification you performed. Acknowledge it after processing.</code></pre>
+      <p>The agent obtains session IDs through discovery, sends a message, and replies using the received message’s ID. References identify relevant files or context; sending a path does not attach the file or grant access to it. Give the receiving session the repository access it needs when launching it.</p>
+      <p>Messages wait in the recipient’s inbox until the agent reads them. Sending or replying to a message does not start a new turn in an idle session.</p>
+      <div class="note"><p>For automatic interaction, use MCP delegation and follow-up to start worker turns. See <a href="#coordination-orchestration">Run a plan through fresh worker sessions</a>.</p></div>
+      <p><strong>Session Details → Messages</strong> shows the sender, recipient, body, references, time, and delivery state. <strong>Received by integration</strong> means a tool fetched the message; <strong>Acknowledged by agent</strong> records acknowledgement. Neither means the requested work passed review.</p>
+      <p><strong>Cancel Queued Message</strong> is available while a message is still queued.</p>
+
+      <h3 id="coordination-orchestration">Run a plan through fresh worker sessions</h3>
+      <ol>
+        <li>Write or choose a plan with the desired outcome, constraints, and acceptance criteria. A repository file such as <code>docs/plans/search-improvements.md</code> makes it easy to resume later.</li>
+        <li>Launch a normal, user-created session to act as the coordinator, in the checkout and group you want to use. Enable Chauffeur integration.</li>
+        <li>Ask it to use <code>chauffeur-orchestrator</code>. In Codex, you can explicitly invoke it with <code>$chauffeur-orchestrator</code>; naming the skill in your request also makes the intended workflow clear.</li>
+      </ol>
+      <pre><code>Use the chauffeur-orchestrator skill to execute
+docs/plans/search-improvements.md in this checkout.
+
+Break the plan into bounded tasks and run one worker at a time.
+Use a fresh Chauffeur session for each task. Choose the preset, model,
+and reasoning effort appropriate to the work; role defaults are suggestions.
+Keep progress and session IDs in the plan file.
+
+Have each worker report its result through MCP. Review its changes and
+verification before accepting it. Request corrections in the same session
+when possible, or close it and start a fresh replacement when that is better.
+Retain the history of every attempt. Commit each completed task after
+reviewing its changes and verification.</code></pre>
+      <p>The coordinator calls <code>chauffeur_delegate</code> to launch each worker and run its initial prompt. You do not need to type into the new terminal. Workers remain visible and interactive, so you can inspect their progress or intervene.</p>
+      <p>While a worker runs, the coordinator waits for its report using <code>chauffeur_inbox</code>, repeating waits of up to 25 seconds. When the report arrives, it reviews the result and starts the next task or requests corrections. This loop lets the plan advance without user input.</p>
+      <p>The skill runs one worker at a time in the selected checkout, including an existing worktree, so later tasks see earlier changes. Avoid making competing edits while a worker owns a task. A group controls message routing and does not isolate files.</p>
+      <p>The coordinator chooses among the project team’s available presets. It can override the model and reasoning effort for each worker without editing the preset. Role references provide suggestions for implementation, exploration, small fixes, review, and specialist work; they are not a model allowlist.</p>
+      <p><strong>New Session</strong> also supports launch-specific overrides, and the preset editor’s model/reasoning fields stay synchronized with launch arguments. Custom values can be saved; the provider may still reject an unavailable model or unsupported effort. <strong>Session Details</strong> records the requested launch settings.</p>
+      <div class="note"><p><strong>Worker permissions:</strong> delegated workers launch with native YOLO mode enforced. This leaves the coordinator’s permissions and saved presets unchanged. Review-only and no-edit assignments are instructions to the worker, not a filesystem sandbox.</p></div>
+
+      <h3 id="coordination-results">Results, corrections, and replacement</h3>
+      <p>Every worker assignment includes a completion instruction: call <code>chauffeur_report_result</code> with the delegation ID and current turn ID, describing changes, verification, and unresolved issues. The report returns through the coordinator’s inbox while the worker terminal stays open.</p>
+      <p>The coordinator reviews the work and chooses one of these actions:</p>
+      <ul>
+        <li><strong>Accept:</strong> close the worker with an accepted outcome and advance the plan.</li>
+        <li><strong>Correct:</strong> use <code>chauffeur_follow_up</code> to start another turn in the same worker conversation when the CLI is ready. The coordinator submits the correction prompt through MCP; you do not need to enter it yourself.</li>
+        <li><strong>Replace:</strong> close the worker as replaced, confirm it has stopped, and start a fresh session linked to the previous attempt. The new worker receives the correction context and uses the same files; replacement does not reset the checkout.</li>
+        <li><strong>Abandon:</strong> close the attempt with a reason and record the unresolved work in the plan.</li>
+      </ul>
+      <p>Closure retains the session and captured terminal history. Coordinators and delegated workers have protected history that is not automatically evicted by the snapshot budget, although user-selected history limits still apply. A closed attempt is reviewed from history; further work uses a fresh session.</p>
+      <p>Normal closure captures the final output before stopping. A forced close can proceed when capture fails, with a warning that uncaptured final output may be lost.</p>
+      <p>Same-session follow-up has been verified on Codex <strong>0.155.1</strong> and Claude Code <strong>2.1.278</strong>. It requires a completed turn and an empty, recognized composer. Busy sessions, drafts, dialogs, and unsupported layouts can prevent submission. If delivery is uncertain, inspect the operation status rather than blindly sending the prompt again; the coordinator can choose replacement instead.</p>
+
+      <h3 id="coordination-tools">MCP tool reference</h3>
+      <p>These are agent tool calls, not shell commands. Discover IDs rather than guessing them. For operations with a <code>retryKey</code>, reuse the same key and identical arguments after a timeout; use a new key for a genuinely new operation.</p>
+      <div class="table tool-reference"><table><thead><tr><th>Tool</th><th>Use and key inputs</th></tr></thead><tbody>
+        <tr><td><code>chauffeur_discover</code></td><td>Read session identity, project/group, registered paths, team presets, peers, and delegation context. A worker uses <code>currentTurnID</code> as its report’s <code>turnID</code>.</td></tr>
+        <tr><td><code>chauffeur_send_message</code></td><td>Queue a message with <code>recipientID</code>, <code>body</code>, optional <code>references</code>, and <code>retryKey</code>.</td></tr>
+        <tr><td><code>chauffeur_inbox</code></td><td>Read messages with optional <code>waitSeconds</code> (0–25). Pass processed message IDs in <code>acknowledge</code>.</td></tr>
+        <tr><td><code>chauffeur_reply</code></td><td>Reply with <code>messageID</code>, <code>body</code>, optional <code>references</code>, and <code>retryKey</code>. Chauffeur routes it to the original sender.</td></tr>
+        <tr><td><code>chauffeur_delegate</code></td><td>Launch using <code>task</code>, <code>presetID</code>, <code>folderID</code>, and <code>retryKey</code>. Optional <code>model</code> and <code>reasoningEffort</code> override the preset. The tool defaults to a new worktree; the orchestration skill explicitly passes <code>shareCheckout: true</code> and the current <code>worktreeID</code> when applicable. Omitting the worktree ID when sharing selects the main checkout.</td></tr>
+        <tr><td><code>chauffeur_delegation_status</code></td><td>Inspect a <code>delegationID</code>: session state, current turn, reported result, and pending/last control operation. Process exit alone is not success.</td></tr>
+        <tr><td><code>chauffeur_report_result</code></td><td>The worker sends <code>delegationID</code>, <code>turnID</code>, <code>result</code>, and <code>retryKey</code>. Reporting does not close its session.</td></tr>
+        <tr><td><code>chauffeur_follow_up</code></td><td>The controlling coordinator submits <code>delegationID</code>, <code>expectedTurnID</code>, <code>prompt</code>, and <code>retryKey</code> for a correction turn.</td></tr>
+        <tr><td><code>chauffeur_close_session</code></td><td>The controlling coordinator supplies <code>delegationID</code>, <code>outcome</code> (<code>accepted</code>, <code>replaced</code>, or <code>abandoned</code>), <code>reason</code>, and <code>retryKey</code>. Optional <code>force</code> permits closure without a final capture. A replacement delegation uses the old delegation ID as <code>predecessorID</code>.</td></tr>
+        <tr><td><code>chauffeur_recover_workers</code></td><td>A new coordinator adopts an ended coordinator’s workers with <code>previousCoordinatorID</code> and <code>retryKey</code>, within the same project/group.</td></tr>
+      </tbody></table></div>
+
+      <h3 id="coordination-recovery">Resume a plan and handle stalled workers</h3>
+      <p><strong>If the coordinator stops waiting:</strong> prompt it to continue the plan and check its Chauffeur inbox. Worker reports remain queued, but they cannot wake an idle coordinator. Automatic coordinator wake-up is not implemented; unattended orchestration depends on the coordinator keeping its inbox loop active.</p>
+      <p>The skill keeps task status, acceptance criteria, session/delegation/turn IDs, selected models, and verification in the plan file. After a disconnect, ask the coordinator to reconcile that file with discovery and delegation status before launching more work. If the original coordinator has ended, start a new user-created coordinator in the same group and ask it to recover the previous coordinator’s workers before continuing. A live coordinator cannot be replaced through recovery. Stopping a coordinator does not automatically stop its workers.</p>
+      <p>Only user-created sessions can delegate; workers cannot recursively create children. The runtime’s default live-child limit is four, configurable under <strong>Settings → Runtime → Retention and Delegation</strong>. The orchestration skill intentionally runs one worker at a time.</p>
+      <p><strong>If a worker appears stuck:</strong> inspect its terminal and delegation status. A trust prompt or other CLI dialog may need your input. Codex errors such as <strong>“Selected model is at capacity”</strong> currently do not generate a dedicated failure notification to the coordinator; the worker may be unable to call MCP at all. Tell the coordinator what happened and ask it to close and replace that worker using another available model. Silence, a finished-turn indicator, and process exit are not substitutes for a reviewed result.</p>
+      <p>Cross-provider delegation, messages, reports, model overrides, correction turns, and retained closure have been checked with Codex 0.155.1 and Claude Code 2.1.278. The integration still carries a candidate/unverified label; broader release workload testing remains separate.</p>
     </section>
 
     <section id="recovery">
@@ -402,8 +470,8 @@ chauffeur -- ./-example</code></pre>
       <h2>17. Current release boundaries</h2>
       <p>This is a signed local personal-use build. It has not been notarized or published as a public installer, and it has no automatic updater.</p>
       <ul>
-        <li><strong>V2:</strong> completing Codex ↔ Claude messaging/delegation and the final workload test—ten real sessions, four Spaces, performance measurements, and three normal workdays.</li>
-        <li><strong>Current compatibility evidence:</strong> Codex 0.154.0 and Claude Code 2.1.272/2.1.273 have focused checks with differing integration coverage. Because Claude Code updates daily, any Claude Code build is accepted as a candidate without per-version validation. Neither matching nor accepting a version is a claim of complete coordination support.</li>
+        <li><strong>V2:</strong> broader release workload testing—ten real sessions, four Spaces, performance measurements, and three normal workdays.</li>
+        <li><strong>Current compatibility evidence:</strong> Codex 0.155.1 and Claude Code 2.1.278 pass focused cross-provider orchestration checks, including messaging, delegated results, and follow-up turns. Earlier Codex 0.154.0 and Claude Code 2.1.272/2.1.273 have separate checks with differing coverage. Because Claude Code updates daily, any Claude Code build is accepted as a candidate without per-version validation. Neither matching nor accepting a version is a claim of complete coordination support.</li>
         <li><strong>Activity:</strong> Codex approval/input detection is unavailable through the current integration. Basic terminal mode has no semantic status integration.</li>
         <li><strong>Recovery verified:</strong> real Codex and Claude sessions retain their processes and conversations through UI quit, service crashes/restarts, bundled-helper replacement, and a user-performed sleep/wake cycle. Both providers reply afterward. The terminal command’s administrator-authenticated installation and registered-folder routing also pass.</li>
         <li><strong>Profile evidence:</strong> the authorized Claude A/B test profiles use the same account. A different-account Claude check was deferred; profile labels do not establish account separation.</li>
@@ -411,7 +479,7 @@ chauffeur -- ./-example</code></pre>
       </ul>
       <p>Chauffeur does not provide an editor, diff/merge or pull-request UI, browser, remote agents, cloud sync, team sharing, account management, or automatic repository-wide isolation across several repositories. Use the native CLIs and your existing development tools alongside it.</p>
     </section>
-    <footer>Chauffeur App Manual · Source: the implemented app and repository guides · Prepared for the current personal build on 16 September 2026.</footer>
+    <footer>Chauffeur App Manual · Source: the implemented app and repository guides · Updated for the current personal build on 22 September 2026.</footer>
   </main>
 </div>
 </body>

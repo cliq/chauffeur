@@ -16,8 +16,11 @@ the current registered checkout.
 ## Prepare durable progress
 
 Use the user's existing plan when it can hold execution state. Otherwise create
-`docs/chauffeur/plans/<plan-name>.md`. Do not commit code or the progress file
-unless the user's task authorizes commits.
+`docs/chauffeur/plans/<plan-name>.md`. Unless the user directs otherwise, commit
+each completed task after reviewing its changes and verification. Include the
+corresponding progress update, keep commits focused, and leave unrelated user
+changes untouched. The coordinator owns this commit step so workers do not
+commit competing changes in the shared checkout.
 
 For each stable task ID, record dependencies, acceptance criteria, status,
 coordinator identity, checkout, attempt and delegation/session/turn IDs,

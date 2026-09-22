@@ -29,6 +29,9 @@ prompts, tools, and approvals.
   running when you close a window or quit Chauffeur. Reopen the app to reconnect.
 - **Session status and notifications.** See when an agent finishes a turn or needs
   input, where supported by the CLI. Open active projects from the menu bar.
+- **Agent communication and orchestration.** Codex and Claude exchange messages
+  through MCP. Run a plan through fresh worker sessions with the orchestrator
+  skill, choosing a model for each task and retaining every attempt’s history.
 - **Searchable terminal history.** Press ⌘F to search saved output, including
   sessions that have ended.
 
@@ -109,6 +112,15 @@ The [coordination skills](docs/coordination-skill.md) are linked automatically
 into Codex’s shared skills directory and every team’s Claude directory. They
 update with Chauffeur and also apply to sessions started outside it. View their
 status in **Settings → Agent Presets → Chauffeur Skill…**.
+
+To try it, launch sessions in the same project/group with **Enable Chauffeur
+messaging and delegation** turned on. Ask an agent to “use the chauffeur skill
+to discover peers and check my inbox,” or ask a coordinator to “use
+chauffeur-orchestrator to execute `docs/plans/my-plan.md`, one worker at a time.”
+Messages do not wake idle agents; prompt the recipient to check its inbox.
+Delegated workers use native YOLO permissions. The
+[manual walkthrough](docs/manual.html#coordination) covers messaging, completion
+reports, corrections, replacements, and recovery.
 
 Coordination and status reporting depend on the CLI version. Unsupported versions
 require an explicit basic-terminal launch, with coordination and status features
