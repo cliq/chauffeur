@@ -42,7 +42,7 @@ public struct ResolvedLaunchOptions: Equatable, Sendable {
 public enum LaunchOptions {
     public static func modelSuggestions(for kind: CLIKind) -> [String] {
         switch kind {
-        case .codex: ["gpt-6", "gpt-5.4", "gpt-5.3-codex"]
+        case .codex: ["gpt-6-astra", "gpt-5.4", "gpt-5.3-codex"]
         case .claude: ["opus", "sonnet", "haiku"]
         case .shell: []
         }
