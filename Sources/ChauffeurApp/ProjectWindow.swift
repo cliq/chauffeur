@@ -995,38 +995,52 @@ private struct SessionStrip: View {
     private var visible: [Session] { sessions.filter { !keepFinishedSessions || $0.state.isLive || $0.needsAttention } }
     private var finished: [Session] { keepFinishedSessions ? WorktreeSessions.finished(sessions).filter { !$0.needsAttention } : [] }
     var body: some View {
-        ScrollViewReader { proxy in
-            ScrollView(.horizontal) {
-                HStack(spacing: 6) {
-                    ForEach(visible) { card($0).id($0.id).opacity($0.state.isLive ? 1 : 0.85) }
-                    ForEach(pendingTabs) { tab in
-                        Button { selectPending(tab.id) } label: {
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(tab.title).fontWeight(.medium).lineLimit(1)
-                                HStack { ProgressView().controlSize(.small).accessibilityHidden(true); Text("Starting…").font(.caption).foregroundStyle(.secondary) }
-                            }.frame(minWidth: 120, maxWidth: 220, alignment: .leading)
-                                .padding(.horizontal, 10).padding(.vertical, 6)
-                                .background(tab.id == selectedID ? Color.accentColor.opacity(0.15) : Color.clear, in: RoundedRectangle(cornerRadius: 6))
-                        }.buttonStyle(.plain)
-                            .id(tab.id)
-                            .accessibilityElement(children: .ignore)
-                            .accessibilityLabel("\(tab.title), Starting")
-                            .accessibilityAddTraits(.isButton)
-                            .accessibilityIdentifier("session.pending.\(tab.id.uuidString)")
-                            .accessibilityAddTraits(tab.id == selectedID ? .isSelected : [])
-                    }
-                    if !finished.isEmpty {
-                        Button { showFinished.toggle() } label: {
-                            Label("Finished (\(finished.count))", systemImage: showFinished ? "chevron.down" : "chevron.right")
-                        }.buttonStyle(.plain).font(.caption).foregroundStyle(.secondary).padding(.horizontal, 8)
-                            .accessibilityIdentifier("session.strip.finished")
-                        if showFinished { ForEach(finished) { card($0).id($0.id).opacity(0.75) } }
-                    }
-                }.padding(.horizontal, 10).padding(.vertical, 6)
-            }.scrollIndicators(.hidden).frame(height: 70).background(.bar)
-                .onAppear { revealSelectedFinished(); if let selectedID { proxy.scrollTo(selectedID) } }
-                .onChange(of: selectedID) { _, _ in revealSelectedFinished(); if let selectedID { proxy.scrollTo(selectedID) } }
-        }
+        HStack(spacing: 0) {
+            ScrollViewReader { proxy in
+                ScrollView(.horizontal) {
+                    HStack(spacing: 6) {
+                        ForEach(visible) { card($0).id($0.id).opacity($0.state.isLive ? 1 : 0.85) }
+                        ForEach(pendingTabs) { tab in
+                            Button { selectPending(tab.id) } label: {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(tab.title).fontWeight(.medium).lineLimit(1)
+                                    HStack { ProgressView().controlSize(.small).accessibilityHidden(true); Text("Starting…").font(.caption).foregroundStyle(.secondary) }
+                                }.frame(minWidth: 120, maxWidth: 220, alignment: .leading)
+                                    .padding(.horizontal, 10).padding(.vertical, 6)
+                                    .background(tab.id == selectedID ? Color.accentColor.opacity(0.15) : Color.clear, in: RoundedRectangle(cornerRadius: 6))
+                            }.buttonStyle(.plain)
+                                .id(tab.id)
+                                .accessibilityElement(children: .ignore)
+                                .accessibilityLabel("\(tab.title), Starting")
+                                .accessibilityAddTraits(.isButton)
+                                .accessibilityIdentifier("session.pending.\(tab.id.uuidString)")
+                                .accessibilityAddTraits(tab.id == selectedID ? .isSelected : [])
+                        }
+                        if !finished.isEmpty {
+                            Button { showFinished.toggle() } label: {
+                                Label("Finished (\(finished.count))", systemImage: showFinished ? "chevron.down" : "chevron.right")
+                            }.buttonStyle(.plain).font(.caption).foregroundStyle(.secondary).padding(.horizontal, 8)
+                                .accessibilityIdentifier("session.strip.finished")
+                            if showFinished { ForEach(finished) { card($0).id($0.id).opacity(0.75) } }
+                        }
+                    }.padding(.horizontal, 10).padding(.vertical, 6)
+                }.scrollIndicators(.hidden)
+                    .onAppear { revealSelectedFinished(); if let selectedID { proxy.scrollTo(selectedID) } }
+                    .onChange(of: selectedID) { _, _ in revealSelectedFinished(); if let selectedID { proxy.scrollTo(selectedID) } }
+            }
+            Button {
+                WorktreeSessions.finished(sessions).forEach(close)
+            } label: {
+                Image(systemName: "xmark.square.stack")
+                    .frame(width: 30, height: 30)
+            }
+            .buttonStyle(.borderless)
+            .disabled(WorktreeSessions.finished(sessions).isEmpty)
+            .help("Close all finished tabs")
+            .accessibilityLabel("Close all finished tabs")
+            .accessibilityIdentifier("session.strip.closeFinished")
+            .padding(.horizontal, 8)
+        }.frame(height: 70).background(.bar)
     }
     private func revealSelectedFinished() {
         if finished.contains(where: { $0.id == selectedID }) { showFinished = true }
