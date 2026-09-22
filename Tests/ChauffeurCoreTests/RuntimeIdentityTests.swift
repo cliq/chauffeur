@@ -3,6 +3,22 @@ import Testing
 import ChauffeurCore
 
 struct RuntimeIdentityTests {
+    @Test func inheritedManagedSocketDoesNotBypassRuntimeUpdates() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let managed = root.appendingPathComponent("runtime.sock").path
+        #expect(!RuntimeConnectionPolicy.usesCustomSocket(nil, defaultSocket: managed))
+        #expect(!RuntimeConnectionPolicy.usesCustomSocket(managed, defaultSocket: managed))
+        let alias = root.appendingPathComponent("alias")
+        try FileManager.default.createSymbolicLink(at: alias, withDestinationURL: root)
+        #expect(!RuntimeConnectionPolicy.usesCustomSocket(alias.appendingPathComponent("runtime.sock").path, defaultSocket: managed))
+        #expect(RuntimeConnectionPolicy.usesCustomSocket(root.appendingPathComponent("fixture.sock").path, defaultSocket: managed))
+        #expect(RuntimeConnectionPolicy.usesCustomSocket(
+            AppBuild.debug.applicationSupport.appendingPathComponent("runtime/runtime.sock").path,
+            defaultSocket: AppBuild.release.applicationSupport.appendingPathComponent("runtime/runtime.sock").path))
+    }
+
     @Test func movingAnUnchangedAppRequiresNewRegistration() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)

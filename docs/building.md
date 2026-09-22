@@ -17,6 +17,10 @@ Use `make release` for an optimized build at
 `build/Build/Products/Release/Chauffeur.app`. `make install` builds that Release,
 quits any copy running from `/Applications/Chauffeur.app`, replaces it, verifies the
 installed signature, and relaunches it (set `INSTALL_DIR` to install elsewhere).
+It then waits for a runtime matching the installed executable's path and hash,
+Release build, and data directory, with MCP ready. A stale or unavailable runtime
+fails installation verification instead of reporting success. Agent processes
+remain running while the runtime is replaced.
 `make open` opens the generated Xcode project, `make test` runs Swift package tests,
 and `make test-ui` runs native UI tests.
 
@@ -33,8 +37,10 @@ versus `~/.chauffeur/worktrees`).
 Startup refreshes service registration after the app moves or its runtime changes.
 The app verifies the connected runtime's build, executable location/hash, and data
 directory before accepting its state. Runtime settings show the verified helper
-path. Explicit `CHAUFFEUR_SOCKET` connections bypass managed-service verification
-and are labeled as custom connections.
+path. A `CHAUFFEUR_SOCKET` pointing to a different destination bypasses managed
+service verification and is labeled custom. The normal socket inherited from a
+Chauffeur terminal remains managed, including when accessed through a path alias.
+`make install` also removes inherited session connection overrides when relaunching.
 
 ## Signing
 

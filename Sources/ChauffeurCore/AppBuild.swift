@@ -1,5 +1,14 @@
 import Foundation
 
+public enum RuntimeConnectionPolicy {
+    /// Agent terminals inherit the managed socket. Only a different destination
+    /// opts the app out of bundled service registration and identity verification.
+    public static func usesCustomSocket(_ configured: String?, defaultSocket: String) -> Bool {
+        guard let configured else { return false }
+        return Paths.canonical(configured) != Paths.canonical(defaultSocket)
+    }
+}
+
 public enum AppBuild: String, Codable, Sendable, CaseIterable {
     case debug = "Debug", release = "Release"
 

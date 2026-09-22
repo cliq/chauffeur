@@ -60,7 +60,8 @@ open 'build/Build/Products/Debug/Chauffeur Debug.app'
 
 For an optimized build, run `make release` and open
 `build/Build/Products/Release/Chauffeur.app`, or run `make install` to build it,
-replace `/Applications/Chauffeur.app`, and relaunch. Debug and Release can run side
+replace `/Applications/Chauffeur.app`, relaunch, and verify that the bundled
+runtime is running with MCP ready. Debug and Release can run side
 by side with separate settings and sessions.
 
 See [building and verifying](docs/building.md) for signing options and tests.

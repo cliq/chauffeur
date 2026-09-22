@@ -199,7 +199,11 @@ struct AppSnapshot: Decodable, Sendable {
     private var wakeObserver: AnyCancellable?
     private let service = SMAppService.agent(plistName: "dev.chauffeur.runtime.plist")
     private var attemptedIdentityRepair = false
-    private var usesCustomSocket: Bool { ProcessInfo.processInfo.environment["CHAUFFEUR_SOCKET"] != nil }
+    private var usesCustomSocket: Bool {
+        RuntimeConnectionPolicy.usesCustomSocket(
+            ProcessInfo.processInfo.environment["CHAUFFEUR_SOCKET"],
+            defaultSocket: Paths.applicationSupport.appendingPathComponent("runtime/runtime.sock").path)
+    }
     private lazy var expectedRuntimeIdentity: RuntimeIdentity? = {
         let executable = Bundle.main.bundleURL.appendingPathComponent("Contents/MacOS/ChauffeurRuntime")
         let root = URL(fileURLWithPath: socketPath).deletingLastPathComponent().deletingLastPathComponent()
@@ -240,7 +244,7 @@ struct AppSnapshot: Decodable, Sendable {
         LauncherProbe.start(model: self)
         QuickSessionProbe.start(model: self)
         #endif
-        if ProcessInfo.processInfo.environment["CHAUFFEUR_SOCKET"] == nil { registerService() }
+        if !usesCustomSocket { registerService() }
         #if DEBUG
         ServiceProbe.start(model: self)
         #endif
@@ -286,7 +290,7 @@ struct AppSnapshot: Decodable, Sendable {
                 } catch {
                     guard generation == connectionGeneration else { continue }
                     online = false
-                    if ProcessInfo.processInfo.environment["CHAUFFEUR_SOCKET"] == nil && service.status == .requiresApproval {
+                    if !usesCustomSocket && service.status == .requiresApproval {
                         finishConnecting()
                         serviceMessage = "Allow Chauffeur in System Settings → Login Items & Extensions"
                     } else if let serviceRegistrationError {
@@ -306,7 +310,7 @@ struct AppSnapshot: Decodable, Sendable {
     func registerService(forceRestart: Bool = false) {
         guard !isRestartingService, !isStoppingService else { return }
         if !online { beginConnecting() }
-        guard ProcessInfo.processInfo.environment["CHAUFFEUR_SOCKET"] == nil else { reconnect(); return }
+        guard !usesCustomSocket else { reconnect(); return }
         isServiceStopped = false
         if initialServiceStatus == nil { initialServiceStatus = service.status.rawValue }
         do {
@@ -329,7 +333,7 @@ struct AppSnapshot: Decodable, Sendable {
         }
     }
     var serviceStatus: String {
-        if ProcessInfo.processInfo.environment["CHAUFFEUR_SOCKET"] != nil { return "customConnection" }
+        if usesCustomSocket { return "customConnection" }
         switch service.status {
         case .notRegistered: return "notRegistered"
         case .enabled: return "enabled"
@@ -392,7 +396,7 @@ struct AppSnapshot: Decodable, Sendable {
         try await completeServiceRestart()
     }
     private func beginServiceRestart() -> Bool {
-        guard ProcessInfo.processInfo.environment["CHAUFFEUR_SOCKET"] == nil else { reconnect(); return false }
+        guard !usesCustomSocket else { reconnect(); return false }
         guard !isRestartingService, !isStoppingService else { return false }
         isServiceStopped = false
         // Set this synchronously, before startup can subscribe to the old helper.
