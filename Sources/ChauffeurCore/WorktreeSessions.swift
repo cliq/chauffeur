@@ -19,6 +19,23 @@ public enum WorktreeSessions {
             return Paths.canonical(session.launch.workingDirectory) == canonical
         }.sorted(by: order)
     }
+    /// Saved tabs precede newly opened tabs, which retain their existing order.
+    public static func orderedTabs(_ sessions: [Session], savedOrder: [UUID]) -> [Session] {
+        let rank = Dictionary(savedOrder.enumerated().map { ($0.element, $0.offset) }, uniquingKeysWith: min)
+        return sessions.enumerated().sorted {
+            let left = rank[$0.element.id] ?? Int.max, right = rank[$1.element.id] ?? Int.max
+            return left == right ? $0.offset < $1.offset : left < right
+        }.map(\.element)
+    }
+    /// Move only within the displayed checkout; retain other checkouts' ordering.
+    public static func movingTab(_ source: UUID, to target: UUID, displayed: [UUID], savedOrder: [UUID]) -> [UUID] {
+        guard source != target, let from = displayed.firstIndex(of: source), let to = displayed.firstIndex(of: target) else { return savedOrder }
+        var moved = displayed
+        moved.remove(at: from); moved.insert(source, at: to)
+        let local = Set(displayed)
+        return savedOrder.filter { !local.contains($0) } + moved
+    }
+
     /// Live sessions first, then by creation time.
     public static func order(_ first: Session, _ second: Session) -> Bool {
         if first.state.isLive != second.state.isLive { return first.state.isLive }

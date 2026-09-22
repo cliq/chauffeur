@@ -11,6 +11,34 @@ struct WorktreeNavigationTests {
         return value
     }
 
+    @Test func reorderedTabsPersistAndKeepOtherCheckoutsAndNewSessions() throws {
+        let project = Project(name: "P", presetSetID: UUID())
+        let folder = ProjectFolder(path: "/tmp/repo")
+        let first = session(folder: folder, project: project, directory: "/tmp/repo")
+        let second = session(folder: folder, project: project, directory: "/tmp/repo")
+        let third = session(folder: folder, project: project, directory: "/tmp/repo")
+        let otherCheckout = UUID()
+        var state = WindowState(projectID: project.id)
+        state.sessionTabOrder = WorktreeSessions.movingTab(first.id, to: third.id,
+            displayed: [first.id, second.id, third.id], savedOrder: [otherCheckout])
+        let restored = try JSONCoding.decode(WindowState.self, from: JSONCoding.encode(state))
+        #expect(restored.sessionTabOrder == [otherCheckout, second.id, third.id, first.id])
+        let newSession = session(folder: folder, project: project, directory: "/tmp/repo")
+        let ordered = WorktreeSessions.orderedTabs([first, second, third, newSession], savedOrder: restored.sessionTabOrder)
+        #expect(ordered.map(\.id) == [second.id, third.id, first.id, newSession.id])
+        #expect(WorktreeSessions.selection(in: ordered.filter { $0.id != first.id }, selectedID: first.id, previousOrder: ordered.map(\.id)) == third.id)
+        #expect(WorktreeSessions.movingTab(otherCheckout, to: first.id, displayed: ordered.map(\.id), savedOrder: restored.sessionTabOrder) == restored.sessionTabOrder)
+        let movedBack = WorktreeSessions.movingTab(first.id, to: second.id, displayed: ordered.map(\.id), savedOrder: restored.sessionTabOrder)
+        #expect(movedBack == [otherCheckout, first.id, second.id, third.id, newSession.id])
+    }
+
+    @Test func olderWindowRecordsDefaultToUnsortedTabs() throws {
+        var value = try JSONCoding.decode(JSONValue.self, from: JSONCoding.encode(WindowState(projectID: UUID())))
+        if case .object(var fields) = value { fields.removeValue(forKey: "sessionTabOrder"); value = .object(fields) }
+        let restored = try value.decode(WindowState.self)
+        #expect(restored.sessionTabOrder.isEmpty)
+    }
+
     @Test func sessionsGroupByWorktreeRecordThenWorkingDirectory() throws {
         var project = Project(name: "P", presetSetID: UUID())
         project.addFolder(ProjectFolder(path: "/tmp/repo"))

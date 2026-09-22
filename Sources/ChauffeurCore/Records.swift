@@ -272,6 +272,8 @@ public struct WindowState: Record, Equatable {
     public var selectedFolderID: UUID?
     public var selectedWorktreePath: String?
     public var sidebarMode: SidebarMode = .repositories
+    /// User ordering of session tabs; each checkout displays its matching subset.
+    public var sessionTabOrder: [UUID] = []
     /// Legacy tab layout fields. Older records still carry them; new writes
     /// leave them empty.
     public var tabs: [UUID] = []
@@ -289,6 +291,7 @@ public struct WindowState: Record, Equatable {
         selectedFolderID = try container.decodeIfPresent(UUID.self, forKey: .selectedFolderID)
         selectedWorktreePath = try container.decodeIfPresent(String.self, forKey: .selectedWorktreePath)
         sidebarMode = try container.decodeIfPresent(SidebarMode.self, forKey: .sidebarMode) ?? .repositories
+        sessionTabOrder = try container.decodeIfPresent([UUID].self, forKey: .sessionTabOrder) ?? []
         tabs = try container.decodeIfPresent([UUID].self, forKey: .tabs) ?? []
         splitSessionID = try container.decodeIfPresent(UUID.self, forKey: .splitSessionID)
         sidebarVisible = try container.decodeIfPresent(Bool.self, forKey: .sidebarVisible) ?? true
@@ -296,6 +299,7 @@ public struct WindowState: Record, Equatable {
     }
     public func validate() throws {
         try Validation.unique(tabs, field: "tab")
+        try Validation.unique(sessionTabOrder, field: "session tab")
         if let selectedWorktreePath { try Validation.absolutePath(selectedWorktreePath) }
     }
 }

@@ -504,7 +504,9 @@ struct ProjectWindow: View {
                 let selectedID = selectedPending?.id ?? WorktreeSessions.selection(in: sessions, selectedID: layout.state.selectedSessionID)
                 VStack(spacing: 0) {
                     if !sessions.isEmpty || !pending.isEmpty {
-                        SessionStrip(pendingTabs: pending, selectPending: { layout.state.selectedSessionID = $0 }, sessions: sessions, project: project, keepFinishedSessions: model.snapshot.settings.keepFinishedSessions, delete: { deletingSession = $0 }, selectedID: selectedID, select: { selectSession($0.id) }, details: { selectSession($0.id); layout.detailsVisible = true }, revealPath: { FilePanels.reveal($0.launch.workingDirectory) })
+                        SessionStrip(pendingTabs: pending, selectPending: { layout.state.selectedSessionID = $0 }, sessions: sessions, project: project, keepFinishedSessions: model.snapshot.settings.keepFinishedSessions, close: { requestCloseTab($0) }, move: { source, target in
+                            layout.state.sessionTabOrder = WorktreeSessions.movingTab(source, to: target, displayed: sessions.map(\.id), savedOrder: layout.state.sessionTabOrder)
+                        }, delete: { deletingSession = $0 }, selectedID: selectedID, select: { selectSession($0.id) }, details: { selectSession($0.id); layout.detailsVisible = true }, revealPath: { FilePanels.reveal($0.launch.workingDirectory) })
                         Divider()
                     }
                     if let selectedPending {
@@ -600,9 +602,9 @@ struct ProjectWindow: View {
     // MARK: Actions
 
     private func openSessions(in folder: ProjectFolder, path: String) -> [Session] {
-        sessions(in: folder, path: path).filter { session in
+        WorktreeSessions.orderedTabs(sessions(in: folder, path: path).filter { session in
             !layout.closedSessionIDs.contains(session.id) && !layout.pendingTabs.contains { $0.id == session.id }
-        }
+        }, savedOrder: layout.state.sessionTabOrder)
     }
     private func reconcileSelection(previousSessions: [Session] = []) {
         guard !layout.pendingTabs.contains(where: { $0.id == layout.state.selectedSessionID }) else { return }
@@ -633,6 +635,10 @@ struct ProjectWindow: View {
         let tabs = openTabs
         guard !tabs.isEmpty else { layout.window?.performClose(nil); return }
         let closing = tabs[tabs.firstIndex { $0.id == layout.state.selectedSessionID } ?? 0]
+        requestCloseTab(closing)
+    }
+    private func requestCloseTab(_ closing: Session) {
+        guard closingTab == nil, !checkingTab, model.online else { return }
         guard closing.state.isLive else { closeTab(closing); return }
         guard !closing.launch.preset.kind.isAgent else { closingTab = TabClosure(session: closing, command: nil); return }
         checkingTab = true
@@ -973,12 +979,16 @@ private struct SessionStrip: View {
     let sessions: [Session]
     let project: Project
     let keepFinishedSessions: Bool
+    let close: (Session) -> Void
+    let move: (UUID, UUID) -> Void
     let delete: (Session) -> Void
     let selectedID: UUID?
     let select: (Session) -> Void
     let details: (Session) -> Void
     let revealPath: (Session) -> Void
     @State private var showFinished = false
+    @State private var hoveredID: UUID?
+    @State private var dropTargetID: UUID?
     private var live: [Session] { WorktreeSessions.live(sessions) }
     /// Failed or unread sessions stay visible; other finished ones collapse.
     private var visible: [Session] { sessions.filter { !keepFinishedSessions || $0.state.isLive || $0.needsAttention } }
@@ -1032,12 +1042,45 @@ private struct SessionStrip: View {
                     Text(status).font(.caption).foregroundStyle(session.needsAttention ? .orange : .secondary).lineLimit(1)
                 }
             }.frame(minWidth: 120, maxWidth: 220, alignment: .leading)
-                .padding(.horizontal, 10).padding(.vertical, 6)
+                .padding(.leading, 10).padding(.trailing, 30).padding(.vertical, 6)
                 .background(selected ? Color.accentColor.opacity(0.15) : Color.clear, in: RoundedRectangle(cornerRadius: 6))
                 .contentShape(Rectangle())
         }.buttonStyle(.plain).help("\(session.title)\n\(session.launch.workingDirectory)")
             .accessibilityIdentifier("session.card.\(session.id.uuidString)")
             .accessibilityAddTraits(selected ? .isSelected : [])
+            .draggable("chauffeur-tab:\(project.id):\(session.id)")
+            .overlay(alignment: .trailing) {
+                Button { close(session) } label: {
+                    Image(systemName: "xmark").font(.system(size: 10, weight: .semibold))
+                        .frame(width: 22, height: 22).contentShape(Rectangle())
+                }
+                .buttonStyle(.borderless).padding(.trailing, 4)
+                .opacity(hoveredID == session.id ? 1 : 0)
+                .allowsHitTesting(hoveredID == session.id)
+                .accessibilityHidden(hoveredID != session.id)
+                .accessibilityLabel("Close \(session.title)")
+                .accessibilityIdentifier("session.close.\(session.id.uuidString)")
+                .help("Close tab")
+            }
+            .onHover { hovering in
+                if hovering { hoveredID = session.id }
+                else if hoveredID == session.id { hoveredID = nil }
+            }
+            .dropDestination(for: String.self) { items, _ in
+                guard let item = items.first,
+                      item.hasPrefix("chauffeur-tab:\(project.id):"),
+                      let source = UUID(uuidString: String(item.dropFirst("chauffeur-tab:\(project.id):".count))),
+                      sessions.contains(where: { $0.id == source }), source != session.id else { return false }
+                move(source, session.id)
+                return true
+            } isTargeted: { targeted in
+                if targeted { dropTargetID = session.id }
+                else if dropTargetID == session.id { dropTargetID = nil }
+            }
+            .overlay {
+                RoundedRectangle(cornerRadius: 6).stroke(dropTargetID == session.id ? Color.accentColor : Color.clear, lineWidth: 2)
+                    .allowsHitTesting(false)
+            }
             .contextMenu {
                 Button("Session Details") { details(session) }
                 if session.state.isLive { Button("Stop Session…") { details(session) } }
