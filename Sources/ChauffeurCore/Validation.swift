@@ -113,18 +113,24 @@ public enum LaunchPolicy {
         let codex: Set<String> = ["-C", "--cd", "-c", "--config", "--last", "--all"]
         let claude: Set<String> = ["-c", "-r", "-w", "--mcp-config", "--strict-mcp-config", "--settings", "--setting-sources", "--safe-mode", "--no-session-persistence", "--print", "-p", "--output-format", "--input-format", "--plugin-dir", "--plugin-url", "--environment", "--tmux"]
         let blocked = common.union(kind == .codex ? codex : claude)
-        for argument in arguments {
+        for (validationIndex, argument) in arguments.enumerated() {
             try Validation.require(!argument.contains("\0") && !argument.contains("\n"), "Arguments cannot contain NUL or newlines")
             let key = String(argument.split(separator: "=", maxSplits: 1).first ?? "")
             let shortConflict = (kind == .codex ? ["-C", "-c"] : ["-r", "-w"]).contains { key.hasPrefix($0) && key != $0 }
-            guard !blocked.contains(key), !shortConflict else {
+            let codexReasoningConfig = kind == .codex && (key == "-c" || key == "--config") && {
+                if let separator = argument.firstIndex(of: "=") {
+                    return argument[argument.index(after: separator)...].hasPrefix("model_reasoning_effort=")
+                }
+                return arguments.dropFirst(validationIndex + 1).first?.hasPrefix("model_reasoning_effort=") == true
+            }()
+            guard (!blocked.contains(key) || codexReasoningConfig), !shortConflict else {
                 throw ChauffeurError("managed_argument", "\(key) conflicts with Chauffeur-managed launch fields")
             }
         }
         // A conservative option/value grammar rejects CLI subcommands and task
         // positionals while preserving explicit native model/permission options.
         let takesValue: Set<String> = kind == .codex
-            ? ["-m", "--model", "-p", "--profile", "-s", "--sandbox", "-a", "--ask-for-approval", "--enable", "--disable", "--local-provider", "-i", "--image"]
+            ? ["-m", "--model", "-p", "--profile", "-s", "--sandbox", "-a", "--ask-for-approval", "--enable", "--disable", "--local-provider", "-i", "--image", "-c", "--config"]
             : ["--model", "--effort", "--permission-mode", "--agent", "--agents", "--append-system-prompt", "--system-prompt", "--allowedTools", "--allowed-tools", "--disallowedTools", "--disallowed-tools", "--tools", "--name", "-n", "--fallback-model"]
         let flags: Set<String> = kind == .codex
             ? ["--search", "--no-alt-screen", "--oss", "--strict-config", "--approve-for-me", "--dangerously-bypass-approvals-and-sandbox", "--yolo"]

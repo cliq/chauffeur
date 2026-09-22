@@ -334,6 +334,7 @@ struct PresetEditor: View {
                 Text("Configuration directory comes from the team.").font(.caption).foregroundStyle(.secondary)
                 if preset != nil { Toggle("Archived", isOn: $archived) }
             }
+            PresetLaunchOptionsEditor(rawArguments: $arguments, kind: kind)
             Text("Launch arguments").font(.headline)
             ArgumentEditor(text: $arguments).frame(height: 84)
                 .clipShape(RoundedRectangle(cornerRadius: 6))
@@ -346,10 +347,10 @@ struct PresetEditor: View {
                     var value = preset ?? AgentPreset(setID: setID, name: effectiveName, kind: kind, executable: executable, configurationDirectory: "")
                     value.name = effectiveName; value.kind = kind; value.executable = executable; value.configurationDirectory = ""
                     value.archived = archived; value.integration = .unverified
-                    Task { do { value.arguments = try ArgumentText.parse(arguments); try value.validate(); try await model.save("savePreset", value, version: version); completion?(value.id); dismiss() } catch { failure = error.localizedDescription } }
+                    Task { do { value.rawArguments = arguments; if let parsed = try? ArgumentText.parse(arguments) { value.arguments = parsed }; try value.validate(); try await model.save("savePreset", value, version: version); completion?(value.id); dismiss() } catch { failure = error.localizedDescription } }
                 }.keyboardShortcut(.defaultAction).accessibilityIdentifier("preset.save")
             }
         }.padding(24).frame(width: 650)
-            .onAppear { name = preset?.name ?? ""; kind = preset?.kind ?? .codex; executable = preset?.executable ?? "codex"; arguments = ArgumentText.format(preset?.arguments ?? []); archived = preset?.archived ?? false; version = model.snapshot.store.presets.first { $0.value.id == preset?.id }?.version }
+            .onAppear { name = preset?.name ?? ""; kind = preset?.kind ?? .codex; executable = preset?.executable ?? "codex"; arguments = preset.map { $0.rawArguments ?? ArgumentText.format($0.arguments) } ?? ""; archived = preset?.archived ?? false; version = model.snapshot.store.presets.first { $0.value.id == preset?.id }?.version }
     }
 }

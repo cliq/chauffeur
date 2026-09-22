@@ -34,6 +34,7 @@ public actor Ledger {
           id TEXT PRIMARY KEY, project_id TEXT NOT NULL, group_id TEXT NOT NULL,
           parent_id TEXT, live INTEGER NOT NULL, record TEXT NOT NULL
         );
+        CREATE TABLE IF NOT EXISTS deleted_sessions (id TEXT PRIMARY KEY);
         CREATE TABLE IF NOT EXISTS grants (
           hash TEXT PRIMARY KEY, session_id TEXT NOT NULL REFERENCES sessions(id), revoked INTEGER NOT NULL DEFAULT 0
         );
@@ -54,6 +55,17 @@ public actor Ledger {
           retry_key TEXT NOT NULL, request_hash TEXT NOT NULL, state TEXT NOT NULL, record TEXT NOT NULL,
           UNIQUE(parent_id, retry_key)
         );
+        CREATE TABLE IF NOT EXISTS control_operations (
+          caller_id TEXT NOT NULL, retry_key TEXT NOT NULL, request_hash TEXT NOT NULL,
+          record TEXT NOT NULL, PRIMARY KEY(caller_id,retry_key)
+        );
+        CREATE TABLE IF NOT EXISTS delegation_tombstones (
+          parent_id TEXT NOT NULL, retry_key TEXT NOT NULL, request_hash TEXT NOT NULL,
+          delegation_id TEXT NOT NULL, PRIMARY KEY(parent_id,retry_key)
+        );
+        CREATE TABLE IF NOT EXISTS worker_recoveries (
+          previous_id TEXT PRIMARY KEY, controller_id TEXT NOT NULL, retry_key TEXT NOT NULL, adopted_ids TEXT
+        );
         CREATE TABLE IF NOT EXISTS notification_preferences (id INTEGER PRIMARY KEY CHECK(id=1), enabled INTEGER NOT NULL);
         INSERT OR IGNORE INTO notification_preferences(id,enabled) VALUES(1,0);
         CREATE TABLE IF NOT EXISTS attention_notices (
@@ -62,6 +74,11 @@ public actor Ledger {
         );
         """
         guard sqlite3_exec(connection.handle, schema, nil, nil, nil) == SQLITE_OK else { throw ChauffeurError("ledger_schema", "Cannot initialize coordination ledger") }
+        var column: OpaquePointer?
+        if sqlite3_prepare_v2(connection.handle, "SELECT adopted_ids FROM worker_recoveries LIMIT 0", -1, &column, nil) != SQLITE_OK {
+            guard sqlite3_exec(connection.handle, "ALTER TABLE worker_recoveries ADD COLUMN adopted_ids TEXT", nil, nil, nil) == SQLITE_OK else { throw ChauffeurError("ledger_schema", "Cannot migrate recovery receipts") }
+        }
+        sqlite3_finalize(column)
         try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: path)
     }
     private var database: OpaquePointer { connection.handle }
@@ -109,6 +126,7 @@ public actor Ledger {
     private func denied() -> ChauffeurError { ChauffeurError("not_found", "Record not found in this session's group") }
     public func register(_ session: Session, notification: AttentionReason? = nil) throws {
         try transaction {
+            guard try !isForgotten(sessionID: session.id) else { throw ChauffeurError("missing_session", "This session was explicitly deleted") }
             if let existing = try rows("SELECT project_id,group_id,parent_id FROM sessions WHERE id=?", [session.id.uuidString]).first {
                 guard existing[0] == session.projectID.uuidString, existing[1] == session.groupID.uuidString, existing[2] == (session.parentID?.uuidString ?? "") else {
                     throw ChauffeurError("immutable_membership", "Session membership and parent cannot change")
@@ -170,14 +188,28 @@ public actor Ledger {
     public func forget(sessionID: UUID) throws {
         let id = sessionID.uuidString
         try transaction {
+            for item in try allDelegations() where item.controllingParentID == sessionID {
+                let live = try rows("SELECT live FROM sessions WHERE id=?", [item.childID.uuidString]).first?[0] == "1"
+                guard !live, ![.reserved, .launching].contains(item.state) else { throw ChauffeurError("active_session", "Close or recover this coordinator's workers before deleting its history") }
+            }
             try execute("DELETE FROM attention_notices WHERE session_id=?", [id])
             try execute("DELETE FROM grants WHERE session_id=?", [id])
             try execute("DELETE FROM message_tombstones WHERE sender_id=?", [id])
             try execute("DELETE FROM messages WHERE sender_id=? OR recipient_id=?", [id, id])
-            try execute("DELETE FROM delegations WHERE parent_id=? OR child_id=?", [id, id])
-            try execute("DELETE FROM sessions WHERE id=?", [id])
+            // An original parent remains a hidden FK anchor for adopted workers.
+            // Deleting its UI/history record must not destroy their control records.
+            for item in try allDelegations() where item.childID == sessionID || (item.parentID == sessionID && item.controllerID == nil) {
+                try execute("INSERT OR IGNORE INTO delegation_tombstones(parent_id,retry_key,request_hash,delegation_id) SELECT parent_id,retry_key,request_hash,id FROM delegations WHERE id=?", [item.id.uuidString])
+                try execute("DELETE FROM delegations WHERE id=?", [item.id.uuidString])
+            }
+            try execute("INSERT OR IGNORE INTO deleted_sessions(id) VALUES(?)", [id])
+            if try rows("SELECT id FROM delegations WHERE parent_id=?", [id]).isEmpty {
+                try execute("DELETE FROM sessions WHERE id=?", [id])
+            }
+            try execute("DELETE FROM sessions WHERE id IN (SELECT id FROM deleted_sessions) AND id NOT IN (SELECT parent_id FROM delegations)")
         }
     }
+    public func isForgotten(sessionID: UUID) throws -> Bool { try !rows("SELECT id FROM deleted_sessions WHERE id=?", [sessionID.uuidString]).isEmpty }
     public func revoke(sessionID: UUID) throws { try execute("UPDATE grants SET revoked=1 WHERE session_id=?", [sessionID.uuidString]) }
     public func authenticate(_ token: String) throws -> Caller {
         guard !token.isEmpty, token.utf8.count <= 512,
@@ -189,17 +221,19 @@ public actor Ledger {
     }
     /// Revalidate after suspension (e.g. bounded inbox wait), including revocation.
     public func peers(_ caller: Caller) throws -> [Session] {
-        try rows("SELECT record FROM sessions WHERE project_id=? AND group_id=?", scopeValues(caller)).map { try decode(Session.self, $0[0]) }
+        try rows("SELECT record FROM sessions WHERE project_id=? AND group_id=? AND id NOT IN (SELECT id FROM deleted_sessions)", scopeValues(caller)).map { try decode(Session.self, $0[0]) }
     }
     private func peer(_ id: UUID, caller: Caller) throws -> Session {
-        guard let row = try rows("SELECT record FROM sessions WHERE id=? AND project_id=? AND group_id=?", [id.uuidString] + scopeValues(caller)).first else { throw denied() }
+        guard let row = try rows("SELECT record FROM sessions WHERE id=? AND project_id=? AND group_id=? AND id NOT IN (SELECT id FROM deleted_sessions)", [id.uuidString] + scopeValues(caller)).first else { throw denied() }
         return try decode(Session.self, row[0])
     }
-    public func send(caller: Caller, recipientID: UUID, body: String, references: [String] = [], retryKey: String, replyToID: UUID? = nil, delegationID: UUID? = nil) throws -> Message {
+    public func send(caller: Caller, recipientID: UUID, body: String, references: [String] = [], retryKey: String, replyToID: UUID? = nil, delegationID: UUID? = nil, turnID: UUID? = nil) throws -> Message {
         try Validation.require(!body.isEmpty && body.utf8.count <= 64 * 1024, "Message must contain 1–65,536 UTF-8 bytes")
         try Validation.require(!retryKey.isEmpty && retryKey.count <= 200, "A retry key of 1–200 characters is required")
         try Validation.require(references.count <= 100 && references.allSatisfy { $0.utf8.count <= 4096 }, "Too many or oversized context references")
-        let requestHash = JSONCoding.digest(try JSONCoding.encode([recipientID.uuidString, body, try encode(references), replyToID?.uuidString ?? "", delegationID?.uuidString ?? ""]))
+        var hashParts = [recipientID.uuidString, body, try encode(references), replyToID?.uuidString ?? "", delegationID?.uuidString ?? ""]
+        if let turnID { hashParts.append(turnID.uuidString) }
+        let requestHash = JSONCoding.digest(try JSONCoding.encode(hashParts))
         return try transaction {
             _ = try peer(recipientID, caller: caller)
             if let replyToID {
@@ -215,7 +249,8 @@ public actor Ledger {
                 guard row[0] == requestHash else { throw ChauffeurError("retry_conflict", "Retry key was already used for different message content") }
                 return try decode(Message.self, row[1])
             }
-            let message = Message(scope: caller.scope, senderID: caller.sessionID, recipientID: recipientID, body: body, references: references, replyToID: replyToID, delegationID: delegationID)
+            var message = Message(scope: caller.scope, senderID: caller.sessionID, recipientID: recipientID, body: body, references: references, replyToID: replyToID, delegationID: delegationID)
+            message.turnID = turnID
             try execute("INSERT INTO messages(id,project_id,group_id,sender_id,recipient_id,retry_key,request_hash,state,record) VALUES(?,?,?,?,?,?,?,?,?)", [message.id.uuidString] + scopeValues(caller) + [caller.sessionID.uuidString, recipientID.uuidString, retryKey, requestHash, message.state.rawValue, try encode(message)])
             try enqueueNotification(session: peer(recipientID, caller: caller), reason: delegationID == nil ? .message : .result)
             return message
@@ -251,20 +286,47 @@ public actor Ledger {
             item.state = .cancelled; try saveMessage(item); return item
         }
     }
-    public func reserveDelegation(caller: Caller, task: String, presetID: UUID, folderID: UUID, shareCheckout: Bool, retryKey: String, limit: Int) throws -> (Delegation, Bool) {
+    public func reserveDelegation(caller: Caller, task: String, presetID: UUID, folderID: UUID, shareCheckout: Bool, retryKey: String, limit: Int, worktreeID: UUID? = nil, model: String? = nil, reasoningEffort: String? = nil, predecessorID: UUID? = nil) throws -> (Delegation, Bool) {
         try Validation.require(!task.isEmpty && task.utf8.count <= 64 * 1024, "Task must contain 1–65,536 UTF-8 bytes")
         try Validation.require(!retryKey.isEmpty && retryKey.count <= 200, "A retry key of 1–200 characters is required")
-        let hash = JSONCoding.digest(try JSONCoding.encode([task, presetID.uuidString, folderID.uuidString, String(shareCheckout)]))
+        var parts = [task, presetID.uuidString, folderID.uuidString, String(shareCheckout)]
+        if worktreeID != nil || model != nil || reasoningEffort != nil || predecessorID != nil {
+            parts += [worktreeID?.uuidString ?? "", model ?? "", reasoningEffort ?? "", predecessorID?.uuidString ?? ""]
+        }
+        let hash = JSONCoding.digest(try JSONCoding.encode(parts))
         return try transaction {
             let parent = try peer(caller.sessionID, caller: caller)
             guard parent.parentID == nil else { throw ChauffeurError("delegation_depth", "Delegated sessions cannot launch further children") }
+            if let tombstone = try rows("SELECT request_hash FROM delegation_tombstones WHERE parent_id=? AND retry_key=?", [caller.sessionID.uuidString, retryKey]).first {
+                guard tombstone[0] == hash else { throw ChauffeurError("retry_conflict", "Retry key was already used for another delegation") }
+                throw ChauffeurError("delegation_deleted", "This delegation was explicitly deleted; it will not be launched again")
+            }
             if let row = try rows("SELECT request_hash,record FROM delegations WHERE parent_id=? AND retry_key=?", [caller.sessionID.uuidString, retryKey]).first {
                 guard row[0] == hash else { throw ChauffeurError("retry_conflict", "Retry key was already used for a different delegation") }
                 return (try decode(Delegation.self, row[1]), false)
             }
-            let reserved = try rows("SELECT COUNT(*) FROM delegations d LEFT JOIN sessions s ON s.id=d.child_id WHERE d.parent_id=? AND (s.live=1 OR d.state IN ('reserved','launching'))", [caller.sessionID.uuidString]).first?[0] ?? "0"
-            guard (Int(reserved) ?? 0) < limit else { throw ChauffeurError("child_limit", "Parent already has the configured maximum of \(limit) live children") }
-            let item = Delegation(scope: caller.scope, parentID: caller.sessionID, task: task, presetID: presetID, folderID: folderID, shareCheckout: shareCheckout)
+            if let predecessorID {
+                let prior = try ownedDelegation(predecessorID, caller: caller)
+                guard shareCheckout, folderID == prior.folderID, worktreeID == prior.worktreeID else {
+                    throw ChauffeurError("checkout_changed", "A replacement must explicitly share its predecessor's registered checkout")
+                }
+                guard prior.closureOutcome == "replaced",
+                      (try? peer(prior.childID, caller: caller).state.isLive) != true else {
+                    throw ChauffeurError("stop_pending", "Confirm the previous worker stopped as replaced before launching its successor")
+                }
+                guard !(try allDelegations()).contains(where: {
+                    $0.predecessorID == predecessorID && (($0.state != .failed && $0.state != .interrupted) || (try? peer($0.childID, caller: caller).state.isLive) == true)
+                }) else {
+                    throw ChauffeurError("retry_conflict", "This attempt already has a replacement; inspect its delegation before retrying")
+                }
+            }
+            let reserved = try allDelegations().filter { item in
+                item.controllingParentID == caller.sessionID &&
+                ((try? peer(item.childID, caller: caller).state.isLive) == true || [.reserved, .launching].contains(item.state))
+            }.count
+            guard reserved < limit else { throw ChauffeurError("child_limit", "Parent already has the configured maximum of \(limit) live children") }
+            var item = Delegation(scope: caller.scope, parentID: caller.sessionID, task: task, presetID: presetID, folderID: folderID, shareCheckout: shareCheckout)
+            item.worktreeID = worktreeID; item.model = model; item.reasoningEffort = reasoningEffort; item.predecessorID = predecessorID
             try execute("INSERT INTO delegations(id,project_id,group_id,parent_id,child_id,retry_key,request_hash,state,record) VALUES(?,?,?,?,?,?,?,?,?)", [item.id.uuidString] + scopeValues(caller) + [caller.sessionID.uuidString, item.childID.uuidString, retryKey, hash, item.state.rawValue, try encode(item)])
             return (item, true)
         }
@@ -276,21 +338,116 @@ public actor Ledger {
     public func updateDelegation(_ value: Delegation) throws {
         guard let row = try rows("SELECT record FROM delegations WHERE id=?", [value.id.uuidString]).first else { throw denied() }
         let previous = try decode(Delegation.self, row[0])
-        guard previous.scope == value.scope, previous.childID == value.childID, previous.parentID == value.parentID else { throw ChauffeurError("immutable_membership", "Delegation membership cannot change") }
+        guard previous.scope == value.scope, previous.childID == value.childID, previous.parentID == value.parentID, previous.controllingParentID == value.controllingParentID else { throw ChauffeurError("immutable_membership", "Delegation membership cannot change") }
         try execute("UPDATE delegations SET state=?,record=? WHERE id=?", [value.state.rawValue, try encode(value), value.id.uuidString])
     }
-    public func reportResult(caller: Caller, delegationID: UUID, result: String, retryKey: String) throws -> Message {
+    public func reportResult(caller: Caller, delegationID: UUID, result: String, retryKey: String, turnID: UUID? = nil) throws -> Message {
         try transaction {
             var item = try delegation(delegationID, caller: caller)
             guard item.childID == caller.sessionID else { throw denied() }
-            let message = try send(caller: caller, recipientID: item.parentID, body: result, retryKey: "result:\(retryKey)", delegationID: item.id)
+            guard item.closureOutcome == nil else { throw ChauffeurError("not_live", "This delegation is closed") }
+            guard turnID == item.currentTurnID || (turnID == nil && item.turnID == nil) else {
+                throw ChauffeurError("stale_turn", "Report the current turnID returned by discovery")
+            }
+            let message = try send(caller: caller, recipientID: item.controllingParentID, body: result, retryKey: "result:\(retryKey)", delegationID: item.id, turnID: turnID)
             item.result = result; item.state = .resultReported; try updateDelegation(item)
+            // A report attributed to this turn proves its prompt was consumed,
+            // even if the runtime crashed before acknowledging terminal input.
+            for row in try rows("SELECT retry_key,record FROM control_operations") {
+                var operation = try decode(CoordinationOperation.self, row[1])
+                if operation.delegationID == item.id, operation.turnID == item.currentTurnID,
+                   ["submitted", "deliveryUncertain"].contains(operation.state) {
+                    operation.state = "reported"; operation.error = nil; operation.errorCode = nil
+                    try saveOperation(operation, retryKey: row[0])
+                }
+            }
             return message
+        }
+    }
+    public func ownedDelegation(_ id: UUID, caller: Caller) throws -> Delegation {
+        let item = try delegation(id, caller: caller)
+        guard item.controllingParentID == caller.sessionID else { throw denied() }
+        return item
+    }
+    public func latestOperation(delegationID: UUID) throws -> CoordinationOperation? {
+        try rows("SELECT record FROM control_operations ORDER BY rowid DESC")
+            .lazy.map { try decode(CoordinationOperation.self, $0[0]) }.first { $0.delegationID == delegationID }
+    }
+    public func unresolvedFollowUp(delegationID: UUID) throws -> CoordinationOperation? {
+        try rows("SELECT record FROM control_operations ORDER BY rowid DESC")
+            .lazy.map { try decode(CoordinationOperation.self, $0[0]) }.first {
+                $0.delegationID == delegationID && $0.kind == "follow_up" && ["reserved", "deliveryUncertain"].contains($0.state)
+            }
+    }
+    public func reserveOperation(caller: Caller, delegationID: UUID, kind: String, arguments: JSONValue, retryKey: String) throws -> (CoordinationOperation, Bool) {
+        try Validation.require(!retryKey.isEmpty && retryKey.count <= 200, "A retry key of 1–200 characters is required")
+        let hash = JSONCoding.digest(try JSONCoding.encode(arguments))
+        return try transaction {
+            let item = try ownedDelegation(delegationID, caller: caller)
+            if let row = try rows("SELECT request_hash,record FROM control_operations WHERE caller_id=? AND retry_key=?", [caller.sessionID.uuidString, retryKey]).first {
+                let operation = try decode(CoordinationOperation.self, row[1])
+                guard row[0] == hash, operation.kind == kind, operation.delegationID == delegationID else {
+                    throw ChauffeurError("retry_conflict", "Retry key was already used for a different session operation")
+                }
+                return (operation, false)
+            }
+            if kind == "follow_up" {
+                guard try unresolvedFollowUp(delegationID: delegationID) == nil else {
+                    throw ChauffeurError("follow_up_delivery_uncertain", "An earlier follow-up is unresolved. Inspect its receipt, wait for its report, or replace the worker; do not submit another prompt")
+                }
+                guard item.closureOutcome == nil else { throw ChauffeurError("not_live", "This delegation is closed") }
+                guard arguments["expectedTurnID"].string.flatMap(UUID.init(uuidString:)) == item.currentTurnID else {
+                    throw ChauffeurError("stale_turn", "Refresh delegation status before submitting a correction")
+                }
+            }
+            let operation = CoordinationOperation(callerID: caller.sessionID, delegationID: delegationID, kind: kind)
+            try execute("INSERT INTO control_operations(caller_id,retry_key,request_hash,record) VALUES(?,?,?,?)", [caller.sessionID.uuidString, retryKey, hash, try encode(operation)])
+            return (operation, true)
+        }
+    }
+    public func saveOperation(_ operation: CoordinationOperation, retryKey: String) throws {
+        if let row = try rows("SELECT record FROM control_operations WHERE caller_id=? AND retry_key=?", [operation.callerID.uuidString, retryKey]).first,
+           try decode(CoordinationOperation.self, row[0]).state == "reported", operation.state != "reported" { return }
+        try execute("UPDATE control_operations SET record=? WHERE caller_id=? AND retry_key=?", [try encode(operation), operation.callerID.uuidString, retryKey])
+    }
+    public func beginTurn(caller: Caller, operation: inout CoordinationOperation, retryKey: String) throws -> Delegation {
+        try transaction {
+            var item = try ownedDelegation(operation.delegationID, caller: caller)
+            item.turnID = operation.id; item.result = nil; item.state = .running
+            operation.turnID = item.turnID; operation.state = "deliveryUncertain"
+            try updateDelegation(item)
+            try saveOperation(operation, retryKey: retryKey)
+            return item
+        }
+    }
+    public func recoverWorkers(caller: Caller, previousCoordinatorID: UUID, retryKey: String) throws -> [Delegation] {
+        try Validation.require(!retryKey.isEmpty && retryKey.count <= 200, "A retry key of 1–200 characters is required")
+        return try transaction {
+            let current = try peer(caller.sessionID, caller: caller)
+            guard current.parentID == nil else { throw ChauffeurError("delegation_depth", "Only user-created coordinators may recover workers") }
+            if let claim = try rows("SELECT controller_id,retry_key,adopted_ids FROM worker_recoveries WHERE previous_id=?", [previousCoordinatorID.uuidString]).first {
+                guard Array(claim.prefix(2)) == [caller.sessionID.uuidString, retryKey] else { throw ChauffeurError("retry_conflict", "Another recovery already claimed this coordinator") }
+                guard !claim[2].isEmpty else { throw ChauffeurError("recovery_receipt_unavailable", "This legacy recovery has no stable receipt; inspect delegation status") }
+                let adoptedIDs = Set(try decode([UUID].self, claim[2]))
+                return try allDelegations().filter { adoptedIDs.contains($0.id) }
+            }
+            let previous = try peer(previousCoordinatorID, caller: caller)
+            guard previous.parentID == nil, !previous.state.isLive else {
+                throw ChauffeurError("active_session", "Only an ended coordinator's workers can be recovered")
+            }
+            var adopted: [Delegation] = []
+            for var item in try allDelegations() where item.controllingParentID == previousCoordinatorID {
+                guard item.scope == caller.scope else { throw denied() }
+                item.controllerID = caller.sessionID
+                try execute("UPDATE delegations SET record=? WHERE id=?", [try encode(item), item.id.uuidString]); adopted.append(item)
+            }
+            try execute("INSERT INTO worker_recoveries(previous_id,controller_id,retry_key,adopted_ids) VALUES(?,?,?,?)", [previousCoordinatorID.uuidString, caller.sessionID.uuidString, retryKey, try encode(adopted.map(\.id))])
+            return adopted
         }
     }
     public func allMessages() throws -> [Message] { try rows("SELECT record FROM messages ORDER BY rowid").map { try decode(Message.self, $0[0]) } }
     public func allDelegations() throws -> [Delegation] { try rows("SELECT record FROM delegations ORDER BY rowid").map { try decode(Delegation.self, $0[0]) } }
-    public func allSessions() throws -> [Session] { try rows("SELECT record FROM sessions").map { try decode(Session.self, $0[0]) } }
+    public func allSessions() throws -> [Session] { try rows("SELECT record FROM sessions WHERE id NOT IN (SELECT id FROM deleted_sessions)").map { try decode(Session.self, $0[0]) } }
     public func pruneCompletedMessages(olderThan date: Date) throws -> Int {
         let candidates = try allMessages().filter { [.acknowledged, .cancelled, .failed].contains($0.state) && ($0.acknowledgedAt ?? $0.createdAt) < date }
         return try transaction {

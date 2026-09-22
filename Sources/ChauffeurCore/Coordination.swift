@@ -20,6 +20,7 @@ public struct Message: Codable, Identifiable, Equatable, Sendable {
     public var references: [String]
     public var state: DeliveryState = .queued
     public var replyToID: UUID?
+    public var turnID: UUID?
     public var delegationID: UUID?
     public var createdAt = Date()
     public var receivedAt: Date?
@@ -41,9 +42,35 @@ public struct Delegation: Codable, Identifiable, Equatable, Sendable {
     public var worktreeID: UUID?
     public var state: DelegationState = .reserved
     public var result: String?
+    public var turnID: UUID?
+    public var controllerID: UUID?
+    public var model: String?
+    public var reasoningEffort: String?
+    public var predecessorID: UUID?
+    public var closureOutcome: String?
+    public var closureReason: String?
+    public var currentTurnID: UUID { turnID ?? id }
+    public var controllingParentID: UUID { controllerID ?? parentID }
     public var error: String?
     public var createdAt = Date()
     public init(scope: GroupScope, parentID: UUID, childID: UUID = UUID(), task: String, presetID: UUID, folderID: UUID, shareCheckout: Bool) {
         self.scope = scope; self.parentID = parentID; self.childID = childID; self.task = task; self.presetID = presetID; self.folderID = folderID; self.shareCheckout = shareCheckout
+    }
+}
+
+/// A durable receipt, not a promise that terminal input was consumed.
+public struct CoordinationOperation: Codable, Equatable, Sendable {
+    public var id = UUID()
+    public var callerID: UUID
+    public var delegationID: UUID
+    public var kind: String
+    public var state = "reserved"
+    public var turnID: UUID?
+    public var error: String?
+    public var errorCode: String?
+    public var historyWarning: String?
+    public var createdAt = Date()
+    public init(callerID: UUID, delegationID: UUID, kind: String) {
+        self.callerID = callerID; self.delegationID = delegationID; self.kind = kind
     }
 }

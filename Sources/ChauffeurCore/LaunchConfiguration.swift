@@ -50,12 +50,17 @@ public struct LaunchRequest: Codable, Sendable {
     public var retryKey: UUID
     /// Missing in requests from older clients, which only launch agents.
     public var kind: LaunchKind?
+    /// nil inherits the preset; an empty string explicitly selects the provider default.
+    public var modelOverride: String?
+    /// nil inherits the preset; an empty string explicitly selects the provider default.
+    public var reasoningOverride: String?
     public var launchKind: LaunchKind { kind ?? .agent }
-    public init(projectID: UUID, groupID: UUID, presetID: UUID, folderID: UUID, title: String, worktreeID: UUID? = nil, additionalFolderIDs: [UUID] = [], task: String? = nil, allowSharedCheckout: Bool = false, coordinationEnabled: Bool = false, retryKey: UUID = UUID(), kind: LaunchKind? = nil) {
+    public init(projectID: UUID, groupID: UUID, presetID: UUID, folderID: UUID, title: String, worktreeID: UUID? = nil, additionalFolderIDs: [UUID] = [], task: String? = nil, allowSharedCheckout: Bool = false, coordinationEnabled: Bool = false, retryKey: UUID = UUID(), kind: LaunchKind? = nil, modelOverride: String? = nil, reasoningOverride: String? = nil) {
         self.projectID = projectID; self.groupID = groupID; self.presetID = presetID; self.folderID = folderID; self.title = title
         self.worktreeID = worktreeID; self.additionalFolderIDs = additionalFolderIDs; self.task = task
         self.allowSharedCheckout = allowSharedCheckout; self.coordinationEnabled = coordinationEnabled; self.retryKey = retryKey
         self.kind = kind
+        self.modelOverride = modelOverride; self.reasoningOverride = reasoningOverride
     }
     /// A login shell in the selected checkout. The preset ID is a placeholder.
     public static func shell(projectID: UUID, groupID: UUID, folderID: UUID, title: String, worktreeID: UUID? = nil, retryKey: UUID = UUID()) -> LaunchRequest {

@@ -99,13 +99,16 @@ conversation ID and original preset.
 ## Agent coordination
 
 Chauffeur includes an experimental MCP server for messages and delegation between
-sessions in a project group. Codex-to-Claude messaging and delegation are still
-being completed as part of [V2](docs/v2-plan.md).
+sessions in a project group. The orchestrator skill runs a plan through fresh
+worker sessions, reviews MCP completion reports, and can submit corrections or
+replace a worker while retaining its history. Workers support per-session model
+and reasoning overrides. See [orchestration validation](docs/orchestration-validation.md)
+for tested provider versions and reproducible checks.
 
-The optional [coordination skill](docs/coordination-skill.md) teaches agents how
-to use these tools. Install it from **Settings → Agent Presets → Chauffeur
-Skill…**. It applies to all sessions using that CLI profile, including those
-started outside Chauffeur.
+The [coordination skills](docs/coordination-skill.md) are linked automatically
+into Codex’s shared skills directory and every team’s Claude directory. They
+update with Chauffeur and also apply to sessions started outside it. View their
+status in **Settings → Agent Presets → Chauffeur Skill…**.
 
 Coordination and status reporting depend on the CLI version. Unsupported versions
 require an explicit basic-terminal launch, with coordination and status features

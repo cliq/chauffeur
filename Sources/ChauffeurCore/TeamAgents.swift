@@ -11,6 +11,8 @@ public struct BaseAgentPreset: Record, Equatable {
     public var kind: CLIKind
     public var executable: String
     public var arguments: [String] = []
+    /// Authoritative editable text when present. Legacy records use `arguments`.
+    public var rawArguments: String?
     public var archived = false
     public var revision = 1
     public init(name: String, kind: CLIKind, executable: String) {
@@ -21,12 +23,13 @@ public struct BaseAgentPreset: Record, Equatable {
         try Validation.require(kind.isAgent, "Choose an agent")
         try Validation.require(!executable.isEmpty && !executable.contains("\0"), "Select an executable")
         try Validation.require(revision > 0, "Revision must be positive")
-        try LaunchPolicy.validateArguments(arguments, kind: kind)
+        if rawArguments == nil { try LaunchPolicy.validateArguments(arguments, kind: kind) }
     }
     public func agent(in team: PresetSet, copy: Bool = false) -> AgentPreset {
         var agent = AgentPreset(setID: team.id, name: name, kind: kind, executable: executable, configurationDirectory: "")
         agent.id = copy ? UUID() : id
         agent.arguments = arguments; agent.archived = archived
+        agent.rawArguments = rawArguments
         agent.sourceBaseID = id; agent.baseRevision = copy ? nil : revision
         return agent
     }

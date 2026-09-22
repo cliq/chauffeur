@@ -67,6 +67,8 @@ public struct AgentPreset: Record, Equatable {
     public var sourceBaseID: UUID?
     public var baseRevision: Int?
     public var arguments: [String] = []
+    /// Authoritative editable text when present. Legacy records use `arguments`.
+    public var rawArguments: String?
     public var integration: IntegrationState = .unverified
     public var archived = false
     public init(setID: UUID, name: String, kind: CLIKind, executable: String, configurationDirectory: String) {
@@ -77,7 +79,7 @@ public struct AgentPreset: Record, Equatable {
         try Validation.name(name)
         try Validation.require(!executable.isEmpty && !executable.contains("\0"), "Select an executable")
         if !configurationDirectory.isEmpty { try Validation.absolutePath(configurationDirectory) }
-        try LaunchPolicy.validateArguments(arguments, kind: kind)
+        if rawArguments == nil { try LaunchPolicy.validateArguments(arguments, kind: kind) }
     }
 }
 
@@ -172,6 +174,10 @@ public struct LaunchSnapshot: Codable, Equatable, Sendable {
     public var configurationPath: String
     public var workingDirectory: String
     public var additionalPaths: [String]
+    public var resolvedArguments: [String]?
+    public var selectedModel: String?
+    public var selectedReasoning: String?
+    public var executionPolicy: WorkerExecutionPolicy?
     public var gitWorktreeIdentities: [UUID]?
     public var checkoutIdentities: [CheckoutIdentity]?
     public var launchedAt = Date()
@@ -199,6 +205,10 @@ public struct Session: Record, Equatable {
     public var nativeConversationID: String?
     public var parentID: UUID?
     public var delegationID: UUID?
+    public var historyProtected: Bool?
+    public var closureOutcome: String?
+    public var closureReason: String?
+    public var closedAt: Date?
     public var initialTask: String?
     public var launchRequestFingerprint: String?
     public var error: String?

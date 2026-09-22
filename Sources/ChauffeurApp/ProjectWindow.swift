@@ -450,7 +450,9 @@ struct ProjectWindow: View {
             VStack(alignment: .leading, spacing: 4) {
                 HStack { Image(systemName: sessionIcon(session)); Text(session.title).lineLimit(1).fontWeight(session.id == layout.state.selectedSessionID ? .semibold : .regular) }
                 Text("\(presetLabel(session)) · \(project.groups.first { $0.id == session.groupID }?.name ?? "Group unavailable")").font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                Text(stateLabel(session)).font(.caption).foregroundStyle(session.needsAttention ? .orange : .secondary)
+                if let status = session.visibleStatus {
+                    Text(status).font(.caption).foregroundStyle(session.needsAttention ? .orange : .secondary)
+                }
             }.padding(.vertical, 3).contentShape(Rectangle())
         }.buttonStyle(.plain).help("\(session.title)\n\(session.launch.workingDirectory)\n\(session.launch.configurationPath)")
             .contextMenu {
@@ -464,7 +466,6 @@ struct ProjectWindow: View {
         return session.parentID == nil ? "terminal" : "arrow.turn.down.right"
     }
     private func presetLabel(_ session: Session) -> String { session.launch.preset.kind.isAgent ? session.launch.preset.name : "Shell" }
-    private func stateLabel(_ session: Session) -> String { session.state.label + (session.pendingMessages > 0 ? " · \(session.pendingMessages) messages" : "") }
 
     // MARK: Detail
 
@@ -678,7 +679,7 @@ struct ProjectWindow: View {
 
     private func closeMessage(_ closing: TabClosure?) -> String {
         let running = closing?.command.map { "“\($0)” is running in this terminal." } ?? "This session is still running."
-        return running + (model.snapshot.settings.keepFinishedSessions
+        return running + ((model.snapshot.settings.keepFinishedSessions || closing?.session.historyProtected == true)
             ? " Closing the tab stops it and keeps its history in Finished."
             : " Closing the tab stops it and permanently deletes its saved history.")
     }
@@ -1027,7 +1028,9 @@ private struct SessionStrip: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(session.title).fontWeight(selected ? .semibold : .medium).lineLimit(1)
                 Text("\(preset) · \(group)").font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                Text(session.state.label + (session.pendingMessages > 0 ? " · \(session.pendingMessages) messages" : "")).font(.caption).foregroundStyle(session.needsAttention ? .orange : .secondary).lineLimit(1)
+                if let status = session.visibleStatus {
+                    Text(status).font(.caption).foregroundStyle(session.needsAttention ? .orange : .secondary).lineLimit(1)
+                }
             }.frame(minWidth: 120, maxWidth: 220, alignment: .leading)
                 .padding(.horizontal, 10).padding(.vertical, 6)
                 .background(selected ? Color.accentColor.opacity(0.15) : Color.clear, in: RoundedRectangle(cornerRadius: 6))
@@ -1118,5 +1121,14 @@ struct WindowObserver: NSViewRepresentable {
             parent.didChangeFrame()
             parent.didShow()
         }
+    }
+}
+
+private extension Session {
+    var visibleStatus: String? {
+        var parts: [String] = []
+        if state != .activityUnknown { parts.append(state.label) }
+        if pendingMessages > 0 { parts.append("\(pendingMessages) messages") }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
 }

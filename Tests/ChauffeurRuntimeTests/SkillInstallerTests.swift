@@ -1,102 +1,110 @@
 import Foundation
-import Darwin
 import Testing
 import ChauffeurCore
 @testable import ChauffeurRuntimeKit
 
 struct SkillInstallerTests {
     private func fixture() throws -> URL {
-        let root = FileManager.default.temporaryDirectory.appendingPathComponent("chauffeur-skill-\(UUID())")
-        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        let root = URL(fileURLWithPath: "/tmp/chauffeur-skill-\(UUID())").resolvingSymlinksInPath()
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         return root
     }
-    private func mode(_ path: URL) throws -> Int {
-        try #require(FileManager.default.attributesOfItem(atPath: path.path)[.posixPermissions] as? Int)
-    }
 
-    @Test func installUpgradeRemovePreservesTheRestOfAProfile() async throws {
+    @Test func linksShareUpdatedCatalogIncludingReferencesAndRepairMissingLinks() async throws {
         let root = try fixture(); defer { try? FileManager.default.removeItem(at: root) }
-        let skill = try CoordinationSkill.bundled()
-        let old = try CoordinationSkill(version: "0.9.0", document: Data(String(decoding: skill.document, as: UTF8.self).replacingOccurrences(of: "version: \"1.0.0\"", with: "version: \"0.9.0\"").utf8))
-        let previous = SkillInstaller(skill: old), current = SkillInstaller(skill: skill)
-        let sentinel = root.appendingPathComponent("settings.json")
-        let sentinelData = Data("untouched fixture settings".utf8)
-        try sentinelData.write(to: sentinel)
-        let before = await previous.status(directory: root.path)
-        #expect(before.state == .notInstalled)
-        #expect(try FileManager.default.contentsOfDirectory(atPath: root.path) == ["settings.json"])
-        let installed = try await previous.install(directory: root.path, revision: before.revision)
-        #expect(installed.state == .installed && installed.installedVersion == "0.9.0")
-        let target = root.appendingPathComponent("skills/chauffeur")
-        #expect(try mode(target) == 0o700 && mode(target.appendingPathComponent("SKILL.md")) == 0o600)
-        let upgrade = await current.status(directory: root.path)
-        #expect(upgrade.state == .updateAvailable)
-        let updated = try await current.install(directory: root.path, revision: upgrade.revision)
-        #expect(updated.installedVersion == skill.version && updated.state == .installed)
-        #expect(try Data(contentsOf: target.appendingPathComponent("SKILL.md")) == skill.document)
-        // A stale sheet must not remove or install into changed state.
-        await #expect(throws: ChauffeurError.self) { try await current.remove(directory: root.path, revision: upgrade.revision) }
-        let removed = try await current.remove(directory: root.path, revision: updated.revision)
-        #expect(removed.state == .notInstalled)
-        #expect(try FileManager.default.contentsOfDirectory(atPath: root.appendingPathComponent("skills").path).isEmpty)
-        #expect(try Data(contentsOf: sentinel) == sentinelData)
-        #expect(try mode(root.appendingPathComponent(".chauffeur-skill.lock")) == 0o600)
-        #expect(try Data(contentsOf: root.appendingPathComponent(".chauffeur-skill.lock")).isEmpty)
-        let other = root.appendingPathComponent("other"); try FileManager.default.createDirectory(at: other, withIntermediateDirectories: true)
-        await #expect(throws: ChauffeurError.self) { try await current.install(directory: other.path, revision: removed.revision) }
-        #expect(!FileManager.default.fileExists(atPath: other.appendingPathComponent("skills/chauffeur").path))
-    }
-
-    @Test(arguments: ["document", "receipt", "extra", "foreign", "symlink-file", "hardlink-file", "symlink-target", "symlink-skills"])
-    func editedAndUnmanagedFilesAreNeverRemoved(kind: String) async throws {
-        let root = try fixture(); defer { try? FileManager.default.removeItem(at: root) }
-        let installer = SkillInstaller(skill: try CoordinationSkill.bundled())
-        let before = await installer.status(directory: root.path)
-        let installed = try await installer.install(directory: root.path, revision: before.revision)
-        let target = root.appendingPathComponent("skills/chauffeur"), file = target.appendingPathComponent("SKILL.md")
-        let external = root.appendingPathComponent("external.txt")
-        let marker = Data("preserve user content".utf8); try marker.write(to: external)
-        switch kind {
-        case "document": try marker.write(to: file)
-        case "receipt": try Data("{}".utf8).write(to: target.appendingPathComponent(".chauffeur-install.json"))
-        case "extra": try marker.write(to: target.appendingPathComponent("notes.txt"))
-        case "foreign": try FileManager.default.removeItem(at: target.appendingPathComponent(".chauffeur-install.json"))
-        case "symlink-file", "hardlink-file":
-            try FileManager.default.removeItem(at: file)
-            if kind == "symlink-file" { try FileManager.default.createSymbolicLink(at: file, withDestinationURL: external) }
-            else { try FileManager.default.linkItem(at: external, to: file) }
-        case "symlink-target", "symlink-skills":
-            let original = kind == "symlink-target" ? target : target.deletingLastPathComponent()
-            let moved = root.appendingPathComponent("saved")
-            try FileManager.default.moveItem(at: original, to: moved)
-            try FileManager.default.createSymbolicLink(at: original, withDestinationURL: moved)
-        default: Issue.record("Unknown fixture")
+        let catalog = try CoordinationSkill.bundledCatalog()
+        let source = root.appendingPathComponent("source")
+        let installer = try SkillInstaller(skills: catalog, root: source)
+        let profiles = [root.appendingPathComponent(".agents").path, root.appendingPathComponent("claude").path]
+        try await installer.publish()
+        #expect(await installer.reconcile(directories: profiles + profiles).count == 4)
+        let link = root.appendingPathComponent(".agents/skills/chauffeur-orchestrator")
+        let destination = try FileManager.default.destinationOfSymbolicLink(atPath: link.path)
+        #expect(destination == source.appendingPathComponent("current/chauffeur-orchestrator").path)
+        let reference = link.appendingPathComponent("references/roles/worker.md")
+        #expect(try Data(contentsOf: reference) == catalog[1].referenceFiles["references/roles/worker.md"])
+        let updated = try catalog.map { skill in
+            try CoordinationSkill(name: skill.name, displayName: skill.displayName, summary: skill.summary,
+                version: skill.version, dependencies: skill.dependencies,
+                document: skill.document + Data("\nUpdated guidance\n".utf8),
+                referenceFiles: skill.referenceFiles.mapValues { $0 + Data("\nUpdated role\n".utf8) })
         }
-        let changed = await installer.status(directory: root.path)
-        #expect(changed.state == .conflict)
-        await #expect(throws: ChauffeurError.self) { try await installer.remove(directory: root.path, revision: installed.revision) }
-        await #expect(throws: ChauffeurError.self) { try await installer.remove(directory: root.path, revision: changed.revision) }
-        await #expect(throws: ChauffeurError.self) { try await installer.install(directory: root.path, revision: changed.revision) }
-        #expect(try Data(contentsOf: external) == marker)
-        #expect(FileManager.default.fileExists(atPath: target.path))
-        if kind == "document" { #expect(try Data(contentsOf: file) == marker) }
-        if kind == "extra" { #expect(try Data(contentsOf: target.appendingPathComponent("notes.txt")) == marker) }
+        let next = try SkillInstaller(skills: updated, root: source)
+        try await next.publish()
+        try await next.publish() // Idempotent source validation includes all references.
+        #expect(try String(contentsOf: reference, encoding: .utf8).contains("Updated role"))
+        #expect(try FileManager.default.destinationOfSymbolicLink(atPath: link.path) == destination)
+        #expect(await next.statuses(directory: profiles[0]).allSatisfy { $0.state == .installed })
+        try FileManager.default.removeItem(at: link)
+        #expect(await next.reconcile(directories: profiles).allSatisfy { $0.state == .installed })
     }
 
-    @Test func missingProfilesAndConcurrentProfileWritersFailWithoutOverwriting() async throws {
+    @Test(arguments: ["directory", "file", "link", "broken-link"])
+    func conflictingTargetsArePreserved(kind: String) async throws {
         let root = try fixture(); defer { try? FileManager.default.removeItem(at: root) }
-        let installer = SkillInstaller(skill: try CoordinationSkill.bundled())
-        let missing = root.appendingPathComponent("missing")
-        let absent = await installer.status(directory: missing.path)
-        #expect(absent.state == .unavailable)
-        await #expect(throws: ChauffeurError.self) { try await installer.install(directory: missing.path, revision: absent.revision) }
-        #expect(!FileManager.default.fileExists(atPath: missing.path))
-        let before = await installer.status(directory: root.path)
-        let lock = open(root.appendingPathComponent(".chauffeur-skill.lock").path, O_RDWR | O_CREAT, 0o600)
-        #expect(lock >= 0 && flock(lock, LOCK_EX | LOCK_NB) == 0)
-        defer { flock(lock, LOCK_UN); close(lock) }
-        do { _ = try await installer.install(directory: root.path, revision: before.revision); Issue.record("Concurrent writer ignored") }
-        catch let error as ChauffeurError { #expect(error.code == "skill_busy") }
-        #expect(!FileManager.default.fileExists(atPath: root.appendingPathComponent("skills").path))
+        let installer = try SkillInstaller(skills: CoordinationSkill.bundledCatalog(), root: root.appendingPathComponent("source"))
+        try await installer.publish()
+        let profile = root.appendingPathComponent("profile")
+        let skills = profile.appendingPathComponent("skills")
+        try FileManager.default.createDirectory(at: skills, withIntermediateDirectories: true)
+        let target = skills.appendingPathComponent("chauffeur")
+        let external = root.appendingPathComponent("external")
+        try Data("keep".utf8).write(to: external)
+        switch kind {
+        case "directory": try FileManager.default.createDirectory(at: target, withIntermediateDirectories: false)
+        case "file": try Data("keep".utf8).write(to: target)
+        default: try FileManager.default.createSymbolicLink(atPath: target.path, withDestinationPath: kind == "link" ? external.path : root.appendingPathComponent("missing").path)
+        }
+        let result = await installer.reconcile(directories: [profile.path])
+        #expect(result.first { $0.name == "chauffeur" }?.state == .conflict)
+        #expect(result.first { $0.name == "chauffeur-orchestrator" }?.state == .installed)
+        #expect(try String(contentsOf: external, encoding: .utf8) == "keep")
+        if kind == "file" { #expect(try String(contentsOf: target, encoding: .utf8) == "keep") }
+        if kind.contains("link") { #expect((try? FileManager.default.destinationOfSymbolicLink(atPath: target.path)) != nil) }
+    }
+
+    @Test func editedManagedSourceIsReportedWithoutOverwritingIt() async throws {
+        let root = try fixture(); defer { try? FileManager.default.removeItem(at: root) }
+        let installer = try SkillInstaller(skills: CoordinationSkill.bundledCatalog(), root: root.appendingPathComponent("source"))
+        try await installer.publish()
+        let profile = root.appendingPathComponent("profile").path
+        _ = await installer.reconcile(directories: [profile])
+        let document = root.appendingPathComponent("source/current/chauffeur/SKILL.md")
+        try Data("user changes".utf8).write(to: document)
+        await #expect(throws: ChauffeurError.self) { try await installer.publish() }
+        #expect(await installer.statuses(directory: profile).allSatisfy { $0.state == .conflict })
+        #expect(try String(contentsOf: document, encoding: .utf8) == "user changes")
+    }
+
+    @Test func defaultsAndSharedTeamDirectoriesAreDeduplicated() throws {
+        var first = PresetSet(name: "First")
+        first.configurationDirectories = ["claude": "/tmp/shared-claude"]
+        var second = PresetSet(name: "Second")
+        second.configurationDirectories = first.configurationDirectories
+        var archived = PresetSet(name: "Archived"); archived.archived = true
+        archived.configurationDirectories = ["claude": "/tmp/archived-claude"]
+        #expect(SkillInstaller.directories(teams: [first, second, PresetSet(name: "Default"), archived], home: "/tmp/home") ==
+            ["/tmp/home/.agents", "/tmp/home/.claude", "/tmp/shared-claude"].map(Paths.canonical).sorted())
+    }
+
+    @Test func runtimeInstallsAtStartupAndWhenTeamDirectoryChanges() async throws {
+        let root = try fixture(); defer { try? FileManager.default.removeItem(at: root) }
+        let home = root.appendingPathComponent("home")
+        let runtime = try RuntimeCoordinator(root: root.appendingPathComponent("data"), ctlPath: "/bin/false",
+            environment: ["PATH": "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin", "HOME": home.path])
+        try await runtime.start()
+        #expect((try? FileManager.default.destinationOfSymbolicLink(atPath: home.appendingPathComponent(".agents/skills/chauffeur").path)) != nil)
+        var team = PresetSet(name: "New")
+        team.configurationDirectories = ["claude": root.appendingPathComponent("claude-one").path]
+        team.agentSelection = .allBase
+        let saved = try await runtime.handle(IPCRequest("savePresetSet", params: .object(["record": try .from(team)]))).decode(Stored<PresetSet>.self)
+        let first = root.appendingPathComponent("claude-one/skills/chauffeur")
+        #expect((try? FileManager.default.destinationOfSymbolicLink(atPath: first.path)) != nil)
+        team = saved.value
+        team.configurationDirectories = ["claude": root.appendingPathComponent("claude-two").path]
+        _ = try await runtime.handle(IPCRequest("savePresetSet", params: .object(["record": try .from(team), "version": .string(saved.version)])))
+        let second = root.appendingPathComponent("claude-two/skills/chauffeur-orchestrator")
+        #expect((try? FileManager.default.destinationOfSymbolicLink(atPath: second.path)) != nil)
+        #expect(FileManager.default.fileExists(atPath: first.path)) // Changing teams does not remove another user's discovery path.
     }
 }

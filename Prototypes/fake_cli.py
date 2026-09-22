@@ -9,7 +9,7 @@ import sys
 if "--version" in sys.argv:
     print("codex-cli 0.154.0")  # Exercises the baseline adapter's flag path.
 elif "--help" in sys.argv:
-    print("Fixture: --add-dir --resume --mcp-config --settings --session-id")
+    print("Fixture: --add-dir --resume --mcp-config --settings --session-id --dangerously-bypass-approvals-and-sandbox")
 else:
     session_id = os.environ["CHAUFFEUR_SESSION_ID"]
     path = Path.cwd() / (".chauffeur-fixture-" + session_id + ".json")

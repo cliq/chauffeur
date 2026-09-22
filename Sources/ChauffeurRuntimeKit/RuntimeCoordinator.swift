@@ -19,6 +19,7 @@ public actor RuntimeCoordinator {
     private var stopGenerations: [UUID: UInt64] = [:]
     private var stopping = Set<UUID>()
     private var stoppingAllSessions = false
+    private var controlRequests = Set<UUID>()
     private var reconciliation: Task<Void, Error>?
     private var checkoutClaims = CheckoutClaims()
     private var endpoint: String?
@@ -81,17 +82,25 @@ public actor RuntimeCoordinator {
         let snapshot = await store.reload()
         try await normalizeDefaultTeam()
         try await onboarding.recover()
+        await reconcileSkills()
         // The ledger preserves accepted membership and orphaned live sessions
         // even if a project directory was removed while the service was running.
         let recorded = try await ledger.allSessions()
         for item in recorded { sessions[item.id] = item }
         for record in snapshot.sessions {
+            if try await ledger.isForgotten(sessionID: record.value.id) { continue }
             if let existing = sessions[record.value.id], existing.projectID != record.value.projectID || existing.groupID != record.value.groupID {
                 self.record(ChauffeurError("immutable_membership", "Session file changes its recorded membership; restore its original IDs", path: record.path))
                 continue
             }
-            sessions[record.value.id] = record.value
-            try await ledger.register(record.value)
+            var restored = record.value
+            if let durable = sessions[restored.id], durable.historyProtected == true {
+                restored.historyProtected = true
+                restored.closureOutcome = durable.closureOutcome; restored.closureReason = durable.closureReason
+                restored.closedAt = durable.closedAt
+            }
+            sessions[restored.id] = restored
+            try await ledger.register(restored)
         }
         if let data = try? Data(contentsOf: root.appendingPathComponent("settings.json")) {
             do { let loaded = try JSONCoding.decode(RetentionSettings.self, from: data); try loaded.validate(); settings = loaded }
@@ -220,6 +229,7 @@ public actor RuntimeCoordinator {
         let logErrors = logReport.status == .unavailable ? [ChauffeurError("log_unavailable", "Structured logs are unavailable")] : []
         return DiagnosticsReport(sessions: Array(sessions.values), health: health(), errors: snapshot.errors + repositoryInventories.compactMap(\.error) + recentErrors + logErrors, observation: .live, observedAt: Date(), logs: logReport)
     }
+    private var protectedSessionIDs: Set<UUID> { Set(sessions.values.filter { $0.historyProtected == true }.map(\.id)) }
     private var liveSessionIDs: Set<UUID> { Set(sessions.values.filter { $0.state.isLive }.map(\.id)) }
     private func captureHistory(_ sessionID: UUID) async throws -> TerminalSnapshot? {
         if let pending = captures[sessionID] { return try await pending.value }
@@ -237,7 +247,7 @@ public actor RuntimeCoordinator {
         guard session.processID == value.processID, session.terminalIdentity == value.terminalIdentity,
               sessions[sessionID]?.processID == value.processID, sessions[sessionID]?.terminalIdentity == value.terminalIdentity,
               !launching.contains(sessionID) else { throw ChauffeurError("snapshot_unavailable", "Terminal ownership changed while saving history") }
-        let saved = try await snapshots.save(value, settings: settings, liveSessions: liveSessionIDs)
+        let saved = try await snapshots.save(value, settings: settings, liveSessions: liveSessionIDs, protectedSessions: protectedSessionIDs)
         snapshotStorage = try await snapshots.status(budgetBytes: settings.snapshotBudgetBytes)
         return saved
     }
@@ -258,7 +268,7 @@ public actor RuntimeCoordinator {
                 } catch let error as ChauffeurError { record(error) }
                 catch { record(ChauffeurError("snapshot_failed", "Could not save terminal history")) }
             }
-            snapshotStorage = try await (applySettings ? snapshots.applyRetention(settings: settings, liveSessions: liveSessionIDs) : snapshots.prune(settings: settings, liveSessions: liveSessionIDs))
+            snapshotStorage = try await (applySettings ? snapshots.applyRetention(settings: settings, liveSessions: liveSessionIDs, protectedSessions: protectedSessionIDs) : snapshots.prune(settings: settings, liveSessions: liveSessionIDs, protectedSessions: protectedSessionIDs))
             if applySettings || Date().timeIntervalSince(lastMessageCleanup) >= 3600 {
                 _ = try await ledger.pruneCompletedMessages(olderThan: Date().addingTimeInterval(-Double(settings.completedMessageDays) * 86400))
                 lastMessageCleanup = Date()
@@ -309,7 +319,7 @@ public actor RuntimeCoordinator {
             // Natural successful exits follow the same retention policy as closing
             // a tab. Explicit stop/close requests own their cleanup; failures stay
             // available so the user can inspect what went wrong.
-            if session.state == .exited, !settings.keepFinishedSessions,
+            if session.state == .exited, !settings.keepFinishedSessions, session.historyProtected != true,
                !stopRequests.contains(session.id) {
                 try await deleteFinishedSession(session.id)
             }
@@ -328,6 +338,7 @@ public actor RuntimeCoordinator {
                 let preferred = (try? await store.setupDraft())?.value.defaultTeamID
                 try await normalizeDefaultTeam(preferring: preferred)
                 try await onboarding.refreshTeamVersions()
+                await reconcileSkills()
             }
             return result
         }
@@ -368,19 +379,27 @@ public actor RuntimeCoordinator {
         case "acknowledgeNotification":
             try await ledger.acknowledgeNotification(params.uuid("noticeID")); return .null
         case "diagnostics": return try .from(await diagnostics())
-        case "skillDocument": return .string(String(decoding: try CoordinationSkill.bundled().document, as: UTF8.self))
-        case "skillStatus", "installSkill", "removeSkill":
+        case "skillDocument": return .string(String(decoding: try CoordinationSkill.bundled(named: params["skillName"].string ?? CoordinationSkill.operationalName).document, as: UTF8.self))
+        case "skillStatus", "skillStatuses":
             let presetID = try params.uuid("presetID")
             let snapshot = await store.reload()
             let teamID = params["teamID"].string.flatMap(UUID.init(uuidString:))
                 ?? snapshot.presets.first(where: { $0.value.id == presetID })?.value.setID
-            guard let teamID, let preset = snapshot.agents(teamID: teamID).first(where: { $0.id == presetID }) else { throw ChauffeurError("missing_preset", "Choose an available agent and team") }
-            if skillInstaller == nil { skillInstaller = SkillInstaller(skill: try CoordinationSkill.bundled()) }
-            let installer = skillInstaller!
-            if request.method == "skillStatus" { return try .from(await installer.status(directory: preset.configurationDirectory)) }
-            let revision = try params.requiredString("revision")
-            if request.method == "installSkill" { return try .from(await installer.install(directory: preset.configurationDirectory, revision: revision)) }
-            return try .from(await installer.remove(directory: preset.configurationDirectory, revision: revision))
+            guard let teamID, let team = snapshot.presetSets.first(where: { $0.value.id == teamID })?.value,
+                  let preset = snapshot.agents(teamID: teamID).first(where: { $0.id == presetID }) else {
+                throw ChauffeurError("missing_preset", "Choose an available agent and team")
+            }
+            await reconcileSkills()
+            let installer = try managedSkillInstaller()
+            let directory = preset.kind == .codex
+                ? URL(fileURLWithPath: skillHome).appendingPathComponent(".agents").path
+                : team.configurationDirectory(for: .claude, home: skillHome)
+            let statuses = await installer.statuses(directory: directory)
+            if request.method == "skillStatuses" { return try .from(statuses) }
+            guard let status = statuses.first(where: { $0.name == (params["skillName"].string ?? CoordinationSkill.operationalName) }) else {
+                throw ChauffeurError("missing_skill", "Choose a bundled Chauffeur skill")
+            }
+            return try .from(status)
         case "sessionActivity":
             let sessionID = try params.uuid("sessionID")
             // Natural-exit cleanup may finish before the UI checks whether Close is safe.
@@ -412,6 +431,7 @@ public actor RuntimeCoordinator {
             }
             let saved = try await store.save(set, expectedVersion: params["version"].string)
             try await normalizeDefaultTeam(preferring: set.isDefault ? set.id : nil)
+            await reconcileSkills()
             return try .from(await store.refresh().presetSets.first { $0.value.id == set.id } ?? saved)
         case "saveBaseAgentPreset": return try .from(await store.save(params["record"].decode(BaseAgentPreset.self), expectedVersion: params["version"].string))
         case "savePreset": return try .from(await store.save(params["record"].decode(AgentPreset.self), expectedVersion: params["version"].string))
@@ -432,7 +452,10 @@ public actor RuntimeCoordinator {
             return try .from(await Task.detached { RepositoryDiscovery.scan(parent: parent) }.value)
         case "launch": return try .from(await launch(params.decode(LaunchRequest.self)))
         case "resume": return try .from(await resume(params.uuid("sessionID")))
-        case "interrupt": try await terminals.interrupt(sessionID: params.uuid("sessionID")); return .object(["sent": .bool(true)])
+        case "interrupt":
+            let sessionID = try params.uuid("sessionID")
+            guard !stopRequests.contains(sessionID) else { throw ChauffeurError("stop_pending", "A session operation is in progress") }
+            try await terminals.interrupt(sessionID: sessionID); return .object(["sent": .bool(true)])
         case "deleteSession":
             let sessionID = try params.uuid("sessionID")
             guard stopRequests.insert(sessionID).inserted else { throw ChauffeurError("stop_pending", "Session cleanup is already in progress") }
@@ -459,7 +482,7 @@ public actor RuntimeCoordinator {
                 if sessions[sessionID]?.state.isLive != true { stopping.remove(sessionID) }
             }
             let closing = request.method == "closeSession"
-            let keepHistory = settings.keepFinishedSessions
+            let keepHistory = settings.keepFinishedSessions || sessions[sessionID]?.historyProtected == true
             if closing && keepHistory { _ = try? await captureHistory(sessionID) }
             stopGenerations[sessionID, default: 0] += 1
             stopping.insert(sessionID)
@@ -786,12 +809,20 @@ public actor RuntimeCoordinator {
         session.id = sessionID; session.worktreeID = request.worktreeID; session.initialTask = request.task
         session.launchRequestFingerprint = fingerprint
         session.parentID = child?.parentID; session.delegationID = child?.id; session.runtimeID = id
+        session.historyProtected = child == nil ? nil : true
         if preset.kind == .claude { session.nativeConversationID = session.id.uuidString }
         do {
             try await persist(session)
             try Task.checkCancellation()
             try preset.validate()
-            try LaunchPolicy.validateAdditionalDirectories(additionalPaths, preset: preset)
+            if !isShell {
+                let resolved = try LaunchOptions.resolve(preset: preset, modelOverride: request.modelOverride, reasoningOverride: request.reasoningOverride, delegated: child != nil)
+                session.launch.resolvedArguments = resolved.arguments
+                session.launch.selectedModel = resolved.model; session.launch.selectedReasoning = resolved.reasoning
+                session.launch.executionPolicy = resolved.executionPolicy
+                var effectivePreset = preset; effectivePreset.arguments = resolved.arguments; effectivePreset.rawArguments = nil
+                try LaunchPolicy.validateAdditionalDirectories(additionalPaths, preset: effectivePreset)
+            }
             session.launch.workingDirectory = try Paths.directory(workingDirectory)
             var checkouts: [CheckoutIdentity] = []
             for path in [session.launch.workingDirectory] + additionalPaths {
@@ -831,6 +862,7 @@ public actor RuntimeCoordinator {
                 let capabilities = try await CLIAdapter.capabilities(executable: session.launch.executablePath, kind: preset.kind, environment: environment)
                 try Task.checkCancellation()
                 session.launch.executableVersion = capabilities.version
+                if child != nil && !capabilities.delegatedYOLO { throw ChauffeurError("worker_policy_unavailable", "Installed CLI does not support delegated YOLO mode") }
                 if !additionalPaths.isEmpty && !capabilities.additionalDirectories { throw ChauffeurError("unsupported_directories", "This CLI does not support additional directories") }
                 if coordination && (!capabilities.coordination || endpoint == nil) { throw ChauffeurError("integration_unavailable", capabilities.limitation ?? "MCP service is unavailable. Retry or explicitly select basic terminal mode") }
                 session.launch.preset.integration = coordination ? .unverified : .unavailable
@@ -863,6 +895,7 @@ public actor RuntimeCoordinator {
         try await reconcile()
         guard !stoppingAllSessions, generation == stopGenerations[sessionID, default: 0], !stopRequests.contains(sessionID) else { throw ChauffeurError("stop_pending", "Stop is still in progress. Resume after it finishes") }
         guard let session = sessions[sessionID], !session.state.isLive else { throw ChauffeurError("already_live", "Reattach the live session instead of resuming") }
+        guard session.closureOutcome == nil else { throw ChauffeurError("resume_unavailable", "This delegated attempt is closed. Launch a fresh worker to continue its work") }
         guard session.nativeConversationID != nil else { throw ChauffeurError("resume_unavailable", "No native conversation ID is available. Create a new session explicitly") }
         guard !launching.contains(sessionID) else { throw ChauffeurError("launch_pending", "Resume is already in progress") }
         launching.insert(sessionID); stopping.remove(sessionID)
@@ -940,6 +973,26 @@ public actor RuntimeCoordinator {
         }
         session.updatedAt = Date(); try await persist(session, notification: notification); return .object(["accepted": .bool(true)])
     }
+    private var skillHome: String { baseEnvironment["HOME"] ?? root.path }
+    private func managedSkillInstaller() throws -> SkillInstaller {
+        if let skillInstaller { return skillInstaller }
+        let installer = try SkillInstaller(skills: CoordinationSkill.bundledCatalog(), root: root.appendingPathComponent("managed-skills"))
+        skillInstaller = installer
+        return installer
+    }
+    private func reconcileSkills() async {
+        do {
+            let installer = try managedSkillInstaller()
+            try await installer.publish()
+            let teams = await store.refresh().presetSets.map(\.value)
+            let statuses = await installer.reconcile(directories: SkillInstaller.directories(teams: teams, home: skillHome))
+            for status in statuses where status.state == .conflict || status.state == .unavailable {
+                record(ChauffeurError("skill_unavailable", status.message, path: status.path))
+            }
+        } catch let error as ChauffeurError { record(error) }
+        catch { record(ChauffeurError("skill_unavailable", "Cannot publish bundled skills")) }
+    }
+
     /// Keeps exactly one non-archived team flagged as default while any exists. `preferring`
     /// names the team the user just made default; otherwise an already flagged team keeps the role,
     /// and a store with none flagged (older data, or the default was deleted or archived) promotes
@@ -971,6 +1024,146 @@ public actor RuntimeCoordinator {
         guard sessions[sessionID]?.state.isLive == true else { throw ChauffeurError("not_live", "Session is not live. Inspect its details or resume explicitly") }
         return try await terminals.attach(sessionID: sessionID, sink: sink, cols: cols, rows: rows, takeControl: takeControl)
     }
+    private func delegationValue(_ item: Delegation) async throws -> JSONValue {
+        guard case .object(var value) = try JSONValue.from(item) else { return .null }
+        value["lastOperation"] = try await ledger.latestOperation(delegationID: item.id).map { try JSONValue.from($0) } ?? .null
+        value["pendingFollowUp"] = try await ledger.unresolvedFollowUp(delegationID: item.id).map { try JSONValue.from($0) } ?? .null
+        value["currentTurnID"] = .string(item.currentTurnID.uuidString)
+        value["controllerID"] = .string(item.controllingParentID.uuidString)
+        value["sessionState"] = sessions[item.childID].map { .string($0.state.rawValue) } ?? .null
+        value["historyProtected"] = .bool(sessions[item.childID]?.historyProtected == true)
+        value["followUpSupported"] = .bool(sessions[item.childID].map { TmuxHost.supportsFollowUp(kind: $0.launch.preset.kind, version: $0.launch.executableVersion) } ?? false)
+        return .object(value)
+    }
+    private func optionalUUID(_ arguments: JSONValue, _ key: String) throws -> UUID? {
+        guard arguments[key] != .null else { return nil }
+        return try arguments.uuid(key)
+    }
+    private func followUp(caller: Caller, arguments: JSONValue) async throws -> JSONValue {
+        let delegationID = try arguments.uuid("delegationID"), retryKey = try arguments.requiredString("retryKey")
+        let prompt = try arguments.requiredString("prompt")
+        try TmuxHost.validateFollowUpPrompt(prompt)
+        let item = try await ledger.ownedDelegation(delegationID, caller: caller)
+        guard controlRequests.insert(item.childID).inserted else { throw ChauffeurError("stop_pending", "A worker operation is already in progress") }
+        defer { controlRequests.remove(item.childID) }
+        let (receipt, isNew) = try await ledger.reserveOperation(caller: caller, delegationID: item.id, kind: "follow_up", arguments: arguments, retryKey: retryKey)
+        var operation = receipt
+        guard isNew else {
+            if operation.state == "reserved" {
+                operation.state = "deliveryUncertain"; operation.errorCode = "follow_up_delivery_uncertain"; operation.error = "Runtime stopped before submission was confirmed; inspect or replace the worker"
+                try await ledger.saveOperation(operation, retryKey: retryKey)
+            }
+            return try .from(operation)
+        }
+        guard stopRequests.insert(item.childID).inserted else { throw ChauffeurError("stop_pending", "Stop is already in progress") }
+        defer { stopRequests.remove(item.childID) }
+        do {
+            guard let session = sessions[item.childID], session.state.isLive, !launching.contains(session.id) else { throw ChauffeurError("not_live", "Worker is not ready; inspect its status or launch a replacement") }
+            try await terminals.validateFollowUp(session: session)
+            guard sessions[session.id]?.state == .turnFinished, sessions[session.id]?.updatedAt == session.updatedAt else {
+                throw ChauffeurError("follow_up_busy", "Worker activity changed while checking readiness; refresh its status")
+            }
+            _ = try await ledger.beginTurn(caller: caller, operation: &operation, retryKey: retryKey)
+            try await terminals.submitFollowUp(session: session, prompt: prompt)
+            operation.state = "submitted"
+            // Do not overwrite a hook that arrived while terminal submission awaited I/O.
+            if var current = sessions[session.id], current.updatedAt == session.updatedAt {
+                current.state = .running; current.updatedAt = Date(); try await persist(current)
+            }
+        } catch {
+            let code = (error as? ChauffeurError)?.code
+            if operation.state != "deliveryUncertain" || code.map({ ["follow_up_busy", "follow_up_unavailable", "follow_up_input_pending", "follow_up_needs_attention", "follow_up_submission_pending", "terminal_missing"].contains($0) }) == true {
+                operation.state = "failed"
+            }
+            operation.errorCode = code ?? "operation_failed"
+            operation.error = (error as? ChauffeurError)?.errorDescription ?? "Follow-up submission failed"
+        }
+        try await ledger.saveOperation(operation, retryKey: retryKey)
+        return try .from(operation)
+    }
+    private func closeWorker(caller: Caller, arguments: JSONValue) async throws -> JSONValue {
+        let delegationID = try arguments.uuid("delegationID"), retryKey = try arguments.requiredString("retryKey")
+        let outcome = try arguments.requiredString("outcome"), reason = try arguments.requiredString("reason")
+        try Validation.require(["accepted", "replaced", "abandoned"].contains(outcome), "outcome must be accepted, replaced, or abandoned")
+        try Validation.require(reason.utf8.count <= 64 * 1024, "Closure reason is too long")
+        var item = try await ledger.ownedDelegation(delegationID, caller: caller)
+        guard controlRequests.insert(item.childID).inserted else { throw ChauffeurError("stop_pending", "A worker operation is already in progress") }
+        defer { controlRequests.remove(item.childID) }
+        let (receipt, isNew) = try await ledger.reserveOperation(caller: caller, delegationID: item.id, kind: "close", arguments: arguments, retryKey: retryKey)
+        var operation = receipt
+        if !isNew && ["completed", "failed"].contains(operation.state) { return try .from(operation) }
+        do {
+            if let existing = item.closureOutcome, existing != outcome { throw ChauffeurError("retry_conflict", "Worker was already closed with a different outcome") }
+            guard var session = sessions[item.childID] else { throw ChauffeurError("missing_session", "Worker record is unavailable") }
+            session.historyProtected = true; try await persist(session)
+            do {
+                if session.state.isLive {
+                    guard try await captureHistory(session.id) != nil else { throw ChauffeurError("snapshot_unavailable", "No history capture is available") }
+                } else if try await snapshots.read(session.id) == nil {
+                    guard try await captureHistory(session.id) != nil else { throw ChauffeurError("snapshot_unavailable", "No history capture is available") }
+                }
+            } catch {
+                guard arguments["force"].bool == true else { throw error }
+                operation.historyWarning = "Final capture unavailable; retained history may be incomplete"
+            }
+            _ = try await handle(IPCRequest("closeSession", params: .object(["sessionID": .string(session.id.uuidString)])))
+            guard var ended = sessions[session.id], !ended.state.isLive,
+                  !(try await terminals.inventory()).contains(where: { $0.sessionName == session.id.uuidString && !$0.dead }) else {
+                throw ChauffeurError("stop_failed", "Worker has not confirmed termination; do not start its replacement")
+            }
+            ended.closureOutcome = outcome; ended.closureReason = reason; ended.closedAt = Date()
+            try await persist(ended)
+            // Refresh after awaits so a result or recovery cannot be overwritten.
+            item = try await ledger.ownedDelegation(delegationID, caller: caller)
+            item.closureOutcome = outcome; item.closureReason = reason; item.state = .exited
+            try await ledger.updateDelegation(item)
+            operation.state = "completed"
+        } catch {
+            operation.state = "failed"; operation.errorCode = (error as? ChauffeurError)?.code ?? "operation_failed"
+            operation.error = (error as? ChauffeurError)?.errorDescription ?? "Worker closure failed"
+        }
+        try await ledger.saveOperation(operation, retryKey: retryKey)
+        return try .from(operation)
+    }
+    private func discover(caller: Caller) async throws -> JSONValue {
+        let snapshot = await store.current()
+        guard let project = snapshot.projects.first(where: { $0.value.id == caller.scope.projectID })?.value else {
+            throw ChauffeurError("project_unavailable", "Project metadata is unavailable")
+        }
+        let members = try await ledger.peers(caller).filter { $0.launch.preset.kind.isAgent }
+        let current = members.first { $0.id == caller.sessionID }
+        let ownDelegation: Delegation?
+        if let delegationID = current?.delegationID { ownDelegation = try await ledger.delegation(delegationID, caller: caller) }
+        else { ownDelegation = nil }
+        let peers: [JSONValue] = members.map { session in
+            .object(["id": .string(session.id.uuidString), "title": .string(session.title),
+                     "status": .string(session.state.label), "workingDirectory": .string(session.launch.workingDirectory),
+                     "preset": .string(session.launch.preset.name), "parentID": session.parentID.map { .string($0.uuidString) } ?? .null])
+        }
+        let presets: [JSONValue] = snapshot.agents(teamID: project.presetSetID).map { preset in
+            let inspection = LaunchOptions.inspect(rawArguments: LaunchOptions.rawArguments(for: preset), kind: preset.kind)
+            return .object(["id": .string(preset.id.uuidString), "name": .string(preset.name), "kind": .string(preset.kind.rawValue),
+                            "model": inspection.model.map(JSONValue.string) ?? .null,
+                            "reasoningEffort": inspection.reasoning.map(JSONValue.string) ?? .null,
+                            "modelSuggestions": .array(LaunchOptions.modelSuggestions(for: preset.kind).map(JSONValue.string)),
+                            "reasoningSuggestions": .array(LaunchOptions.reasoningSuggestions(for: preset.kind).map(JSONValue.string))])
+        }
+        var value: [String: JSONValue] = ["sessionID": .string(caller.sessionID.uuidString),
+            "projectID": .string(project.id.uuidString), "project": .string(project.name),
+            "groupID": .string(caller.scope.groupID.uuidString),
+            "group": .string(project.groups.first { $0.id == caller.scope.groupID }?.name ?? "Unavailable"),
+            "repositories": try .from(project.folders.filter(\.registered)), "presets": .array(presets), "peers": .array(peers)]
+        value["parentID"] = current?.parentID.map { .string($0.uuidString) } ?? .null
+        value["delegationID"] = current?.delegationID.map { .string($0.uuidString) } ?? .null
+        value["currentTurnID"] = ownDelegation.map { .string($0.currentTurnID.uuidString) } ?? .null
+        value["controllerID"] = ownDelegation.map { .string($0.controllingParentID.uuidString) } ?? .null
+        value["workingDirectory"] = current.map { .string($0.launch.workingDirectory) } ?? .null
+        value["worktreeID"] = current?.worktreeID.map { .string($0.uuidString) } ?? .null
+        value["folderID"] = current.map { .string($0.folderID.uuidString) } ?? .null
+        let followUpSupported = current.map { TmuxHost.supportsFollowUp(kind: $0.launch.preset.kind, version: $0.launch.executableVersion) } ?? false
+        value["capabilities"] = .object(["scope": .string("currentSession"), "executableVersion": current.map { .string($0.launch.executableVersion) } ?? .null, "followUpSupported": .bool(followUpSupported), "workerExecutionPolicy": .string("delegatedYOLO"), "modelAvailabilityVerified": .bool(false)])
+        return .object(value)
+    }
     public func callTool(token: String, name: String, arguments: JSONValue) async throws -> JSONValue {
         let caller = try await ledger.authenticate(token)
         try MCPTools.validate(name: name, arguments: arguments)
@@ -979,16 +1172,7 @@ public actor RuntimeCoordinator {
         entry.projectID = caller.scope.projectID; entry.groupID = caller.scope.groupID
         logs?.append(entry)
         switch name {
-        case "chauffeur_discover":
-            let snapshot = await store.current()
-            guard let project = snapshot.projects.first(where: { $0.value.id == caller.scope.projectID })?.value else { throw ChauffeurError("project_unavailable", "Project metadata is unavailable") }
-            // Shells share the group but cannot read an inbox.
-            let members = try await ledger.peers(caller).filter { $0.launch.preset.kind.isAgent }
-            let current = members.first { $0.id == caller.sessionID }
-            let peers = members.map { session -> JSONValue in
-                .object(["id": .string(session.id.uuidString), "title": .string(session.title), "status": .string(session.state.label), "workingDirectory": .string(session.launch.workingDirectory), "preset": .string(session.launch.preset.name), "parentID": session.parentID.map { .string($0.uuidString) } ?? .null])
-            }
-            return .object(["sessionID": .string(caller.sessionID.uuidString), "parentID": current?.parentID.map { .string($0.uuidString) } ?? .null, "delegationID": current?.delegationID.map { .string($0.uuidString) } ?? .null, "projectID": .string(project.id.uuidString), "project": .string(project.name), "groupID": .string(caller.scope.groupID.uuidString), "group": .string(project.groups.first { $0.id == caller.scope.groupID }?.name ?? "Unavailable"), "repositories": try .from(project.folders.filter(\.registered)), "presets": .array(snapshot.agents(teamID: project.presetSetID).map { .object(["id": .string($0.id.uuidString), "name": .string($0.name), "kind": .string($0.kind.rawValue)]) }), "peers": .array(peers)])
+        case "chauffeur_discover": return try await discover(caller: caller)
         case "chauffeur_send_message":
             return try .from(await ledger.send(caller: caller, recipientID: arguments.uuid("recipientID"), body: arguments.requiredString("body"), references: arguments["references"].array.compactMap(\.string), retryKey: arguments.requiredString("retryKey")))
         case "chauffeur_inbox":
@@ -1008,13 +1192,28 @@ public actor RuntimeCoordinator {
         case "chauffeur_reply":
             let message = try await ledger.message(arguments.uuid("messageID"), caller: caller)
             return try .from(await ledger.send(caller: caller, recipientID: message.senderID, body: arguments.requiredString("body"), references: arguments["references"].array.compactMap(\.string), retryKey: arguments.requiredString("retryKey"), replyToID: message.id))
-        case "chauffeur_delegation_status": return try .from(await ledger.delegation(arguments.uuid("delegationID"), caller: caller))
-        case "chauffeur_report_result": return try .from(await ledger.reportResult(caller: caller, delegationID: arguments.uuid("delegationID"), result: arguments.requiredString("result"), retryKey: arguments.requiredString("retryKey")))
+        case "chauffeur_delegation_status":
+            let item = try await ledger.delegation(arguments.uuid("delegationID"), caller: caller)
+            return try await delegationValue(item)
+        case "chauffeur_follow_up": return try await followUp(caller: caller, arguments: arguments)
+        case "chauffeur_close_session": return try await closeWorker(caller: caller, arguments: arguments)
+        case "chauffeur_recover_workers":
+            let previousID = try arguments.uuid("previousCoordinatorID")
+            let workers = try await ledger.allDelegations().filter { $0.controllingParentID == previousID }
+            guard !workers.contains(where: { controlRequests.contains($0.childID) || launching.contains($0.childID) || stopRequests.contains($0.childID) }) else {
+                throw ChauffeurError("stop_pending", "A worker operation is still finishing; retry recovery after it completes")
+            }
+            return try .from(await ledger.recoverWorkers(caller: caller, previousCoordinatorID: previousID, retryKey: arguments.requiredString("retryKey")))
+        case "chauffeur_report_result": return try .from(await ledger.reportResult(caller: caller, delegationID: arguments.uuid("delegationID"), result: arguments.requiredString("result"), retryKey: arguments.requiredString("retryKey"), turnID: optionalUUID(arguments, "turnID")))
         case "chauffeur_delegate":
-            let (reserved, isNew) = try await ledger.reserveDelegation(caller: caller, task: arguments.requiredString("task"), presetID: arguments.uuid("presetID"), folderID: arguments.uuid("folderID"), shareCheckout: arguments["shareCheckout"].bool ?? false, retryKey: arguments.requiredString("retryKey"), limit: settings.maxLiveChildren)
-            guard isNew else { return try .from(reserved) }
+            let (reserved, isNew) = try await ledger.reserveDelegation(caller: caller, task: arguments.requiredString("task"), presetID: arguments.uuid("presetID"), folderID: arguments.uuid("folderID"), shareCheckout: arguments["shareCheckout"].bool ?? false, retryKey: arguments.requiredString("retryKey"), limit: settings.maxLiveChildren, worktreeID: optionalUUID(arguments, "worktreeID"), model: arguments["model"].string, reasoningEffort: arguments["reasoningEffort"].string, predecessorID: optionalUUID(arguments, "predecessorID"))
+            guard isNew else { return try await delegationValue(reserved) }
             var delegation = reserved
             do {
+                guard delegation.worktreeID == nil || delegation.shareCheckout else { throw ChauffeurError("invalid_argument", "worktreeID requires shareCheckout=true") }
+                if var parent = sessions[caller.sessionID] {
+                    parent.historyProtected = true; try await persist(parent)
+                }
                 let snapshot = await store.current()
                 guard let project = snapshot.projects.first(where: { $0.value.id == caller.scope.projectID })?.value,
                       let folder = project.folders.first(where: { $0.id == delegation.folderID && $0.registered }) else { throw ChauffeurError("missing_folder", "Delegation folder is unavailable in this project") }
@@ -1026,15 +1225,20 @@ public actor RuntimeCoordinator {
                     try await ledger.updateDelegation(delegation)
                 }
                 _ = try await ledger.authenticate(token)
-                let request = LaunchRequest(projectID: caller.scope.projectID, groupID: caller.scope.groupID, presetID: delegation.presetID, folderID: delegation.folderID, title: String(delegation.task.prefix(100)), worktreeID: delegation.worktreeID, task: delegation.task, allowSharedCheckout: delegation.shareCheckout, coordinationEnabled: true, retryKey: delegation.childID)
+                var request = LaunchRequest(projectID: caller.scope.projectID, groupID: caller.scope.groupID, presetID: delegation.presetID, folderID: delegation.folderID, title: String(delegation.task.prefix(100)), worktreeID: delegation.worktreeID, task: delegation.task, allowSharedCheckout: delegation.shareCheckout, coordinationEnabled: true, retryKey: delegation.childID)
+                request.modelOverride = delegation.model; request.reasoningOverride = delegation.reasoningEffort
+                if let parent = sessions[caller.sessionID] {
+                    request.additionalFolderIDs = project.folders.filter { parent.launch.additionalPaths.contains($0.canonicalPath) }.map(\.id)
+                }
                 _ = try await launch(request, child: delegation)
-                delegation.state = .running
+                delegation = try await ledger.delegation(delegation.id, caller: caller)
+                if [.reserved, .launching].contains(delegation.state) { delegation.state = .running }
             } catch {
                 delegation.state = .failed; delegation.error = (error as? ChauffeurError)?.errorDescription ?? "Delegation failed; any created worktree is retained"
                 record(error as? ChauffeurError ?? ChauffeurError("operation_failed", "Delegation failed"))
             }
             try await ledger.updateDelegation(delegation)
-            return try .from(delegation)
+            return try await delegationValue(delegation)
         default: throw ChauffeurError("unknown_tool", "Unknown Chauffeur tool")
         }
     }

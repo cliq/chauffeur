@@ -188,9 +188,11 @@ struct SessionRow: View {
                                 .accessibilityLabel("In use on another device")
                         }
                     }
-                    Text(detail)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    if !detail.isEmpty {
+                        Text(detail)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                 }
                 Spacer()
                 if session.needsAttention {
@@ -216,7 +218,9 @@ struct SessionRow: View {
         if let branch = session.branch {
             parts.append(branch)
         }
-        parts.append(session.state.label)
+        if session.state != .activityUnknown {
+            parts.append(session.state.label)
+        }
         return parts.joined(separator: " · ")
     }
 }

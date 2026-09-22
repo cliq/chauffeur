@@ -29,6 +29,9 @@ public actor TmuxHost {
     /// from the client that replaced it.
     private var nextGeneration: AttachmentGeneration = 1
     private var spawning = Set<UUID>()
+    /// Sessions whose native composer is being checked or populated by an
+    /// orchestrated follow-up. Terminal clients must not race that operation.
+    private var followUpSubmissions = Set<UUID>()
     /// Servers started by an older runtime keep `set-clipboard external`, which drops applications'
     /// OSC 52 writes; apply the current setting live once per host instead of restarting tmux.
     private var clipboardForwardingEnsured = Set<String>()
@@ -162,6 +165,9 @@ public actor TmuxHost {
         return generation
     }
     public func input(sessionID: UUID, generation: AttachmentGeneration, bytes: Data) throws {
+        guard !followUpSubmissions.contains(sessionID) else {
+            throw ChauffeurError("follow_up_submission_pending", "A follow-up is being submitted to this terminal")
+        }
         try current(sessionID, generation).pty.input(bytes)
     }
     public func resize(sessionID: UUID, generation: AttachmentGeneration, cols: Int, rows: Int) throws {
@@ -178,6 +184,137 @@ public actor TmuxHost {
     }
     /// The generation currently controlling a session's terminal, if any.
     public func currentGeneration(sessionID: UUID) -> AttachmentGeneration? { attachments[sessionID]?.generation }
+    func isFollowUpSubmissionPending(sessionID: UUID) -> Bool { followUpSubmissions.contains(sessionID) }
+
+    /// Verifies that the installed provider and its live terminal are at a
+    /// known, empty native composer. Provider completion state is necessary but
+    /// deliberately insufficient: dialogs, user drafts and a still-rendering
+    /// turn are rejected from the current pane contents.
+    public func validateFollowUp(session: Session) async throws {
+        guard !followUpSubmissions.contains(session.id) else {
+            throw ChauffeurError("follow_up_submission_pending", "A follow-up is already being submitted to this terminal")
+        }
+        try await validateFollowUpReadiness(session: session)
+    }
+
+    /// Submits a prompt to the existing interactive provider conversation.
+    /// Readiness is checked again while terminal input is reserved, so callers
+    /// may safely persist their turn before invoking this method without relying
+    /// on an earlier, stale validation.
+    public static func validateFollowUpPrompt(_ prompt: String) throws {
+        try Validation.require(!prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, "Follow-up prompt cannot be empty")
+        try Validation.require(!prompt.unicodeScalars.contains(where: {
+            CharacterSet.controlCharacters.contains($0) && $0.value != 0x0A && $0.value != 0x09
+        }), "Follow-up prompt contains terminal control characters")
+        try Validation.require(prompt.utf8.count <= 64 * 1024, "Follow-up prompt is too large")
+    }
+
+    public func submitFollowUp(session: Session, prompt: String) async throws {
+        try Self.validateFollowUpPrompt(prompt)
+        guard followUpSubmissions.insert(session.id).inserted else {
+            throw ChauffeurError("follow_up_submission_pending", "A follow-up is already being submitted to this terminal")
+        }
+        defer { followUpSubmissions.remove(session.id) }
+
+        try await validateFollowUpReadiness(session: session)
+        let socketPath = try await socket(for: session.id)
+        let bufferName = "chauffeur-follow-up-\(UUID().uuidString)"
+        do {
+            let buffered = try await command(["set-buffer", "-b", bufferName, "--", prompt], socket: socketPath)
+            guard buffered.status == 0 else { throw ChauffeurError("follow_up_delivery_uncertain", "Follow-up delivery could not be confirmed") }
+            // -p asks tmux to use the provider's enabled bracketed-paste mode,
+            // so embedded newlines and tabs remain one editable prompt.
+            let pasted = try await command(["paste-buffer", "-p", "-d", "-b", bufferName, "-t", session.id.uuidString], socket: socketPath)
+            guard pasted.status == 0 else { throw ChauffeurError("follow_up_delivery_uncertain", "Follow-up delivery could not be confirmed") }
+            // Both supported TUIs distinguish a pasted burst from Return on their
+            // event loop. Let them finish accepting the literal text before submit.
+            try await Task.sleep(for: .milliseconds(600))
+            let submit = try await command(["send-keys", "-t", session.id.uuidString, "Enter"], socket: socketPath)
+            guard submit.status == 0 else { throw ChauffeurError("follow_up_delivery_uncertain", "Follow-up delivery could not be confirmed") }
+        } catch {
+            _ = try? await command(["delete-buffer", "-b", bufferName], socket: socketPath)
+            // Once the first tmux client is started, a timeout or cancellation
+            // cannot prove whether some or all input reached the native TUI.
+            throw ChauffeurError("follow_up_delivery_uncertain", "Follow-up delivery could not be confirmed")
+        }
+    }
+
+    /// Exact builds whose native blank-composer rendering has been exercised.
+    /// A changed TUI must be revalidated before terminal injection is enabled.
+    public static func supportsFollowUp(kind: CLIKind, version: String) -> Bool {
+        switch kind {
+        case .codex: version == "codex-cli 0.155.1"
+        case .claude: version == "2.1.278 (Claude Code)"
+        case .shell: false
+        }
+    }
+
+    private func validateFollowUpReadiness(session: Session) async throws {
+        let kind = session.launch.preset.kind
+        guard Self.supportsFollowUp(kind: kind, version: session.launch.executableVersion) else {
+            throw ChauffeurError("follow_up_unavailable", "Follow-up readiness has not been verified for this provider version")
+        }
+        switch session.state {
+        case .turnFinished: break
+        case .starting, .running:
+            throw ChauffeurError("follow_up_busy", "The provider is still running a turn")
+        case .needsAttention:
+            throw ChauffeurError("follow_up_needs_attention", "The provider is waiting for input in a dialog")
+        case .activityUnknown:
+            throw ChauffeurError("follow_up_unavailable", "The provider's input readiness is unknown")
+        case .exited, .failed, .interrupted:
+            throw ChauffeurError("follow_up_unavailable", "The provider is no longer available for follow-up")
+        }
+
+        guard let expectedPane = session.terminalIdentity, let expectedPID = session.processID else {
+            throw ChauffeurError("follow_up_unavailable", "The provider terminal identity is unavailable")
+        }
+        let socketPath = try await socket(for: session.id)
+        let metadata = try await command(["display-message", "-p", "-t", session.id.uuidString, "#{pane_id}|#{pane_pid}|#{pane_dead}|#{cursor_y}|#{pane_height}"], socket: socketPath)
+        let fields = metadata.output.trimmingCharacters(in: .newlines).split(separator: "|", omittingEmptySubsequences: false).map(String.init)
+        guard metadata.status == 0, fields.count == 5, fields[0] == expectedPane,
+              Int32(fields[1]) == expectedPID, fields[2] == "0",
+              let cursorY = Int(fields[3]), let height = Int(fields[4]),
+              cursorY >= 0, cursorY < height else {
+            throw ChauffeurError("follow_up_unavailable", "The provider terminal identity or cursor state could not be verified")
+        }
+        let captured = try await ProcessRunner.run(executable, ["-S", socketPath, "capture-pane", "-p", "-t", session.id.uuidString], environment: environment, timeout: 3, outputLimit: 256 * 1024, keepOutputTail: true)
+        guard captured.status == 0, !captured.outputTruncated else {
+            throw ChauffeurError("follow_up_unavailable", "The provider's input readiness could not be inspected")
+        }
+        let lines = captured.output.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        guard lines.indices.contains(cursorY),
+              let owner = try await inventory().first(where: { $0.sessionName == session.id.uuidString }),
+              owner.paneID == expectedPane, owner.processID == expectedPID, !owner.dead else {
+            throw ChauffeurError("follow_up_unavailable", "The provider terminal changed while input readiness was inspected")
+        }
+        let composer = Self.composerReadiness(kind: kind, activeLine: lines[cursorY])
+        switch composer {
+        case .ready: return
+        case .inputPending:
+            throw ChauffeurError("follow_up_input_pending", "The terminal already contains user input or an open dialog")
+        case .unrecognized:
+            throw ChauffeurError("follow_up_unavailable", "The provider is not at a recognized empty input prompt")
+        }
+    }
+
+    enum ComposerReadiness: Equatable { case ready, inputPending, unrecognized }
+    static func composerReadiness(kind: CLIKind, activeLine: String) -> ComposerReadiness {
+        let line = activeLine.trimmingCharacters(in: .whitespaces)
+        switch kind {
+        case .codex:
+            if line == "› Ask Codex to do anything" { return .ready }
+            if line == "›" || line.hasPrefix("› ") { return .inputPending }
+        case .claude:
+            if line.first == "❯" {
+                let content = line.dropFirst().trimmingCharacters(in: .whitespaces)
+                if content.isEmpty { return .ready }
+                return .inputPending
+            }
+        case .shell: break
+        }
+        return .unrecognized
+    }
     private func ensureClipboardForwarding(socket: String) async {
         guard !clipboardForwardingEnsured.contains(socket) else { return }
         do {
@@ -250,10 +387,16 @@ public actor TmuxHost {
         _ = try await command(["if-shell", "-F", "-t", snapshot.sessionID.uuidString, condition, "kill-session -t \(snapshot.sessionID.uuidString)"], socket: socket)
     }
     public func interrupt(sessionID: UUID) async throws {
+        guard !followUpSubmissions.contains(sessionID) else {
+            throw ChauffeurError("follow_up_submission_pending", "A follow-up is being submitted to this terminal")
+        }
         let result = try await command(["send-keys", "-t", sessionID.uuidString, "C-c"], socket: socket(for: sessionID))
         guard result.status == 0 else { throw ChauffeurError("interrupt_failed", "Session is no longer live") }
     }
     public func stop(sessionID: UUID, force: Bool) async throws {
+        guard !followUpSubmissions.contains(sessionID) else {
+            throw ChauffeurError("follow_up_submission_pending", "A follow-up is being submitted to this terminal")
+        }
         guard let pane = try await inventory().first(where: { $0.sessionName == sessionID.uuidString }) else { return }
         if force || pane.dead {
             do {

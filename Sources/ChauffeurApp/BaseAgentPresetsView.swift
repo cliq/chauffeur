@@ -5,29 +5,46 @@ struct BaseAgentPresetsView: View {
     @EnvironmentObject private var model: AppModel
     @State private var adding = false
     @State private var editing: BaseAgentPreset?
+    private var presets: [BaseAgentPreset] {
+        model.snapshot.store.baseAgentPresets.map(\.value).sorted { $0.name < $1.name }
+    }
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text("Agent Presets").font(.title2)
             Text("Define launch commands once. Teams using all agent presets inherit changes; custom copies remain independent.")
                 .foregroundStyle(.secondary)
-            List(model.snapshot.store.baseAgentPresets.map(\.value).sorted { $0.name < $1.name }) { preset in
-                HStack {
-                    VStack(alignment: .leading) {
-                        HStack {
-                            Text(preset.name).font(.headline)
-                            AgentKindBadge(kind: preset.kind)
-                        }
-                        Text(preset.kind.displayName + " · " + ArgumentText.format([preset.executable] + preset.arguments)).font(.caption).textSelection(.enabled)
-                    }
-                    Spacer()
-                    if preset.archived { Text("Archived").foregroundStyle(.secondary) }
-                    Button("Edit…") { editing = preset }
-                }.padding(.vertical, 6)
+            List(presets) { preset in
+                BaseAgentPresetRow(preset: preset) { editing = preset }
             }
             Button("Add Agent Preset…") { adding = true }.disabled(!model.online)
         }.padding(20)
             .sheet(isPresented: $adding) { BaseAgentEditor() }
             .sheet(item: $editing) { BaseAgentEditor(preset: $0) }
+    }
+}
+
+private struct BaseAgentPresetRow: View {
+    let preset: BaseAgentPreset
+    let edit: () -> Void
+
+    var body: some View {
+        HStack {
+            VStack(alignment: .leading) {
+                HStack {
+                    Text(preset.name).font(.headline)
+                    AgentKindBadge(kind: preset.kind)
+                }
+                Text("\(preset.kind.displayName) · \(command)").font(.caption).textSelection(.enabled)
+            }
+            Spacer()
+            if preset.archived { Text("Archived").foregroundStyle(.secondary) }
+            Button("Edit…", action: edit)
+        }.padding(.vertical, 6)
+    }
+
+    private var command: String {
+        let arguments = preset.rawArguments ?? ArgumentText.format(preset.arguments)
+        return arguments.isEmpty ? preset.executable : "\(preset.executable) \(arguments)"
     }
 }
 
@@ -60,6 +77,7 @@ struct BaseAgentEditor: View {
                 }
                 if preset != nil { Toggle("Archived", isOn: $archived) }
             }
+            PresetLaunchOptionsEditor(rawArguments: $arguments, kind: kind)
             Text("Launch arguments").font(.headline)
             ArgumentEditor(text: $arguments).frame(height: 84).accessibilityIdentifier("base-agent.arguments")
                 .overlay(RoundedRectangle(cornerRadius: 6).stroke(.separator))
@@ -72,7 +90,7 @@ struct BaseAgentEditor: View {
             }
         }.padding(24).frame(width: 620).onAppear {
             name = preset?.name ?? ""; kind = preset?.kind ?? .codex; executable = preset?.executable ?? "codex"
-            arguments = ArgumentText.format(preset?.arguments ?? []); archived = preset?.archived ?? false
+            arguments = preset.map { $0.rawArguments ?? ArgumentText.format($0.arguments) } ?? ""; archived = preset?.archived ?? false
             version = model.snapshot.store.baseAgentPresets.first { $0.value.id == preset?.id }?.version
         }
     }
@@ -84,7 +102,8 @@ struct BaseAgentEditor: View {
                 var value = preset ?? BaseAgentPreset(name: name, kind: kind, executable: executable)
                 value.name = name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? kind.displayName : name
                 value.kind = kind; value.executable = executable; value.archived = archived
-                value.arguments = try ArgumentText.parse(arguments)
+                value.rawArguments = arguments
+                if let parsed = try? ArgumentText.parse(arguments) { value.arguments = parsed }
                 try await model.save("saveBaseAgentPreset", value, version: version)
                 dismiss()
             } catch { failure = error.localizedDescription }
@@ -141,7 +160,7 @@ private struct AgentPresetCard: View {
             HStack(spacing: 12) {
                 VStack(alignment: .leading, spacing: 6) {
                     Text(preset.name).font(.headline)
-                    Text(ArgumentText.format([preset.executable] + preset.arguments))
+                    Text(command)
                         .font(.caption.monospaced()).foregroundStyle(.secondary)
                         .lineLimit(2).truncationMode(.middle)
                 }
@@ -160,5 +179,9 @@ private struct AgentPresetCard: View {
         .accessibilityLabel(preset.name)
         .accessibilityHint("Customize a copy of this \(preset.kind.displayName) preset for the team")
         .accessibilityIdentifier("agent-preset.pick-\(preset.id.uuidString)")
+    }
+    private var command: String {
+        let arguments = preset.rawArguments ?? ArgumentText.format(preset.arguments)
+        return arguments.isEmpty ? preset.executable : "\(preset.executable) \(arguments)"
     }
 }

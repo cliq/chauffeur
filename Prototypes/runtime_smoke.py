@@ -158,7 +158,7 @@ with tempfile.TemporaryDirectory(prefix="chauffeur-smoke-", dir="/tmp") as direc
         assert mcp(None, "initialize")[0] == 401
         assert mcp("invalid", "initialize")[0] == 401
         assert mcp(token_a, "initialize", origin="https://evil.invalid")[0] == 403
-        assert len(mcp(token_a, "tools/list")[1]["result"]["tools"]) == 7
+        assert {item["name"] for item in mcp(token_a, "tools/list")[1]["result"]["tools"]} >= {"chauffeur_delegate", "chauffeur_follow_up", "chauffeur_close_session", "chauffeur_recover_workers"}
         error, discovered = tool(token_a, "chauffeur_discover")
         assert not error and len(discovered["peers"]) == 2
         message_args = {"recipientID": sessions[1]["id"], "body": "Durable fixture message", "retryKey": "one"}

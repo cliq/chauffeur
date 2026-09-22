@@ -1,6 +1,6 @@
 # CLI and platform compatibility
 
-Last inspected: 2026-09-16. These are observed development-machine versions,
+Last inspected: 2026-09-22. These are observed development-machine versions,
 not a completed real-provider support matrix.
 
 | Component | Version | Current evidence |
@@ -12,6 +12,8 @@ not a completed real-provider support matrix.
 | SwiftTerm | 1.20.0 | Pinned; native terminal views implemented and exercised by the Debug probe |
 | Hummingbird | 2.26.0 | Actual loopback MCP requests exercised with fixture credentials |
 | Codex | 0.154.0 | Three real sessions/two profiles; authenticated messages, native approvals/completion, scoped stop, explicit resume and runtime reconnect pass. Native UI input/clipboard/resize/history and normal/forced UI quit preserve the process and draft |
+| Codex | 0.155.1 | Authenticated cross-provider MCP delegation, messages/results, model/effort overrides, same-session follow-up, retry and retained closure pass; see [orchestration validation](orchestration-validation.md) |
+| Claude Code | 2.1.278 | Same orchestration checks pass in both coordinator and worker roles |
 | Claude Code | 2.1.272 | Three real sessions/two profiles; native account/process configuration, authenticated messages, permission/completion hooks, scoped stop, explicit resume and runtime reconnect pass; both profiles report the same account |
 | Claude Code | 2.1.273 | Basic-terminal launch/resume and checkout recovery pass; native UI input/clipboard/resize/history and normal/forced UI quit preserve the process and draft. Native permission/completion hooks, read-only MCP discovery and normal exit pass; full coordination remains unverified |
 
@@ -45,7 +47,7 @@ below and does not send a model prompt.
 ### Agent sessions
 
 The adapter checks `--version` and `--help` before spawning an agent. Codex
-0.154.0 is the baseline version with a candidate coordination configuration,
+0.154.0 and 0.155.1 have candidate coordination configurations,
 recorded as unverified; other Codex versions require an explicit basic-terminal
 launch, showing unavailable coordination/status. Claude Code releases almost
 daily, so any build that identifies itself as Claude Code is accepted as a
@@ -58,7 +60,10 @@ explicit `-s read-only` or `--sandbox read-only` agent preset combined with addi
 folders before inspecting or spawning the CLI (including `=read-only` forms).
 Remove additional folders or explicitly choose `workspace-write` in the agent preset.
 Native configuration and managed policy can also affect effective permissions;
-the CLI still enforces them. Chauffeur does not silently increase permissions.
+the CLI still enforces them. Ordinary sessions retain their configured permissions.
+Delegated orchestration workers explicitly use native YOLO mode, as described in
+[orchestration validation](orchestration-validation.md); this does not change presets
+or the coordinating session.
 
 `Prototypes/real_checkout_recovery.py` verifies a moved main repository,
 replacement primary/additional Git metadata, restored-checkout resume with actual
@@ -107,8 +112,22 @@ unchanged process/terminal identities, and correct Unicode output. See
 [service recovery](service-recovery.md#private-native-service-fixture).
 
 The default Codex and Claude launch routes have real credential and scoped-stop evidence.
-Full tool coverage and cross-provider acceptance remain open. See
+Cross-provider orchestration has the dated evidence above; broader release workload
+coverage remains open. See
 [V3](decisions/V3-mcp-and-status.md). Both baseline CLIs pass native metadata
 discovery/isolation/removal checks for the optional
 [Chauffeur skill](coordination-skill.md). File installation status does not
 override CLI skill policies or establish model use of the guidance.
+
+### Orchestrated follow-up turns
+
+Automatic terminal submission is limited to verified composer layouts in Codex
+0.155.1 and Claude Code 2.1.278. It checks completion, pane identity, and an empty
+composer before submitting. Unknown versions, busy sessions, and drafts are
+refused; the coordinator can close and replace a worker instead. Delegated Claude
+2.1.278 launches disable prompt suggestions in launch-scoped settings so ghost
+suggestions do not occupy the composer. Ordinary sessions keep their settings.
+
+Worker completion is an attributed MCP result, separate from terminal submission
+or native turn-finished status. Messages do not wake an idle agent; coordinators
+wait for results while their turn remains active.

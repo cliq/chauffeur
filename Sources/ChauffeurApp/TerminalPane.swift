@@ -273,7 +273,9 @@ struct TerminalPane: View {
             HStack {
                 Text(session.title).fontWeight(.medium).lineLimit(1).help(session.title)
                 Spacer()
-                Text(session.state.label).font(.caption).foregroundStyle(session.needsAttention ? .orange : .secondary)
+                if session.state != .activityUnknown {
+                    Text(session.state.label).font(.caption).foregroundStyle(session.needsAttention ? .orange : .secondary)
+                }
                 Button { controller.find() } label: { Label("History and Search", systemImage: "clock.arrow.circlepath") }.labelStyle(.iconOnly).help("View and search saved terminal history")
                 if case .controlLost = controller.controlState, session.state.isLive {
                     Button("Take Control") { controller.detach(); controller.attach(socketPath: model.socketPath, takeControl: true) }

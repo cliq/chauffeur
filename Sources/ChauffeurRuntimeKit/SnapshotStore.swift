@@ -51,19 +51,19 @@ public actor SnapshotStore {
             return value
         } catch { throw ChauffeurError("invalid_snapshot", "Cannot read saved terminal history; the file is preserved", path: path.path) }
     }
-    @discardableResult public func save(_ snapshot: TerminalSnapshot, settings: RetentionSettings, liveSessions: Set<UUID>) throws -> TerminalSnapshot {
+    @discardableResult public func save(_ snapshot: TerminalSnapshot, settings: RetentionSettings, liveSessions: Set<UUID>, protectedSessions: Set<UUID> = []) throws -> TerminalSnapshot {
         try settings.validate()
         var value = snapshot
         try value.bound(lines: settings.scrollbackLines, maximumBytes: settings.snapshotBudgetBytes)
         let path = try file(value.sessionID, create: true)
         if let existing = try read(value.sessionID) {
             var comparable = value; comparable.capturedAt = existing.capturedAt
-            if comparable == existing { _ = try prune(settings: settings, liveSessions: liveSessions); return existing }
+            if comparable == existing { _ = try prune(settings: settings, liveSessions: liveSessions, protectedSessions: protectedSessions); return existing }
         }
         let data = try JSONCoding.encode(value)
         try data.write(to: path, options: .atomic)
         try manager.setAttributes([.posixPermissions: 0o600], ofItemAtPath: path.path)
-        _ = try prune(settings: settings, liveSessions: liveSessions)
+        _ = try prune(settings: settings, liveSessions: liveSessions, protectedSessions: protectedSessions)
         // Match the persisted date precision on both initial and deduplicated reads.
         return try JSONCoding.decode(TerminalSnapshot.self, from: data)
     }
@@ -85,7 +85,7 @@ public actor SnapshotStore {
         return SnapshotStorageStatus(files: values.count, bytes: values.reduce(0) { $0 + $1.bytes }, budgetBytes: budgetBytes, evictedFiles: evictedFiles)
     }
     /// Apply a reduced line limit to completed archives as well as live captures.
-    @discardableResult public func applyRetention(settings: RetentionSettings, liveSessions: Set<UUID>) throws -> SnapshotStorageStatus {
+    @discardableResult public func applyRetention(settings: RetentionSettings, liveSessions: Set<UUID>, protectedSessions: Set<UUID> = []) throws -> SnapshotStorageStatus {
         try settings.validate()
         for entry in try entries() {
             guard var value = try read(entry.id) else { continue }
@@ -96,16 +96,16 @@ public actor SnapshotStore {
                 try manager.setAttributes([.posixPermissions: 0o600, .modificationDate: entry.modified], ofItemAtPath: entry.path.path)
             }
         }
-        return try prune(settings: settings, liveSessions: liveSessions)
+        return try prune(settings: settings, liveSessions: liveSessions, protectedSessions: protectedSessions)
     }
-    @discardableResult public func prune(settings: RetentionSettings, liveSessions: Set<UUID>) throws -> SnapshotStorageStatus {
+    @discardableResult public func prune(settings: RetentionSettings, liveSessions: Set<UUID>, protectedSessions: Set<UUID> = []) throws -> SnapshotStorageStatus {
         try settings.validate()
         let values = try entries().sorted {
             if liveSessions.contains($0.id) != liveSessions.contains($1.id) { return !liveSessions.contains($0.id) }
             return $0.modified < $1.modified
         }
         var remaining = values.reduce(0) { $0 + $1.bytes }, files = values.count
-        for entry in values where remaining > settings.snapshotBudgetBytes {
+        for entry in values where remaining > settings.snapshotBudgetBytes && !protectedSessions.contains(entry.id) {
             try manager.removeItem(at: entry.path) // Delete only our named file, never a directory tree.
             remaining -= entry.bytes; files -= 1; evictedFiles += 1
         }

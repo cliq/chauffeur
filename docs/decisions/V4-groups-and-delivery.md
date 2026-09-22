@@ -1,6 +1,6 @@
 # V4 — groups and delivery
 
-Status: ledger isolation fixtures passed; cross-provider delegation gate open.
+Status: extended orchestration implementation; native acceptance evidence is recorded in docs/orchestration-validation.md.
 
 ## Decision
 
@@ -17,3 +17,24 @@ Delegation reserves a durable child identity before launching, shares the normal
 ## Remaining gate evidence
 
 Real Codex→Claude and Claude→Codex delegation while the UI is closed remains open. More integration cases are needed for crash windows during worktree creation/delegation, native approval prompts, long-running busy recipients, and parent termination. Result-message acceptance and delegation result updates share one transaction. Pruned completed messages retain retry tombstones so old retries cannot create new deliveries. The user will explicitly prompt an idle recipient unless a documented wake mechanism is independently verified.
+
+## Orchestration extension (2026-09-22)
+
+The approved design is in
+`docs/superpowers/specs/2026-09-22-chauffeur-orchestration-design.md`.
+Ordinary messages remain mailbox data. The explicit `chauffeur_follow_up`
+operation is a separate permission to submit a new prompt through a verified
+native composer. It uses a durable operation receipt and turn ID. Uncertain
+terminal delivery is never blindly replayed.
+
+`chauffeur_close_session` confirms the worker stopped and preserves bounded
+captured history, with an accepted/replaced/abandoned outcome distinct from CLI
+exit status. Replacement uses a fresh delegation with a predecessor ID, after
+termination of the old worker. Workers run in provider-native YOLO mode at the
+user's request. Model and effort overrides are launch-local; preset edits are
+not required.
+
+Parent attribution remains immutable. A separate controller identity permits an
+explicit same-group recovery operation after a coordinator has ended. Recovery
+cannot take workers from a live coordinator. Results route to the current
+controller and are attributed to the actual worker and current turn.

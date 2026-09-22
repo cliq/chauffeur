@@ -15,7 +15,9 @@ struct SessionDetailsView: View {
                 Text("Session Details").font(.title3)
                 section("Context") {
                     detail("Title", session.title)
-                    detail("State", session.state.label)
+                    if session.state != .activityUnknown {
+                        detail("State", session.state.label)
+                    }
                     detail("Group", project.groups.first { $0.id == session.groupID }?.name ?? "Unavailable")
                     detail(session.launch.preset.kind.isAgent ? "Agent" : "Kind", session.launch.preset.kind.displayName)
                     if session.launch.preset.kind.isAgent {
@@ -23,6 +25,14 @@ struct SessionDetailsView: View {
                         detail("Team", "\(session.launch.presetSetName) · revision \(session.launch.presetSetRevision)")
                         detail("Configuration directory", session.launch.configurationPath)
                     }
+                    if session.launch.preset.kind.isAgent {
+                        detail("Requested model", session.launch.displayedModel ?? "Provider default")
+                        detail("Reasoning", session.launch.displayedReasoning ?? "Provider default")
+                        if session.launch.executionPolicy == .delegatedYOLO { detail("Worker permissions", "YOLO — provider approvals bypassed") }
+                    }
+                    if let outcome = session.closureOutcome { detail("Outcome", outcome.capitalized) }
+                    if let reason = session.closureReason { detail("Closure reason", reason) }
+                    if session.historyProtected == true { Text("Saved history is kept until this session is deleted.").font(.caption).foregroundStyle(.secondary) }
                     detail("Working directory", session.launch.workingDirectory)
                     ForEach(session.launch.additionalPaths, id: \.self) { detail("Additional repository", $0) }
                     if let worktree = model.snapshot.store.worktrees.first(where: { $0.value.id == session.worktreeID })?.value { detail("Branch", worktree.branch); detail("Base commit", worktree.baseCommit) }
@@ -35,7 +45,7 @@ struct SessionDetailsView: View {
                             Button("Stop Session…", role: .destructive) { confirmingStop = true }
                         }
                         Button("Force Stop…", role: .destructive) { confirmingForceStop = true }.font(.caption)
-                    } else if session.nativeConversationID != nil {
+                    } else if session.nativeConversationID != nil && session.closureOutcome == nil {
                         Button("Resume Conversation") { model.perform { _ = try await model.call("resume", .object(["sessionID": .string(session.id.uuidString)])) } }
                     }
                     Text(session.state.isLive ? "Closing the terminal view keeps this execution running. Stopping a parent preserves its children and their work." : "This execution has ended. Its launch settings and saved terminal history remain available.").font(.caption).foregroundStyle(.secondary)
@@ -64,6 +74,8 @@ struct SessionDetailsView: View {
                             Text("\(name(delegation.parentID)) → \(name(delegation.childID))").fontWeight(.medium)
                             Text(delegation.task).textSelection(.enabled)
                             Text(delegation.state.rawValue).font(.caption).foregroundStyle(.secondary)
+                            if let predecessor = delegation.predecessorID { detail("Replaces attempt", predecessor.uuidString) }
+                            if delegation.controllerID != nil { detail("Current coordinator", name(delegation.controllingParentID)) }
                             if let result = delegation.result { Text(result).textSelection(.enabled) }
                             if let error = delegation.error { Text(error).foregroundStyle(.orange) }
                             if let id = delegation.worktreeID, let tree = model.snapshot.store.worktrees.first(where: { $0.value.id == id })?.value { detail("Worktree", tree.path) }
@@ -84,7 +96,7 @@ struct SessionDetailsView: View {
                         detail("CLI version", session.launch.executableVersion)
                         detail("Native conversation ID", session.nativeConversationID ?? "Not available")
                         detail("Process ID", session.processID.map(String.init) ?? "Not available")
-                        detail("Arguments", session.launch.preset.arguments.joined(separator: "\n"))
+                        detail("Arguments", (session.launch.resolvedArguments ?? session.launch.preset.arguments).joined(separator: "\n"))
                         detail("Launched", session.launch.launchedAt.formatted())
                     }.padding(.top, 10)
                 }

@@ -1,7 +1,7 @@
 # Chauffeur orchestration skills and session control
 
 Date: 2026-09-22
-Status: Written for user review; implementation has not been approved.
+Status: Approved by the user; implementation and validation recorded in [orchestration validation](../../orchestration-validation.md).
 
 ## Intent and agreed scope
 
@@ -103,9 +103,11 @@ fresh reviewer session after the implementation worker closes, before advancing
 the task. Reviewer no-edit instructions are behavioral guidance, not an OS
 restriction, particularly under YOLO mode.
 
-Extend the current installer to present both skills and preserve its ownership,
-update, and removal guarantees. Installing the orchestrator also includes its
-operational skill dependency; installation remains an explicit user action.
+Updated installation decision (2026-09-22): publish both skills in one managed
+Application Support catalog and automatically symlink them into `~/.agents/skills`
+for Codex and each active team’s Claude home. Reconcile at startup, setup
+completion, team saves, and status refresh. Preserve conflicting files; no copy
+migration is needed. Settings presents health rather than install/remove actions.
 
 ## Session workflow and MCP contract
 

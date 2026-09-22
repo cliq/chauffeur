@@ -64,6 +64,21 @@ After an execution ends and its history is captured, the runtime retires its
 dead tmux pane. The retirement command checks the pane ID and process ID together
 with the dead flag, protecting a newly resumed execution from delayed cleanup.
 
+## Orchestrated workers
+
+Delegated workers protect their session record and captured history from launch,
+including natural exits, so the coordinator can review them before accepting or
+replacing the attempt. MCP closure retains that history independently of the
+**Keep finished sessions** setting. Session Details shows the accepted, replaced,
+or abandoned outcome and the reason. Closed attempts cannot be resumed in place;
+launch a fresh worker to continue their work.
+
+Protected captures are excluded from automatic eviction. Scrollback and
+per-file limits still apply, including when the user reduces those limits. Protected bytes count toward storage usage and can exceed the automatic
+snapshot budget. Explicitly deleting the session removes its saved capture.
+Forced worker closure can proceed after a failed final capture, but its MCP
+receipt warns that only the last valid capture may remain.
+
 ## Service loss and recovery
 
 - If only Chauffeur or its runtime closes, surviving tmux terminals reconnect by

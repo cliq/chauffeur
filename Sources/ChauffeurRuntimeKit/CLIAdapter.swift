@@ -7,6 +7,7 @@ public struct CLICapabilities: Codable, Sendable {
     public var statusSignals: Bool
     public var additionalDirectories: Bool
     public var resume: Bool
+    public var delegatedYOLO: Bool
     public var limitation: String?
 }
 
@@ -18,19 +19,27 @@ public enum CLIAdapter {
         guard help.status == 0 else { throw ChauffeurError("help_failed", "Executable does not report its supported options", path: executable) }
         let text = version.output.trimmingCharacters(in: .whitespacesAndNewlines)
         let baseline = switch kind {
-        case .codex: text == "codex-cli 0.154.0"
+        case .codex: ["codex-cli 0.154.0", "codex-cli 0.155.1"].contains(text)
         // Claude Code ships new builds almost daily, so pinning versions would leave
         // the integration unavailable most of the time. Any build that identifies
         // itself as Claude Code is a candidate; the integration stays unverified.
         case .claude: text.hasSuffix("(Claude Code)")
         case .shell: false
         }
-        return CLICapabilities(version: String(text.prefix(200)), coordination: baseline, statusSignals: baseline, additionalDirectories: help.output.contains("--add-dir"), resume: help.output.contains("resume"), limitation: baseline ? (kind == .codex ? "Turn completion via notify; approval/input detection is unavailable" : nil) : "CLI version has not passed coordination/status compatibility checks. Basic terminal mode remains available")
+        let delegatedYOLO = switch kind {
+        case .codex: help.output.contains("--dangerously-bypass-approvals-and-sandbox")
+        case .claude: help.output.contains("--dangerously-skip-permissions")
+        case .shell: false
+        }
+        return CLICapabilities(version: String(text.prefix(200)), coordination: baseline, statusSignals: baseline, additionalDirectories: help.output.contains("--add-dir"), resume: help.output.contains("resume"), delegatedYOLO: delegatedYOLO, limitation: baseline ? (kind == .codex ? "Turn completion via notify; approval/input detection is unavailable" : nil) : "CLI version has not passed coordination/status compatibility checks. Basic terminal mode remains available")
     }
     public static func arguments(session: Session, endpoint: String, ctlPath: String, integrationDirectory: URL, coordination: Bool, resume: Bool) throws -> [String] {
         let preset = session.launch.preset
-        try LaunchPolicy.validateArguments(preset.arguments, kind: preset.kind)
-        var arguments = preset.arguments
+        let resolved: [String]
+        if let snapshotArguments = session.launch.resolvedArguments { resolved = snapshotArguments }
+        else { resolved = try LaunchOptions.resolve(preset: preset).arguments }
+        try LaunchPolicy.validateArguments(resolved, kind: preset.kind)
+        var arguments = resolved
         switch preset.kind {
         case .shell:
             guard !resume else { throw ChauffeurError("resume_unavailable", "Shell sessions cannot be resumed. Open a new shell") }
@@ -73,8 +82,17 @@ public enum CLIAdapter {
                     }
                     hooks[hook] = .array([.object(group)])
                 }
+                var launchSettings: [String: JSONValue] = ["hooks": .object(hooks)]
+                // Generated suggestions render inside Claude's composer and
+                // cannot be distinguished safely from a user draft in plain
+                // terminal output. Disable them only for delegated sessions on
+                // the native build whose setting and composer were verified.
+                if session.delegationID != nil,
+                   TmuxHost.supportsFollowUp(kind: .claude, version: session.launch.executableVersion) {
+                    launchSettings["promptSuggestionEnabled"] = .bool(false)
+                }
                 let settings = integrationDirectory.appendingPathComponent("settings.json")
-                try JSONCoding.encode(JSONValue.object(["hooks": .object(hooks)])).write(to: settings, options: .atomic)
+                try JSONCoding.encode(JSONValue.object(launchSettings)).write(to: settings, options: .atomic)
                 arguments += ["--mcp-config", configPath.path, "--settings", settings.path]
             }
             if !resume, let task = session.initialTask, !task.isEmpty { arguments += ["--", task] }
