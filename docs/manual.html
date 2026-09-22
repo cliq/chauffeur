@@ -71,6 +71,7 @@
     <a href="#launcher">12. Terminal launcher</a>
     <a href="#history">13. History and retention</a>
     <a href="#coordination">14. MCP and orchestration</a>
+    <a href="#implementation-progress">Implementation progress panels</a>
     <a href="#recovery">15. Recovery and diagnostics</a>
     <a href="#shortcuts">16. Keyboard reference</a>
     <a href="#limits">17. Current release boundaries</a>
@@ -205,7 +206,7 @@
         <div class="card"><h3>Checkouts and sessions</h3><p>Select a worktree or main checkout to see its sessions as cards above the terminal; retained sessions sit behind <strong>Finished</strong> when <strong>Keep finished sessions</strong> is enabled. <kbd>⌘⇧]</kbd> and <kbd>⌘⇧[</kbd> move between that checkout's sessions. <strong>Open Shell</strong> starts a login shell there as a session that survives closing the window.</p></div>
         <div class="card"><h3>Copy, paste, and links</h3><p>Select output and press <kbd>⌘C</kbd>; use <kbd>⌘V</kbd> to paste. Hold Shift while dragging if the CLI captures mouse input. Command-click a link to open its associated app.</p></div>
         <div class="card"><h3>History and search</h3><p>Choose <strong>History and Search</strong> or press <kbd>⌘F</kbd>. Search and copy from a stable, read-only capture. <strong>Refresh</strong> captures current output when the terminal still exists.</p></div>
-        <div class="card"><h3>Session Details</h3><p>Use the right-sidebar toolbar button or session context menu. Review the agent, group, agent preset/revision, paths, state, branch/base commit when available, and execution controls.</p></div>
+        <div class="card"><h3>Session Details</h3><p>Use the right-sidebar toolbar button or session context menu. Review the agent, group, agent preset/revision, paths, state, branch/base commit when available, and execution controls. The adjacent <strong>Progress</strong> tab displays the session’s registered <a href="#implementation-progress">implementation progress panel</a>.</p></div>
       </div>
       <p>Expand <strong>Launch Snapshot</strong> in Session Details for the recorded executable and CLI version, process ID, native conversation ID when available, arguments, and launch time. These are the values used by this session, even if its shared agent preteam has since changed.</p>
       <p><kbd>Control-C</kbd> and <kbd>Escape</kbd> go to the focused CLI. The CLI decides whether they interrupt work, cancel a prompt, or exit. Live terminal selection can change during redraws; use History when you need stable text.</p>
@@ -334,6 +335,25 @@ chauffeur -- ./-example</code></pre>
       <p>The <code>chauffeur</code> skill teaches the operational tools. The <code>chauffeur-orchestrator</code> skill teaches a coordinator to break down a plan, assign fresh workers, and review their results. Codex discovers both through <code>~/.agents/skills/</code>, shared across Codex profiles. Claude discovers them in each team’s configured Claude home under <code>skills/</code>, or <code>~/.claude/skills/</code> when no custom home is set.</p>
       <p>Links are created at runtime startup, setup completion, and team creation or directory changes. They point to one managed source that updates when the updated Chauffeur runtime starts. <strong>Refresh</strong> repairs missing links. An existing unrelated file, directory, or link is preserved as a conflict; use <strong>Show in Finder</strong>, move the conflicting item aside if appropriate, then refresh. CLI policies can disable skill loading; restart the CLI if its skill list does not refresh. Skills are also discoverable outside Chauffeur, but its MCP connection is supplied only to sessions launched with integration enabled.</p>
 
+      <h3 id="implementation-progress">Track implementation progress</h3>
+      <p>The <code>implementation-progress</code> skill creates a browser panel showing the task’s phases, optional steps, current activity, and estimated completion. Chauffeur can display that same panel in the right sidebar beside <strong>Session Details</strong>. The browser panel continues to work independently.</p>
+      <p>This skill is separate from the two automatically linked Chauffeur skills above. It must be available in your CLI’s skill list; its repository copy is in <a href="../Skills/implementation-progress/SKILL.md"><code>Skills/implementation-progress/</code></a>. Once it is available, launch a session with Chauffeur integration enabled and ask:</p>
+      <pre><code>Use the implementation-progress skill while implementing
+docs/plans/search-improvements.md. Create a panel with phases for discovery,
+implementation, and verification. Register its JSON and HTML files with
+Chauffeur, and keep the activity and phase states current as you work.
+Keep the normal browser panel available too.</code></pre>
+      <p>In Codex, you can explicitly invoke the skill with <code>$implementation-progress</code>. The agent creates the panel files in its chosen directory, opens the browser panel, and uses the <code>chauffeur</code> skill’s registration guidance to connect those files to its own session. You do not need to enter paths into Chauffeur.</p>
+      <ol>
+        <li>Open the session’s right sidebar using the toolbar button or session context menu.</li>
+        <li>Select <strong>Progress</strong>. Its HTML panel refreshes every two seconds; ordinary progress updates need no further registration calls.</li>
+        <li>Use <strong>Open in Browser</strong> for the standalone panel or <strong>Reveal JSON</strong> to locate its companion data file.</li>
+      </ol>
+      <p>Progress reflects the agent’s explicit updates, not automatic observation of its tools. The percentage is a rough phase-based estimate, not elapsed time or an ETA. An update older than 20 minutes is marked stale. A completed progress panel does not itself verify the work or change the session’s execution state.</p>
+      <p>To use this alongside <code>chauffeur-orchestrator</code>, ask the coordinator to maintain one overall panel while workers report their results. Keep its saved plan and session IDs as usual; the panel supplements that record.</p>
+      <p><strong>No progress panel</strong> means this session has no registered files. Ask the agent to register its existing panel. If integration is unavailable, the standalone browser panel still works. If the HTML is missing or cannot load, Chauffeur shows the JSON progress instead; <strong>Retry HTML</strong> is available after a loading error. Unreadable JSON is reported while Chauffeur retries, retaining the last readable progress when available.</p>
+      <p>The association survives runtime restarts while the session is retained. Its files must remain on disk, so ask the agent to use a persistent output directory if you need the panel later. If files move, ask it to register the new paths. To disconnect a panel, ask the agent to unregister it; this leaves the files intact. Native iOS progress displays and Live Activities are not included in this version.</p>
+
       <h3 id="coordination-messaging">Example: ask another agent for a review</h3>
       <p>Launch two sessions in the same group, with clear titles such as <strong>Implementation</strong> and <strong>Review</strong>. In the Implementation terminal, enter:</p>
       <pre><code>Use the chauffeur skill. Discover the sessions in this group and send
@@ -392,7 +412,9 @@ reviewing its changes and verification.</code></pre>
       <h3 id="coordination-tools">MCP tool reference</h3>
       <p>These are agent tool calls, not shell commands. Discover IDs rather than guessing them. For operations with a <code>retryKey</code>, reuse the same key and identical arguments after a timeout; use a new key for a genuinely new operation.</p>
       <div class="table tool-reference"><table><thead><tr><th>Tool</th><th>Use and key inputs</th></tr></thead><tbody>
-        <tr><td><code>chauffeur_discover</code></td><td>Read session identity, project/group, registered paths, team presets, peers, and delegation context. A worker uses <code>currentTurnID</code> as its report’s <code>turnID</code>.</td></tr>
+        <tr><td><code>chauffeur_discover</code></td><td>Read session identity, project/group, registered paths, team presets, peers, delegation context, and the current <code>progress</code> registration when present. A worker uses <code>currentTurnID</code> as its report’s <code>turnID</code>.</td></tr>
+        <tr><td><code>chauffeur_register_progress</code></td><td>Connect an existing panel to the authenticated session using required <code>jsonPath</code> and optional <code>htmlPath</code>, both absolute paths on the Chauffeur host. Repeating the same registration is safe; new paths replace it. File updates are read automatically.</td></tr>
+        <tr><td><code>chauffeur_unregister_progress</code></td><td>Disconnect the authenticated session’s panel with no arguments. This does not delete the files, and repeating it is safe.</td></tr>
         <tr><td><code>chauffeur_send_message</code></td><td>Queue a message with <code>recipientID</code>, <code>body</code>, optional <code>references</code>, and <code>retryKey</code>.</td></tr>
         <tr><td><code>chauffeur_inbox</code></td><td>Read messages with optional <code>waitSeconds</code> (0–25). Pass processed message IDs in <code>acknowledge</code>.</td></tr>
         <tr><td><code>chauffeur_reply</code></td><td>Reply with <code>messageID</code>, <code>body</code>, optional <code>references</code>, and <code>retryKey</code>. Chauffeur routes it to the original sender.</td></tr>

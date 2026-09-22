@@ -42,7 +42,7 @@ public struct CoordinationSkill: Sendable {
 
     public static func bundled(named name: String) throws -> Self {
         let definitions: [String: (String, String, String, [String])] = [
-            operationalName: ("Chauffeur", "Discover sessions, exchange messages, and control delegated work.", "1.1.0", []),
+            operationalName: ("Chauffeur", "Discover sessions, exchange messages, and control delegated work.", "1.2.0", []),
             orchestratorName: ("Chauffeur Orchestrator", "Execute a saved plan through sequential, visible Chauffeur workers.", "1.0.0", [operationalName])
         ]
         guard let definition = definitions[name] else { throw ChauffeurError("skill_bundle", "The requested bundled skill does not exist") }

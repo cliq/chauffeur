@@ -130,7 +130,7 @@ struct ProjectWindow: View {
                         Divider()
                         HSplitView {
                             detailArea(project)
-                            if layout.detailsVisible, let session = model.session(layout.state.selectedSessionID) { SessionDetailsView(session: session, project: project).frame(minWidth: 300, idealWidth: 340, maxWidth: 460) }
+                            if layout.detailsVisible, let session = model.session(layout.state.selectedSessionID) { SessionSidebarView(session: session, project: project).frame(minWidth: 300, idealWidth: 340, maxWidth: 460) }
                         }
                     }
                 }

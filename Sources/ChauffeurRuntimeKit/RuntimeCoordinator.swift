@@ -1125,6 +1125,27 @@ public actor RuntimeCoordinator {
         try await ledger.saveOperation(operation, retryKey: retryKey)
         return try .from(operation)
     }
+    private func setProgress(token: String, arguments: JSONValue?) async throws -> JSONValue {
+        let registration: ProgressRegistration?
+        if let arguments {
+            let jsonPath = try arguments.requiredString("jsonPath")
+            let htmlPath = arguments["htmlPath"].string
+            registration = try await Task.detached(priority: .utility) {
+                try ProgressFiles.registration(jsonPath: jsonPath, htmlPath: htmlPath)
+            }.value
+        } else { registration = nil }
+        // File reads can suspend; recheck the grant and use the latest session afterward.
+        let caller = try await ledger.authenticate(token)
+        guard var session = sessions[caller.sessionID], session.state.isLive else {
+            throw ChauffeurError("missing_session", "The progress panel requires a live session")
+        }
+        if session.progress != registration {
+            session.progress = registration
+            try await persist(session)
+        }
+        return .object(["sessionID": .string(session.id.uuidString), "progress": try registration.map { try .from($0) } ?? .null])
+    }
+
     private func discover(caller: Caller) async throws -> JSONValue {
         let snapshot = await store.current()
         guard let project = snapshot.projects.first(where: { $0.value.id == caller.scope.projectID })?.value else {
@@ -1160,6 +1181,7 @@ public actor RuntimeCoordinator {
         value["workingDirectory"] = current.map { .string($0.launch.workingDirectory) } ?? .null
         value["worktreeID"] = current?.worktreeID.map { .string($0.uuidString) } ?? .null
         value["folderID"] = current.map { .string($0.folderID.uuidString) } ?? .null
+        value["progress"] = try current?.progress.map { try .from($0) } ?? .null
         let followUpSupported = current.map { TmuxHost.supportsFollowUp(kind: $0.launch.preset.kind, version: $0.launch.executableVersion) } ?? false
         value["capabilities"] = .object(["scope": .string("currentSession"), "executableVersion": current.map { .string($0.launch.executableVersion) } ?? .null, "followUpSupported": .bool(followUpSupported), "workerExecutionPolicy": .string("delegatedYOLO"), "modelAvailabilityVerified": .bool(false)])
         return .object(value)
@@ -1172,6 +1194,8 @@ public actor RuntimeCoordinator {
         entry.projectID = caller.scope.projectID; entry.groupID = caller.scope.groupID
         logs?.append(entry)
         switch name {
+        case "chauffeur_register_progress": return try await setProgress(token: token, arguments: arguments)
+        case "chauffeur_unregister_progress": return try await setProgress(token: token, arguments: nil)
         case "chauffeur_discover": return try await discover(caller: caller)
         case "chauffeur_send_message":
             return try .from(await ledger.send(caller: caller, recipientID: arguments.uuid("recipientID"), body: arguments.requiredString("body"), references: arguments["references"].array.compactMap(\.string), retryKey: arguments.requiredString("retryKey")))

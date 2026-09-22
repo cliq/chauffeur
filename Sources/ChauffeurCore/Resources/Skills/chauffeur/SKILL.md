@@ -1,8 +1,8 @@
 ---
 name: chauffeur
-description: Coordinate with peer sessions through Chauffeur's MCP tools. Use when working in a Chauffeur session to discover peers, exchange task context, check an inbox, delegate authorized work, or report a delegated result.
+description: Coordinate with peer sessions through Chauffeur's MCP tools. Use when working in a Chauffeur session to discover peers, exchange task context, check an inbox, delegate authorized work, report a delegated result, or register an implementation progress panel.
 metadata:
-  version: "1.1.0"
+  version: "1.2.0"
 ---
 
 # Chauffeur coordination
@@ -14,6 +14,28 @@ from `chauffeur_discover`. This file contains no session-specific context.
 If Chauffeur's tools are unavailable, explain that coordination is unavailable
 and continue work that does not require them. Do not infer peers or credentials
 from another session's files.
+
+## Implementation progress panel
+
+When an implementation-progress panel has been created and
+`chauffeur_register_progress` is available, register its existing files:
+
+```json
+{"jsonPath": "/absolute/panel/progress.json", "htmlPath": "/absolute/panel/index.html"}
+```
+
+Paths are absolute paths on the Chauffeur host. The tool derives ownership from
+your authenticated session; do not supply another session's ID. JSON is required;
+HTML is optional. Chauffeur accepts the original implementation-progress JSON
+and schema version 1, and reads file updates automatically. Continue updating the
+panel with its Python CLI; register again only when the paths change. Repeating
+the same registration is safe. Discovery's `progress` field reports the current
+association after reconnecting. To remove it, call
+`chauffeur_unregister_progress` with `{}`; this does not delete the files.
+
+Registration does not change the task's completion state. If the tool is
+unavailable or registration fails, retain the standalone panel, share its path,
+and report that the Chauffeur panel could not be connected.
 
 ## Messages and inbox
 

@@ -206,6 +206,7 @@ public struct Session: Record, Equatable {
     public var parentID: UUID?
     public var delegationID: UUID?
     public var historyProtected: Bool?
+    public var progress: ProgressRegistration?
     public var closureOutcome: String?
     public var closureReason: String?
     public var closedAt: Date?
@@ -226,6 +227,10 @@ public struct Session: Record, Equatable {
         try Validation.name(title); try Validation.absolutePath(launch.configurationPath)
         try Validation.absolutePath(launch.workingDirectory)
         if let nativeConversationID { try Validation.require(UUID(uuidString: nativeConversationID) != nil, "Native conversation ID must be a UUID") }
+        if let progress {
+            try Validation.absolutePath(progress.jsonPath)
+            if let htmlPath = progress.htmlPath { try Validation.absolutePath(htmlPath) }
+        }
     }
 }
 

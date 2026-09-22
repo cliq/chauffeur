@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Implementation Progress</title>
+<style>
+  :root {
+    --bg: #f6f5f2; --panel: #ffffff; --ink: #1c1b19; --muted: #6f6c66; --line: #e3e0da;
+    --done: #2f9e5b; --active: #d9822b; --pending: #c9c5bd; --blocked: #c93b3b; --accent: #2b5fd9;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #15161a; --panel: #1e1f25; --ink: #ecebe7; --muted: #9a978f; --line: #2c2e36; --pending: #44464f; }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--ink);
+    font: 14px/1.4 -apple-system, "SF Pro Text", Helvetica, Arial, sans-serif; }
+  body { padding: 16px; max-width: 360px; }
+  header { margin-bottom: 14px; }
+  h1 { font-size: 15px; margin: 0 0 2px; letter-spacing: .01em; }
+  .sub { color: var(--muted); font-size: 12px; }
+  .now { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; margin-bottom: 16px; }
+  .now .label { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin-bottom: 4px; }
+  .now .text { font-size: 13px; }
+  .now .text::before { content: ""; display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+    background: var(--active); margin-right: 8px; animation: pulse 1.6s ease-in-out infinite; vertical-align: 1px; }
+  @keyframes pulse { 0%,100% { opacity: .35 } 50% { opacity: 1 } }
+  .overall { display: flex; align-items: center; gap: 10px; margin-bottom: 18px; font-size: 12px; color: var(--muted); }
+  .overall .bar { flex: 1; height: 6px; background: var(--pending); border-radius: 3px; overflow: hidden; }
+  .overall .bar i { display: block; height: 100%; background: var(--done); transition: width .6s ease; }
+  ol.phases { list-style: none; margin: 0; padding: 0 0 0 4px; position: relative; }
+  ol.phases::before { content: ""; position: absolute; left: 13px; top: 10px; bottom: 10px; width: 2px; background: var(--line); }
+  li.phase { position: relative; padding: 0 0 18px 34px; }
+  li.phase:last-child { padding-bottom: 0; }
+  .dot { position: absolute; left: 4px; top: 1px; width: 20px; height: 20px; border-radius: 50%; border: 2px solid var(--pending);
+    background: var(--bg); display: flex; align-items: center; justify-content: center; font-size: 11px; color: #fff; }
+  .done .dot { background: var(--done); border-color: var(--done); }
+  .active .dot { border-color: var(--active); box-shadow: 0 0 0 4px color-mix(in srgb, var(--active) 22%, transparent); }
+  .active .dot::after { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--active); }
+  .blocked .dot { background: var(--blocked); border-color: var(--blocked); }
+  .title { font-weight: 600; font-size: 13.5px; }
+  .pending .title { color: var(--muted); font-weight: 500; }
+  .detail { color: var(--muted); font-size: 12px; margin-top: 2px; }
+  ul.steps { list-style: none; margin: 8px 0 0; padding: 0; }
+  ul.steps li { font-size: 12px; padding: 2px 0 2px 18px; position: relative; color: var(--muted); }
+  ul.steps li::before { content: ""; position: absolute; left: 3px; top: 8px; width: 7px; height: 7px; border-radius: 50%; background: var(--pending); }
+  ul.steps li.done { color: var(--ink); text-decoration: line-through; opacity: .7; }
+  ul.steps li.done::before { background: var(--done); }
+  ul.steps li.active { color: var(--ink); }
+  ul.steps li.active::before { background: var(--active); }
+  ul.steps li.blocked::before { background: var(--blocked); }
+  footer { margin-top: 18px; font-size: 11px; color: var(--muted); display: flex; justify-content: space-between; }
+  .stale { color: var(--blocked); }
+</style>
+</head>
+<body>
+<header>
+  <h1 id="title">Implementation progress</h1>
+  <div class="sub" id="subtitle"></div>
+</header>
+<div class="now"><div class="label">Now</div><div class="text" id="now">Loading…</div></div>
+<div class="overall"><div class="bar"><i id="bar" style="width:0%"></i></div><span id="pct">0%</span></div>
+<ol class="phases" id="phases"></ol>
+<footer><span id="updated"></span><span id="age"></span></footer>
+<script>
+  let lastUpdated = null;
+  function render(p) {
+    document.getElementById('now').textContent = p.now || '';
+    document.title = p.title || 'Implementation Progress';
+    document.getElementById('title').textContent = p.title || 'Implementation progress';
+    document.getElementById('subtitle').textContent = p.subtitle || '';
+    const phases = p.phases || [];
+    const doneCount = phases.filter(x => x.state === 'done').length;
+    const activePartial = phases.filter(x => x.state === 'active').reduce((acc, x) => {
+      const s = x.steps || []; if (!s.length) return acc + 0.5;
+      return acc + s.filter(y => y.state === 'done').length / s.length; }, 0);
+    const pct = phases.length ? Math.round(100 * (doneCount + activePartial) / phases.length) : 0;
+    document.getElementById('bar').style.width = pct + '%';
+    document.getElementById('pct').textContent = pct + '%';
+    const ol = document.getElementById('phases'); ol.innerHTML = '';
+    phases.forEach((ph, i) => {
+      const li = document.createElement('li'); li.className = 'phase ' + (ph.state || 'pending');
+      let html = `<div class="dot">${ph.state === 'done' ? '✓' : ''}</div><div class="title">${esc(ph.title)}</div>`;
+      if (ph.detail) html += `<div class="detail">${esc(ph.detail)}</div>`;
+      if (ph.steps && ph.steps.length && ph.state !== 'pending') {
+        html += '<ul class="steps">' + ph.steps.map(s => `<li class="${s.state || 'pending'}">${esc(s.title)}</li>`).join('') + '</ul>';
+      }
+      li.innerHTML = html; ol.appendChild(li);
+    });
+    lastUpdated = p.updated ? new Date(p.updated) : null;
+    document.getElementById('updated').textContent = lastUpdated ? 'Updated ' + lastUpdated.toLocaleTimeString() : '';
+    tickAge();
+  }
+  function esc(s) { return String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+  function tickAge() {
+    if (!lastUpdated) return;
+    const m = Math.floor((Date.now() - lastUpdated.getTime()) / 60000);
+    const el = document.getElementById('age');
+    el.textContent = m < 1 ? 'just now' : m + ' min ago';
+    el.className = m >= 20 ? 'stale' : '';
+  }
+  function load() {
+    const old = document.getElementById('data'); if (old) old.remove();
+    const s = document.createElement('script'); s.id = 'data';
+    s.src = 'progress.js?t=' + Date.now();
+    s.onload = () => { if (window.IMPLEMENTATION_PROGRESS) render(window.IMPLEMENTATION_PROGRESS); };
+    s.onerror = () => {
+      const el = document.getElementById('age');
+      el.textContent = 'Cannot read progress.js — retrying';
+      el.className = 'stale';
+    };
+    document.body.appendChild(s);
+  }
+  load(); setInterval(load, 2000); setInterval(tickAge, 15000);
+</script>
+</body>
+</html>
