@@ -987,6 +987,7 @@ private struct SessionStrip: View {
     let details: (Session) -> Void
     let revealPath: (Session) -> Void
     @State private var showFinished = false
+    @State private var hoveredCloseID: UUID?
     @State private var hoveredID: UUID?
     @State private var dropTargetID: UUID?
     private var live: [Session] { WorktreeSessions.live(sessions) }
@@ -1052,9 +1053,15 @@ private struct SessionStrip: View {
             .overlay(alignment: .trailing) {
                 Button { close(session) } label: {
                     Image(systemName: "xmark").font(.system(size: 10, weight: .semibold))
-                        .frame(width: 22, height: 22).contentShape(Rectangle())
+                        .frame(width: 22, height: 22)
+                        .background(hoveredCloseID == session.id ? Color.primary.opacity(0.14) : Color.clear, in: Circle())
+                        .contentShape(Circle())
                 }
-                .buttonStyle(.borderless).padding(.trailing, 4)
+                .buttonStyle(.plain).padding(.trailing, 4)
+                .onHover { hovering in
+                    if hovering { hoveredCloseID = session.id }
+                    else if hoveredCloseID == session.id { hoveredCloseID = nil }
+                }
                 .opacity(hoveredID == session.id ? 1 : 0)
                 .allowsHitTesting(hoveredID == session.id)
                 .accessibilityHidden(hoveredID != session.id)
@@ -1064,7 +1071,7 @@ private struct SessionStrip: View {
             }
             .onHover { hovering in
                 if hovering { hoveredID = session.id }
-                else if hoveredID == session.id { hoveredID = nil }
+                else if hoveredID == session.id { hoveredID = nil; hoveredCloseID = nil }
             }
             .dropDestination(for: String.self) { items, _ in
                 guard let item = items.first,
