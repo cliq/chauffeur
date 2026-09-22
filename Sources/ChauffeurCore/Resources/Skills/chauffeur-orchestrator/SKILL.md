@@ -36,6 +36,11 @@ Choose one role and read only its reference. Model and reasoning entries are
 suggestions, freely overridable for the task and provider. Confirm advertised
 capabilities, pass explicit choices when desired, and report resolved launch
 settings accurately. A prompt cannot prove the provider selected them.
+Use exact provider model IDs: the role defaults are `gpt-6-astra`,
+`gpt-5.6-sol`, and `gpt-5.6-terra`. Do not shorten them to `gpt-6` or
+rename them to `gpt-6-sol`. Suggestions are not proof of account availability;
+if the provider rejects a model, choose another supported ID and record the
+change.
 
 | Role | Use | Reference |
 | --- | --- | --- |

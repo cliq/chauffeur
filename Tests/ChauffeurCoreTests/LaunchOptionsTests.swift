@@ -10,6 +10,17 @@ struct LaunchOptionsTests {
         return preset
     }
 
+    @Test func orchestrationRoleModelsAreAdvertisedByLaunchSuggestions() throws {
+        let skill = try CoordinationSkill.bundled(named: CoordinationSkill.orchestratorName)
+        let suggestions = Set(LaunchOptions.modelSuggestions(for: .codex))
+        for (path, data) in skill.referenceFiles {
+            let text = String(decoding: data, as: UTF8.self)
+            let line = try #require(text.split(separator: "\n").first { $0.hasPrefix("Suggested model:") })
+            let model = try #require(line.split(separator: "`").dropFirst().first)
+            #expect(suggestions.contains(String(model)), "Missing model suggestion for \(path)")
+        }
+    }
+
     @Test func aCustomModelNameIsNotMistakenForAReasoningOption() throws {
         let raw = "--model model_reasoning_effort=custom"
         let edited = try LaunchOptions.updating(field: .reasoning, value: "high", rawArguments: raw, kind: .codex)
