@@ -1,4 +1,5 @@
 .build/
+build-mobile/
 .swiftpm/
 build/
 *.xcodeproj/

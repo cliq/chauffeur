@@ -37,6 +37,8 @@ struct RootView: View {
                         SessionsView(model: model)
                     case .terminal:
                         SessionTerminalView(model: model)
+                    case .progress(let sessionID):
+                        SessionProgressView(model: model, sessionID: sessionID)
                     case .location(let projectID):
                         LocationView(model: model, preselectedProjectID: projectID)
                     case .launch(let location):

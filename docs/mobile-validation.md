@@ -1,5 +1,32 @@
 # Mobile remote — validation record
 
+## Progress tracking — 2026-09-22
+
+The sessions list now carries optional progress summaries. Terminal **… → Progress**
+opens the registered HTML panel, refreshed with its JSON while the screen is active.
+Missing HTML falls back to the summary; disconnection preserves the last panel with
+an offline banner. This uses the existing authenticated connection and advertises
+`progress.v1`; older hosts produce an update message. No arbitrary file paths can
+be requested by the phone, and HTML has a private origin without credentials or
+host filesystem access. The implementation-progress template's `progress.js` is
+synthesized from the registered JSON.
+
+Verified on an isolated iPhone 17 / iOS 26.3 simulator:
+
+- The real skill HTML renders and its companion data refreshes without reloading
+  the page (`ChauffeurMobileTests/ProgressHTMLTests`). A WebKit snapshot is attached
+  to the test result.
+- Protocol compatibility, session identity checks, older host capabilities,
+  inventory revision changes, missing/invalid/oversized files, and registered HTML
+  delivery have automated coverage in the remote protocol, client, and runtime tests.
+- The iOS simulator build passes. No physical iPhone was available for this pass.
+
+Run the renderer check with `xcodebuild -project Chauffeur.xcodeproj -scheme
+ChauffeurMobile -destination 'platform=iOS Simulator,id=<simulator-id>'
+-derivedDataPath build-mobile -skipPackagePluginValidation CODE_SIGNING_ALLOWED=NO test`.
+
+## Original remote-access validation
+
 - Date: 2026-09-17
 - Scope: [PRD](mobile-poc-prd.md) acceptance list, [implementation plan](mobile-poc-implementation-plan.md) P5.
 - Environment: Xcode 26.3, Swift 6.2, macOS 26.2 SDK, iOS 26.2 SDK, iPhone 16 Pro simulator on iOS 18.6, tmux from

@@ -34,6 +34,8 @@ prompts, tools, and approvals.
   skill, choosing a model for each task and retaining every attempt’s history.
 - **Searchable terminal history.** Press ⌘F to search saved output, including
   sessions that have ended.
+- **Progress on iPhone.** See registered worker progress in the session list,
+  then open **… → Progress** from a terminal to view the full HTML panel.
 
 ## Build and run
 

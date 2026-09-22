@@ -139,6 +139,26 @@ targets:
         INFOPLIST_KEY_NSLocalNetworkUsageDescription: Chauffeur connects to your Mac on this network to list its sessions and use their terminals.
         MARKETING_VERSION: "1.3.1"
         CURRENT_PROJECT_VERSION: 1
+  ChauffeurMobileTests:
+    type: bundle.unit-test
+    platform: iOS
+    deploymentTarget: "18.0"
+    sources:
+      - Tests/ChauffeurMobileTests
+      - path: Skills/implementation-progress/assets/index.html
+        buildPhase: resources
+    dependencies:
+      - target: ChauffeurMobile
+      - package: Chauffeur
+        product: ChauffeurRemoteProtocol
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.cliq.chauffeur.mobile.tests
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/Chauffeur.app/Chauffeur"
+        BUNDLE_LOADER: "$(TEST_HOST)"
+        TARGETED_DEVICE_FAMILY: "1"
+
 schemes:
   Chauffeur:
     build:
@@ -162,3 +182,7 @@ schemes:
       config: Debug
     archive:
       config: Release
+    test:
+      config: Debug
+      targets:
+        - ChauffeurMobileTests

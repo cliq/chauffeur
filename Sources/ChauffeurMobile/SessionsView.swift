@@ -193,6 +193,22 @@ struct SessionRow: View {
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
+                    if let progress = session.progress {
+                        if let percent = progress.percentComplete {
+                            ProgressView(value: Double(percent), total: 100) {
+                                Text(progress.now.isEmpty ? progress.title : progress.now).lineLimit(1)
+                            } currentValueLabel: {
+                                Text("\(percent)%").monospacedDigit()
+                            }
+                            .font(.caption)
+                            .accessibilityLabel("Implementation progress")
+                            .accessibilityValue("\(percent) percent. \(progress.now)")
+                            .accessibilityIdentifier("session-progress")
+                        } else {
+                            Label("Progress unavailable", systemImage: "exclamationmark.triangle")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                    }
                 }
                 Spacer()
                 if session.needsAttention {

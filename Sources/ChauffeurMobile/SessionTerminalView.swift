@@ -65,6 +65,10 @@ struct SessionTerminalView: View {
                     }
                     .disabled(model.selectedTab == nil || !model.isConnected)
                     if let sessionID = model.selectedTab {
+                        Button("Progress", systemImage: "chart.bar.xaxis") {
+                            model.path.append(.progress(sessionID: sessionID))
+                        }
+                        .accessibilityIdentifier("terminal-progress")
                         Button("Close tab", systemImage: "xmark.rectangle") {
                             model.closeTab(sessionID)
                         }
