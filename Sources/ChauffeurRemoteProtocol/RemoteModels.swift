@@ -173,6 +173,7 @@ public struct SessionSummary: Codable, Equatable, Sendable, Identifiable {
     public var attached: Bool
     public var createdAt: Date
     public var updatedAt: Date
+    public var progress: SessionProgressSummary?
 
     public init(
         id: UUID,
@@ -187,7 +188,8 @@ public struct SessionSummary: Codable, Equatable, Sendable, Identifiable {
         checkoutPath: String,
         attached: Bool = false,
         createdAt: Date,
-        updatedAt: Date
+        updatedAt: Date,
+        progress: SessionProgressSummary? = nil
     ) {
         self.id = id
         self.projectID = projectID
@@ -202,6 +204,7 @@ public struct SessionSummary: Codable, Equatable, Sendable, Identifiable {
         self.attached = attached
         self.createdAt = createdAt
         self.updatedAt = updatedAt
+        self.progress = progress
     }
 }
 

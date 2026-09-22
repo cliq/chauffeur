@@ -30,6 +30,41 @@ struct RemoteHostSessionTests {
         return (session, factory)
     }
 
+    @Test func progressUsesSessionIdentityAndRejectsMismatchedResponses() async throws {
+        let (session, factory) = makeSession()
+        let id = UUID()
+        let panel = SessionProgressPanel(sessionID: id, summary: SessionProgressSummary(title: "Task", now: "Building", percentComplete: 20), json: "{}", html: "<html>Panel</html>")
+        factory.configure = { host in
+            host.responder = { request in
+                if case .getSessionProgress = request.operation {
+                    return RemoteResponse(id: request.id, result: .sessionProgress(panel))
+                }
+                return FakeHost.defaultResponse(for: request)
+            }
+        }
+        await session.connect()
+        #expect(try await session.sessionProgress(sessionID: id) == panel)
+        await #expect(throws: RemoteClientError.self) { try await session.sessionProgress(sessionID: UUID()) }
+        session.disconnect()
+    }
+
+    @Test func olderHostsGetAnUpdateMessageWithoutUnsupportedRequests() async throws {
+        let (session, factory) = makeSession()
+        factory.configure = { host in
+            host.responder = { request in
+                if case .hello = request.operation {
+                    var info = FakeHost.hostInfo(); info.capabilities = ["inventory.v1"]
+                    return RemoteResponse(id: request.id, result: .hostInfo(info))
+                }
+                return FakeHost.defaultResponse(for: request)
+            }
+        }
+        await session.connect()
+        await #expect(throws: RemoteClientError.self) { try await session.sessionProgress(sessionID: UUID()) }
+        #expect(factory.hosts[0].requests(ofKind: "getSessionProgress").isEmpty)
+        session.disconnect()
+    }
+
     @Test func connectSendsHelloWithSavedCredentialsAndLoadsInventory() async throws {
         let (session, factory) = makeSession()
 

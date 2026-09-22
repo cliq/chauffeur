@@ -72,7 +72,8 @@ public struct RemoteInventoryBuilder {
                 checkoutPath: session.launch.workingDirectory,
                 attached: isAttached(session.id),
                 createdAt: session.createdAt,
-                updatedAt: session.updatedAt
+                updatedAt: session.updatedAt,
+                progress: RemoteProgressReader.summary(session: session)
             ))
         }
         sessions.sort { $0.createdAt < $1.createdAt }

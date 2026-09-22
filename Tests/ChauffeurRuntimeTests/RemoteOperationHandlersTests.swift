@@ -5,6 +5,35 @@ import ChauffeurRemoteProtocol
 @testable import ChauffeurRuntimeKit
 
 struct RemoteOperationHandlersTests {
+    @Test func inventoryAndProgressRequestsFollowRegisteredFiles() async throws {
+        let fixture = try await Fixture.make()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        let json = fixture.root.appendingPathComponent("progress.json")
+        let html = fixture.root.appendingPathComponent("index.html")
+        func write(_ percent: Int) throws {
+            try JSONSerialization.data(withJSONObject: ["title": "Task", "now": "Building", "phases": [], "percentComplete": percent, "updated": "2026-09-22T12:00:00Z"]).write(to: json, options: .atomic)
+        }
+        try write(25)
+        try "<html>Full progress</html>".write(to: html, atomically: true, encoding: .utf8)
+        var session = fixture.shellSession(worktreeID: nil, path: fixture.repo.path, title: "Progress worker")
+        session.progress = ProgressRegistration(jsonPath: json.path, htmlPath: html.path)
+        try await fixture.runtime.store.save(session)
+        let runtime = try fixture.reopen(); try await runtime.start()
+        let handlers = RemoteOperationHandlers(runtime: runtime, root: fixture.root, hostName: "Mac")
+        let before = try await handlers.inventory()
+        #expect(before.sessions.first?.progress?.percentComplete == 25)
+        try write(75)
+        let after = try await handlers.inventory()
+        #expect(after.revision > before.revision)
+        #expect(after.sessions.first?.progress?.percentComplete == 75)
+        let result = await handlers.handle(.getSessionProgress(SessionProgressRequest(sessionID: session.id)), deviceID: UUID())
+        guard case .success(.sessionProgress(let panel)) = result else { Issue.record("Missing progress response"); return }
+        #expect(panel.html == "<html>Full progress</html>" && panel.summary.percentComplete == 75)
+        let missing = await handlers.handle(.getSessionProgress(SessionProgressRequest(sessionID: UUID())), deviceID: UUID())
+        guard case .failure(let error) = missing else { Issue.record("Unknown session exposed progress"); return }
+        #expect(error.code == "missing_session")
+    }
+
     @Test func inventoryMapsProjectsFoldersCheckoutsAndSessions() async throws {
         let fixture = try await Fixture.make(); defer { fixture.cleanup() }
         // An archived preset in the same set, and an archived set with a live preset, are both hidden.

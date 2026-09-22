@@ -105,6 +105,7 @@ public enum RemoteOperation: Equatable, Sendable, Codable {
     case hello(HelloRequest)
     case pair(PairRequest)
     case listInventory(ListInventoryRequest)
+    case getSessionProgress(SessionProgressRequest)
     case previewWorktreeDestination(PreviewWorktreeRequest)
     case launch(LaunchOperationRequest)
     case getOperationStatus(OperationStatusRequest)
@@ -117,6 +118,7 @@ public enum RemoteOperation: Equatable, Sendable, Codable {
         case .hello: return "hello"
         case .pair: return "pair"
         case .listInventory: return "listInventory"
+        case .getSessionProgress: return "getSessionProgress"
         case .previewWorktreeDestination: return "previewWorktreeDestination"
         case .launch: return "launch"
         case .getOperationStatus: return "getOperationStatus"
@@ -134,6 +136,8 @@ public enum RemoteOperation: Equatable, Sendable, Codable {
             self = .hello(try container.decode(HelloRequest.self, forKey: .payload))
         case "pair":
             self = .pair(try container.decode(PairRequest.self, forKey: .payload))
+        case "getSessionProgress":
+            self = .getSessionProgress(try container.decode(SessionProgressRequest.self, forKey: .payload))
         case "listInventory":
             self = .listInventory(try container.decode(ListInventoryRequest.self, forKey: .payload))
         case "previewWorktreeDestination":
@@ -166,6 +170,8 @@ public enum RemoteOperation: Equatable, Sendable, Codable {
             try container.encode(payload, forKey: .payload)
         case .pair(let payload):
             try container.encode(payload, forKey: .payload)
+        case .getSessionProgress(let payload):
+            try container.encode(payload, forKey: .payload)
         case .listInventory(let payload):
             try container.encode(payload, forKey: .payload)
         case .previewWorktreeDestination(let payload):
@@ -190,6 +196,7 @@ public enum RemoteResult: Equatable, Sendable, Codable {
     case hostInfo(HostInfo)
     case pairing(PairingResult)
     case inventory(InventorySnapshot)
+    case sessionProgress(SessionProgressPanel)
     case worktreeDestination(WorktreeDestinationPreview)
     case operation(OperationStatus)
     case attachment(AttachmentInfo)
@@ -200,6 +207,7 @@ public enum RemoteResult: Equatable, Sendable, Codable {
         case .hostInfo: return "hostInfo"
         case .pairing: return "pairing"
         case .inventory: return "inventory"
+        case .sessionProgress: return "sessionProgress"
         case .worktreeDestination: return "worktreeDestination"
         case .operation: return "operation"
         case .attachment: return "attachment"
@@ -215,6 +223,8 @@ public enum RemoteResult: Equatable, Sendable, Codable {
             self = .hostInfo(try container.decode(HostInfo.self, forKey: .payload))
         case "pairing":
             self = .pairing(try container.decode(PairingResult.self, forKey: .payload))
+        case "sessionProgress":
+            self = .sessionProgress(try container.decode(SessionProgressPanel.self, forKey: .payload))
         case "inventory":
             self = .inventory(try container.decode(InventorySnapshot.self, forKey: .payload))
         case "worktreeDestination":
@@ -242,6 +252,8 @@ public enum RemoteResult: Equatable, Sendable, Codable {
         case .hostInfo(let payload):
             try container.encode(payload, forKey: .payload)
         case .pairing(let payload):
+            try container.encode(payload, forKey: .payload)
+        case .sessionProgress(let payload):
             try container.encode(payload, forKey: .payload)
         case .inventory(let payload):
             try container.encode(payload, forKey: .payload)

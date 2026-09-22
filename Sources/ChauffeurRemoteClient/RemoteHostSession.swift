@@ -261,6 +261,18 @@ public final class RemoteHostSession {
         }
     }
 
+    public func sessionProgress(sessionID: UUID) async throws -> SessionProgressPanel {
+        guard case .connected(let host) = connectionState, let connection else { throw RemoteClientError.disconnected }
+        guard host.capabilities.contains("progress.v1") else {
+            throw RemoteClientError.invalidResponse("Update Chauffeur on your Mac to view progress on this device.")
+        }
+        let result = try await connection.request(.getSessionProgress(SessionProgressRequest(sessionID: sessionID)))
+        guard case .sessionProgress(let panel) = result, panel.sessionID == sessionID else {
+            throw RemoteClientError.invalidResponse("The Mac returned progress for a different session.")
+        }
+        return panel
+    }
+
     public func previewWorktree(projectID: UUID, folderID: UUID, branch: String) async throws -> String {
         guard let connection else { throw RemoteClientError.disconnected }
         let request = PreviewWorktreeRequest(projectID: projectID, folderID: folderID, branch: branch)

@@ -2,7 +2,7 @@ import Foundation
 
 public enum RemoteProtocol {
     public static let version = 1
-    public static let capabilities = ["terminal.binary.v1", "launch.worktree.v1", "inventory.v1"]
+    public static let capabilities = ["terminal.binary.v1", "launch.worktree.v1", "inventory.v1", "progress.v1"]
 }
 
 public struct RemoteError: Codable, Equatable, Sendable, Error {

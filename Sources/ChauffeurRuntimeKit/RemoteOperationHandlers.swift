@@ -35,6 +35,15 @@ public actor RemoteOperationHandlers {
             // `sinceRevision` is accepted but the full inventory is always returned for now.
             do { return .success(.inventory(try await inventory())) }
             catch { return .failure(Self.remoteError(error)) }
+        case .getSessionProgress(let request):
+            do {
+                let snapshot = try await runtime.snapshot().decode(RemoteInventoryBuilder.RuntimeSnapshotView.self)
+                guard let session = snapshot.sessions.first(where: { $0.id == request.sessionID }) else {
+                    throw ChauffeurError("missing_session", "This session no longer exists on the Mac")
+                }
+                let panel = try await Task.detached(priority: .utility) { try RemoteProgressReader.panel(session: session) }.value
+                return .success(.sessionProgress(panel))
+            } catch { return .failure(Self.remoteError(error)) }
         case .previewWorktreeDestination(let request):
             do {
                 let params: JSONValue = .object([

@@ -11,21 +11,26 @@ public enum ProgressFiles {
     }
 
     public static func read(jsonPath: String) throws -> ImplementationProgress {
-        let url = try fileURL(jsonPath)
+        let data = try readData(path: jsonPath)
+        do { return try ImplementationProgress.decode(data) }
+        catch { throw ChauffeurError("progress_invalid", "Cannot decode the progress JSON; expected implementation-progress schema version 1", path: jsonPath) }
+    }
+
+    public static func readData(path: String) throws -> Data {
+        let url = try fileURL(path)
         // Nonblocking open plus fstat avoids hanging on FIFOs or reading device files.
         let descriptor = Darwin.open(url.path, O_RDONLY | O_NONBLOCK | O_CLOEXEC)
-        guard descriptor >= 0 else { throw ChauffeurError("progress_unavailable", "Cannot open the progress JSON", path: url.path) }
+        guard descriptor >= 0 else { throw ChauffeurError("progress_unavailable", "Cannot open the progress file", path: url.path) }
         let handle = FileHandle(fileDescriptor: descriptor, closeOnDealloc: true)
         defer { try? handle.close() }
         var info = stat()
         guard fstat(descriptor, &info) == 0, (info.st_mode & S_IFMT) == S_IFREG,
               info.st_size <= maximumJSONBytes else {
-            throw ChauffeurError("progress_invalid", "Progress JSON must be a regular file of at most 1 MiB", path: url.path)
+            throw ChauffeurError("progress_invalid", "Progress file must be a regular file of at most 1 MiB", path: url.path)
         }
         let data = try handle.read(upToCount: maximumJSONBytes + 1) ?? Data()
-        guard data.count <= maximumJSONBytes else { throw ChauffeurError("progress_invalid", "Progress JSON exceeds 1 MiB", path: url.path) }
-        do { return try ImplementationProgress.decode(data) }
-        catch { throw ChauffeurError("progress_invalid", "Cannot decode the progress JSON; expected implementation-progress schema version 1", path: url.path) }
+        guard data.count <= maximumJSONBytes else { throw ChauffeurError("progress_invalid", "Progress file exceeds 1 MiB", path: url.path) }
+        return data
     }
 
     public static func htmlURL(_ path: String) throws -> URL {

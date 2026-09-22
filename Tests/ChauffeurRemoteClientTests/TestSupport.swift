@@ -173,6 +173,8 @@ final class FakeHost: @unchecked Sendable {
                 hostName: "fake-mac"
             )
             return RemoteResponse(id: request.id, result: .pairing(pairing))
+        case .getSessionProgress:
+            return RemoteResponse(id: request.id, error: RemoteError(code: "progress_unavailable", message: "No progress panel"))
         case .listInventory:
             return RemoteResponse(id: request.id, result: .inventory(inventory()))
         case .previewWorktreeDestination(let preview):
