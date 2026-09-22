@@ -69,7 +69,8 @@ struct PresetLaunchOptionsEditor: View {
     }
 
     private func option(_ label: String, field: LaunchOptionField, value: String?, suggestions: [String]) -> some View {
-        HStack {
+        HStack(spacing: 10) {
+            Text(label).frame(width: 76, alignment: .leading)
             TextField(label, text: Binding(
                 get: { value ?? "" },
                 set: { newValue in
@@ -77,6 +78,8 @@ struct PresetLaunchOptionsEditor: View {
                     rawArguments = updated
                 }
             ), prompt: Text("Provider default"))
+                .labelsHidden()
+                .accessibilityLabel(label)
                 .disabled(inspection.arguments == nil)
                 .accessibilityIdentifier(field == .model ? "preset.model" : "preset.reasoning")
             Menu {
@@ -84,7 +87,10 @@ struct PresetLaunchOptionsEditor: View {
                 if !suggestions.isEmpty { Divider() }
                 ForEach(suggestions, id: \.self) { suggestion in Button(suggestion) { update(field, suggestion) } }
             } label: { Image(systemName: "chevron.down") }
-                .menuStyle(.borderlessButton).fixedSize().disabled(inspection.arguments == nil)
+                .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
+                .accessibilityLabel("Choose \(label.lowercased())")
+                .help("Choose a suggestion or type a custom value in the field.")
+                .disabled(inspection.arguments == nil)
         }
     }
 
@@ -105,7 +111,7 @@ struct SessionLaunchOptionsEditor: View {
             Text("Model and reasoning").font(.headline)
             sessionOption("Model", selection: $modelOverride, presetValue: presetInspection.model, suggestions: LaunchOptions.modelSuggestions(for: kind))
             sessionOption("Reasoning", selection: $reasoningOverride, presetValue: presetInspection.reasoning, suggestions: LaunchOptions.reasoningSuggestions(for: kind))
-            Text("Use preset keeps its launch arguments. Provider default removes the preset's matching option for this session. Custom values are passed to the provider as typed.")
+            Text("Choose a suggestion or type a custom value. Changes apply only to this session.")
                 .font(.caption).foregroundStyle(.secondary)
         }
     }
@@ -116,11 +122,14 @@ struct SessionLaunchOptionsEditor: View {
     }
 
     private func sessionOption(_ label: String, selection: Binding<String?>, presetValue: String?, suggestions: [String]) -> some View {
-        HStack {
+        HStack(spacing: 10) {
+            Text(label).frame(width: 76, alignment: .leading)
             TextField(label, text: Binding(
                 get: { selection.wrappedValue ?? "" },
                 set: { selection.wrappedValue = $0 }
-            ), prompt: Text(presetValue.map { "Use preset (\($0))" } ?? "Use preset"))
+            ), prompt: Text(selection.wrappedValue == nil ? (presetValue.map { "Use preset (\($0))" } ?? "Use preset") : "Provider default"))
+                .labelsHidden()
+                .accessibilityLabel(label)
                 .accessibilityIdentifier(label == "Model" ? "session.model" : "session.reasoning")
             Menu {
                 Button(presetValue.map { "Use preset (\($0))" } ?? "Use preset") { selection.wrappedValue = nil }
@@ -128,7 +137,9 @@ struct SessionLaunchOptionsEditor: View {
                 if !suggestions.isEmpty { Divider() }
                 ForEach(suggestions, id: \.self) { suggestion in Button(suggestion) { selection.wrappedValue = suggestion } }
             } label: { Image(systemName: "chevron.down") }
-                .menuStyle(.borderlessButton).fixedSize()
+                .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
+                .accessibilityLabel("Choose \(label.lowercased())")
+                .help("Use preset keeps its setting. Provider default removes the preset’s override for this session.")
         }
     }
 }

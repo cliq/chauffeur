@@ -122,9 +122,9 @@ Delegated workers use native YOLO permissions. The
 [manual walkthrough](docs/manual.html#coordination) covers messaging, completion
 reports, corrections, replacements, and recovery.
 
-Coordination and status reporting depend on the CLI version. Unsupported versions
-require an explicit basic-terminal launch, with coordination and status features
-unavailable. See [compatibility](docs/compatibility.md) for tested versions and
+Daily Codex and Claude Code updates are accepted without a version allowlist.
+Chauffeur checks provider identity, available CLI options, and live terminal
+readiness; an unrecognized executable can still run in basic terminal mode. See [compatibility](docs/compatibility.md) for tested versions and
 known limits. Full release workload testing is also pending.
 
 ## Documentation

@@ -46,13 +46,10 @@ below and does not send a model prompt.
 
 ### Agent sessions
 
-The adapter checks `--version` and `--help` before spawning an agent. Codex
-0.154.0 and 0.155.1 have candidate coordination configurations,
-recorded as unverified; other Codex versions require an explicit basic-terminal
-launch, showing unavailable coordination/status. Claude Code releases almost
-daily, so any build that identifies itself as Claude Code is accepted as a
-candidate without per-version validation; the versions in the table are the ones
-with evidence. Missing `--add-dir` support rejects a multi-directory launch.
+The adapter checks `--version` and `--help` before spawning an agent. Codex and
+Claude Code are recognized by provider identity, without a version allowlist.
+New releases remain coordination candidates; the table records tested versions,
+not permitted versions. Missing `--add-dir` support rejects a multi-directory launch.
 Missing native conversation IDs disable resume; no global resume selector is used.
 
 Codex 0.154.0 rejects `--add-dir` with a read-only sandbox. Chauffeur reports an
@@ -121,12 +118,12 @@ override CLI skill policies or establish model use of the guidance.
 
 ### Orchestrated follow-up turns
 
-Automatic terminal submission is limited to verified composer layouts in Codex
-0.155.1 and Claude Code 2.1.278. It checks completion, pane identity, and an empty
-composer before submitting. Unknown versions, busy sessions, and drafts are
-refused; the coordinator can close and replace a worker instead. Delegated Claude
-2.1.278 launches disable prompt suggestions in launch-scoped settings so ghost
-suggestions do not occupy the composer. Ordinary sessions keep their settings.
+Automatic terminal submission checks provider identity, completion, live pane
+identity, cursor state, and an empty recognized composer before every submission.
+There is no version allowlist. Busy sessions, drafts, dialogs, and unknown composer
+layouts are refused; the coordinator can close and replace a worker instead.
+Delegated Claude launches disable prompt suggestions in launch-scoped settings
+so ghost suggestions do not occupy the composer. Ordinary sessions keep their settings.
 
 Worker completion is an attributed MCP result, separate from terminal submission
 or native turn-finished status. Messages do not wake an idle agent; coordinators

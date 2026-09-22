@@ -18,11 +18,11 @@ struct FollowUpComposerTests {
         #expect(TmuxHost.composerReadiness(kind: .claude, activeLine: "esc to interrupt") == .unrecognized)
     }
 
-    @Test func supportIsVersionSpecific() {
+    @Test func supportUsesProviderIdentityAcrossUpdates() {
         #expect(TmuxHost.supportsFollowUp(kind: .codex, version: "codex-cli 0.155.1"))
         #expect(TmuxHost.supportsFollowUp(kind: .claude, version: "2.1.278 (Claude Code)"))
-        #expect(!TmuxHost.supportsFollowUp(kind: .codex, version: "codex-cli 0.155.2"))
-        #expect(!TmuxHost.supportsFollowUp(kind: .claude, version: "2.1.279 (Claude Code)"))
+        #expect(TmuxHost.supportsFollowUp(kind: .codex, version: "codex-cli 9.999.0"))
+        #expect(TmuxHost.supportsFollowUp(kind: .claude, version: "9.999.0 (Claude Code)"))
         #expect(!TmuxHost.supportsFollowUp(kind: .shell, version: "zsh"))
     }
 }
@@ -71,7 +71,7 @@ struct FollowUpSubmissionTests {
             let attentionSession = attention
             #expect(await fixture.errorCode { try await fixture.host.validateFollowUp(session: attentionSession) } == "follow_up_needs_attention")
             var unsupported = session
-            unsupported.launch.executableVersion += "-unknown"
+            unsupported.launch.executableVersion = "some-other-tool 1.0"
             let unsupportedSession = unsupported
             #expect(await fixture.errorCode { try await fixture.host.validateFollowUp(session: unsupportedSession) } == "follow_up_unavailable")
         }
@@ -82,7 +82,7 @@ private struct FollowUpFixture: Sendable {
     enum Provider: String, CaseIterable, Sendable {
         case codex, claude
         var kind: CLIKind { self == .codex ? .codex : .claude }
-        var version: String { self == .codex ? "codex-cli 0.155.1" : "2.1.278 (Claude Code)" }
+        var version: String { self == .codex ? "codex-cli 9.999.0" : "9.999.0 (Claude Code)" }
         var marker: String { self == .codex ? "› Ask Codex to do anything" : "❯\u{00a0}" }
     }
 

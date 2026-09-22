@@ -239,20 +239,16 @@ public actor TmuxHost {
         }
     }
 
-    /// Exact builds whose native blank-composer rendering has been exercised.
-    /// A changed TUI must be revalidated before terminal injection is enabled.
+    /// Provider identity is version-independent. Every submission still verifies
+    /// live pane ownership, turn state, cursor position, and the blank composer.
     public static func supportsFollowUp(kind: CLIKind, version: String) -> Bool {
-        switch kind {
-        case .codex: version == "codex-cli 0.155.1"
-        case .claude: version == "2.1.278 (Claude Code)"
-        case .shell: false
-        }
+        CLIAdapter.identifiesProvider(kind: kind, version: version)
     }
 
     private func validateFollowUpReadiness(session: Session) async throws {
         let kind = session.launch.preset.kind
         guard Self.supportsFollowUp(kind: kind, version: session.launch.executableVersion) else {
-            throw ChauffeurError("follow_up_unavailable", "Follow-up readiness has not been verified for this provider version")
+            throw ChauffeurError("follow_up_unavailable", "The executable is not recognized as a supported agent provider")
         }
         switch session.state {
         case .turnFinished: break

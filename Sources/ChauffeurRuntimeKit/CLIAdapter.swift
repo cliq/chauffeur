@@ -18,21 +18,24 @@ public enum CLIAdapter {
         let help = try await ProcessRunner.run(executable, ["--help"], environment: environment)
         guard help.status == 0 else { throw ChauffeurError("help_failed", "Executable does not report its supported options", path: executable) }
         let text = version.output.trimmingCharacters(in: .whitespacesAndNewlines)
-        let baseline = switch kind {
-        case .codex: ["codex-cli 0.154.0", "codex-cli 0.155.1"].contains(text)
-        // Claude Code ships new builds almost daily, so pinning versions would leave
-        // the integration unavailable most of the time. Any build that identifies
-        // itself as Claude Code is a candidate; the integration stays unverified.
-        case .claude: text.hasSuffix("(Claude Code)")
-        case .shell: false
-        }
+        // Native CLIs update frequently. Identify the provider without pinning a
+        // release number; feature flags below are discovered from native help.
+        let baseline = identifiesProvider(kind: kind, version: text)
         let delegatedYOLO = switch kind {
         case .codex: help.output.contains("--dangerously-bypass-approvals-and-sandbox")
         case .claude: help.output.contains("--dangerously-skip-permissions")
         case .shell: false
         }
-        return CLICapabilities(version: String(text.prefix(200)), coordination: baseline, statusSignals: baseline, additionalDirectories: help.output.contains("--add-dir"), resume: help.output.contains("resume"), delegatedYOLO: delegatedYOLO, limitation: baseline ? (kind == .codex ? "Turn completion via notify; approval/input detection is unavailable" : nil) : "CLI version has not passed coordination/status compatibility checks. Basic terminal mode remains available")
+        return CLICapabilities(version: String(text.prefix(200)), coordination: baseline, statusSignals: baseline, additionalDirectories: help.output.contains("--add-dir"), resume: help.output.contains("resume"), delegatedYOLO: delegatedYOLO, limitation: baseline ? (kind == .codex ? "Turn completion via notify; approval/input detection is unavailable" : nil) : "The executable does not identify itself as the selected agent. Check the preset executable, or use basic terminal mode")
     }
+    public static func identifiesProvider(kind: CLIKind, version: String) -> Bool {
+        switch kind {
+        case .codex: version.hasPrefix("codex-cli ")
+        case .claude: version.hasSuffix("(Claude Code)")
+        case .shell: false
+        }
+    }
+
     public static func arguments(session: Session, endpoint: String, ctlPath: String, integrationDirectory: URL, coordination: Bool, resume: Bool) throws -> [String] {
         let preset = session.launch.preset
         let resolved: [String]
@@ -85,8 +88,8 @@ public enum CLIAdapter {
                 var launchSettings: [String: JSONValue] = ["hooks": .object(hooks)]
                 // Generated suggestions render inside Claude's composer and
                 // cannot be distinguished safely from a user draft in plain
-                // terminal output. Disable them only for delegated sessions on
-                // the native build whose setting and composer were verified.
+                // terminal output. Disable them for delegated Claude sessions;
+                // actual composer readiness is checked before each follow-up.
                 if session.delegationID != nil,
                    TmuxHost.supportsFollowUp(kind: .claude, version: session.launch.executableVersion) {
                     launchSettings["promptSuggestionEnabled"] = .bool(false)

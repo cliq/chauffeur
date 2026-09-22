@@ -59,7 +59,8 @@ are written under `.local/native-orchestration/`. Fixture grants remain in the
 private temporary root named by `fixture-path.txt`; no credentials or grants are
 printed in the report. The probe stops only its own sessions and runtime.
 
-Follow-up capability is version-specific. Unknown native composer layouts return
+Follow-up checks provider identity and live terminal readiness, without a version
+allowlist. Unknown native composer layouts return
 an unavailable state; busy sessions and actual drafts are never treated as a
 result-ready input field. The coordinator may choose a fresh replacement.
 Ordinary messages remain queued mailbox data and do not start turns. A terminal

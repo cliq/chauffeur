@@ -24,7 +24,7 @@ struct CLIAdapterTests {
         #expect(claude.delegatedYOLO)
     }
 
-    @Test func anyClaudeCodeBuildIsACoordinationCandidate() async throws {
+    @Test func providerUpdatesRemainCoordinationCandidates() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("chauffeur-cli-versions-\(UUID())")
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
         defer { try? FileManager.default.removeItem(at: root) }
@@ -36,11 +36,14 @@ struct CLIAdapterTests {
         // Something that is not Claude Code at all is still rejected for coordination.
         let other = try await CLIAdapter.capabilities(executable: fakeCLI(reporting: "some-other-tool 1.0", in: root), kind: .claude, environment: environment)
         #expect(!other.coordination && other.limitation != nil)
-        // Codex keeps its verified baseline.
+        // Codex updates must remain candidates too.
         let codex = try await CLIAdapter.capabilities(executable: fakeCLI(reporting: "codex-cli 0.154.0", in: root), kind: .codex, environment: environment)
         let currentCodex = try await CLIAdapter.capabilities(executable: fakeCLI(reporting: "codex-cli 0.155.1", in: root), kind: .codex, environment: environment)
-        let newerCodex = try await CLIAdapter.capabilities(executable: fakeCLI(reporting: "codex-cli 0.155.0", in: root), kind: .codex, environment: environment)
-        #expect(codex.coordination && currentCodex.coordination && !newerCodex.coordination)
+        let newerCodex = try await CLIAdapter.capabilities(executable: fakeCLI(reporting: "codex-cli 9.999.0", in: root), kind: .codex, environment: environment)
+        #expect(codex.coordination && currentCodex.coordination && newerCodex.coordination)
+        let wrongCodex = try await CLIAdapter.capabilities(executable: fakeCLI(reporting: "some-other-tool 1.0", in: root), kind: .codex, environment: environment)
+        #expect(!wrongCodex.coordination)
+
     }
 
     @Test func claudeAttentionNotificationsRequireUserInput() throws {
@@ -86,7 +89,7 @@ struct CLIAdapterTests {
         delegated.launch.executableVersion = "2.1.279 (Claude Code)"
         _ = try CLIAdapter.arguments(session: delegated, endpoint: "http://127.0.0.1:1/mcp", ctlPath: "/bin/false", integrationDirectory: root, coordination: true, resume: false)
         settings = try JSONCoding.decode(JSONValue.self, from: Data(contentsOf: root.appendingPathComponent("settings.json")))
-        #expect(settings["promptSuggestionEnabled"].bool == nil)
+        #expect(settings["promptSuggestionEnabled"].bool == false)
 
         let ordinary = Session(projectID: UUID(), groupID: UUID(), title: "Ordinary", launch: launch, folderID: UUID())
         _ = try CLIAdapter.arguments(session: ordinary, endpoint: "http://127.0.0.1:1/mcp", ctlPath: "/bin/false", integrationDirectory: root, coordination: true, resume: false)
