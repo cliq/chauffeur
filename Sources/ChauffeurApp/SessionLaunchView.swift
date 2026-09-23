@@ -41,6 +41,7 @@ struct SessionLaunchView: View {
     private static let manageGroupsTag = UUID()
     @State private var modelOverride: String?
     @State private var reasoningOverride: String?
+    @State private var autoApproveOverride: Bool?
     #if DEBUG
     @State private var probeID = UUID()
     #endif
@@ -137,7 +138,7 @@ struct SessionLaunchView: View {
                     }
                     additionalFolders
                     if let preset {
-                        SessionLaunchOptionsEditor(kind: preset.kind, preset: preset, modelOverride: $modelOverride, reasoningOverride: $reasoningOverride)
+                        SessionLaunchOptionsEditor(kind: preset.kind, preset: preset, modelOverride: $modelOverride, reasoningOverride: $reasoningOverride, autoApproveOverride: $autoApproveOverride)
                     }
                     VStack(alignment: .leading, spacing: 8) {
                         Text("Initial task (optional)").font(.headline)
@@ -301,7 +302,7 @@ struct SessionLaunchView: View {
             return
         }
         guard let groupID, let presetID, let folderID else { return }
-        let request = LaunchRequest(projectID: project.id, groupID: groupID, presetID: presetID, folderID: folderID, title: title.isEmpty ? "\(preset?.name ?? "Agent") · \(folder?.name ?? "Session")" : title, worktreeID: worktreeID, additionalFolderIDs: additional.filter { $0 != folderID }.sorted { $0.uuidString < $1.uuidString }, task: task.isEmpty ? nil : task, allowSharedCheckout: shared, coordinationEnabled: coordination, modelOverride: modelOverride, reasoningOverride: reasoningOverride)
+        let request = LaunchRequest(projectID: project.id, groupID: groupID, presetID: presetID, folderID: folderID, title: title.isEmpty ? "\(preset?.name ?? "Agent") · \(folder?.name ?? "Session")" : title, worktreeID: worktreeID, additionalFolderIDs: additional.filter { $0 != folderID }.sorted { $0.uuidString < $1.uuidString }, task: task.isEmpty ? nil : task, allowSharedCheckout: shared, coordinationEnabled: coordination, modelOverride: modelOverride, reasoningOverride: reasoningOverride, autoApproveOverride: autoApproveOverride)
         let creation = checkout == .newWorktree ? WorktreeCreationRequest(projectID: project.id, folderID: folderID, branch: branch, baseRef: baseRef) : nil
         Task {
             finish(await operation.launch(request, creating: creation, retry: false, model: model))

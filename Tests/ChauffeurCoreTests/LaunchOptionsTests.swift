@@ -124,4 +124,85 @@ struct LaunchOptionsTests {
         #expect(decoded.resolvedArguments == nil)
         #expect(decoded.executionPolicy == nil)
     }
+
+    private func autoApprove(_ raw: String, _ kind: CLIKind) -> Bool { LaunchOptions.inspect(rawArguments: raw, kind: kind).autoApprove }
+    private func setting(_ on: Bool, _ raw: String, _ kind: CLIKind) throws -> [String] {
+        try ArgumentText.parse(LaunchOptions.updatingAutoApprove(on, rawArguments: raw, kind: kind))
+    }
+
+    @Test func autoApproveIsRecognizedInEveryProviderForm() {
+        #expect(autoApprove("--dangerously-skip-permissions", .claude))
+        #expect(autoApprove("--permission-mode bypassPermissions", .claude))
+        #expect(autoApprove("--permission-mode=bypassPermissions", .claude))
+        #expect(!autoApprove("--permission-mode plan", .claude))
+        #expect(!autoApprove("--permission-mode=acceptEdits", .claude))
+        #expect(!autoApprove("--allow-dangerously-skip-permissions", .claude))
+        #expect(!autoApprove("--yolo", .claude))
+        #expect(autoApprove("--dangerously-bypass-approvals-and-sandbox", .codex))
+        #expect(autoApprove("--search --yolo", .codex))
+        #expect(!autoApprove("--sandbox danger-full-access --approve-for-me", .codex))
+        #expect(!autoApprove("--dangerously-skip-permissions", .codex))
+        #expect(!autoApprove("--dangerously-skip-permissions", .shell))
+        #expect(!autoApprove("--model 'unfinished", .claude))
+        #expect(LaunchOptions.autoApproveCaption(for: .claude) == "Skips permission prompts")
+        #expect(LaunchOptions.autoApproveCaption(for: .codex) == "Skips approvals and the sandbox")
+        #expect(LaunchOptions.autoApproveCaption(for: .shell) == nil)
+    }
+
+    @Test func checkingAutoApproveAddsTheCanonicalFlagOnce() throws {
+        #expect(try setting(true, "--model opus", .claude) == ["--model", "opus", "--dangerously-skip-permissions"])
+        #expect(try setting(true, "--permission-mode bypassPermissions", .claude) == ["--permission-mode", "bypassPermissions"])
+        #expect(try setting(true, "--permission-mode plan", .claude) == ["--permission-mode", "plan", "--dangerously-skip-permissions"])
+        #expect(try setting(true, "--yolo", .codex) == ["--yolo"])
+        #expect(try setting(true, "--search", .codex) == ["--search", "--dangerously-bypass-approvals-and-sandbox"])
+        #expect(try setting(true, "-l", .shell) == ["-l"])
+        let viaField = try LaunchOptions.updating(field: .autoApprove, value: "true", rawArguments: "", kind: .codex)
+        #expect(try ArgumentText.parse(viaField) == ["--dangerously-bypass-approvals-and-sandbox"])
+    }
+
+    @Test func uncheckingAutoApproveRemovesEveryRecognizedForm() throws {
+        let claude = "--dangerously-skip-permissions --verbose --permission-mode bypassPermissions --permission-mode=bypassPermissions --allow-dangerously-skip-permissions"
+        #expect(try setting(false, claude, .claude) == ["--verbose", "--allow-dangerously-skip-permissions"])
+        #expect(try setting(false, "--permission-mode plan --dangerously-skip-permissions", .claude) == ["--permission-mode", "plan"])
+        #expect(try setting(false, "--permission-mode=acceptEdits", .claude) == ["--permission-mode=acceptEdits"])
+        #expect(try setting(false, "--yolo --search --dangerously-bypass-approvals-and-sandbox --approve-for-me", .codex) == ["--search", "--approve-for-me"])
+        let viaField = try LaunchOptions.updating(field: .autoApprove, value: nil, rawArguments: "--yolo", kind: .codex)
+        #expect(viaField.isEmpty)
+    }
+
+    @Test func autoApproveRoundTripsThroughTheArgumentsText() throws {
+        for kind in [CLIKind.claude, .codex] {
+            let on = try LaunchOptions.updatingAutoApprove(true, rawArguments: "--model m", kind: kind)
+            #expect(LaunchOptions.inspect(rawArguments: on, kind: kind).autoApprove)
+            let off = try LaunchOptions.updatingAutoApprove(false, rawArguments: on, kind: kind)
+            #expect(!LaunchOptions.inspect(rawArguments: off, kind: kind).autoApprove)
+            #expect(try ArgumentText.parse(off) == ["--model", "m"])
+        }
+        #expect(throws: (any Error).self) { try LaunchOptions.updatingAutoApprove(true, rawArguments: "--model 'unfinished", kind: .claude) }
+    }
+
+    @Test func autoApproveOverrideAppliesToTheSessionOnly() throws {
+        let claude = preset(.claude, raw: "--model opus --permission-mode bypassPermissions")
+        #expect(try LaunchOptions.resolve(preset: claude).arguments == ["--model", "opus", "--permission-mode", "bypassPermissions"])
+        #expect(try LaunchOptions.resolve(preset: claude, autoApproveOverride: false).arguments == ["--model", "opus"])
+        #expect(try LaunchOptions.resolve(preset: claude, autoApproveOverride: true).arguments == ["--model", "opus", "--permission-mode", "bypassPermissions"])
+        let codex = preset(.codex, raw: "--search")
+        #expect(try LaunchOptions.resolve(preset: codex, modelOverride: "gpt-x", autoApproveOverride: true).arguments == ["--search", "--model", "gpt-x", "--dangerously-bypass-approvals-and-sandbox"])
+        #expect(codex.rawArguments == "--search")
+    }
+
+    @Test func delegatedWorkersAutoApproveWhateverTheOverrideSays() throws {
+        let claude = try LaunchOptions.resolve(preset: preset(.claude, raw: "--permission-mode plan"), autoApproveOverride: false, delegated: true)
+        #expect(claude.arguments == ["--dangerously-skip-permissions"])
+        let codex = try LaunchOptions.resolve(preset: preset(.codex, raw: "--yolo"), autoApproveOverride: true, delegated: true)
+        #expect(codex.arguments == ["--dangerously-bypass-approvals-and-sandbox"])
+        #expect(codex.executionPolicy == .delegatedYOLO)
+    }
+
+    @Test func autoApproveOverrideIsOptionalInLaunchRequests() throws {
+        var request = LaunchRequest(projectID: UUID(), groupID: UUID(), presetID: UUID(), folderID: UUID(), title: "T")
+        #expect(!String(decoding: try JSONCoding.encode(request), as: UTF8.self).contains("autoApproveOverride"))
+        request.autoApproveOverride = false
+        #expect(try JSONCoding.decode(LaunchRequest.self, from: JSONCoding.encode(request)).autoApproveOverride == false)
+    }
 }

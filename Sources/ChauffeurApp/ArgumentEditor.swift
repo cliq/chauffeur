@@ -58,6 +58,15 @@ struct PresetLaunchOptionsEditor: View {
         VStack(alignment: .leading, spacing: 10) {
             option("Model", field: .model, value: inspection.model, suggestions: LaunchOptions.modelSuggestions(for: kind))
             option("Reasoning", field: .reasoning, value: inspection.reasoning, suggestions: LaunchOptions.reasoningSuggestions(for: kind))
+            if let caption = LaunchOptions.autoApproveCaption(for: kind) {
+                AutoApproveToggle(caption: caption, identifier: "preset.auto-approve", isOn: Binding(
+                    get: { inspection.autoApprove },
+                    set: { on in
+                        guard let updated = try? LaunchOptions.updatingAutoApprove(on, rawArguments: rawArguments, kind: kind) else { return }
+                        rawArguments = updated
+                    }
+                )).disabled(inspection.arguments == nil)
+            }
             if !inspection.warnings.isEmpty {
                 VStack(alignment: .leading, spacing: 3) {
                     ForEach(inspection.warnings, id: \.self) { warning in
@@ -105,12 +114,19 @@ struct SessionLaunchOptionsEditor: View {
     let preset: AgentPreset?
     @Binding var modelOverride: String?
     @Binding var reasoningOverride: String?
+    @Binding var autoApproveOverride: Bool?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("Model and reasoning").font(.headline)
+            Text("Launch options").font(.headline)
             sessionOption("Model", selection: $modelOverride, presetValue: presetInspection.model, suggestions: LaunchOptions.modelSuggestions(for: kind))
             sessionOption("Reasoning", selection: $reasoningOverride, presetValue: presetInspection.reasoning, suggestions: LaunchOptions.reasoningSuggestions(for: kind))
+            if let caption = LaunchOptions.autoApproveCaption(for: kind) {
+                AutoApproveToggle(caption: caption, identifier: "session.auto-approve", isOn: Binding(
+                    get: { autoApproveOverride ?? presetInspection.autoApprove },
+                    set: { autoApproveOverride = $0 }
+                ))
+            }
             Text("Choose a suggestion or type a custom value. Changes apply only to this session.")
                 .font(.caption).foregroundStyle(.secondary)
         }
@@ -140,6 +156,25 @@ struct SessionLaunchOptionsEditor: View {
                 .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
                 .accessibilityLabel("Choose \(label.lowercased())")
                 .help("Use preset keeps its setting. Provider default removes the preset’s override for this session.")
+        }
+    }
+}
+
+/// Sits under the model and reasoning rows, aligned with their fields.
+private struct AutoApproveToggle: View {
+    let caption: String
+    let identifier: String
+    @Binding var isOn: Bool
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 10) {
+            Color.clear.frame(width: 76, height: 1)
+            VStack(alignment: .leading, spacing: 2) {
+                Toggle("Auto-approve", isOn: $isOn).toggleStyle(.checkbox)
+                    .accessibilityIdentifier(identifier)
+                    .help(caption)
+                Text(caption).font(.caption).foregroundStyle(.secondary)
+            }
         }
     }
 }

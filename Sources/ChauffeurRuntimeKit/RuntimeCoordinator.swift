@@ -906,7 +906,7 @@ public actor RuntimeCoordinator {
             try Task.checkCancellation()
             try preset.validate()
             if !isShell {
-                let resolved = try LaunchOptions.resolve(preset: preset, modelOverride: request.modelOverride, reasoningOverride: request.reasoningOverride, delegated: child != nil)
+                let resolved = try LaunchOptions.resolve(preset: preset, modelOverride: request.modelOverride, reasoningOverride: request.reasoningOverride, autoApproveOverride: request.autoApproveOverride, delegated: child != nil)
                 session.launch.resolvedArguments = resolved.arguments
                 session.launch.selectedModel = resolved.model; session.launch.selectedReasoning = resolved.reasoning
                 session.launch.executionPolicy = resolved.executionPolicy

@@ -24,12 +24,19 @@ public enum LaunchOptionMatch: Equatable, Sendable { case none, separate, inline
 /// The flag that puts a session in auto-approve mode and what it supersedes.
 public struct AutoApprovePolicy: Equatable, Sendable {
     public var flag: String
+    /// What auto-approve does for this provider, shown next to the checkbox.
+    public var caption: String
+    /// Other flags that turn auto-approve on, e.g. Codex `--yolo`.
+    public var alternateFlags: Set<String>
+    /// Option values that turn auto-approve on, e.g. Claude `--permission-mode bypassPermissions`.
+    public var enablingValues: [String: String]
     /// Flags removed when `flag` is enforced.
     public var replacedFlags: Set<String>
     /// Options whose value is removed with them when `flag` is enforced.
     public var replacedValueOptions: Set<String>
-    public init(flag: String, replacedFlags: Set<String>, replacedValueOptions: Set<String>) {
-        self.flag = flag; self.replacedFlags = replacedFlags; self.replacedValueOptions = replacedValueOptions
+    public init(flag: String, caption: String, alternateFlags: Set<String> = [], enablingValues: [String: String] = [:], replacedFlags: Set<String>, replacedValueOptions: Set<String>) {
+        self.flag = flag; self.caption = caption; self.alternateFlags = alternateFlags; self.enablingValues = enablingValues
+        self.replacedFlags = replacedFlags; self.replacedValueOptions = replacedValueOptions
     }
 }
 
@@ -66,6 +73,7 @@ public protocol AgentProvider: Sendable {
     var modelSuggestions: [String] { get }
     var reasoningSuggestions: [String] { get }
     var supportsReasoning: Bool { get }
+    /// Model and reasoning only; `autoApprove` is read from `autoApprove`.
     func recognize(_ argument: String, field: LaunchOptionField) -> LaunchOptionMatch
     /// The option's value when `next` follows a `.separate` match, or nil when
     /// that pair belongs to another setting.
@@ -131,6 +139,7 @@ public struct ClaudeProvider: AgentProvider {
     public var modelSuggestions: [String] { ["opus", "sonnet", "haiku"] }
     public var reasoningSuggestions: [String] { ["low", "medium", "high", "xhigh", "max"] }
     public func recognize(_ argument: String, field: LaunchOptionField) -> LaunchOptionMatch {
+        guard field != .autoApprove else { return .none }
         let option = field == .model ? "--model" : "--effort"
         if argument == option { return .separate }
         if argument.hasPrefix(option + "=") { return .inline(String(argument.dropFirst(option.count + 1))) }
@@ -138,7 +147,8 @@ public struct ClaudeProvider: AgentProvider {
     }
     public func canonical(_ field: LaunchOptionField, value: String) -> [String] { [field == .model ? "--model" : "--effort", value] }
     public var autoApprove: AutoApprovePolicy {
-        AutoApprovePolicy(flag: "--dangerously-skip-permissions", replacedFlags: ["--allow-dangerously-skip-permissions", "--dangerously-skip-permissions"], replacedValueOptions: ["--permission-mode"])
+        // `--allow-dangerously-skip-permissions` only offers the mode, so it does not count as on.
+        AutoApprovePolicy(flag: "--dangerously-skip-permissions", caption: "Skips permission prompts", enablingValues: ["--permission-mode": "bypassPermissions"], replacedFlags: ["--allow-dangerously-skip-permissions", "--dangerously-skip-permissions"], replacedValueOptions: ["--permission-mode"])
     }
 
     public func composerReadiness(activeLine line: String) -> ComposerReadiness {
@@ -199,6 +209,7 @@ public struct CodexProvider: AgentProvider {
                 let config = String(argument.dropFirst(prefix.count))
                 if config.hasPrefix(Self.reasoningKey) { return .inline(Self.reasoning(config)) }
             }
+        case .autoApprove: break
         }
         return .none
     }
@@ -211,7 +222,7 @@ public struct CodexProvider: AgentProvider {
         field == .model ? ["--model", value] : ["-c", Self.reasoningKey + value]
     }
     public var autoApprove: AutoApprovePolicy {
-        AutoApprovePolicy(flag: "--dangerously-bypass-approvals-and-sandbox", replacedFlags: ["--approve-for-me", "--dangerously-bypass-approvals-and-sandbox", "--yolo"], replacedValueOptions: ["-s", "--sandbox", "-a", "--ask-for-approval"])
+        AutoApprovePolicy(flag: "--dangerously-bypass-approvals-and-sandbox", caption: "Skips approvals and the sandbox", alternateFlags: ["--yolo"], replacedFlags: ["--approve-for-me", "--dangerously-bypass-approvals-and-sandbox", "--yolo"], replacedValueOptions: ["-s", "--sandbox", "-a", "--ask-for-approval"])
     }
 
     public func composerReadiness(activeLine line: String) -> ComposerReadiness {

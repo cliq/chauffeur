@@ -1,7 +1,7 @@
 import Foundation
 
 public enum LaunchOptionField: Equatable, Sendable {
-    case model, reasoning
+    case model, reasoning, autoApprove
 }
 
 public enum WorkerExecutionPolicy: String, Codable, Sendable {
@@ -13,12 +13,14 @@ public struct LaunchArgumentInspection: Equatable, Sendable {
     public var arguments: [String]?
     public var model: String?
     public var reasoning: String?
+    public var autoApprove: Bool
     public var warnings: [String]
 
-    public init(arguments: [String]?, model: String?, reasoning: String?, warnings: [String]) {
+    public init(arguments: [String]?, model: String?, reasoning: String?, autoApprove: Bool = false, warnings: [String]) {
         self.arguments = arguments
         self.model = model
         self.reasoning = reasoning
+        self.autoApprove = autoApprove
         self.warnings = warnings
     }
 }
@@ -42,6 +44,8 @@ public struct ResolvedLaunchOptions: Equatable, Sendable {
 public enum LaunchOptions {
     public static func modelSuggestions(for kind: CLIKind) -> [String] { kind.provider?.modelSuggestions ?? [] }
     public static func reasoningSuggestions(for kind: CLIKind) -> [String] { kind.provider?.reasoningSuggestions ?? [] }
+    /// nil for kinds without an auto-approve mode.
+    public static func autoApproveCaption(for kind: CLIKind) -> String? { kind.provider?.autoApprove.caption }
 
     public static func rawArguments(for preset: AgentPreset) -> String {
         preset.rawArguments ?? ArgumentText.format(preset.arguments)
@@ -64,23 +68,33 @@ public enum LaunchOptions {
             arguments: arguments,
             model: model.conflicting ? nil : model.values.first,
             reasoning: reasoning.conflicting ? nil : reasoning.values.first,
+            autoApprove: autoApproves(arguments, kind: kind),
             warnings: unique(warnings)
         )
     }
 
     /// Rewrites all recognized occurrences of one option after the raw text parses.
     /// An empty value selects the provider default by removing that option.
+    /// For `.autoApprove`, any non-empty value turns it on.
     public static func updating(field: LaunchOptionField, value: String?, rawArguments: String, kind: CLIKind) throws -> String {
+        if field == .autoApprove { return try updatingAutoApprove(value?.isEmpty == false, rawArguments: rawArguments, kind: kind) }
         var arguments = try ArgumentText.parse(rawArguments)
         arguments = removing(field, from: arguments, kind: kind)
         if let value, !value.isEmpty { arguments += canonical(field, value: value, kind: kind) }
         return ArgumentText.format(arguments)
     }
 
+    /// Turning on adds the canonical flag unless a recognized form is present;
+    /// turning off removes every recognized form.
+    public static func updatingAutoApprove(_ on: Bool, rawArguments: String, kind: CLIKind) throws -> String {
+        ArgumentText.format(settingAutoApprove(on, in: try ArgumentText.parse(rawArguments), kind: kind))
+    }
+
     public static func resolve(
         preset: AgentPreset,
         modelOverride: String? = nil,
         reasoningOverride: String? = nil,
+        autoApproveOverride: Bool? = nil,
         delegated: Bool = false
     ) throws -> ResolvedLaunchOptions {
         var arguments: [String]
@@ -103,6 +117,7 @@ public enum LaunchOptions {
             arguments = removing(.reasoning, from: arguments, kind: preset.kind)
             if !reasoningOverride.isEmpty { arguments += canonical(.reasoning, value: reasoningOverride, kind: preset.kind) }
         }
+        if let autoApproveOverride { arguments = settingAutoApprove(autoApproveOverride, in: arguments, kind: preset.kind) }
         if delegated { arguments = enforcingYOLO(in: arguments, kind: preset.kind) }
         try LaunchPolicy.validateArguments(arguments, kind: preset.kind)
 
@@ -169,6 +184,38 @@ public enum LaunchOptions {
 
     private static func canonical(_ field: LaunchOptionField, value: String, kind: CLIKind) -> [String] {
         kind.provider?.canonical(field, value: value) ?? []
+    }
+
+    private enum AutoApproveForm { case none, flag, inline, separate }
+
+    private static func autoApproveForm(_ arguments: [String], at index: Int, policy: AutoApprovePolicy) -> AutoApproveForm {
+        let argument = arguments[index]
+        if argument == policy.flag || policy.alternateFlags.contains(argument) { return .flag }
+        for (option, value) in policy.enablingValues {
+            if argument == option + "=" + value { return .inline }
+            if argument == option, arguments.dropFirst(index + 1).first == value { return .separate }
+        }
+        return .none
+    }
+
+    private static func autoApproves(_ arguments: [String], kind: CLIKind) -> Bool {
+        guard let policy = kind.provider?.autoApprove else { return false }
+        return arguments.indices.contains { autoApproveForm(arguments, at: $0, policy: policy) != .none }
+    }
+
+    private static func settingAutoApprove(_ on: Bool, in arguments: [String], kind: CLIKind) -> [String] {
+        guard let policy = kind.provider?.autoApprove else { return arguments }
+        if on { return autoApproves(arguments, kind: kind) ? arguments : arguments + [policy.flag] }
+        var result: [String] = [], index = 0
+        while index < arguments.count {
+            switch autoApproveForm(arguments, at: index, policy: policy) {
+            case .none: result.append(arguments[index])
+            case .flag, .inline: break
+            case .separate: index += 1
+            }
+            index += 1
+        }
+        return result
     }
 
     private static func enforcingYOLO(in arguments: [String], kind: CLIKind) -> [String] {
