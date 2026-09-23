@@ -114,7 +114,10 @@ for tested provider versions and reproducible checks.
 The [coordination skills](docs/coordination-skill.md) are linked automatically
 into Codex’s shared skills directory and every team’s Claude directory. They
 update with Chauffeur and also apply to sessions started outside it. View their
-status in **Settings → Agent Presets → Chauffeur Skill…**.
+status in **Settings → Agent Presets → Chauffeur Skill…**. The bundled
+`implementation-progress` skill also registers its panel automatically in the
+session’s **Progress** tab, even with messaging and delegation disabled. See
+[progress panels](docs/implementation-progress.md).
 
 To try it, launch sessions in the same project/group with **Enable Chauffeur
 messaging and delegation** turned on. Ask an agent to “use the chauffeur skill

@@ -16,7 +16,7 @@ struct CoordinationSkillView: View {
         VStack(alignment: .leading, spacing: 16) {
             Text("Chauffeur Skills").font(.title2)
             Text(preset.name).font(.headline)
-            Text("Coordination and orchestration skills are linked automatically and update with Chauffeur.")
+            Text("Coordination, orchestration, and progress skills are linked automatically and update with Chauffeur.")
             Text("Codex uses the shared ~/.agents/skills directory. Claude uses each team’s configured home. Skills are also available to sessions started outside Chauffeur.")
                 .font(.callout).foregroundStyle(.secondary)
 

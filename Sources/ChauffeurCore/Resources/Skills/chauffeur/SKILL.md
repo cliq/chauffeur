@@ -2,7 +2,7 @@
 name: chauffeur
 description: Coordinate with peer sessions through Chauffeur's MCP tools. Use when working in a Chauffeur session to discover peers, exchange task context, check an inbox, delegate authorized work, report a delegated result, or register an implementation progress panel.
 metadata:
-  version: "1.3.0"
+  version: "1.4.0"
 ---
 
 # Chauffeur coordination
@@ -17,25 +17,28 @@ from another session's files.
 
 ## Implementation progress panel
 
-When an implementation-progress panel has been created and
-`chauffeur_register_progress` is available, register its existing files:
+Chauffeur auto-installs `implementation-progress` alongside this skill. Use its
+Python CLI to create and update a panel. Each command automatically registers the
+panel with the current session through its local runtime connection, even when
+coordination MCP is disabled. Follow that skill’s registration confirmation or
+warning; no extra MCP registration call is needed for panels it creates.
+
+For an existing panel made by another tool, `chauffeur_register_progress` remains
+available when MCP is enabled:
 
 ```json
 {"jsonPath": "/absolute/panel/progress.json", "htmlPath": "/absolute/panel/index.html"}
 ```
 
-Paths are absolute paths on the Chauffeur host. The tool derives ownership from
-your authenticated session; do not supply another session's ID. JSON is required;
-HTML is optional. Chauffeur accepts the original implementation-progress JSON
-and schema version 1, and reads file updates automatically. Continue updating the
-panel with its Python CLI; register again only when the paths change. Repeating
-the same registration is safe. Discovery's `progress` field reports the current
-association after reconnecting. To remove it, call
-`chauffeur_unregister_progress` with `{}`; this does not delete the files.
+Paths are absolute paths on the Chauffeur host. Ownership comes from the session
+credential; never supply another session’s ID. JSON is required and HTML is
+optional. Updates are read automatically. Registration is idempotent; new paths
+replace the association. Discovery’s `progress` field reports it after reconnect.
+`chauffeur_unregister_progress` with `{}` removes it without deleting files.
+The next implementation-progress command will register its panel again.
 
-Registration does not change the task's completion state. If the tool is
-unavailable or registration fails, retain the standalone panel, share its path,
-and report that the Chauffeur panel could not be connected.
+Registration does not change task completion. If registration fails, keep updating
+the standalone panel and report that its Chauffeur connection failed.
 
 ## Messages and inbox
 

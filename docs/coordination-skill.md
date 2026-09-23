@@ -1,10 +1,10 @@
 # Coordination skills
 
-Chauffeur automatically links both bundled skills when the runtime starts, when
+Chauffeur automatically links all three bundled skills when the runtime starts, when
 setup completes, and when a team is created or its configuration directories
 change. **Settings → Agent Presets → Chauffeur Skill…** shows their health,
 destinations, versions, and guidance. **Refresh** also repairs missing links.
-There is no manual install, update, removal, or migration step.
+The skills update with the app; an existing user-owned skill at the same discovery path is preserved and reported as a conflict.
 
 The `chauffeur` skill explains discovery, messages, bounded inbox waiting,
 authorized delegation, attributed results, follow-up turns, retained-history
@@ -12,6 +12,12 @@ closure, retries, and recovery. `chauffeur-orchestrator` executes a saved plan
 through one visible worker at a time. Its six role references provide freely
 overridable model/reasoning suggestions. Installing guidance does not launch an
 agent or join a session to a group.
+
+`implementation-progress` creates a local HTML progress panel and automatically
+registers it in the current session’s **Progress** tab. Registration works without
+coordination MCP. Its Python script and HTML template update with the bundled
+catalog. Outside Chauffeur the panel remains usable in a standalone browser.
+See [session progress panels](implementation-progress.md).
 
 ## Waiting during orchestration
 
@@ -40,8 +46,8 @@ when a worker reports. It uses isolated fixture CLIs, without provider inference
 
 | CLI | Links |
 | --- | --- |
-| Codex | `~/.agents/skills/chauffeur` and `~/.agents/skills/chauffeur-orchestrator`, shared across Codex profiles |
-| Claude Code | `<team Claude home>/skills/chauffeur` and `<team Claude home>/skills/chauffeur-orchestrator` |
+| Codex | `~/.agents/skills/{chauffeur,chauffeur-orchestrator,implementation-progress}`, shared across Codex profiles |
+| Claude Code | `<team Claude home>/skills/{chauffeur,chauffeur-orchestrator,implementation-progress}` |
 
 Claude uses `~/.claude` when the team has no custom Claude directory. Active
 teams sharing a directory share one installation. Archived teams do not create
@@ -60,7 +66,7 @@ The runtime publishes the bundled catalog beneath
 `<Chauffeur data directory>/managed-skills/`. For the installed app, this lives
 in Chauffeur's Application Support directory. Every discovery link points
 through `managed-skills/current/<skill>`. A complete catalog, including role
-references, is written before `current` is atomically switched to it. Updating
+references, scripts, and templates, is written before `current` is atomically switched to it. Updating
 Chauffeur and restarting its runtime updates all linked profiles together;
 moving the app does not change the link destinations.
 

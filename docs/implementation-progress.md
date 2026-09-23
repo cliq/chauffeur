@@ -1,24 +1,54 @@
 # Session progress panels
 
-The `implementation-progress` skill in `Skills/implementation-progress` maintains
-its standalone HTML panel and publishes `progress.json` and `progress.js` after
-each CLI update. Its installation is separate from Chauffeur's bundled skills.
+Chauffeur bundles `implementation-progress` in
+`Sources/ChauffeurCore/Resources/Skills/implementation-progress` and auto-installs
+it beside its coordination skills. The managed catalog includes `SKILL.md`, the
+Python CLI, and the HTML template. No separate skill installation is needed.
 
-An agent with Chauffeur MCP access registers an existing panel:
+Run the bundled `scripts/progress.py` to initialize or update a panel. The script
+publishes its standalone HTML, `progress.json`, and `progress.js`, then registers
+the panel in the current session’s **Progress** tab. This works with **Enable
+Chauffeur messaging and delegation** turned off: it uses the local Unix socket
+and the agent’s session credential, not MCP.
+
+Registration is attempted after every successful CLI command, including `show`
+and `open`, so the next command retries a failed connection. Repeated registration
+is idempotent. Failed registration never discards the local panel or prevents
+updates; the script prints a warning. Without a session credential it continues
+as a standalone browser panel. Use `--open` when a separate browser is wanted.
+Default panel paths include the session ID inside Chauffeur so agents sharing a
+checkout do not overwrite one another. An explicit `--dir` or `PROGRESS_DIR`
+still takes precedence.
+
+## Registration API
+
+The local IPC methods `registerProgress` and `unregisterProgress` accept:
 
 ```json
 {
-  "jsonPath": "/absolute/panel/progress.json",
-  "htmlPath": "/absolute/panel/index.html"
+  "token": "<current session credential>",
+  "arguments": {
+    "jsonPath": "/absolute/panel/progress.json",
+    "htmlPath": "/absolute/panel/index.html"
+  }
 }
 ```
 
-Call `chauffeur_register_progress` with these arguments. `jsonPath` is required;
-`htmlPath` is optional. Paths are on the runtime's host, not a remote client's
-device. Registration validates the JSON and any supplied HTML file before
-replacing the session's previous association. Ownership comes from the MCP
-credential; callers cannot select another session. The result contains
-`sessionID` and `progress` (the normalized paths).
+For removal, `arguments` is `{}`. The script reads `CHAUFFEUR_SOCKET` and
+`CHAUFFEUR_SESSION_TOKEN` from its inherited environment and sends the credential
+only over that local connection, never as a command argument or in panel files.
+The runtime authenticates the live session before reading files and rechecks the
+grant after those reads. Callers cannot select another session.
+
+The existing MCP tools `chauffeur_register_progress` and
+`chauffeur_unregister_progress` remain available for other panel producers; their
+arguments are the inner `arguments` object above and their credential comes from
+MCP authentication. Both transports use the same validation and persistence.
+
+`jsonPath` is required; `htmlPath` is optional. Paths are on the runtime’s host,
+not a remote client’s device. Registration validates JSON and any supplied HTML
+before replacing the association. The result contains `sessionID` and `progress`
+(the normalized paths).
 
 The association is stored with the session and is returned by
 `chauffeur_discover` as `progress`, or `null` when absent. Repeating a registration
@@ -67,12 +97,19 @@ versions and states, invalid timestamps, and invalid percentages are rejected.
 JSON and HTML files must be regular files no larger than 1 MiB. Each JSON and JS
 write is atomic, but the two files can briefly represent adjacent updates.
 
-Native iOS presentation, Live Activities, remote progress transport, and a
-terminal-side progress bar are future consumers, not part of this implementation.
+The same association supplies the authenticated remote progress API and iPhone
+progress display. Registration does not enable coordination tools or change the
+session’s task-completion state.
 
 ## Verification
 
 ```sh
-python3 -m unittest discover -s Skills/implementation-progress/tests
-swift test --filter 'ImplementationProgressTests|ProgressRegistrationTests|SkillInstallerTests'
+python3 -m unittest discover -s Tests/ImplementationProgressTests
+swift test --no-parallel --filter 'ImplementationProgressTests|ProgressRegistrationTests|SkillInstallerTests'
 ```
+
+The runtime integration test launches a fixture agent with coordination disabled,
+executes the auto-installed script through its discovery symlink, and checks the
+registered paths and subsequent updates. Installer tests cover publishing and
+updating the script and HTML along with the skill instructions. Python tests cover
+standalone use, session-specific directories, IPC framing, and graceful failure.

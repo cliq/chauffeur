@@ -522,6 +522,10 @@ public actor RuntimeCoordinator {
             let sessionID = try params.uuid("sessionID")
             guard var session = sessions[sessionID] else { throw ChauffeurError("missing_session", "Session not found") }
             session.unread = false; try await persist(session); return .null
+        case "registerProgress":
+            return try await callTool(token: params.requiredString("token"), name: "chauffeur_register_progress", arguments: params["arguments"])
+        case "unregisterProgress":
+            return try await callTool(token: params.requiredString("token"), name: "chauffeur_unregister_progress", arguments: params["arguments"])
         case "event": return try await event(params)
         case "inboxHint": return try .from(await inboxHint(params))
         case "cancelMessage":

@@ -17,7 +17,14 @@ struct SkillInstallerTests {
         let installer = try SkillInstaller(skills: catalog, root: source)
         let profiles = [root.appendingPathComponent(".agents").path, root.appendingPathComponent("claude").path]
         try await installer.publish()
-        #expect(await installer.reconcile(directories: profiles + profiles).count == 4)
+        #expect(await installer.reconcile(directories: profiles + profiles).count == profiles.count * catalog.count)
+        let progress = try #require(catalog.first { $0.name == CoordinationSkill.progressName })
+        for profile in profiles {
+            for (path, expected) in progress.referenceFiles {
+                let installed = URL(fileURLWithPath: profile).appendingPathComponent("skills/implementation-progress/" + path)
+                #expect(try Data(contentsOf: installed) == expected)
+            }
+        }
         let link = root.appendingPathComponent(".agents/skills/chauffeur-orchestrator")
         let destination = try FileManager.default.destinationOfSymbolicLink(atPath: link.path)
         #expect(destination == source.appendingPathComponent("current/chauffeur-orchestrator").path)
@@ -33,6 +40,8 @@ struct SkillInstallerTests {
         try await next.publish()
         try await next.publish() // Idempotent source validation includes all references.
         #expect(try String(contentsOf: reference, encoding: .utf8).contains("Updated role"))
+        let updatedScript = root.appendingPathComponent(".agents/skills/implementation-progress/scripts/progress.py")
+        #expect(try String(contentsOf: updatedScript, encoding: .utf8).contains("Updated role"))
         #expect(try FileManager.default.destinationOfSymbolicLink(atPath: link.path) == destination)
         #expect(await next.statuses(directory: profiles[0]).allSatisfy { $0.state == .installed })
         try FileManager.default.removeItem(at: link)

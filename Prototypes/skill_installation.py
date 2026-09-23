@@ -62,17 +62,17 @@ def discover(kind, profile, home, cwd):
                 process.stdin.write(b'{"method":"initialized"}\n'); process.stdin.flush()
                 response = exchange(process, {"id": 2, "method": "skills/list", "params": {"cwds": [str(cwd)], "forceReload": True}}, lambda item: item.get("id") == 2)
                 assert "error" not in response, "Codex skills/list failed"
-                matches = [skill for listing in response["result"]["data"] for skill in listing["skills"] if skill["name"] in {"chauffeur", "chauffeur-orchestrator"}]
+                matches = [skill for listing in response["result"]["data"] for skill in listing["skills"] if skill["name"] in {"chauffeur", "chauffeur-orchestrator", "implementation-progress"}]
                 if matches:
-                    assert len(matches) == 2 and all(item["enabled"] for item in matches)
+                    assert len(matches) == 3 and all(item["enabled"] for item in matches)
                     for item in matches:
                         assert Path(item["path"]).resolve() == (home / ".agents/skills" / item["name"] / "SKILL.md").resolve()
                 return bool(matches)
             response = exchange(process, {"type": "control_request", "request_id": "fixture-init", "request": {"subtype": "initialize"}}, lambda item: item.get("type") == "control_response" and item.get("response", {}).get("request_id") == "fixture-init")["response"]
             assert response["subtype"] == "success", "Claude metadata initialization failed"
-            matches = [entry for entry in response["response"].get("commands", []) if entry.get("name") in {"chauffeur", "chauffeur-orchestrator"}]
+            matches = [entry for entry in response["response"].get("commands", []) if entry.get("name") in {"chauffeur", "chauffeur-orchestrator", "implementation-progress"}]
             if matches:
-                assert {item["name"] for item in matches} == {"chauffeur", "chauffeur-orchestrator"}
+                assert {item["name"] for item in matches} == {"chauffeur", "chauffeur-orchestrator", "implementation-progress"}
             return bool(matches)
         finally:
             process.terminate()
@@ -126,7 +126,7 @@ def run():
                     record = {"id": preset_id, "setID": set_id, "name": kind + " fixture", "kind": kind, "executable": kind, "configurationDirectory": str(profile), "arguments": [], "integration": "unverified", "archived": False}
                     call("savePreset", {"record": record})
                     statuses = call("skillStatuses", {"presetID": preset_id})
-                    assert len(statuses) == 2 and all(item["state"] == "installed" for item in statuses), statuses
+                    assert len(statuses) == 3 and all(item["state"] == "installed" for item in statuses), statuses
                     for item in statuses:
                         assert Path(item["path"]).is_symlink()
                         assert str(Path(item["path"]).resolve()).startswith(str(data_root / "managed-skills"))

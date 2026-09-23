@@ -1,14 +1,19 @@
 ---
 name: implementation-progress
-description: Create and maintain a local, auto-refreshing browser panel showing implementation phases, optional steps, and current activity. Use when the user asks for a progress panel, dashboard, or status page for a multi-step task, or when updating a panel already in use.
+description: Create and maintain an auto-refreshing progress panel in Chauffeur’s session Progress tab or a standalone browser, showing implementation phases, optional steps, and current activity. Use when the user asks for a progress panel, dashboard, or status page for a multi-step task, or when updating a panel already in use.
+metadata:
+  version: "1.0.0"
 ---
 
 # Implementation progress
 
 Use `scripts/progress.py` next to this skill to maintain a small browser dashboard
 while carrying out the user's task. It uses Python 3.8+ and the standard library;
-no server, packages, API keys, or agent-specific tools are needed. The page reloads
-`progress.js` every two seconds. Progress reflects your updates, not automatic
+no server, packages, API keys, or agent-specific tools are needed. Chauffeur bundles
+and auto-installs this skill, including its script and HTML template. Inside a
+Chauffeur agent session, commands automatically register the panel in that
+session’s **Progress** tab, even when messaging/delegation MCP is disabled.
+The page reloads `progress.js` every two seconds. Progress reflects your updates, not automatic
 observation of tools or the repository.
 
 ## Locate the script and panel
@@ -26,8 +31,9 @@ and panel paths in the task's handoff notes when needed. Shell variables in the
 examples are shorthand; tool calls may not share a persistent shell.
 
 Without `--dir`, the script uses `PROGRESS_DIR`, then the OS temporary directory
-under `implementation-progress/<cwd-name>-<path-hash>`. Use distinct directories
-for concurrent tasks in the same project. Have one agent write a given panel;
+under `implementation-progress/<cwd-name>-<identity-hash>`. Inside Chauffeur the
+identity includes the session ID, so concurrent sessions get different panels.
+Outside Chauffeur, use distinct directories for concurrent tasks in one project. Have one agent write a given panel;
 individual file writes are atomic, but simultaneous read/modify/write commands
 can overwrite each other's changes.
 
@@ -41,30 +47,37 @@ python3 "$P" init --dir "$DIR" --title "Feature implementation" \
   --phase "Discovery::Understand requirements and existing code" \
   --phase "Implementation::Make the planned changes" \
   --phase "Verification::Run relevant checks and review the result" \
-  --now "Reading the requirements" --open
+  --now "Reading the requirements"
 ```
 
-The first phase starts `active`; the others start `pending`. Share the printed
-`index.html` path with the user. `--open` asks the OS to launch its default browser;
-if no browser is available, the command prints a manual-open URI. Do not claim that
-the user saw the panel merely because the launch was requested. In a remote or
-headless environment, use `show` and explain that the page lives on that machine.
+The first phase starts `active`; the others start `pending`. Inside Chauffeur,
+look for the script’s registration confirmation and tell the user the panel is
+available in the session’s **Progress** tab. No separate registration tool call
+or browser is needed. Outside Chauffeur, share the printed `index.html` path and
+use `open` (or `init --open`) to launch its default browser. `--open` also works
+inside Chauffeur if the user wants a separate browser window. If no browser is
+available, the command prints a manual-open URI. Do not claim the user saw the
+panel merely because launching was requested. In a remote or headless environment,
+use `show` and explain that the page lives on that machine.
 
 If a panel already exists, inspect it with `show` and use `open` to reopen it.
 `init` refuses to overwrite progress unless `--force` is supplied. Use that flag
 only when intentionally restarting the task; otherwise choose a new directory.
 
-### Connect to Chauffeur when available
+### Automatic Chauffeur registration
 
-After creating or resuming the panel, if `chauffeur_register_progress` is
-available, use the Chauffeur skill's progress registration guidance to register
-the absolute `progress.json` and `index.html` paths. If that skill is not loaded,
-the tool accepts `{"jsonPath": "<DIR>/progress.json", "htmlPath": "<DIR>/index.html"}`.
-Chauffeur associates them with the authenticated session and reads updates
-automatically. No registration call is needed at each milestone; repeat it if
-the paths change. Continue the normal browser behavior, including `--open`.
-If Chauffeur is unavailable, continue using the standalone panel. If registration
-fails, keep updating the panel and tell the user its Chauffeur connection failed.
+After each successful command, the script uses `CHAUFFEUR_SOCKET` and
+`CHAUFFEUR_SESSION_TOKEN` inherited from the current agent session. The runtime
+authenticates the credential and associates the absolute JSON and HTML paths
+with that session. MCP access is not required. Never read another session’s
+environment, pass credentials in command arguments, or copy them into the panel.
+
+Registration is idempotent. Subsequent commands reassert the association, so
+resuming with `show` or updating a panel also repairs a failed connection. A
+connection failure leaves the local files usable, prints a warning, and retries
+on the next command. Report that warning rather than claiming registration
+succeeded. Without a session credential the script runs as a standalone tool.
+Older Chauffeur runtimes may need an update/restart to support registration.
 
 ## Update at milestones
 

@@ -2,7 +2,7 @@
 name: chauffeur-orchestrator
 description: Execute an implementation plan through sequential, visible Chauffeur worker sessions. Use when a coordinator should decompose saved work, launch role-guided workers in the current checkout, review results, request corrections or replacements, and maintain durable progress.
 metadata:
-  version: "1.0.0"
+  version: "1.1.0"
 ---
 
 # Chauffeur orchestrator
@@ -86,9 +86,10 @@ completion notification; terminal silence and process exit are not acceptance
 criteria. Capacity errors visible only in terminal text may still require
 inspection; the wait cannot detect provider errors that Chauffeur has not observed.
 
-If a worker uses `implementation-progress`, include in its assignment: register
-its JSON file using `chauffeur_register_progress`, then update that file as work
-advances. `chauffeur_delegation_status` exposes the registered path in
+If a worker uses `implementation-progress`, include in its assignment: create and
+update its panel with the bundled Python CLI as work advances. The script
+automatically registers the panel with the worker’s session; no separate MCP call
+is required. `chauffeur_delegation_status` exposes the registered path in
 `progress.jsonPath`. Chauffeur watches that worker's file during inbox waits,
 including atomic replacements. Changes to activity, phases, steps, or percentage
 wake the wait; timestamp-only writes do not. After an empty response, inspect the

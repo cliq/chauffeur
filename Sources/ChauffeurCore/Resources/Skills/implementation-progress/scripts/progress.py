@@ -20,6 +20,10 @@ import json
 import os
 from pathlib import Path
 import shutil
+import socket
+import struct
+import time
+import uuid
 import sys
 import tempfile
 import webbrowser
@@ -34,9 +38,77 @@ def default_dir():
     if os.environ.get("PROGRESS_DIR"):
         return os.environ["PROGRESS_DIR"]
     cwd = Path.cwd().resolve()
-    digest = hashlib.sha256(os.fsencode(str(cwd))).hexdigest()[:12]
+    # Concurrent Chauffeur sessions in the same checkout must not share a panel.
+    identity = str(cwd)
+    if os.environ.get("CHAUFFEUR_SESSION_ID"):
+        identity += ":" + os.environ["CHAUFFEUR_SESSION_ID"]
+    digest = hashlib.sha256(os.fsencode(identity)).hexdigest()[:12]
     return str(Path(tempfile.gettempdir()) / "implementation-progress" / f"{cwd.name or 'project'}-{digest}")
 
+
+
+def register_chauffeur(directory):
+    """Use the session's local IPC grant; no coordinator MCP or extra tools required.
+
+    Reassert the association after each command so a failed connection is retried
+    at the next milestone. Registration is idempotent and never creates progress.
+    """
+    token = os.environ.get("CHAUFFEUR_SESSION_TOKEN")
+    socket_path = os.environ.get("CHAUFFEUR_SOCKET")
+    if not token:
+        return  # Standalone use (including plain shell sessions).
+    if not socket_path:
+        print("Panel is available locally; Chauffeur registration needs CHAUFFEUR_SOCKET.", file=sys.stderr)
+        return
+    root = Path(directory).resolve()
+    arguments = {"jsonPath": str(root / "progress.json")}
+    if (root / "index.html").is_file():
+        arguments["htmlPath"] = str(root / "index.html")
+    request_id = str(uuid.uuid4()).upper()
+    request = {"version": 1, "id": request_id, "method": "registerProgress",
+               "params": {"token": token, "arguments": arguments}}
+    deadline = time.monotonic() + 2
+
+    def receive(connection, count):
+        chunks = bytearray()
+        while len(chunks) < count:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError("registration timed out")
+            connection.settimeout(remaining)
+            chunk = connection.recv(count - len(chunks))
+            if not chunk:
+                raise OSError("runtime closed the connection")
+            chunks.extend(chunk)
+        return bytes(chunks)
+
+    try:
+        body = json.dumps(request).encode("utf-8")
+        if len(body) > 65_536:
+            raise ValueError("registration request is too large")
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as connection:
+            connection.settimeout(2)
+            connection.connect(socket_path)
+            connection.sendall(struct.pack(">I", len(body)) + body)
+            size = struct.unpack(">I", receive(connection, 4))[0]
+            if not 0 < size <= 65_536:
+                raise ValueError("invalid response size")
+            response = json.loads(receive(connection, size))
+        if not isinstance(response, dict) or response.get("version") != 1 or response.get("id") != request_id:
+            raise ValueError("unexpected runtime response")
+        if response.get("error"):
+            # Do not echo response bodies or credentials into terminal/history.
+            print("Panel is available locally; Chauffeur registration was rejected. "
+                  "Update/restart Chauffeur and run the command from a live agent session. "
+                  "The next panel command will retry.", file=sys.stderr)
+            return
+        result = response.get("result")
+        if not isinstance(result, dict) or not isinstance(result.get("progress"), dict):
+            raise ValueError("missing registration acknowledgement")
+        print("Registered in Chauffeur’s Progress tab.", file=sys.stderr)
+    except (OSError, ValueError, struct.error):
+        print("Panel is available locally; could not register with Chauffeur. "
+              "The next panel command will retry.", file=sys.stderr)
 
 def load(d):
     try:
@@ -194,6 +266,7 @@ def main():
     a.dir = str(Path(a.dir).expanduser().resolve())
     try:
         a.fn(a)
+        register_chauffeur(a.dir)
     except (OSError, ValueError) as exc:
         ap.exit(1, f"error: {exc}\n")
 

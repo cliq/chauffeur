@@ -3,6 +3,7 @@ import Foundation
 public struct CoordinationSkill: Sendable {
     public static let operationalName = "chauffeur"
     public static let orchestratorName = "chauffeur-orchestrator"
+    public static let progressName = "implementation-progress"
 
     public let name: String
     public let displayName: String
@@ -32,8 +33,13 @@ public struct CoordinationSkill: Sendable {
             throw ChauffeurError("skill_bundle", "The bundled \(name) skill is invalid")
         }
         self.name = name; self.displayName = displayName; self.summary = summary
-        guard referenceFiles.keys.allSatisfy({ $0.hasPrefix("references/") && !$0.contains("..") && !$0.hasSuffix("/") }) else {
-            throw ChauffeurError("skill_bundle", "The bundled \(name) skill has invalid reference paths")
+        guard referenceFiles.allSatisfy({ path, data in
+            let parts = path.split(separator: "/", omittingEmptySubsequences: false)
+            return parts.count >= 2 && ["references", "scripts", "assets"].contains(String(parts[0]))
+                && parts.allSatisfy { !$0.isEmpty && $0 != "." && $0 != ".." && !$0.contains("\\") && !$0.contains("\0") }
+                && data.count <= 65_536
+        }) else {
+            throw ChauffeurError("skill_bundle", "The bundled \(name) skill has invalid support files")
         }
         self.version = version; self.dependencies = dependencies; self.document = document; self.referenceFiles = referenceFiles
     }
@@ -42,8 +48,9 @@ public struct CoordinationSkill: Sendable {
 
     public static func bundled(named name: String) throws -> Self {
         let definitions: [String: (String, String, String, [String])] = [
-            operationalName: ("Chauffeur", "Discover sessions, exchange messages, and control delegated work.", "1.3.0", []),
-            orchestratorName: ("Chauffeur Orchestrator", "Execute a saved plan through sequential, visible Chauffeur workers.", "1.0.0", [operationalName])
+            operationalName: ("Chauffeur", "Discover sessions, exchange messages, and control delegated work.", "1.4.0", []),
+            orchestratorName: ("Chauffeur Orchestrator", "Execute a saved plan through sequential, visible Chauffeur workers.", "1.1.0", [operationalName]),
+            progressName: ("Implementation Progress", "Create a progress panel that appears automatically in the session’s Progress tab.", "1.0.0", [])
         ]
         guard let definition = definitions[name] else { throw ChauffeurError("skill_bundle", "The requested bundled skill does not exist") }
         let appBundle = Bundle.main.resourceURL.flatMap { Bundle(url: $0.appendingPathComponent("Chauffeur_ChauffeurCore.bundle")) }
@@ -62,12 +69,21 @@ public struct CoordinationSkill: Sendable {
                 references["references/roles/\(role).md"] = try Data(contentsOf: roleURL)
             }
         }
+        if name == progressName {
+            for (directory, file, ext) in [("scripts", "progress", "py"), ("assets", "index", "html")] {
+                guard let fileURL = (appBundle ?? Bundle.module).url(forResource: file, withExtension: ext,
+                    subdirectory: "Skills/\(name)/\(directory)") else {
+                    throw ChauffeurError("skill_bundle", "The bundled progress panel files are missing. Reinstall Chauffeur")
+                }
+                references["\(directory)/\(file).\(ext)"] = try Data(contentsOf: fileURL)
+            }
+        }
         return try Self(name: name, displayName: definition.0, summary: definition.1, version: definition.2,
                         dependencies: definition.3, document: Data(contentsOf: url), referenceFiles: references)
     }
 
     public static func bundledCatalog() throws -> [Self] {
-        try [bundled(named: operationalName), bundled(named: orchestratorName)]
+        try [bundled(named: operationalName), bundled(named: orchestratorName), bundled(named: progressName)]
     }
 }
 
