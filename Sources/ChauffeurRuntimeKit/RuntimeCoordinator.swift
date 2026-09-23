@@ -316,6 +316,11 @@ public actor RuntimeCoordinator {
                 session.failureCode = stopped ? nil : "terminal_ownership_lost"
                 try await ledger.revoke(sessionID: session.id)
             }
+            // The process keeps running from memory, but anything the CLI later starts
+            // from its own install (Codex's code-mode host) is gone.
+            let kind = session.launch.preset.kind
+            session.executableWarning = session.state.isLive && kind.isAgent && !FileManager.default.isExecutableFile(atPath: session.launch.executablePath)
+                ? "\(kind.displayName) was updated or removed while this session was running, so some of its features may fail. Stop and Resume the session to use the installed version." : nil
             if sessions[session.id] != session { session.updatedAt = Date(); try await persist(session) }
             // Natural successful exits follow the same retention policy as closing
             // a tab. Explicit stop/close requests own their cleanup; failures stay
@@ -921,6 +926,9 @@ public actor RuntimeCoordinator {
         // Preflight must finish before stopping the pane or persisting startup.
         try await worktrees.validateResume(session.launch)
         if session.launch.configurationUsesDefault != true { _ = try Paths.directory(session.launch.configurationPath) }
+        // Resume starts the preset's executable as it resolves now: a recorded real
+        // path (e.g. a versioned Homebrew Caskroom directory) disappears on upgrade.
+        let executable = session.launch.preset.kind.isAgent ? try Paths.executable(session.launch.preset.executable, environment: baseEnvironment) : nil
         try Task.checkCancellation()
         do {
             try await terminals.stop(sessionID: sessionID, force: true)
@@ -935,6 +943,7 @@ public actor RuntimeCoordinator {
             let integration = root.appendingPathComponent("runtime/integration/\(session.id)")
             try FileManager.default.createDirectory(at: integration, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
             let coordination = session.launch.preset.integration != .unavailable
+            if let executable { try await refreshExecutable(&session, to: executable, environment: environment, coordination: coordination) }
             let codexTrust = coordination && session.launch.preset.kind == .codex ? await codexHookTrust(session, environment: environment) : nil
             try Task.checkCancellation()
             session.inboxReminders = coordination ? (session.launch.preset.kind == .claude || codexTrust != nil) : nil
@@ -948,6 +957,16 @@ public actor RuntimeCoordinator {
         } catch {
             throw try await finishFailedStartup(session, error: error)
         }
+    }
+    /// A changed executable is checked like a new launch and its version recorded.
+    private func refreshExecutable(_ session: inout Session, to resolved: String, environment: [String: String], coordination: Bool) async throws {
+        let kind = session.launch.preset.kind
+        session.executableWarning = nil
+        guard resolved != session.launch.executablePath else { return }
+        let capabilities = try await CLIAdapter.capabilities(executable: resolved, kind: kind, environment: environment)
+        try Task.checkCancellation()
+        if coordination && !capabilities.coordination { throw ChauffeurError("integration_unavailable", capabilities.limitation ?? "The installed CLI no longer supports coordination") }
+        session.launch.executablePath = resolved; session.launch.executableVersion = capabilities.version
     }
     /// Hashes that let this launch trust Chauffeur's own Codex hooks, or nil to
     /// launch without them (MCP and notify still work).

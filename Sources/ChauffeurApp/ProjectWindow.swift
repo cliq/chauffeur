@@ -1046,6 +1046,7 @@ private struct SessionStrip: View {
         var lines = [session.title, session.launch.workingDirectory]
         if session.coordinationEnabled { lines.append("Chauffeur coordination on") }
         if let warning = session.conversationWarning { lines.append(warning) }
+        if let warning = session.executableWarning { lines.append(warning) }
         return lines.joined(separator: "\n")
     }
     private func revealSelectedFinished() {
@@ -1064,9 +1065,9 @@ private struct SessionStrip: View {
                             .accessibilityLabel("Coordination on")
                             .accessibilityIdentifier("session.coordination.\(session.id.uuidString)")
                     }
-                    if session.conversationWarning != nil {
+                    if session.conversationWarning != nil || session.executableWarning != nil {
                         Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
-                            .accessibilityLabel("Conversation also open in another session")
+                            .accessibilityLabel(session.executableWarning != nil ? "Agent was updated while running" : "Conversation also open in another session")
                     }
                     Text("\(preset) · \(group)").lineLimit(1)
                 }.font(.caption).foregroundStyle(.secondary)

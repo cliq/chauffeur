@@ -208,6 +208,9 @@ public struct Session: Record, Equatable {
     /// Native hooks deliver inbox reminders to this coordinated session. False
     /// when Codex hook trust could not be established; nil without coordination.
     public var inboxReminders: Bool?
+    /// Set while a live session's executable no longer exists, for example after a
+    /// Homebrew upgrade removed the version it started from.
+    public var executableWarning: String?
     public var parentID: UUID?
     public var delegationID: UUID?
     public var historyProtected: Bool?

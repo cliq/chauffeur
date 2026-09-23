@@ -38,6 +38,7 @@ struct SessionDetailsView: View {
                     if let worktree = model.snapshot.store.worktrees.first(where: { $0.value.id == session.worktreeID })?.value { detail("Branch", worktree.branch); detail("Base commit", worktree.baseCommit) }
                     if let error = session.error { Text(error).font(.callout).foregroundStyle(.orange) }
                     if session.inboxReminders == false { Text("Inbox reminders unavailable for this Codex version. Messages still arrive through chauffeur_inbox.").font(.caption).foregroundStyle(.secondary) }
+                    if let warning = session.executableWarning { Label(warning, systemImage: "exclamationmark.triangle").font(.callout).foregroundStyle(.orange) }
                     if let warning = session.conversationWarning { Label(warning, systemImage: "exclamationmark.triangle").font(.callout).foregroundStyle(.orange) }
                 }
                 section("Execution") {
