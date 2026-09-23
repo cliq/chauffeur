@@ -120,4 +120,28 @@ struct CLIAdapterTests {
         settings = try JSONCoding.decode(JSONValue.self, from: Data(contentsOf: root.appendingPathComponent("settings.json")))
         #expect(settings["promptSuggestionEnabled"].bool == nil)
     }
+
+    @Test func claudeInboxRemindersRunBesideUnchangedStatusHooks() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("chauffeur-inbox-hooks-\(UUID())")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        defer { try? FileManager.default.removeItem(at: root) }
+        let set = PresetSet(name: "Fixture")
+        let preset = AgentPreset(setID: set.id, name: "Fixture", kind: .claude, executable: "/bin/false", configurationDirectory: root.path)
+        let launch = LaunchSnapshot(preset: preset, set: set, executablePath: "/bin/false", executableVersion: "fixture", workingDirectory: root.path, additionalPaths: [])
+        let session = Session(projectID: UUID(), groupID: UUID(), title: "Fixture", launch: launch, folderID: UUID())
+        let ctl = "/Applications/Chauffeur's Tools/chauffeurctl"
+        _ = try CLIAdapter.arguments(session: session, endpoint: "http://127.0.0.1:1/mcp", ctlPath: ctl, integrationDirectory: root, coordination: true, resume: false)
+        let hooks = try JSONCoding.decode(JSONValue.self, from: Data(contentsOf: root.appendingPathComponent("settings.json")))["hooks"]
+        let inbox = #"'/Applications/Chauffeur'"'"'s Tools/chauffeurctl' 'inbox-hook' '--provider' 'claude'"#
+        func commands(_ hook: String) -> [String] { hooks[hook].array.flatMap { $0["hooks"].array.compactMap { $0["command"].string } } }
+        for (hook, event) in [("SessionStart", "running"), ("UserPromptSubmit", "running"), ("PostToolUse", "running"), ("PostToolUseFailure", "running"),
+                              ("Stop", "turn-finished"), ("StopFailure", "needs-attention"), ("Notification", "needs-attention"), ("PermissionRequest", "needs-attention")] {
+            let status = #"'/Applications/Chauffeur'"'"'s Tools/chauffeurctl' 'event' '--session' '\#(session.id.uuidString)' '\#(event)'"#
+            let expected = ["UserPromptSubmit", "PostToolUse", "Stop"].contains(hook) ? [status, inbox] : [status]
+            #expect(commands(hook) == expected, "\(hook)")
+        }
+        let postToolUse = hooks["PostToolUse"].array
+        #expect(postToolUse.allSatisfy { $0["matcher"] == .null }, "MCP tool calls must reach the reminder")
+        #expect(postToolUse.last?["hooks"].array.first?["timeout"].int == 5)
+    }
 }

@@ -72,4 +72,21 @@ struct NativeConversationTests {
             _ = try await fixture.runtime.handle(IPCRequest("stop", params: .object(["sessionID": .string(id.uuidString), "force": .bool(true)])))
         }
     }
+
+    @Test func inboxHintsRequireTheSessionsProviderAndConversation() async throws {
+        let fixture = try await LaunchFixture.make(); defer { fixture.cleanup() }
+        let (launched, token) = try await launch(fixture, fixture.request)
+        func hint(provider: String, native: String?) async throws -> InboxHintSummary {
+            var params: [String: JSONValue] = ["token": .string(token), "provider": .string(provider), "event": .string("UserPromptSubmit")]
+            if let native { params["nativeConversationID"] = .string(native) }
+            return try await fixture.runtime.handle(IPCRequest("inboxHint", params: .object(params))).decode(InboxHintSummary.self)
+        }
+        await #expect(throws: ChauffeurError.self) { try await hint(provider: "codex", native: nil) }
+        #expect(try await hint(provider: "claude", native: launched.id.uuidString.lowercased()) == InboxHintSummary())
+        #expect(try await hint(provider: "claude", native: UUID().uuidString) == InboxHintSummary())
+        await #expect(throws: ChauffeurError.self) {
+            _ = try await fixture.runtime.handle(IPCRequest("inboxHint", params: .object(["token": .string("forged"), "provider": .string("claude"), "event": .string("Stop")])))
+        }
+        _ = try await fixture.stop()
+    }
 }

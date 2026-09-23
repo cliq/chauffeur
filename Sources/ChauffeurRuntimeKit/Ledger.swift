@@ -117,6 +117,15 @@ public actor Ledger {
           session_id TEXT PRIMARY KEY REFERENCES sessions(id), notice_id TEXT NOT NULL,
           delivered INTEGER NOT NULL DEFAULT 0, record TEXT NOT NULL
         );
+        CREATE TABLE IF NOT EXISTS inbox_hints (
+          message_id TEXT PRIMARY KEY REFERENCES messages(id) ON DELETE CASCADE,
+          recipient_id TEXT NOT NULL, event TEXT NOT NULL, native_turn_id TEXT, created_at REAL NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS inbox_hint_receipts (
+          session_id TEXT NOT NULL, event TEXT NOT NULL, native_turn_id TEXT NOT NULL, tool_use_id TEXT NOT NULL,
+          record TEXT NOT NULL, created_at REAL NOT NULL, PRIMARY KEY(session_id,event,native_turn_id,tool_use_id)
+        );
+        CREATE TABLE IF NOT EXISTS inbox_hint_stops (session_id TEXT PRIMARY KEY, native_turn_id TEXT NOT NULL);
         """
         guard sqlite3_exec(connection.handle, schema, nil, nil, nil) == SQLITE_OK else { throw ChauffeurError("ledger_schema", "Cannot initialize coordination ledger") }
         var column: OpaquePointer?
@@ -248,6 +257,8 @@ public actor Ledger {
                 guard !live, ![.reserved, .launching].contains(item.state) else { throw ChauffeurError("active_session", "Close or recover this coordinator's workers before deleting its history") }
             }
             try execute("DELETE FROM attention_notices WHERE session_id=?", [id])
+            try execute("DELETE FROM inbox_hint_receipts WHERE session_id=?", [id])
+            try execute("DELETE FROM inbox_hint_stops WHERE session_id=?", [id])
             try execute("DELETE FROM grants WHERE session_id=?", [id])
             try execute("DELETE FROM message_tombstones WHERE sender_id=?", [id])
             try execute("DELETE FROM messages WHERE sender_id=? OR recipient_id=?", [id, id])
@@ -336,6 +347,44 @@ public actor Ledger {
             }
         }
     }
+    /// Claims queued mail that no hook has mentioned yet, for a metadata-only
+    /// reminder. Message state, `receivedAt` and bodies are untouched: only
+    /// `chauffeur_inbox` delivers. IDs are tracked, never counts, so a new arrival
+    /// is claimed even when an acknowledgement keeps the total the same.
+    public func claimInboxHint(caller: Caller, event: String, nativeTurnID: String? = nil, toolUseID: String? = nil) throws -> InboxHintSummary {
+        try Validation.require(InboxHintFormatter.hookEvents.contains(event), "Unsupported hook event")
+        try Validation.require([nativeTurnID, toolUseID].allSatisfy { ($0?.count ?? 0) <= 200 }, "Hook identifiers are too long")
+        let session = caller.sessionID.uuidString
+        // A provider that retries a hook call gets the answer it was first given.
+        let key: [String?]? = nativeTurnID == nil && toolUseID == nil ? nil : [session, event, nativeTurnID ?? "", toolUseID ?? ""]
+        return try transaction {
+            if let key, let row = try rows("SELECT record FROM inbox_hint_receipts WHERE session_id=? AND event=? AND native_turn_id=? AND tool_use_id=?", key).first {
+                return try decode(InboxHintSummary.self, row[0])
+            }
+            if event == "UserPromptSubmit" { try execute("DELETE FROM inbox_hint_stops WHERE session_id=?", [session]) }
+            // Stop continues a turn at most once. Claude reports no turn ID, so
+            // its flag lasts until the next prompt; mail then waits for that prompt.
+            if event == "Stop", let blocked = try rows("SELECT native_turn_id FROM inbox_hint_stops WHERE session_id=?", [session]).first,
+               nativeTurnID == nil || blocked[0] == nativeTurnID {
+                return InboxHintSummary()
+            }
+            let claimed = try rows("SELECT m.id,m.record FROM messages m WHERE m.recipient_id=? AND m.project_id=? AND m.group_id=? AND m.state='queued' AND NOT EXISTS (SELECT 1 FROM inbox_hints h WHERE h.message_id=m.id) ORDER BY m.rowid", [session] + scopeValues(caller))
+            let now = String(Date().timeIntervalSince1970)
+            var summary = InboxHintSummary()
+            for row in claimed {
+                try execute("INSERT INTO inbox_hints(message_id,recipient_id,event,native_turn_id,created_at) VALUES(?,?,?,?,?)", [row[0], session, event, nativeTurnID, now])
+                summary.count += 1
+                if try decode(Message.self, row[1]).delegationID != nil { summary.results += 1 }
+            }
+            if event == "Stop", summary.count > 0 {
+                summary.block = true
+                try execute("INSERT INTO inbox_hint_stops(session_id,native_turn_id) VALUES(?,?) ON CONFLICT(session_id) DO UPDATE SET native_turn_id=excluded.native_turn_id", [session, nativeTurnID ?? ""])
+            }
+            if let key { try execute("INSERT INTO inbox_hint_receipts(session_id,event,native_turn_id,tool_use_id,record,created_at) VALUES(?,?,?,?,?,?)", key + [try encode(summary), now]) }
+            return summary
+        }
+    }
+    func hintRowCount() throws -> Int { Int(try rows("SELECT COUNT(*) FROM inbox_hints").first?[0] ?? "") ?? 0 }
     private func saveMessage(_ message: Message) throws { try execute("UPDATE messages SET state=?,record=? WHERE id=?", [message.state.rawValue, try encode(message), message.id.uuidString]) }
     public func cancelMessage(_ id: UUID, caller: Caller) throws -> Message {
         try transaction {
@@ -514,6 +563,8 @@ public actor Ledger {
                 try execute("INSERT INTO message_tombstones(sender_id,retry_key,request_hash,message_id) SELECT sender_id,retry_key,request_hash,id FROM messages WHERE id=?", [item.id.uuidString])
                 try execute("DELETE FROM messages WHERE id=?", [item.id.uuidString])
             }
+            // Hint rows go with their message; receipts only answer prompt retries.
+            try execute("DELETE FROM inbox_hint_receipts WHERE created_at<?", [String(date.timeIntervalSince1970)])
             return candidates.count
         }
     }

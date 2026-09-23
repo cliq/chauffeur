@@ -86,6 +86,12 @@ public enum CLIAdapter {
                     }
                     hooks[hook] = .array([.object(group)])
                 }
+                // Metadata-only mail reminders run beside the status hooks. No
+                // matcher on PostToolUse, so Chauffeur's own MCP tools count too.
+                let inboxCommand = [ctlPath, "inbox-hook", "--provider", "claude"].map(shellQuote).joined(separator: " ")
+                for hook in ["UserPromptSubmit", "PostToolUse", "Stop"] {
+                    hooks[hook] = .array((hooks[hook]?.array ?? []) + [.object(["hooks": .array([.object(["type": .string("command"), "command": .string(inboxCommand), "timeout": .number(5)])])])])
+                }
                 var launchSettings: [String: JSONValue] = ["hooks": .object(hooks)]
                 // Generated suggestions render inside Claude's composer and
                 // cannot be distinguished safely from a user draft in plain

@@ -511,6 +511,7 @@ public actor RuntimeCoordinator {
             guard var session = sessions[sessionID] else { throw ChauffeurError("missing_session", "Session not found") }
             session.unread = false; try await persist(session); return .null
         case "event": return try await event(params)
+        case "inboxHint": return try .from(await inboxHint(params))
         case "cancelMessage":
             let messageID = try params.uuid("messageID")
             guard let message = try await ledger.allMessages().first(where: { $0.id == messageID }) else { throw ChauffeurError("missing_message", "Message not found") }
@@ -981,6 +982,16 @@ public actor RuntimeCoordinator {
             }
         }
         session.updatedAt = Date(); try await persist(session, notification: notification); return .object(["accepted": .bool(true)])
+    }
+    /// Native hooks ask whether new mail arrived. Native subagents inherit the
+    /// session's hooks and credential, so a different conversation gets nothing.
+    private func inboxHint(_ params: JSONValue) async throws -> InboxHintSummary {
+        let caller = try await ledger.authenticate(params.requiredString("token"))
+        guard let session = sessions[caller.sessionID], session.state.isLive,
+              session.launch.preset.kind.rawValue == params["provider"].string else { throw ChauffeurError("unauthorized", "Hook does not belong to this session") }
+        if let reported = params["nativeConversationID"].string, session.nativeConversationID != nil,
+           !NativeConversation.same(session.nativeConversationID, reported) { return InboxHintSummary() }
+        return try await ledger.claimInboxHint(caller: caller, event: params.requiredString("event"), nativeTurnID: params["turnID"].string, toolUseID: params["toolUseID"].string)
     }
     private var skillHome: String { baseEnvironment["HOME"] ?? root.path }
     private func managedSkillInstaller() throws -> SkillInstaller {
