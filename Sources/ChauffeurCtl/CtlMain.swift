@@ -18,7 +18,7 @@ import ChauffeurCore
                 chauffeurctl snapshot [--socket PATH]
                 chauffeurctl diagnostics [--socket PATH]
                 chauffeurctl request METHOD [JSON | --file PATH] [--socket PATH]
-                chauffeurctl event --session UUID EVENT [provider-notify-json]
+                chauffeurctl event [--session UUID] EVENT [provider-notify-json]
                 chauffeurctl inbox-hook --provider claude|codex
 
                 request sends structured commands to the per-user service. Native
@@ -36,9 +36,16 @@ import ChauffeurCore
             case "event":
                 // Native hooks call this. A rejected event must not surface as a
                 // provider hook error; the runtime records its own diagnostics.
-                guard args.count >= 3, args[0] == "--session", let sessionID = UUID(uuidString: args[1]), let token = ProcessInfo.processInfo.environment["CHAUFFEUR_SESSION_TOKEN"] else { return }
-                var params: [String: JSONValue] = ["sessionID": .string(sessionID.uuidString), "event": .string(args[2]), "token": .string(token)]
-                let payload = HookPayload.parse(args.count > 3 ? Data(args[3].utf8) : hookInput())
+                // Without --session the credential names the session, which keeps
+                // the command identical across sessions (Codex hook trust hashes it).
+                var params: [String: JSONValue] = [:]
+                if args.first == "--session" {
+                    guard args.count >= 3, let sessionID = UUID(uuidString: args[1]) else { return }
+                    params["sessionID"] = .string(sessionID.uuidString); args.removeFirst(2)
+                }
+                guard let event = args.first, let token = ProcessInfo.processInfo.environment["CHAUFFEUR_SESSION_TOKEN"] else { return }
+                params["event"] = .string(event); params["token"] = .string(token)
+                let payload = HookPayload.parse(args.count > 1 ? Data(args[1].utf8) : hookInput())
                 if let nativeID = payload.conversationID { params["nativeConversationID"] = .string(nativeID) }
                 if let hookEvent = payload.hookEvent { params["hookEvent"] = .string(hookEvent) }
                 if let source = payload.source { params["source"] = .string(source) }

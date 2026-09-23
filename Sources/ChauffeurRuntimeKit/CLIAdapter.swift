@@ -36,7 +36,21 @@ public enum CLIAdapter {
         }
     }
 
-    public static func arguments(session: Session, endpoint: String, ctlPath: String, integrationDirectory: URL, coordination: Bool, resume: Bool) throws -> [String] {
+    /// Codex hooks Chauffeur adds for a coordinated session. The commands carry no
+    /// session ID (the session comes from `CHAUFFEUR_SESSION_TOKEN`), so their
+    /// trust hashes stay the same across sessions.
+    public static func codexHookDefinitions(ctlPath: String) -> [CodexHookTrust.Definition] {
+        let inbox = [ctlPath, "inbox-hook", "--provider", "codex"].map(shellQuote).joined(separator: " ")
+        return [CodexHookTrust.Definition(event: "SessionStart", command: [ctlPath, "event", "session-start"].map(shellQuote).joined(separator: " "))]
+            + ["UserPromptSubmit", "PostToolUse", "Stop"].map { CodexHookTrust.Definition(event: $0, command: inbox) }
+    }
+    public static func codexHookArguments(_ definitions: [CodexHookTrust.Definition]) throws -> [String] {
+        try definitions.flatMap { ["-c", "hooks.\($0.event)=[{hooks=[{type=\"command\",command=\(try tomlLiteral($0.command)),timeout=5}]}]"] }
+    }
+
+    /// `codexHookTrust` holds the `hooks/list` hashes for Chauffeur's Codex hooks.
+    /// Without it, Codex launches with MCP and `notify` only.
+    public static func arguments(session: Session, endpoint: String, ctlPath: String, integrationDirectory: URL, coordination: Bool, resume: Bool, codexHookTrust: [String: String]? = nil) throws -> [String] {
         let preset = session.launch.preset
         let resolved: [String]
         if let snapshotArguments = session.launch.resolvedArguments { resolved = snapshotArguments }
@@ -54,6 +68,11 @@ public enum CLIAdapter {
                 arguments += ["-c", "mcp_servers.chauffeur.tool_timeout_sec=360"]
                 let notify = [ctlPath, "event", "--session", session.id.uuidString, "turn-finished"]
                 arguments += ["-c", "notify=\(try tomlLiteral(notify))"]
+                // A blocking Stop is not the end of a turn, so status still comes from notify.
+                if let codexHookTrust {
+                    arguments += try codexHookArguments(codexHookDefinitions(ctlPath: ctlPath))
+                    arguments += ["-c", try CodexHookTrust.stateArgument(codexHookTrust)]
+                }
             }
             if resume {
                 guard let id = session.nativeConversationID, UUID(uuidString: id) != nil else { throw ChauffeurError("resume_unavailable", "No native conversation ID was recorded") }

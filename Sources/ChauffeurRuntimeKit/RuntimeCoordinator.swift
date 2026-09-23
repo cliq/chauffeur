@@ -869,7 +869,10 @@ public actor RuntimeCoordinator {
                 session.launch.preset.integration = coordination ? .unverified : .unavailable
                 try FileManager.default.createDirectory(at: integration, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
             }
-            let arguments = try CLIAdapter.arguments(session: session, endpoint: endpoint ?? "", ctlPath: ctlPath, integrationDirectory: integration, coordination: coordination, resume: false)
+            let codexTrust = coordination && preset.kind == .codex ? await codexHookTrust(session, environment: environment) : nil
+            try Task.checkCancellation()
+            session.inboxReminders = coordination ? (preset.kind == .claude || codexTrust != nil) : nil
+            let arguments = try CLIAdapter.arguments(session: session, endpoint: endpoint ?? "", ctlPath: ctlPath, integrationDirectory: integration, coordination: coordination, resume: false, codexHookTrust: codexTrust)
             try await persist(session)
             try Task.checkCancellation()
             if preset.kind == .shell {
@@ -930,7 +933,11 @@ public actor RuntimeCoordinator {
             environment["CHAUFFEUR_SOCKET"] = root.appendingPathComponent("runtime/runtime.sock").path
             let integration = root.appendingPathComponent("runtime/integration/\(session.id)")
             try FileManager.default.createDirectory(at: integration, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
-            let arguments = try CLIAdapter.arguments(session: session, endpoint: endpoint ?? "", ctlPath: ctlPath, integrationDirectory: integration, coordination: session.launch.preset.integration != .unavailable, resume: true)
+            let coordination = session.launch.preset.integration != .unavailable
+            let codexTrust = coordination && session.launch.preset.kind == .codex ? await codexHookTrust(session, environment: environment) : nil
+            try Task.checkCancellation()
+            session.inboxReminders = coordination ? (session.launch.preset.kind == .claude || codexTrust != nil) : nil
+            let arguments = try CLIAdapter.arguments(session: session, endpoint: endpoint ?? "", ctlPath: ctlPath, integrationDirectory: integration, coordination: coordination, resume: true, codexHookTrust: codexTrust)
             let pane = try await terminals.spawn(session: session, payload: ExecPayload(executable: session.launch.executablePath, arguments: arguments, environment: environment, directory: session.launch.workingDirectory), scrollback: settings.scrollbackLines)
             try Task.checkCancellation()
             session.processID = pane.processID; session.terminalIdentity = pane.paneID; session.state = .activityUnknown
@@ -940,6 +947,15 @@ public actor RuntimeCoordinator {
         } catch {
             throw try await finishFailedStartup(session, error: error)
         }
+    }
+    /// Hashes that let this launch trust Chauffeur's own Codex hooks, or nil to
+    /// launch without them (MCP and notify still work).
+    private func codexHookTrust(_ session: Session, environment: [String: String]) async -> [String: String]? {
+        let definitions = CLIAdapter.codexHookDefinitions(ctlPath: ctlPath)
+        guard let arguments = try? CLIAdapter.codexHookArguments(definitions) else { return nil }
+        let hashes = await CodexHookTrust.resolve(executable: session.launch.executablePath, version: session.launch.executableVersion, hookArguments: arguments, expected: definitions, environment: environment, cacheDirectory: root.appendingPathComponent("runtime"))
+        if hashes == nil { record(ChauffeurError("integration_unavailable", CodexHookTrust.unavailableMessage)) }
+        return hashes
     }
     private func finishFailedStartup(_ recorded: Session, error: Error) async throws -> Error {
         var session = recorded
@@ -956,8 +972,8 @@ public actor RuntimeCoordinator {
         return failure
     }
     private func event(_ params: JSONValue) async throws -> JSONValue {
-        let sessionID = try params.uuid("sessionID"), token = try params.requiredString("token")
-        let caller = try await ledger.authenticate(token)
+        let caller = try await ledger.authenticate(params.requiredString("token"))
+        let sessionID = params["sessionID"] == .null ? caller.sessionID : try params.uuid("sessionID")
         guard caller.sessionID == sessionID, var session = sessions[sessionID], session.state.isLive else { throw ChauffeurError("unauthorized", "Event does not belong to this session") }
         var notification: AttentionReason?
         switch try params.requiredString("event") {
@@ -966,6 +982,8 @@ public actor RuntimeCoordinator {
         case "needs-attention":
             if session.state != .needsAttention { notification = .input }
             session.state = .needsAttention; session.unread = true
+        // Codex SessionStart only reports which conversation is active.
+        case "session-start": break
         default: throw ChauffeurError("unknown_event", "Unsupported lifecycle event")
         }
         if let nativeID = params["nativeConversationID"].string, UUID(uuidString: nativeID) != nil,
@@ -1204,7 +1222,7 @@ public actor RuntimeCoordinator {
         value["folderID"] = current.map { .string($0.folderID.uuidString) } ?? .null
         value["progress"] = try current?.progress.map { try .from($0) } ?? .null
         let followUpSupported = current.map { TmuxHost.supportsFollowUp(kind: $0.launch.preset.kind, version: $0.launch.executableVersion) } ?? false
-        value["capabilities"] = .object(["scope": .string("currentSession"), "executableVersion": current.map { .string($0.launch.executableVersion) } ?? .null, "followUpSupported": .bool(followUpSupported), "workerExecutionPolicy": .string("delegatedYOLO"), "modelAvailabilityVerified": .bool(false)])
+        value["capabilities"] = .object(["scope": .string("currentSession"), "executableVersion": current.map { .string($0.launch.executableVersion) } ?? .null, "followUpSupported": .bool(followUpSupported), "inboxReminders": .bool(current?.inboxReminders == true), "limitation": current?.inboxReminders == false ? .string(CodexHookTrust.unavailableMessage) : .null, "workerExecutionPolicy": .string("delegatedYOLO"), "modelAvailabilityVerified": .bool(false)])
         return .object(value)
     }
     public func callTool(token: String, name: String, arguments: JSONValue) async throws -> JSONValue {

@@ -38,6 +38,9 @@ struct NativeHooksTests {
         #expect(!NativeConversation.adopts(kind: .claude, hookEvent: "Stop", source: "clear"))
         #expect(!NativeConversation.adopts(kind: .claude, hookEvent: nil, source: nil))
         #expect(!NativeConversation.adopts(kind: .shell, hookEvent: "SessionStart", source: "resume"))
+        for source in ["startup", "clear", "resume", "fork"] { #expect(NativeConversation.adopts(kind: .codex, hookEvent: "SessionStart", source: source)) }
+        #expect(!NativeConversation.adopts(kind: .codex, hookEvent: "SessionStart", source: "compact"))
+        #expect(!NativeConversation.adopts(kind: .claude, hookEvent: "SessionStart", source: "fork"))
     }
 
     @Test func hintOutputMatchesEachHookContract() throws {

@@ -205,6 +205,9 @@ public struct Session: Record, Equatable {
     public var nativeConversationID: String?
     /// Set when `/resume` adopted a conversation another live session also uses.
     public var conversationWarning: String?
+    /// Native hooks deliver inbox reminders to this coordinated session. False
+    /// when Codex hook trust could not be established; nil without coordination.
+    public var inboxReminders: Bool?
     public var parentID: UUID?
     public var delegationID: UUID?
     public var historyProtected: Bool?

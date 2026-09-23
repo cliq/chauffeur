@@ -68,8 +68,9 @@ public enum NativeConversation {
     public static func identityChangingSources(_ kind: CLIKind) -> Set<String> {
         switch kind {
         case .claude: ["clear", "resume"]
-        // Codex does not register SessionStart yet; its sources come from the interactive spike.
-        case .codex, .shell: []
+        // Codex `/new` reports `startup` too (verified in Codex 0.156.1).
+        case .codex: ["startup", "clear", "resume", "fork"]
+        case .shell: []
         }
     }
     public static func adopts(kind: CLIKind, hookEvent: String?, source: String?) -> Bool {
@@ -111,6 +112,8 @@ public enum InboxHintFormatter {
             value = .object(["hookSpecificOutput": .object(["hookEventName": .string(event), "additionalContext": .string(text(summary))])])
         default: return nil
         }
-        return try? JSONCoding.encode(value)
+        // One compact line, as provider hook runners expect.
+        let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
+        return try? encoder.encode(value)
     }
 }
