@@ -60,7 +60,7 @@ import ChauffeurCore
                 Text("Use Stop session to end an execution. Interrupt sends Control-C. Resume conversation starts a new process using its recorded native conversation ID and original profile.")
                 Text("Messages stay in an agent's inbox until it reads them through Chauffeur's MCP tools. If an idle agent needs to read its inbox, prompt it explicitly in its terminal.")
                 Text("A worktree isolates one repository. Select a worktree in the sidebar to see its sessions, launch an agent there, or open a shell. Additional repository paths are shown when launching and use their selected existing checkouts.")
-                Text("Use Set Up Teams on the Welcome screen or Add Team in Settings to connect existing agent configurations, copy selected settings into separate folders, and sign in. Teams can share a configuration. Resume Setup lets you finish pending sign-ins later.")
+                Text("Use Set Up Teams on the Welcome screen for guided setup and sign-in. Add Team in Settings creates one team using existing configuration folders or copies selected settings into new folders. New configurations sign in when you first launch an agent. Teams can share a configuration. Resume Setup lets you finish pending onboarding sign-ins later.")
             }.padding(30).frame(width: 580)
         }.defaultLaunchBehavior(.suppressed).restorationBehavior(.disabled)
     }

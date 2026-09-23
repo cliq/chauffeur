@@ -2,7 +2,7 @@ import Foundation
 import ChauffeurCore
 
 public extension OnboardingCoordinator {
-    static let methods: Set<String> = ["setupInventory", "setupDraft", "saveSetupDraft", "previewSetupCopy", "createSetupConfiguration", "verifySetupAuthentication", "startSetupLogin", "cancelSetupLogin", "attachSetupLogin", "readSetupLogin", "inputSetupLogin", "resizeSetupLogin", "detachSetupLogin", "activeSetupLogin", "finishSetup", "discardSetup"]
+    static let methods: Set<String> = ["previewTeamConfiguration", "addTeam", "setupInventory", "setupDraft", "saveSetupDraft", "previewSetupCopy", "createSetupConfiguration", "verifySetupAuthentication", "startSetupLogin", "cancelSetupLogin", "attachSetupLogin", "readSetupLogin", "inputSetupLogin", "resizeSetupLogin", "detachSetupLogin", "activeSetupLogin", "finishSetup", "discardSetup"]
 
     func handle(_ request: IPCRequest) async throws -> JSONValue {
         let params = request.params
@@ -29,6 +29,8 @@ public extension OnboardingCoordinator {
         guard !mutating else { throw ChauffeurError("setup_busy", "Setup is processing another change. Try again shortly.") }
         mutating = true; defer { mutating = false }
         switch request.method {
+        case "previewTeamConfiguration": return try .from(previewTeamConfiguration(params))
+        case "addTeam": return try .from(await addTeam(params))
         case "saveSetupDraft": return try .from(await saveDraft(params))
         case "previewSetupCopy": return try .from(await preview(params))
         case "createSetupConfiguration": return try .from(await createConfiguration(params))

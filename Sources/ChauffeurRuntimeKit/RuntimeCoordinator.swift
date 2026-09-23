@@ -346,6 +346,12 @@ public actor RuntimeCoordinator {
                 try await onboarding.refreshTeamVersions()
                 await reconcileSkills()
             }
+            if request.method == "addTeam" {
+                let saved = try result.decode(Stored<PresetSet>.self)
+                try await normalizeDefaultTeam(preferring: saved.value.isDefault ? saved.value.id : nil)
+                await reconcileSkills()
+                return try .from(await store.refresh().presetSets.first { $0.value.id == saved.value.id } ?? saved)
+            }
             return result
         }
         let params = request.params

@@ -15,6 +15,40 @@ import ChauffeurCore
         await fixture?.stop()
     }
 
+    func testSettingsAddTeamCancelPreservesExistingTeamsAndDraft() async throws {
+        _ = try await fixture.seedReturningProject(name: "Existing Project")
+        let originalDraft = try await fixture.seedDraft(SetupDraft(teams: [SetupTeam(name: "Unfinished")]))
+        fixture.launch()
+        fixture.app.typeKey(",", modifierFlags: .command)
+        let teams = fixture.app.buttons["Teams"]
+        XCTAssertTrue(teams.waitForExistence(timeout: 10))
+        teams.click()
+        let add = fixture.app.buttons["preset-set.add"]
+        XCTAssertTrue(add.waitForExistence(timeout: 10))
+        add.click()
+        let name = fixture.app.textFields["preset-set.name"]
+        XCTAssertTrue(name.waitForExistence(timeout: 10))
+        XCTAssertFalse(fixture.app.buttons["onboarding.discard"].exists)
+        XCTAssertFalse(fixture.app.buttons["onboarding.continue"].exists)
+        name.replaceText(with: "Cancelled team")
+        fixture.app.buttons["Cancel"].click()
+        XCTAssertTrue(name.waitForNonExistence(timeout: 5))
+        XCTAssertTrue(fixture.app.staticTexts["Existing Team"].firstMatch.exists)
+        let draftAfterCancel = try await fixture.setupDraft()
+        XCTAssertEqual(draftAfterCancel.version, originalDraft.version)
+
+        add.click()
+        XCTAssertTrue(name.waitForExistence(timeout: 5))
+        XCTAssertEqual(name.value as? String, "")
+        name.replaceText(with: "New client")
+        fixture.app.buttons["preset-set.save"].click()
+        XCTAssertTrue(name.waitForNonExistence(timeout: 10))
+        XCTAssertTrue(fixture.app.staticTexts["New client"].firstMatch.waitForExistence(timeout: 10))
+        XCTAssertTrue(fixture.app.staticTexts["Existing Team"].firstMatch.exists)
+        let draftAfterAdd = try await fixture.setupDraft()
+        XCTAssertEqual(draftAfterAdd.version, originalDraft.version)
+    }
+
     func testSingleProfileLoginSummaryAndReturnToWelcome() async throws {
         fixture.launch()
         fixture.openWizard()
