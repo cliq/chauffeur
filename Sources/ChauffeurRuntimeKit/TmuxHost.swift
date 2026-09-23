@@ -229,7 +229,12 @@ public actor TmuxHost {
             // Both supported TUIs distinguish a pasted burst from Return on their
             // event loop. Let them finish accepting the literal text before submit.
             try await Task.sleep(for: .milliseconds(600))
-            let submit = try await command(["send-keys", "-t", session.id.uuidString, "Enter"], socket: socketPath)
+            // Return is pasted too: `send-keys` goes to the pane's mode first, so while the
+            // user scrolls (tmux copy mode) it would be eaten there. A paste reaches the TUI
+            // and leaves the scroll position alone.
+            let returned = try await command(["set-buffer", "-b", bufferName, "--", "\r"], socket: socketPath)
+            guard returned.status == 0 else { throw ChauffeurError("follow_up_delivery_uncertain", "Follow-up delivery could not be confirmed") }
+            let submit = try await command(["paste-buffer", "-d", "-b", bufferName, "-t", session.id.uuidString], socket: socketPath)
             guard submit.status == 0 else { throw ChauffeurError("follow_up_delivery_uncertain", "Follow-up delivery could not be confirmed") }
         } catch {
             _ = try? await command(["delete-buffer", "-b", bufferName], socket: socketPath)

@@ -28,6 +28,20 @@ struct FollowUpComposerTests {
 }
 
 struct FollowUpSubmissionTests {
+    @Test func submitsWhileTheUserIsScrolledBackInCopyMode() async throws {
+        for provider in FollowUpFixture.Provider.allCases {
+            let fixture = try await FollowUpFixture.make(provider: provider)
+            defer { fixture.cleanup() }
+            try await fixture.waitForScreen(provider.marker)
+            // Scrolling the app's terminal puts the tmux pane into copy mode.
+            try await fixture.tmuxCommand(["copy-mode", "-t", fixture.session.id.uuidString])
+            try await fixture.submitWhenReady("while scrolled for \(provider.rawValue)")
+            try await fixture.waitForLog("while scrolled for \(provider.rawValue)")
+            #expect(try await fixture.tmuxCommand(["display-message", "-p", "-t", fixture.session.id.uuidString, "#{pane_in_mode}"]) == "1",
+                    "Submitting leaves the user's scroll position alone")
+        }
+    }
+
     @Test func submitsInSameSessionAndRejectsDraftBusyAndUnsupported() async throws {
         for provider in FollowUpFixture.Provider.allCases {
             let fixture = try await FollowUpFixture.make(provider: provider)
@@ -155,6 +169,15 @@ private struct FollowUpFixture: Sendable {
         let result = try await ProcessRunner.run(tmux, ["-S", socket, "send-keys", "-t", session.id.uuidString, "-l", "--", text])
         try #require(result.status == 0)
     }
+
+    @discardableResult
+    func tmuxCommand(_ arguments: [String]) async throws -> String {
+        let result = try await ProcessRunner.run(tmux, ["-S", socket] + arguments)
+        try #require(result.status == 0)
+        return result.output.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    func submitWhenReady(_ prompt: String) async throws { try await host.submitFollowUp(session: session, prompt: prompt) }
 
     func sendKey(_ key: String) async throws {
         let result = try await ProcessRunner.run(tmux, ["-S", socket, "send-keys", "-t", session.id.uuidString, key])
