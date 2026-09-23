@@ -117,3 +117,38 @@ struct WorkWaitTests {
         #expect(await fresh.ledger.pendingInboxWaitCount == 0)
     }
 }
+
+struct ResultWakeFilterTests {
+    private func pair(_ state: SessionState, _ delegationState: DelegationState) -> (Delegation, Session) {
+        var child = LedgerTests().session(project: UUID(), group: UUID(), parent: UUID())
+        child.state = state
+        var item = Delegation(scope: GroupScope(projectID: child.projectID, groupID: child.groupID), parentID: child.parentID!, childID: child.id,
+                              task: "T3.0", presetID: UUID(), folderID: UUID(), shareCheckout: true)
+        item.state = delegationState
+        return (item, child)
+    }
+
+    @Test func aWorkerThatStoppedWithoutReportingWakesTheCoordinator() {
+        for state in [SessionState.exited, .failed, .interrupted] {
+            let (item, child) = pair(state, .running)
+            #expect(RuntimeCoordinator.stopNeedsWake(item, child: child, closing: false))
+        }
+        let (item, child) = pair(.turnFinished, .running)
+        #expect(!RuntimeCoordinator.stopNeedsWake(item, child: child, closing: false))
+    }
+
+    @Test func reportedOrDeliberatelyClosedWorkersDoNot() {
+        let (reported, child) = pair(.interrupted, .resultReported)
+        #expect(!RuntimeCoordinator.stopNeedsWake(reported, child: child, closing: false))
+        // Accepting a result closes the worker: the delegation becomes `exited` and the session `interrupted`.
+        var accepted = pair(.interrupted, .exited)
+        accepted.0.closureOutcome = "accepted"
+        #expect(!RuntimeCoordinator.stopNeedsWake(accepted.0, child: accepted.1, closing: false))
+        var closedSession = pair(.interrupted, .exited)
+        closedSession.1.closureOutcome = "abandoned"
+        #expect(!RuntimeCoordinator.stopNeedsWake(closedSession.0, child: closedSession.1, closing: false))
+        // While the close is still running, before either record says so.
+        let closing = pair(.interrupted, .running)
+        #expect(!RuntimeCoordinator.stopNeedsWake(closing.0, child: closing.1, closing: true))
+    }
+}

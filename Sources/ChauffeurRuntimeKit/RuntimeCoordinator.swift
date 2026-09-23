@@ -348,16 +348,25 @@ public actor RuntimeCoordinator {
         session.launch.preset.kind == .codex && session.coordinationEnabled && settings.wakeIdleCoordinators
             && TmuxHost.supportsFollowUp(kind: .codex, version: session.launch.executableVersion)
     }
+    /// A worker that stopped is news only if it didn't report and nobody closed it on purpose:
+    /// closing a worker (usually after accepting its result) interrupts it too.
+    static func stopNeedsWake(_ delegation: Delegation, child: Session, closing: Bool) -> Bool {
+        [.exited, .failed, .interrupted].contains(child.state) && delegation.state != .resultReported
+            && delegation.closureOutcome == nil && child.closureOutcome == nil && !closing
+    }
     private func wakeIdleCoordinators() async {
         let candidates = sessions.values.filter { resultWakeApplies($0) && $0.state == .turnFinished && $0.waiting == nil && !launching.contains($0.id) && !resultWakes.contains($0.id) }
+        // A resumed worker's next stop is news again.
+        wakeStatesSent = wakeStatesSent.filter { sessions[$0.key].map { !$0.state.isLive } ?? false }
         guard !candidates.isEmpty, let delegations = try? await ledger.allDelegations() else { return }
+        func unreportedStop(_ item: Delegation) -> Session? {
+            guard let child = sessions[item.childID], wakeStatesSent[child.id] != child.state,
+                  Self.stopNeedsWake(item, child: child, closing: controlRequests.contains(child.id) || stopRequests.contains(child.id)) else { return nil }
+            return child
+        }
         for coordinator in candidates {
             if let last = lastWakeAttempt[coordinator.id], Date().timeIntervalSince(last) < 5 { continue }
-            let stopped = delegations.filter { $0.controllingParentID == coordinator.id }.compactMap { item -> (Delegation, Session)? in
-                guard let child = sessions[item.childID], [.exited, .failed, .interrupted].contains(child.state),
-                      wakeStatesSent[child.id] != child.state, item.state != .resultReported else { return nil }
-                return (item, child)
-            }
+            let stopped = delegations.filter { $0.controllingParentID == coordinator.id }.compactMap { item in unreportedStop(item).map { (item, $0) } }
             guard let caller = try? await ledger.callerFor(sessionID: coordinator.id) else { continue }
             let results = (try? await ledger.claimResultWake(caller: caller)) ?? []
             guard !results.isEmpty || !stopped.isEmpty else { continue }
@@ -373,6 +382,8 @@ public actor RuntimeCoordinator {
             do {
                 try await terminals.validateFollowUp(session: coordinator)
                 guard sessions[coordinator.id]?.state == .turnFinished, sessions[coordinator.id]?.updatedAt == coordinator.updatedAt else { throw ChauffeurError("follow_up_busy", "Coordinator activity changed") }
+                // A close or resume may have started while validation awaited the terminal.
+                guard stopped.allSatisfy({ unreportedStop($0.0)?.state == $0.1.state }) else { throw ChauffeurError("follow_up_busy", "Worker state changed") }
                 try await terminals.submitFollowUp(session: coordinator, prompt: lines.joined(separator: " "))
                 for (_, child) in stopped { wakeStatesSent[child.id] = child.state }
                 if var current = sessions[coordinator.id], current.updatedAt == coordinator.updatedAt {
