@@ -1075,6 +1075,7 @@ public actor RuntimeCoordinator {
         do {
             let installer = try managedSkillInstaller()
             try await installer.publish()
+            guard SkillInstaller.linksAllowed(dataRoot: root.path, defaultDataRoot: Paths.applicationSupport.path, home: skillHome, accountHome: SkillInstaller.accountHome) else { return }
             let teams = await store.refresh().presetSets.map(\.value)
             let statuses = await installer.reconcile(directories: SkillInstaller.directories(teams: teams, home: skillHome))
             for status in statuses where status.state == .conflict || status.state == .unavailable {

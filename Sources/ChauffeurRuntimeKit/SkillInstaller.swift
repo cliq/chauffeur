@@ -20,6 +20,13 @@ public actor SkillInstaller {
     }
 
     /// Codex shares its user skills across profiles; Claude uses each team's home.
+    /// A runtime on a private data directory (tests, smokes) links skills only into
+    /// a private HOME. Links into the account's own homes would point at that data
+    /// directory and dangle once it is removed, which native CLIs report as invalid skills.
+    public static func linksAllowed(dataRoot: String, defaultDataRoot: String, home: String, accountHome: String?) -> Bool {
+        Paths.canonical(dataRoot) == Paths.canonical(defaultDataRoot) || accountHome.map { Paths.canonical(home) != Paths.canonical($0) } ?? true
+    }
+    public static var accountHome: String? { getpwuid(getuid()).flatMap { $0.pointee.pw_dir.map { String(cString: $0) } } }
     public static func directories(teams: [PresetSet], home: String) -> [String] {
         Set([Paths.canonical(URL(fileURLWithPath: home).appendingPathComponent(".agents").path)]
             + teams.filter { !$0.archived }.map { $0.configurationDirectory(for: .claude, home: home) })

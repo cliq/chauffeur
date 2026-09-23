@@ -116,4 +116,13 @@ struct SkillInstallerTests {
         #expect((try? FileManager.default.destinationOfSymbolicLink(atPath: second.path)) != nil)
         #expect(FileManager.default.fileExists(atPath: first.path)) // Changing teams does not remove another user's discovery path.
     }
+
+    @Test func privateDataDirectoriesNeverLinkIntoTheAccountHome() {
+        let account = "/Users/someone", appData = "/Users/someone/Library/Application Support/Chauffeur"
+        #expect(SkillInstaller.linksAllowed(dataRoot: appData, defaultDataRoot: appData, home: account, accountHome: account))
+        #expect(!SkillInstaller.linksAllowed(dataRoot: "/tmp/chauffeur-smoke", defaultDataRoot: appData, home: account, accountHome: account),
+                "A smoke's runtime would leave dangling links in ~/.agents and ~/.claude")
+        #expect(SkillInstaller.linksAllowed(dataRoot: "/tmp/chauffeur-smoke", defaultDataRoot: appData, home: "/tmp/chauffeur-smoke/home", accountHome: account))
+        #expect(SkillInstaller.linksAllowed(dataRoot: "/tmp/x", defaultDataRoot: appData, home: account, accountHome: nil))
+    }
 }
