@@ -546,6 +546,12 @@ public actor RuntimeCoordinator {
             try await worktrees.prune(repositoryPath: folder.canonicalPath)
             await reconcileWorktrees()
             return try .from(repositoryInventories)
+        case "listGitRefs", "resolveGitCommit":
+            let snapshot = await store.current(), projectID = try params.uuid("projectID"), folderID = try params.uuid("folderID")
+            guard let folder = snapshot.projects.first(where: { $0.value.id == projectID })?.value.folders.first(where: { $0.id == folderID && $0.registered }) else { throw ChauffeurError("missing_folder", "Select a registered repository") }
+            let reader = GitRefReader()
+            if request.method == "listGitRefs" { return try .from(await reader.list(at: folder.canonicalPath)) }
+            return try .from(await reader.resolve(params.requiredString("query"), at: folder.canonicalPath))
         case "previewWorktree":
             let snapshot = await store.current(), projectID = try params.uuid("projectID"), folderID = try params.uuid("folderID")
             guard let folder = snapshot.projects.first(where: { $0.value.id == projectID })?.value.folders.first(where: { $0.id == folderID && $0.registered }) else { throw ChauffeurError("missing_folder", "Select a registered repository") }

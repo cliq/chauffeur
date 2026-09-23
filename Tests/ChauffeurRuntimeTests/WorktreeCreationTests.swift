@@ -4,6 +4,20 @@ import ChauffeurCore
 @testable import ChauffeurRuntimeKit
 
 struct WorktreeCreationTests {
+    @Test func refPickerOperationsResolveRegisteredRepositoriesOnly() async throws {
+        let fixture = try await Fixture.make(); defer { fixture.cleanup() }
+        let params: JSONValue = .object(["projectID": .string(fixture.project.id.uuidString), "folderID": .string(fixture.project.folders[0].id.uuidString)])
+        let refs = try await fixture.runtime.handle(IPCRequest("listGitRefs", params: params)).decode(GitRefSnapshot.self)
+        #expect(refs.head != nil)
+        for method in ["listGitRefs", "resolveGitCommit"] {
+            let invalid: JSONValue = .object(["projectID": .string(fixture.project.id.uuidString), "folderID": .string(UUID().uuidString), "query": .string("abcd")])
+            do {
+                _ = try await fixture.runtime.handle(IPCRequest(method, params: invalid))
+                Issue.record("An unknown repository should be rejected")
+            } catch let error as ChauffeurError { #expect(error.code == "missing_folder") }
+        }
+    }
+
     @Test func previewValidatesBranchesAndMatchesCreationAfterPathCollisions() async throws {
         let fixture = try await Fixture.make(); defer { fixture.cleanup() }
         func preview(_ branch: String) async throws -> String {

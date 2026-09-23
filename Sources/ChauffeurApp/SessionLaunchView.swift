@@ -26,6 +26,7 @@ struct SessionLaunchView: View {
     private struct DestinationRequest: Equatable {
         let folderID: UUID
         let branch: String
+        let baseRef: String
         let attempt: Int
     }
     @State private var previewAttempt = 0
@@ -61,7 +62,7 @@ struct SessionLaunchView: View {
     }
     private var destinationRequest: DestinationRequest? {
         guard checkout == .newWorktree, model.online, let folderID, !branch.isEmpty else { return nil }
-        return DestinationRequest(folderID: folderID, branch: branch, attempt: previewAttempt)
+        return DestinationRequest(folderID: folderID, branch: branch, baseRef: baseRef, attempt: previewAttempt)
     }
     private var destination: String { destinationRequest != nil && previewedRequest == destinationRequest ? previewPath : "" }
     private var destinationFailure: String? { destinationRequest != nil && previewedRequest == destinationRequest ? previewFailure : nil }
@@ -231,6 +232,7 @@ struct SessionLaunchView: View {
                 Picker("Repository", selection: Binding(get: { folderID }, set: { selected in
                     guard selected != folderID else { return }
                     folderID = selected
+                    baseRef = "HEAD"
                     checkout = startsInNewWorktree ? .newWorktree : .repository
                     shared = false
                 })) {
@@ -247,14 +249,19 @@ struct SessionLaunchView: View {
                     if value != .newWorktree { branchFocused = false }
                 }
                 if checkout == .newWorktree {
-                    TextField("New branch", text: branchBinding).autocorrectionDisabled().accessibilityIdentifier("session.branch")
-                        .focused($branchFocused)
-                        .task {
-                            await Task.yield()
-                            guard !Task.isCancelled else { return }
-                            branchFocused = true
+                    HStack(spacing: 8) {
+                        TextField("New branch", text: branchBinding).autocorrectionDisabled().accessibilityIdentifier("session.branch")
+                            .focused($branchFocused)
+                            .task {
+                                await Task.yield()
+                                guard !Task.isCancelled else { return }
+                                branchFocused = true
+                            }
+                        Text("from").foregroundStyle(.secondary)
+                        if let folderID {
+                            RefPicker(projectID: project.id, folderID: folderID, selection: $baseRef)
                         }
-                    TextField("Base ref", text: $baseRef).autocorrectionDisabled()
+                    }
                 }
             }
             if checkout == .newWorktree { Text("Creates a separate checkout for this repository, then starts your agent there.").font(.caption).foregroundStyle(.secondary) }

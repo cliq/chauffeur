@@ -113,6 +113,12 @@ with tempfile.TemporaryDirectory(prefix='chauffeur-quick-', dir='/tmp') as direc
     def control(identifier):
         return next((c for c in controls() if c['identifier'] == identifier), None)
 
+    def screenshot_popover(name):
+        popover = next(c for c in controls() if c['role'] == 'AXPopover')
+        frame = popover['frame']
+        rectangle = ','.join(str(round(frame[key])) for key in ['x', 'y', 'width', 'height'])
+        subprocess.run(['/usr/sbin/screencapture', '-x', '-R', rectangle, str(artifacts / (name + '.png'))], check=True)
+
     def ax(operation, **fields):
         result = accessibility(operation, **fields)
         assert result.get('performed'), result
@@ -122,6 +128,12 @@ with tempfile.TemporaryDirectory(prefix='chauffeur-quick-', dir='/tmp') as direc
         repo = root / 'repo 日本語'; repo.mkdir()
         for args in [['init', '-b', 'main'], ['config', 'core.hooksPath', '/dev/null'], ['config', 'commit.gpgsign', 'false'], ['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '--allow-empty', '-m', 'Initial']]:
             subprocess.run(['/usr/bin/git', '-C', str(repo), *args], capture_output=True, check=True)
+        for args in [['branch', 'feature/nested/8524-picker'], ['tag', 'v4.19'], ['update-ref', 'refs/remotes/origin/feature/8524-picker', 'HEAD']]:
+            subprocess.run(['/usr/bin/git', '-C', str(repo), *args], capture_output=True, check=True)
+        # A realistic ref count without creating extra checkouts.
+        subprocess.run(['/usr/bin/git', '-C', str(repo), 'update-ref', '--stdin'],
+                       input=''.join(f'create refs/heads/archive/item-{index:02} HEAD\n' for index in range(70)),
+                       text=True, capture_output=True, check=True)
         # Enough existing worktrees to put the new, alphabetically later row
         # below the viewport unless creation really scrolls it into view.
         for index in range(22):
@@ -155,7 +167,8 @@ else:
         call('savePreset', {'record': {'id': default_id, 'setID': set_id, 'name': 'Default agent', 'kind': 'claude', 'executable': str(fake), 'configurationDirectory': str(root), 'arguments': [], 'integration': 'unverified', 'archived': False}})
         preset_set = call('snapshot')['store']['presetSets'][0]
         call('saveProject', {'record': {'id': project_id, 'name': 'Quick Session Fixture', 'presetSetID': set_id, 'folders': [{'id': folder_id, 'name': repo.name, 'selectedPath': str(repo), 'canonicalPath': str(repo), 'availability': 'available', 'registered': True}, {'id': other_folder_id, 'name': other_repo.name, 'selectedPath': str(other_repo), 'canonicalPath': str(other_repo), 'availability': 'available', 'registered': True}], 'groups': [{'id': uid(), 'name': 'Default', 'isDefault': True, 'archived': False, 'createdAt': now, 'updatedAt': now}], 'archived': False, 'createdAt': now, 'updatedAt': now, 'lastOpenedAt': now}})
-        subprocess.run([str(binary_dir / 'chauffeur-launcher'), str(repo)], capture_output=True, check=True)
+        launch_environment = {**os.environ, 'CHAUFFEUR_SOCKET': socket_path, 'CHAUFFEUR_QUICK_SESSION_PROBE_DIR': str(root)}
+        subprocess.run([str(binary_dir / 'chauffeur-launcher'), str(repo)], env=launch_environment, capture_output=True, check=True)
         ready = wait_for(lambda: (s if (s := state())['online'] and s['ready'] else None), 'project window ready')
         app_pid = ready['processID']
         call('refreshWorktrees'); command('refresh')
@@ -170,6 +183,58 @@ else:
         command('open', projectID=project_id, folderID=folder_id)
         wait_for(lambda: state()['sheetWindow'] and state()['sheet'], 'new worktree sheet visible')
         assert state()['sheet']['presetID'] == default_id
+        # Exercise the actual popover field editor: filtered refs, commit lookup,
+        # Return selection, and Escape isolation from the parent launch sheet.
+        ax('press', identifier='session.base-ref')
+        wait_for(lambda: control('ref-picker.filter'), 'base ref picker open')
+        wait_for(lambda: control('ref-picker.row.archive'), 'browse folders loaded')
+        ax('press', identifier='ref-picker.row.archive')
+        wait_for(lambda: (c := control('ref-picker.row.archive')) and 'expanded' in c['label'], 'folder expands')
+        ax('key', identifier='ref-picker.filter', keyCode=53)
+        wait_for(lambda: control('ref-picker.filter') is None and control('session.base-ref'), 'close expanded picker')
+        ax('press', identifier='session.base-ref')
+        wait_for(lambda: (c := control('ref-picker.row.archive')) and 'expanded' in c['label'], 'folder expansion survives reopening')
+        screenshot_popover('branch-picker-browse')
+        type_text('ref-picker.filter', '8524')
+        wait_for(lambda: control('ref-picker.row.refs/heads/feature/nested/8524-picker'), 'local substring match')
+        assert control('ref-picker.row.refs/remotes/origin/feature/8524-picker')
+        screenshot_popover('branch-picker-filter')
+        ax('key', identifier='ref-picker.filter', keyCode=125)
+        ax('key', identifier='ref-picker.filter', keyCode=36)
+        wait_for(lambda: control('ref-picker.filter') is None, 'Return picks ref and closes popover')
+        wait_for(lambda: (c := control('session.base-ref')) and c['value'] == 'origin/feature/8524-picker', 'Down selects remote branch')
+        assert state()['sheetWindow'], 'Return must not launch the session'
+        ax('press', identifier='session.base-ref')
+        wait_for(lambda: control('ref-picker.filter'), 'reopen base picker')
+        type_text('ref-picker.filter', 'v4.19')
+        wait_for(lambda: control('ref-picker.row.refs/tags/v4.19'), 'tag match')
+        ax('key', identifier='ref-picker.filter', keyCode=51, modifiers=['command'])
+        wait_for(lambda: (c := control('ref-picker.filter')) and not c['value'], 'Command-Delete clears filter')
+        type_text('ref-picker.filter', 'v4.19')
+        wait_for(lambda: control('ref-picker.row.refs/tags/v4.19'), 'tag match after clearing')
+        ax('key', identifier='ref-picker.filter', keyCode=36)
+        wait_for(lambda: control('ref-picker.filter') is None, 'tag selection closes popover')
+        wait_for(lambda: (c := control('session.base-ref')) and c['value'] == 'v4.19', 'picked tag shown on trigger')
+        ax('press', identifier='session.base-ref')
+        wait_for(lambda: control('ref-picker.filter'), 'open for SHA lookup')
+        sha = subprocess.check_output(['/usr/bin/git', '-C', str(repo), 'rev-parse', 'HEAD'], text=True).strip()
+        type_text('ref-picker.filter', sha[:8])
+        wait_for(lambda: control('ref-picker.row.' + sha), 'abbreviated SHA resolves')
+        ax('key', identifier='ref-picker.filter', keyCode=36)
+        wait_for(lambda: control('ref-picker.filter') is None, 'commit selection closes popover')
+        wait_for(lambda: (c := control('session.base-ref')) and c['value'] == sha, 'picked SHA shown on trigger')
+        ax('press', identifier='session.base-ref')
+        wait_for(lambda: control('ref-picker.filter'), 'open for empty state')
+        type_text('ref-picker.filter', 'no-such-branch-picker')
+        wait_for(lambda: any('No branches or tags match' in c['value'] or 'No branches or tags match' in c['label'] for c in controls()), 'no-match message')
+        ax('key', identifier='ref-picker.filter', keyCode=53)
+        wait_for(lambda: control('ref-picker.filter') is None, 'Escape closes only popover')
+        wait_for(lambda: (c := control('session.base-ref')) and c['value'] == sha, 'Escape preserves selection')
+        assert state()['sheetWindow']
+        ax('key', identifier='session.title', keyCode=53)
+        wait_for(lambda: state()['sheetWindow'] is None, 'second Escape closes sheet')
+        command('open', projectID=project_id, folderID=folder_id)
+        wait_for(lambda: state()['sheetWindow'] and control('session.title'), 'reopen launch sheet')
         # Real text controls: suggestions keep following the title until a
         # manual branch is supplied, and clearing it restores automatic naming.
         type_text('session.title', 'Fix login')
@@ -258,6 +323,10 @@ else:
         assert len(call('snapshot')['sessions']) == len(updated['sessions'])
         assert state()['error'] is None
         summary = {'passed': True, 'nativeSheetOpenedFromRepository': True, 'nativeTitleDerivedBranch': True, 'manualOverridePreserved': True, 'clearingOverrideRestoresSuggestion': True, 'emptySanitizedTitleBlocked': True, 'invalidBranchPreviewBlocksCreation': True, 'invalidBranchDoesNotCreateCheckout': True, 'failedAgentRetainsWorktree': True, 'freshLaunchReusesSelectedWorktree': True, 'initialTaskPreserved': True, 'sessionSelectedAfterLaunch': True, 'worktreesCreated': 1, 'lastSuccessfulPresetSelected': True, 'failedLaunchDoesNotChangePreference': True, 'presetRevisionAdvanced': True, 'runningLaunchSnapshotUnchanged': True, 'emptySetSavedButCannotLaunch': True}
+        summary['baseRefPickerBranchesTagsAndSHA'] = True
+        summary['baseRefFolderExpansionPersists'] = True
+        summary['baseRefReturnDoesNotLaunch'] = True
+        summary['baseRefEscapePreservesSheetAndSelection'] = True
         summary['destinationFollowsRepository'] = True
         summary['createdWorktreeRevealsHiddenSidebar'] = True
         summary['createdWorktreeExpandsCollapsedRepository'] = True
@@ -270,6 +339,7 @@ else:
             shutil.copy(root / 'quick-state.json', artifacts / 'last-state.json')
             app_pid = state()['processID']
         if app_pid:
+            (artifacts / 'last-controls.json').write_text(json.dumps(controls(), indent=2))
             subprocess.run(['/bin/kill', '-TERM', str(app_pid)], capture_output=True)
         subprocess.run(['tmux', '-S', str(root / 'runtime/tmux.sock'), 'kill-server'], capture_output=True)
         runtime.terminate()
