@@ -332,4 +332,39 @@ struct WorktreeRemoteStatusTests {
         status = await manager.remoteStatus(at: tree.path)
         #expect(status.remoteBranch == "origin/review" && status.unpushedCommits == 0)
     }
+
+    /// Git LFS is a checkout filter installed outside /usr/bin (Homebrew puts it in
+    /// /opt/homebrew/bin). Creating a worktree must find it on the user's PATH.
+    @Test func newWorktreesRunCheckoutFiltersFromTheUsersPath() async throws {
+        let root = URL(fileURLWithPath: "/tmp/chauffeur-filter-\(UUID())").resolvingSymlinksInPath()
+        let repo = root.appendingPathComponent("repo"), bin = root.appendingPathComponent("bin")
+        for directory in [repo, bin] { try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true) }
+        defer { try? FileManager.default.removeItem(at: root) }
+        let filter = bin.appendingPathComponent("fixture-filter")
+        try "#!/bin/sh\nexec /bin/cat\n".write(to: filter, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: filter.path)
+        func git(_ args: [String]) async throws {
+            let result = try await ProcessRunner.run("/usr/bin/git", ["-C", repo.path, "-c", "core.hooksPath=/dev/null", "-c", "commit.gpgsign=false"] + args,
+                                                     environment: ["PATH": "\(bin.path):/usr/bin:/bin", "HOME": root.path])
+            try #require(result.status == 0, "Git fixture failed: \(result.error)")
+        }
+        try await git(["init", "-b", "main"])
+        // Like `git lfs install`: a required filter the checkout cannot skip.
+        for (key, value) in [("filter.fixture.smudge", "fixture-filter"), ("filter.fixture.clean", "fixture-filter"), ("filter.fixture.required", "true")] {
+            try await git(["config", key, value])
+        }
+        try "*.bin filter=fixture\n".write(to: repo.appendingPathComponent(".gitattributes"), atomically: true, encoding: .utf8)
+        try "payload\n".write(to: repo.appendingPathComponent("asset.bin"), atomically: true, encoding: .utf8)
+        try await git(["add", "."])
+        try await git(["-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "-m", "Asset"])
+        let folder = ProjectFolder(path: repo.path)
+
+        let system = WorktreeManager(root: root.appendingPathComponent("system"))
+        await #expect(throws: ChauffeurError.self, "Without the user's PATH the filter is missing, as reported") {
+            _ = try await system.create(projectID: UUID(), folder: folder, branch: "feature/system", baseRef: "HEAD")
+        }
+        let manager = WorktreeManager(root: root.appendingPathComponent("managed"), searchPath: "\(bin.path):/usr/bin:/bin")
+        let worktree = try await manager.create(projectID: UUID(), folder: folder, branch: "feature/lfs", baseRef: "HEAD")
+        #expect(try String(contentsOf: URL(fileURLWithPath: worktree.path).appendingPathComponent("asset.bin"), encoding: .utf8) == "payload\n")
+    }
 }

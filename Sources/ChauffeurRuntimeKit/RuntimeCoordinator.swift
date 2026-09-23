@@ -73,7 +73,8 @@ public actor RuntimeCoordinator {
         ledger = try Ledger(path: root.appendingPathComponent("runtime/ledger.sqlite").path)
         terminals = try TmuxHost(runtimeDirectory: root.appendingPathComponent("runtime"), ctlPath: ctlPath, environment: environment, sessionsApp: sessionsApp)
         let legacyWorktreeRoot = root.appendingPathComponent("worktrees")
-        worktrees = WorktreeManager(root: worktreeRoot ?? legacyWorktreeRoot, legacyRoots: worktreeRoot == nil ? [] : [legacyWorktreeRoot])
+        worktrees = WorktreeManager(root: worktreeRoot ?? legacyWorktreeRoot, legacyRoots: worktreeRoot == nil ? [] : [legacyWorktreeRoot],
+                                    searchPath: environment["PATH"].flatMap { $0.isEmpty ? nil : $0 } ?? "/usr/bin:/bin")
         snapshots = try SnapshotStore(root: root.appendingPathComponent("runtime/snapshots"))
         onboarding = try OnboardingCoordinator(store: store, root: root, environment: environment)
     }

@@ -9,16 +9,20 @@ public actor WorktreeManager {
     /// new checkouts are only created under `root`.
     private let legacyRoots: [URL]
     private var reservations = Set<String>()
-    public init(root: URL, legacyRoots: [URL] = []) {
+    /// Git runs checkout filters such as `git-lfs` from this search path, so it
+    /// must include where the user installed them (for example /opt/homebrew/bin).
+    private let searchPath: String
+    public init(root: URL, legacyRoots: [URL] = [], searchPath: String = "/usr/bin:/bin") {
         self.root = URL(fileURLWithPath: Paths.canonical(root.path))
         self.legacyRoots = legacyRoots.map { URL(fileURLWithPath: Paths.canonical($0.path)) }
+        self.searchPath = searchPath
     }
     /// Whether a canonical path lies inside the current or a legacy managed root.
     public func isManagedPath(_ path: String) -> Bool {
         ([root] + legacyRoots).contains { path.hasPrefix($0.path + "/") }
     }
-    private func git(_ directory: String, _ arguments: [String]) async throws -> String {
-        let result = try await ProcessRunner.run("/usr/bin/git", ["-C", directory] + arguments, environment: ["PATH": "/usr/bin:/bin", "HOME": FileManager.default.homeDirectoryForCurrentUser.path, "LC_ALL": "en_US.UTF-8", "GIT_TERMINAL_PROMPT": "0"], timeout: 30)
+    private func git(_ directory: String, _ arguments: [String], timeout: TimeInterval = 30) async throws -> String {
+        let result = try await ProcessRunner.run("/usr/bin/git", ["-C", directory] + arguments, environment: ["PATH": searchPath, "HOME": FileManager.default.homeDirectoryForCurrentUser.path, "LC_ALL": "en_US.UTF-8", "GIT_TERMINAL_PROMPT": "0"], timeout: timeout)
         guard result.status == 0, !result.outputTruncated else {
             throw ChauffeurError("git_failed", String(result.error.prefix(2000)).trimmingCharacters(in: .whitespacesAndNewlines), path: directory)
         }
@@ -213,7 +217,7 @@ public actor WorktreeManager {
         let destination = destination(repositoryID: repoID, branch: branch)
         reservations.insert(destination.path); defer { reservations.remove(destination.path) }
         try FileManager.default.createDirectory(at: destination.deletingLastPathComponent(), withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
-        _ = try await git(repository, ["worktree", "add", "-b", branch, "--", destination.path, baseCommit])
+        _ = try await git(repository, ["worktree", "add", "-b", branch, "--", destination.path, baseCommit], timeout: 600)  // checkout filters (LFS) may download
         var result = Worktree(projectID: projectID, folderID: folder.id, repositoryID: repoID, path: Paths.canonical(destination.path), repositoryPath: repository, branch: branch, baseCommit: baseCommit, managed: true)
         result.baseBranch = baseBranchName
         result.gitIdentity = try? await identity(at: result.path)
