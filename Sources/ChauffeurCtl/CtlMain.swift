@@ -33,21 +33,33 @@ import ChauffeurCore
                 else { data = Data((args.first ?? "{}").utf8) }
                 request = IPCRequest(method, params: try JSONCoding.decode(JSONValue.self, from: data))
             case "event":
-                guard args.count >= 3, args[0] == "--session", let sessionID = UUID(uuidString: args[1]), let token = ProcessInfo.processInfo.environment["CHAUFFEUR_SESSION_TOKEN"] else { throw ChauffeurError("usage", "event requires a session ID, event, and session credential environment") }
+                // Native hooks call this. A rejected event must not surface as a
+                // provider hook error; the runtime records its own diagnostics.
+                guard args.count >= 3, args[0] == "--session", let sessionID = UUID(uuidString: args[1]), let token = ProcessInfo.processInfo.environment["CHAUFFEUR_SESSION_TOKEN"] else { return }
                 var params: [String: JSONValue] = ["sessionID": .string(sessionID.uuidString), "event": .string(args[2]), "token": .string(token)]
-                var payload: JSONValue = .null
-                if args.count > 3 { payload = (try? JSONCoding.decode(JSONValue.self, from: Data(args[3].utf8))) ?? .null }
-                else if isatty(STDIN_FILENO) == 0, let data = try FileHandle.standardInput.read(upToCount: 65_536) { payload = (try? JSONCoding.decode(JSONValue.self, from: data)) ?? .null }
-                if let nativeID = payload["thread-id"].string ?? payload["session_id"].string, UUID(uuidString: nativeID) != nil { params["nativeConversationID"] = .string(nativeID) }
-                request = IPCRequest("event", params: .object(params))
+                let payload = HookPayload.parse(args.count > 3 ? Data(args[3].utf8) : hookInput())
+                if let nativeID = payload.conversationID { params["nativeConversationID"] = .string(nativeID) }
+                if let hookEvent = payload.hookEvent { params["hookEvent"] = .string(hookEvent) }
+                if let source = payload.source { params["source"] = .string(source) }
+                _ = try? await RuntimeClient.call(IPCRequest("event", params: .object(params)), socketPath: socket)
+                return
             default: throw ChauffeurError("usage", "Unknown command. Run chauffeurctl help")
             }
             let result = try await RuntimeClient.call(request, socketPath: socket)
-            if command != "event" { print(String(decoding: try JSONCoding.encode(result), as: UTF8.self)) }
+            print(String(decoding: try JSONCoding.encode(result), as: UTF8.self))
         } catch {
             FileHandle.standardError.write(Data(((error as? ChauffeurError)?.errorDescription ?? "chauffeurctl operation failed").utf8) + Data("\n".utf8))
             exit(1)
         }
+    }
+    /// Reads a bounded hook payload and drains the rest so the provider never
+    /// blocks writing a large tool response into a closed pipe.
+    private static func hookInput() -> Data {
+        guard isatty(STDIN_FILENO) == 0 else { return Data() }
+        let input = FileHandle.standardInput
+        let data = (try? input.read(upToCount: HookPayload.readLimit)) ?? nil
+        while let more = try? input.read(upToCount: HookPayload.readLimit), !more.isEmpty {}
+        return data ?? Data()
     }
     private static func execPayload(_ args: [String]) throws {
         guard args.count == 1 else { throw ChauffeurError("usage", "Invalid launch handoff") }

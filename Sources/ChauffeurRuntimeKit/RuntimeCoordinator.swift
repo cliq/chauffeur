@@ -967,9 +967,18 @@ public actor RuntimeCoordinator {
             session.state = .needsAttention; session.unread = true
         default: throw ChauffeurError("unknown_event", "Unsupported lifecycle event")
         }
-        if let nativeID = params["nativeConversationID"].string, UUID(uuidString: nativeID) != nil {
-            if let previous = session.nativeConversationID, previous != nativeID { throw ChauffeurError("conversation_mismatch", "Hook reported a different native conversation") }
-            session.nativeConversationID = nativeID
+        if let nativeID = params["nativeConversationID"].string, UUID(uuidString: nativeID) != nil,
+           !NativeConversation.same(session.nativeConversationID, nativeID) {
+            // The session token already identifies the caller, so state always
+            // applies. Only /clear and /resume move the session to another conversation.
+            if session.nativeConversationID == nil || NativeConversation.adopts(kind: session.launch.preset.kind, hookEvent: params["hookEvent"].string, source: params["source"].string) {
+                let owner = sessions.values.first { $0.id != sessionID && $0.state.isLive && NativeConversation.same($0.nativeConversationID, nativeID) }
+                session.nativeConversationID = nativeID
+                session.conversationWarning = owner.map { "This conversation is also open in “\($0.title)”. Both sessions now write to the same native conversation." }
+                if owner != nil { record(ChauffeurError("conversation_in_use", "A resumed native conversation is open in another live session")) }
+            } else {
+                record(ChauffeurError("conversation_mismatch", "Hook reported a different native conversation; the recorded one was kept"))
+            }
         }
         session.updatedAt = Date(); try await persist(session, notification: notification); return .object(["accepted": .bool(true)])
     }

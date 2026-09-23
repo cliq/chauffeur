@@ -203,6 +203,8 @@ public struct Session: Record, Equatable {
     public var runtimeID: UUID?
     public var terminalIdentity: String?
     public var nativeConversationID: String?
+    /// Set when `/resume` adopted a conversation another live session also uses.
+    public var conversationWarning: String?
     public var parentID: UUID?
     public var delegationID: UUID?
     public var historyProtected: Bool?

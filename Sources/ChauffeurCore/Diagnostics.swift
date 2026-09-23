@@ -7,7 +7,7 @@ public enum DiagnosticCode: String, Codable, Sendable {
     case operation_failed, startup_failed, log_unavailable, cli_exit, terminal_ownership_lost, diagnostics_export_failed
     case active_worktree, already_attached, already_live, already_received, already_running
     case attachment_closed, attachment_lost, child_limit, command_pipe, command_timeout
-    case connection_closed, conversation_mismatch, delegation_depth, dirty_worktree, duplicate_id
+    case connection_closed, conversation_in_use, conversation_mismatch, delegation_depth, dirty_worktree, duplicate_id
     case edit_conflict, exec_failed, external_worktree, frame_too_large, git_failed, handoff_cleanup
     case help_failed, immutable_membership, inaccessible_directory, input_failed, integration_unavailable
     case interrupt_failed, invalid, invalid_argument, invalid_arguments, invalid_delivery_state

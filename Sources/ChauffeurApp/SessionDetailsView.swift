@@ -37,6 +37,7 @@ struct SessionDetailsView: View {
                     ForEach(session.launch.additionalPaths, id: \.self) { detail("Additional repository", $0) }
                     if let worktree = model.snapshot.store.worktrees.first(where: { $0.value.id == session.worktreeID })?.value { detail("Branch", worktree.branch); detail("Base commit", worktree.baseCommit) }
                     if let error = session.error { Text(error).font(.callout).foregroundStyle(.orange) }
+                    if let warning = session.conversationWarning { Label(warning, systemImage: "exclamationmark.triangle").font(.callout).foregroundStyle(.orange) }
                 }
                 section("Execution") {
                     if session.state.isLive {
