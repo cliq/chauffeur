@@ -79,3 +79,67 @@ c. `SkillInstaller` publishes to `~/.agents/skills` when a Codex or OpenCode pre
 - a debug build, then end-to-end runs on the local model: an OpenCode coordinator delegating to an OpenCode worker and a Claude
   worker; status, attention, wake, follow-ups and resume; the mobile label (UI tests on the Maestro simulator if needed)
 - a final review pass. Commit.
+
+## Plugin ↔ runtime contract (fixed after the spike, see V9)
+
+The plugin lives at `Sources/ChauffeurCore/Resources/Plugins/chauffeur-opencode.js`. It is copied as a package resource, and the
+runtime publishes it to `<Application Support>/Chauffeur/…/plugins/chauffeur-opencode.js`. Each launch references it through
+`OPENCODE_CONFIG_CONTENT`.
+
+### Environment
+
+- `CHAUFFEUR_SESSION_ID` is the Chauffeur session UUID.
+- `CHAUFFEUR_CTL` is the path to `chauffeurctl`.
+- `CHAUFFEUR_SESSION_TOKEN` and `CHAUFFEUR_SOCKET` are already set for every agent session.
+- The plugin is a no-op unless `CHAUFFEUR_SESSION_ID` and `CHAUFFEUR_CTL` are set.
+
+### Hook payload
+
+Each ctl call gets one JSON object on stdin, in the Claude hook shape that `HookPayload.parse` already reads:
+
+```json
+{"session_id": "ses_…", "hook_event_name": "SessionStart" | "PostToolUse" | "Stop", "source": "startup" | "resume", "stop_hook_active": false}
+```
+
+- `source` is sent only with `SessionStart`.
+- `stop_hook_active` is sent only with `Stop`.
+
+### Status
+
+`"$CHAUFFEUR_CTL" event --session "$CHAUFFEUR_SESSION_ID" <event>`, with the payload above on stdin.
+
+| Event | When |
+|---|---|
+| `session-start` | The first root session is seen. `source` is `startup` after `session.created`, and `resume` when the ID is adopted from another root event. |
+| `running` | Busy, or a permission or question is answered. Sent only on transitions. |
+| `needs-attention` | A permission or question has stayed open for 250 ms, or a `session.error` other than `MessageAbortedError`. |
+
+### Inbox
+
+`"$CHAUFFEUR_CTL" inbox-hook --provider opencode [--report-stop]`, with the payload on stdin. It prints nothing, or one JSON line:
+
+```json
+{"block": true | false, "text": "…" | null, "waitForWorkers": true | false}
+```
+
+- **`Stop`**, on a root `session.idle` that doesn't follow an unrecovered error:
+  - `block: true`: the plugin calls `promptAsync(text)` and sends `stop_hook_active: true` on the next Stop. The ctl doesn't
+    report turn-finished.
+  - `block: false`: the ctl has already reported turn-finished (`--report-stop`). If `waitForWorkers` is true, the plugin starts
+    the waiter.
+- **`PostToolUse`**, from `tool.execute.after`: a non-null `text` is appended to the tool output, in `output.output` for built-in
+  tools and `output.content` for MCP tools. `waitForWorkers` is ignored.
+- No output, or output that doesn't parse, counts as `{"block": false}`.
+
+### Waiter
+
+`"$CHAUFFEUR_CTL" wait-for-work --json` runs as a child of OpenCode. On exit it prints one JSON line:
+
+```json
+{"reason": "work" | "timeout" | "replaced" | "ended", "text": "…"}
+```
+
+- `reason: "work"`: the plugin calls `promptAsync(text)`.
+- Any other reason: nothing happens.
+- The plugin kills the waiter with SIGTERM when the root session turns busy, and on dispose or exit. At most one waiter runs at a
+  time.
