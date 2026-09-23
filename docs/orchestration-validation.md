@@ -96,3 +96,34 @@ capacity errors) currently have no dedicated runtime-to-coordinator failure
 notification. Worker MCP reporting cannot cover failures that prevent the model
 from running. Codex turn-completion notifications are not evidence of success;
 structured provider-failure integration remains separate work.
+
+## Inbox reminders — 2026-09-23
+
+```sh
+swift build
+python3 Prototypes/codex_inbox_hooks_smoke.py
+python3 Prototypes/cross_provider_inbox_smoke.py
+```
+
+Both checks use the real runtime, the real Claude Code and Codex TUIs in the
+runtime's tmux, and local mock providers scripted per prompt. They need no
+account and send no inference. Each session uses a throwaway profile; the
+checks refuse to type into a session whose configuration directory is not its
+mock profile, and they compare `~/.codex` and `~/.claude/settings.json` before
+and after.
+
+| Check | Codex 0.156.1 | Claude Code 2.1.280 |
+| --- | --- | --- |
+| Hook trust | Preflight trusts Chauffeur's session-flag hooks; no review prompt | Launch-scoped `--settings` |
+| Mail while busy (peer on the other provider) | One `PostToolUse` reminder, then `chauffeur_inbox` | One `PostToolUse` reminder, then `chauffeur_inbox` |
+| Mail during the final answer | One `Stop` continuation | One `Stop` continuation |
+| Idle recipient | Not woken; mail stays queued; reminded at the next prompt | — |
+| Identity | `/new` followed; Resume reopens it; title-thread `notify` ignored | `/clear` during an active delegation followed; `/resume <id>` followed; Resume reopens it |
+| Delegation across `/clear` | — | The Codex worker's result routes to the coordinator; its next prompt says "1 worker result" |
+| Runtime restart mid-turn | — | One message, one reminder; nothing duplicated or lost |
+| User configuration | Unchanged | Unchanged |
+
+Claude's TUI labels the one intended continuation "Stop hook error: Chauffeur: …".
+The check fails on any other hook error, including "Hook reported a different
+native conversation". No real model was asked to act on a reminder in these
+runs; the mocks call `chauffeur_inbox` when a reminder is present.

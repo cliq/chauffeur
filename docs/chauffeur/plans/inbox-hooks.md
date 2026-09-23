@@ -1,6 +1,6 @@
 # Inbox reminders via native hooks, and native conversation identity
 
-Status: in progress (2026-09-23). T0–T4 done; T5–T7 pending.
+Status: implemented (2026-09-23). T0–T7 done; a real-model reminder check remains manual (see T7).
 Coordinator: Claude Code session in the main repository checkout.
 
 ## Goal
@@ -310,8 +310,9 @@ Consequences for T5:
   - Codex adopts nothing on `SessionStart` until T0 supplies its sources; a
     Codex session with no recorded ID still adopts its first reported one.
   - Verified: `NativeHooksTests`, `NativeConversationTests`.
-  - Pending: the manual tmux `/clear` → `/resume` check in a real Chauffeur session
-    (needs the installed app rebuilt with this change).
+  - The `/clear` → `/resume` sequence passed in the real Claude Code 2.1.280 TUI
+    through the real runtime (`Prototypes/cross_provider_inbox_smoke.py`, mock
+    model), with no hook error on screen.
 
 ### T2: Ledger hint claims and IPC
 - Depends on: none.
@@ -365,7 +366,10 @@ Consequences for T5:
   - no PTY input is sent.
 - Status: implemented 2026-09-23; unit-verified by
   `CLIAdapterTests.claudeInboxRemindersRunBesideUnchangedStatusHooks`.
-  - Pending: the real-Claude acceptance checks above.
+  - The acceptance checks above passed in the real Claude Code 2.1.280 TUI with a
+    mock model (`Prototypes/cross_provider_inbox_smoke.py`); the runtime sends no
+    PTY input for reminders by construction. A real model acting on the reminder
+    is still unverified (see T7).
 
 ### T5: Codex launch integration and trust preflight
 - Depends on: T0, T3.
@@ -378,11 +382,35 @@ Consequences for T5:
     `Prototypes/` alongside the other smokes.
 - Acceptance: the same real-session checks as T4, using Codex. The user's
   `~/.codex` files are unchanged afterwards.
-- Status: pending.
+- Status: implemented 2026-09-23.
+  - `CodexHookTrust` (in `ChauffeurRuntimeKit`) runs the `hooks/list` preflight in an
+    empty temporary `CODEX_HOME` that it deletes afterwards. It trusts only an exact
+    match of Chauffeur's four session-flag hooks and caches the hashes in
+    `runtime/codex-hook-trust.json`, keyed by executable, version and hook arguments.
+  - Codex hooks: `SessionStart` → `chauffeurctl event session-start` (identity only,
+    no status change; the session comes from the credential), and `UserPromptSubmit`,
+    `PostToolUse` and `Stop` → `chauffeurctl inbox-hook --provider codex`. Status
+    still comes from `notify`.
+  - `Session.inboxReminders` records the outcome. Discovery reports `inboxReminders`
+    and the limitation "Inbox reminders unavailable for this Codex version";
+    Session Details shows it.
+  - Fixes found on the way: `app-server` needs JSON Lines (Chauffeur's encoder
+    pretty-prints), and a pipe must be read with `availableData`. Hook stdout is now
+    compact JSON.
+  - Verified: `CodexHookTrustTests` (fixture parsing, unexpected entries, quoting of
+    a ctl path with spaces, an apostrophe and a backslash, the whole-map state,
+    caching, isolated home, timeout) and `Prototypes/codex_inbox_hooks_smoke.py`
+    (real runtime and Codex 0.156.1 TUI, mock provider): pass. `~/.codex` was
+    unchanged by the smoke.
+  - Not done: the user or managed policy turning off Codex hooks isn't detected
+    ahead of time (the preflight can't see the user's config). Chauffeur never forces
+    the feature on, so reminders just don't arrive in that case.
 
 ### T6: Documentation and skill text
 - Depends on: T4, T5.
-- Status: pending.
+- Status: done 2026-09-23. Chauffeur skill 1.3.0 explains the reminder; V4 has
+  the delivery note; `docs/compatibility.md` has Claude Code 2.1.280 and Codex
+  0.156.1 rows and an "Inbox reminders" section.
 
 ### T7: Cross-provider acceptance
 - Depends on: all of the above.
@@ -393,7 +421,14 @@ Consequences for T5:
   - a runtime restart mid-turn neither duplicates nor loses mail, only possibly
     the hint.
 - Record the evidence in `docs/orchestration-validation.md`.
-- Status: pending.
+- Status: done 2026-09-23 with mock providers; evidence in
+  `docs/orchestration-validation.md` ("Inbox reminders — 2026-09-23").
+  `Prototypes/cross_provider_inbox_smoke.py` passed twice.
+  - Not verified: a **real** model acting on a reminder. That needs an
+    authenticated profile; pointing Chauffeur at `~/.claude` starts Claude
+    onboarding, and the Codex account was near its weekly limit. Run
+    `Prototypes/native_orchestration.py`-style checks with authorized profile
+    clones to cover it.
 
 ## Decisions (2026-09-23)
 
