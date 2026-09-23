@@ -145,7 +145,7 @@ targets:
     deploymentTarget: "18.0"
     sources:
       - Tests/ChauffeurMobileTests
-      - path: Skills/implementation-progress/assets/index.html
+      - path: Sources/ChauffeurCore/Resources/Skills/implementation-progress/assets/index.html
         buildPhase: resources
     dependencies:
       - target: ChauffeurMobile
