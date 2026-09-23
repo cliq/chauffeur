@@ -28,10 +28,16 @@ public actor SkillInstaller {
     }
     public static var accountHome: String? { getpwuid(getuid()).flatMap { $0.pointee.pw_dir.map { String(cString: $0) } } }
     public static func directories(teams: [PresetSet], home: String) -> [String] {
-        Set([Paths.canonical(URL(fileURLWithPath: home).appendingPathComponent(".agents").path)]
-            + teams.filter { !$0.archived }.map { $0.configurationDirectory(for: .claude, home: home) })
-            .sorted()
+        Set(AgentProviders.all.flatMap { provider in
+            provider.skillDiscovery == .sharedAgentsHome ? [sharedAgentsHome(home)]
+                : teams.filter { !$0.archived }.map { $0.configurationDirectory(for: provider.kind, home: home) }
+        }.map(Paths.canonical)).sorted()
     }
+    /// The directory whose `skills` folder `provider` discovers for `team`.
+    public static func skillDirectory(for provider: any AgentProvider, team: PresetSet, home: String) -> String {
+        provider.skillDiscovery == .sharedAgentsHome ? sharedAgentsHome(home) : team.configurationDirectory(for: provider.kind, home: home)
+    }
+    private static func sharedAgentsHome(_ home: String) -> String { URL(fileURLWithPath: home).appendingPathComponent(".agents").path }
 
     public func publish() throws {
         do {

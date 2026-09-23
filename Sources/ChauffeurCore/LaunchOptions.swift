@@ -40,21 +40,8 @@ public struct ResolvedLaunchOptions: Equatable, Sendable {
 /// Provider-specific launch option parsing and rewriting shared by UI and API launches.
 /// Curated values are suggestions only; callers may provide any non-empty value.
 public enum LaunchOptions {
-    public static func modelSuggestions(for kind: CLIKind) -> [String] {
-        switch kind {
-        case .codex: ["gpt-6-astra", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.5"]
-        case .claude: ["opus", "sonnet", "haiku"]
-        case .shell: []
-        }
-    }
-
-    public static func reasoningSuggestions(for kind: CLIKind) -> [String] {
-        switch kind {
-        case .codex: ["low", "medium", "high", "xhigh"]
-        case .claude: ["low", "medium", "high", "xhigh", "max"]
-        case .shell: []
-        }
-    }
+    public static func modelSuggestions(for kind: CLIKind) -> [String] { kind.provider?.modelSuggestions ?? [] }
+    public static func reasoningSuggestions(for kind: CLIKind) -> [String] { kind.provider?.reasoningSuggestions ?? [] }
 
     public static func rawArguments(for preset: AgentPreset) -> String {
         preset.rawArguments ?? ArgumentText.format(preset.arguments)
@@ -133,8 +120,7 @@ public enum LaunchOptions {
     private static func occurrences(of field: LaunchOptionField, in arguments: [String], kind: CLIKind) -> Occurrences {
         var result = Occurrences(), index = 0
         while index < arguments.count {
-            let match = recognized(arguments[index], field: field, kind: kind)
-            switch match {
+            switch recognized(arguments[index], field: field, kind: kind) {
             case .none: break
             case .inline(let value): result.values.append(value)
             case .separate:
@@ -143,11 +129,8 @@ public enum LaunchOptions {
                     index += 1
                     continue
                 }
-                let rawValue = arguments[index + 1]
-                if kind == .codex, field == .reasoning {
-                    guard rawValue.hasPrefix("model_reasoning_effort=") else { index += 2; continue }
-                    result.values.append(String(rawValue.dropFirst("model_reasoning_effort=".count)).trimmingCharacters(in: CharacterSet(charactersIn: "\"'")))
-                } else { result.values.append(rawValue) }
+                guard let value = kind.provider?.separateValue(arguments[index + 1], field: field) else { index += 2; continue }
+                result.values.append(value)
                 index += 1
             }
             index += 1
@@ -159,29 +142,8 @@ public enum LaunchOptions {
         return result
     }
 
-    private enum Match { case none, separate, inline(String) }
-
-    private static func recognized(_ argument: String, field: LaunchOptionField, kind: CLIKind) -> Match {
-        switch (kind, field) {
-        case (.codex, .model):
-            if argument == "-m" || argument == "--model" { return .separate }
-            if argument.hasPrefix("--model=") { return .inline(String(argument.dropFirst("--model=".count))) }
-            if argument.hasPrefix("-m=") { return .inline(String(argument.dropFirst(3))) }
-        case (.claude, .model):
-            if argument == "--model" { return .separate }
-            if argument.hasPrefix("--model=") { return .inline(String(argument.dropFirst("--model=".count))) }
-        case (.codex, .reasoning):
-            if argument == "-c" || argument == "--config" { return .separate }
-            for prefix in ["-c=", "--config="] where argument.hasPrefix(prefix) {
-                let config = String(argument.dropFirst(prefix.count))
-                if config.hasPrefix("model_reasoning_effort=") { return .inline(String(config.dropFirst("model_reasoning_effort=".count)).trimmingCharacters(in: CharacterSet(charactersIn: "\"'"))) }
-            }
-        case (.claude, .reasoning):
-            if argument == "--effort" { return .separate }
-            if argument.hasPrefix("--effort=") { return .inline(String(argument.dropFirst("--effort=".count))) }
-        case (.shell, _): break
-        }
-        return .none
+    private static func recognized(_ argument: String, field: LaunchOptionField, kind: CLIKind) -> LaunchOptionMatch {
+        kind.provider?.recognize(argument, field: field) ?? .none
     }
 
     private static func removing(_ field: LaunchOptionField, from arguments: [String], kind: CLIKind) -> [String] {
@@ -191,22 +153,14 @@ public enum LaunchOptions {
             if case .none = match { result.append(arguments[index]) }
             else if case .separate = match, index + 1 < arguments.count {
                 let next = arguments[index + 1]
-                if kind == .codex, field == .reasoning, !next.hasPrefix("model_reasoning_effort=") {
-                    if !next.hasPrefix("-") {
-                        // This is an unrelated managed config pair. Preserve it
-                        // verbatim; a reasoning picker edit owns only the
-                        // model_reasoning_effort key.
-                        result.append(arguments[index])
-                        result.append(next)
-                        index += 2
-                    } else {
-                        // An incomplete -c has no value to preserve. Leave the
-                        // following option for the next iteration.
-                        index += 1
+                if !next.hasPrefix("-") {
+                    // A pair that belongs to another setting (an unrelated Codex
+                    // `-c key=value`) is preserved verbatim.
+                    if kind.provider?.separateValue(next, field: field) == nil {
+                        result.append(arguments[index]); result.append(next)
                     }
-                    continue
+                    index += 1
                 }
-                if !next.hasPrefix("-") { index += 1 }
             }
             index += 1
         }
@@ -214,41 +168,23 @@ public enum LaunchOptions {
     }
 
     private static func canonical(_ field: LaunchOptionField, value: String, kind: CLIKind) -> [String] {
-        switch (kind, field) {
-        case (.codex, .model), (.claude, .model): ["--model", value]
-        case (.codex, .reasoning): ["-c", "model_reasoning_effort=\(value)"]
-        case (.claude, .reasoning): ["--effort", value]
-        case (.shell, _): []
-        }
+        kind.provider?.canonical(field, value: value) ?? []
     }
 
     private static func enforcingYOLO(in arguments: [String], kind: CLIKind) -> [String] {
-        let valueOptions: Set<String>
-        let flagOptions: Set<String>
-        let enforced: String
-        switch kind {
-        case .codex:
-            valueOptions = ["-s", "--sandbox", "-a", "--ask-for-approval"]
-            flagOptions = ["--approve-for-me", "--dangerously-bypass-approvals-and-sandbox", "--yolo"]
-            enforced = "--dangerously-bypass-approvals-and-sandbox"
-        case .claude:
-            valueOptions = ["--permission-mode"]
-            flagOptions = ["--allow-dangerously-skip-permissions", "--dangerously-skip-permissions"]
-            enforced = "--dangerously-skip-permissions"
-        case .shell: return arguments
-        }
+        guard let policy = kind.provider?.autoApprove else { return arguments }
         var result: [String] = [], index = 0
         while index < arguments.count {
             let argument = arguments[index]
             let key = String(argument.split(separator: "=", maxSplits: 1).first ?? "")
-            if flagOptions.contains(key) { index += 1; continue }
-            if valueOptions.contains(key) {
+            if policy.replacedFlags.contains(key) { index += 1; continue }
+            if policy.replacedValueOptions.contains(key) {
                 if !argument.contains("="), index + 1 < arguments.count, !arguments[index + 1].hasPrefix("-") { index += 1 }
                 index += 1; continue
             }
             result.append(argument); index += 1
         }
-        result.append(enforced)
+        result.append(policy.flag)
         return result
     }
 

@@ -299,22 +299,8 @@ public actor TmuxHost {
         }
     }
 
-    enum ComposerReadiness: Equatable { case ready, inputPending, unrecognized }
     static func composerReadiness(kind: CLIKind, activeLine: String) -> ComposerReadiness {
-        let line = activeLine.trimmingCharacters(in: .whitespaces)
-        switch kind {
-        case .codex:
-            if line == "› Ask Codex to do anything" { return .ready }
-            if line == "›" || line.hasPrefix("› ") { return .inputPending }
-        case .claude:
-            if line.first == "❯" {
-                let content = line.dropFirst().trimmingCharacters(in: .whitespaces)
-                if content.isEmpty { return .ready }
-                return .inputPending
-            }
-        case .shell: break
-        }
-        return .unrecognized
+        kind.provider?.composerReadiness(activeLine: activeLine.trimmingCharacters(in: .whitespaces)) ?? .unrecognized
     }
     private func ensureClipboardForwarding(socket: String) async {
         guard !clipboardForwardingEnsured.contains(socket) else { return }

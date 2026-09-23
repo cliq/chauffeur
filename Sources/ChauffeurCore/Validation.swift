@@ -73,13 +73,10 @@ public enum LaunchPolicy {
     public static func environment(base: [String: String], preset: AgentPreset, projectID: UUID, sessionID: UUID, token: String, configurationEnvironment: [String: String]? = nil, allowMissingConfiguration: Bool = false) throws -> [String: String] {
         let directory = allowMissingConfiguration ? Paths.canonical(preset.configurationDirectory) : try Paths.directory(preset.configurationDirectory)
         var result = sanitizedEnvironment(base: base)
-        switch preset.kind {
-        case .codex: result["CODEX_HOME"] = directory
-        case .claude: result["CLAUDE_CONFIG_DIR"] = directory
-        case .shell: break
-        }
+        result.merge(preset.kind.provider?.environment(configurationDirectory: directory) ?? [:]) { _, profile in profile }
         if let configurationEnvironment {
-            for (key, value) in configurationEnvironment where key == "CODEX_HOME" || key == "CLAUDE_CONFIG_DIR" { result[key] = value }
+            let selectors = Set(AgentProviders.all.map(\.configurationEnvironmentKey))
+            for (key, value) in configurationEnvironment where selectors.contains(key) { result[key] = value }
         }
         result["CHAUFFEUR_SESSION_ID"] = sessionID.uuidString
         // A deep link other tools can open to reveal this terminal: it launches
@@ -94,47 +91,31 @@ public enum LaunchPolicy {
     }
 
     public static func validateAdditionalDirectories(_ paths: [String], preset: AgentPreset) throws {
-        guard !paths.isEmpty, preset.kind == .codex else { return }
-        let readOnly = preset.arguments.enumerated().contains { index, argument in
-            argument == "--sandbox=read-only" || argument == "-s=read-only"
-                || ((argument == "--sandbox" || argument == "-s") && preset.arguments.dropFirst(index + 1).first == "read-only")
-        }
-        guard !readOnly else {
-            throw ChauffeurError("unsupported_directories", "Codex's read-only sandbox cannot add writable folders. Remove the additional folders or select workspace-write in the agent preset's launch arguments")
-        }
+        guard !paths.isEmpty else { return }
+        try preset.kind.provider?.validateAdditionalDirectories(arguments: preset.arguments)
     }
 
+    /// Options no provider may receive from a preset: Chauffeur sets them per launch.
+    public static let commonManagedOptions: Set<String> = ["--", "--add-dir", "--worktree", "--resume", "--continue", "--session-id", "--fork-session", "--remote", "--remote-auth-token-env", "--cloud", "--teleport"]
+
     public static func validateArguments(_ arguments: [String], kind: CLIKind) throws {
-        if kind == .shell {
+        guard let provider = kind.provider else {
             for argument in arguments { try Validation.require(!argument.contains("\0") && !argument.contains("\n"), "Arguments cannot contain NUL or newlines") }
             return
         }
-        let common: Set<String> = ["--", "--add-dir", "--worktree", "--resume", "--continue", "--session-id", "--fork-session", "--remote", "--remote-auth-token-env", "--cloud", "--teleport"]
-        let codex: Set<String> = ["-C", "--cd", "-c", "--config", "--last", "--all"]
-        let claude: Set<String> = ["-c", "-r", "-w", "--mcp-config", "--strict-mcp-config", "--settings", "--setting-sources", "--safe-mode", "--no-session-persistence", "--print", "-p", "--output-format", "--input-format", "--plugin-dir", "--plugin-url", "--environment", "--tmux"]
-        let blocked = common.union(kind == .codex ? codex : claude)
+        let blocked = commonManagedOptions.union(provider.managedOptions)
         for (validationIndex, argument) in arguments.enumerated() {
             try Validation.require(!argument.contains("\0") && !argument.contains("\n"), "Arguments cannot contain NUL or newlines")
             let key = String(argument.split(separator: "=", maxSplits: 1).first ?? "")
-            let shortConflict = (kind == .codex ? ["-C", "-c"] : ["-r", "-w"]).contains { key.hasPrefix($0) && key != $0 }
-            let codexReasoningConfig = kind == .codex && (key == "-c" || key == "--config") && {
-                if let separator = argument.firstIndex(of: "=") {
-                    return argument[argument.index(after: separator)...].hasPrefix("model_reasoning_effort=")
-                }
-                return arguments.dropFirst(validationIndex + 1).first?.hasPrefix("model_reasoning_effort=") == true
-            }()
-            guard (!blocked.contains(key) || codexReasoningConfig), !shortConflict else {
+            let shortConflict = provider.managedShortPrefixes.contains { key.hasPrefix($0) && key != $0 }
+            let value = argument.firstIndex(of: "=").map { String(argument[argument.index(after: $0)...]) } ?? arguments.dropFirst(validationIndex + 1).first
+            guard !blocked.contains(key) || provider.permitsManaged(key, value: value), !shortConflict else {
                 throw ChauffeurError("managed_argument", "\(key) conflicts with Chauffeur-managed launch fields")
             }
         }
         // A conservative option/value grammar rejects CLI subcommands and task
         // positionals while preserving explicit native model/permission options.
-        let takesValue: Set<String> = kind == .codex
-            ? ["-m", "--model", "-p", "--profile", "-s", "--sandbox", "-a", "--ask-for-approval", "--enable", "--disable", "--local-provider", "-i", "--image", "-c", "--config"]
-            : ["--model", "--effort", "--permission-mode", "--agent", "--agents", "--append-system-prompt", "--system-prompt", "--allowedTools", "--allowed-tools", "--disallowedTools", "--disallowed-tools", "--tools", "--name", "-n", "--fallback-model"]
-        let flags: Set<String> = kind == .codex
-            ? ["--search", "--no-alt-screen", "--oss", "--strict-config", "--approve-for-me", "--dangerously-bypass-approvals-and-sandbox", "--yolo"]
-            : ["--verbose", "--chrome", "--no-chrome", "--ide", "--disable-slash-commands", "--dangerously-skip-permissions", "--allow-dangerously-skip-permissions"]
+        let takesValue = provider.valueOptions, flags = provider.flagOptions
         var index = 0
         while index < arguments.count {
             try Validation.require(!arguments[index].hasPrefix("—") && !arguments[index].hasPrefix("–"), "Replace the typographic dash at the start of an option with two hyphens (--)")

@@ -11,9 +11,7 @@ public enum CLIKind: String, Codable, CaseIterable, Sendable {
     /// runtime synthesizes its preset when launching a shell session.
     case shell
     public var isAgent: Bool { self != .shell }
-    public var displayName: String {
-        switch self { case .codex: "Codex"; case .claude: "Claude Code"; case .shell: "Shell" }
-    }
+    public var displayName: String { provider?.displayName ?? "Shell" }
 }
 public enum SidebarMode: String, Codable, Sendable { case repositories, sessions }
 public enum Availability: String, Codable, Sendable { case available, missing, inaccessible }
@@ -48,7 +46,7 @@ public struct PresetSet: Record, Equatable {
     public func validate() throws {
         try Validation.name(name)
         for (kind, path) in configurationDirectories ?? [:] {
-            try Validation.require(kind == "claude" || kind == "codex", "Unknown agent")
+            try Validation.require(CLIKind(rawValue: kind)?.provider != nil, "Unknown agent")
             if !path.isEmpty { try Validation.absolutePath(path) }
         }
         try Validation.require(revision > 0, "Revision must be positive")

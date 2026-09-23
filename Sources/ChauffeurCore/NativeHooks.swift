@@ -127,18 +127,10 @@ public enum NativeConversation {
         return lhs == rhs
     }
     /// `SessionStart` sources after which the provider continues in another conversation.
-    public static func identityChangingSources(_ kind: CLIKind) -> Set<String> {
-        switch kind {
-        case .claude: ["clear", "resume"]
-        // Codex `/new` reports `startup` too (verified in Codex 0.156.1).
-        case .codex: ["startup", "clear", "resume", "fork"]
-        case .shell: []
-        }
-    }
-    /// A session with no recorded conversation yet. With trusted Codex hooks, only
-    /// a hook names it: Codex's title generator sends `notify` from another thread.
+    public static func identityChangingSources(_ kind: CLIKind) -> Set<String> { kind.provider?.identityChangingSources ?? [] }
+    /// A session with no recorded conversation yet may adopt this event's ID.
     public static func adoptsFirst(kind: CLIKind, hooksTrusted: Bool, hookEvent: String?) -> Bool {
-        !(kind == .codex && hooksTrusted && hookEvent == nil)
+        kind.provider?.adoptsFirstConversation(hooksTrusted: hooksTrusted, hookEvent: hookEvent) ?? true
     }
     public static func adopts(kind: CLIKind, hookEvent: String?, source: String?) -> Bool {
         guard hookEvent == "SessionStart", let source else { return false }

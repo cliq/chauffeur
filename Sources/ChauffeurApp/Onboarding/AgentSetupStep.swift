@@ -26,10 +26,10 @@ struct AgentSetupStep: View {
                                 .accessibilityIdentifier("onboarding.detected.\(kind.rawValue)")
                         } else {
                             Text("Not detected").foregroundStyle(.secondary)
-                            Link("Install \(kind.displayName)", destination: URL(string: kind == .codex
-                                ? "https://developers.openai.com/codex/cli"
-                                : "https://code.claude.com/docs/en/setup")!)
-                                .accessibilityIdentifier("onboarding.install.\(kind.rawValue)")
+                            if let url = kind.provider?.installURL {
+                                Link("Install \(kind.displayName)", destination: url)
+                                    .accessibilityIdentifier("onboarding.install.\(kind.rawValue)")
+                            }
                         }
                     }
                     if detected && setup.draft.accountCounts[kind.rawValue] != nil {

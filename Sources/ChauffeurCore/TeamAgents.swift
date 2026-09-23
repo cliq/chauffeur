@@ -41,12 +41,10 @@ public extension PresetSet {
     func configurationDirectory(for kind: CLIKind, home: String = FileManager.default.homeDirectoryForCurrentUser.path) -> String {
         let configured = configurationDirectories?[kind.rawValue] ?? ""
         if !configured.isEmpty { return Paths.canonical(configured) }
-        return Paths.canonical(URL(fileURLWithPath: home).appendingPathComponent(kind == .claude ? ".claude" : ".codex").path)
+        return Paths.canonical(kind.provider?.defaultConfigurationDirectory(home: home) ?? home)
     }
     var configurationEnvironment: [String: String] {
-        Dictionary(uniqueKeysWithValues: CLIKind.allCases.filter(\.isAgent).map {
-            (ShellAgentEnvironment.variableName(for: $0)!, configurationDirectory(for: $0))
-        })
+        Dictionary(uniqueKeysWithValues: AgentProviders.all.map { ($0.configurationEnvironmentKey, configurationDirectory(for: $0.kind)) })
     }
 }
 

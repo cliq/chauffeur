@@ -343,10 +343,12 @@ public actor RuntimeCoordinator {
         }
         await wakeIdleCoordinators()
     }
-    /// An idle Codex coordinator gets one short prompt when its workers report or stop.
+    /// An idle coordinator whose provider cannot wait by itself gets one short
+    /// prompt when its workers report or stop.
     func resultWakeApplies(_ session: Session) -> Bool {
-        session.launch.preset.kind == .codex && session.coordinationEnabled && settings.wakeIdleCoordinators
-            && TmuxHost.supportsFollowUp(kind: .codex, version: session.launch.executableVersion)
+        let kind = session.launch.preset.kind
+        return kind.provider?.wakeStrategy == .typedPrompt && session.coordinationEnabled && settings.wakeIdleCoordinators
+            && TmuxHost.supportsFollowUp(kind: kind, version: session.launch.executableVersion)
     }
     /// A worker that stopped is news only if it didn't report and nobody closed it on purpose:
     /// closing a worker (usually after accepting its result) interrupts it too.
@@ -458,14 +460,12 @@ public actor RuntimeCoordinator {
             let teamID = params["teamID"].string.flatMap(UUID.init(uuidString:))
                 ?? snapshot.presets.first(where: { $0.value.id == presetID })?.value.setID
             guard let teamID, let team = snapshot.presetSets.first(where: { $0.value.id == teamID })?.value,
-                  let preset = snapshot.agents(teamID: teamID).first(where: { $0.id == presetID }) else {
+                  let provider = snapshot.agents(teamID: teamID).first(where: { $0.id == presetID })?.kind.provider else {
                 throw ChauffeurError("missing_preset", "Choose an available agent and team")
             }
             await reconcileSkills()
             let installer = try managedSkillInstaller()
-            let directory = preset.kind == .codex
-                ? URL(fileURLWithPath: skillHome).appendingPathComponent(".agents").path
-                : team.configurationDirectory(for: .claude, home: skillHome)
+            let directory = SkillInstaller.skillDirectory(for: provider, team: team, home: skillHome)
             let statuses = await installer.statuses(directory: directory)
             if request.method == "skillStatuses" { return try .from(statuses) }
             guard let status = statuses.first(where: { $0.name == (params["skillName"].string ?? CoordinationSkill.operationalName) }) else {
@@ -900,7 +900,7 @@ public actor RuntimeCoordinator {
         session.launchRequestFingerprint = fingerprint
         session.parentID = child?.parentID; session.delegationID = child?.id; session.runtimeID = id
         session.historyProtected = child == nil ? nil : true
-        if preset.kind == .claude { session.nativeConversationID = session.id.uuidString }
+        if preset.kind.provider?.preassignsConversationID == true { session.nativeConversationID = session.id.uuidString }
         do {
             try await persist(session)
             try Task.checkCancellation()
@@ -959,16 +959,17 @@ public actor RuntimeCoordinator {
                 session.launch.preset.integration = coordination ? .unverified : .unavailable
                 try FileManager.default.createDirectory(at: integration, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
             }
-            let codexTrust = coordination && preset.kind == .codex ? await codexHookTrust(session, environment: environment) : nil
+            let preparation = coordination ? await prepareLaunch(session, environment: environment) : nil
             try Task.checkCancellation()
-            session.inboxReminders = coordination ? (preset.kind == .claude || codexTrust != nil) : nil
-            let arguments = try CLIAdapter.arguments(session: session, endpoint: endpoint ?? "", ctlPath: ctlPath, integrationDirectory: integration, coordination: coordination, resume: false, codexHookTrust: codexTrust)
+            session.inboxReminders = preparation?.inboxReminders
+            let native = try CLIAdapter.launch(session: session, endpoint: endpoint ?? "", ctlPath: ctlPath, integrationDirectory: integration, coordination: coordination, resume: false, preparation: preparation ?? LaunchPreparation())
+            environment.merge(native.environment) { _, provider in provider }
             try await persist(session)
             try Task.checkCancellation()
             if preset.kind == .shell {
                 environment = try ShellStartup.environment(executable: session.launch.executablePath, environment: environment, exports: shellExports, directory: root.appendingPathComponent("runtime/shell-startup/\(session.id)"))
             }
-            let pane = try await terminals.spawn(session: session, payload: ExecPayload(executable: session.launch.executablePath, arguments: arguments, environment: environment, directory: session.launch.workingDirectory, preamble: ShellAgentEnvironment.exportCommand(shellExports)), scrollback: settings.scrollbackLines)
+            let pane = try await terminals.spawn(session: session, payload: ExecPayload(executable: session.launch.executablePath, arguments: native.arguments, environment: environment, directory: session.launch.workingDirectory, preamble: ShellAgentEnvironment.exportCommand(shellExports)), scrollback: settings.scrollbackLines)
             try Task.checkCancellation()
             session.processID = pane.processID; session.terminalIdentity = pane.paneID; session.state = .activityUnknown
             try await persist(session)
@@ -1029,11 +1030,12 @@ public actor RuntimeCoordinator {
             try FileManager.default.createDirectory(at: integration, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
             let coordination = session.launch.preset.integration != .unavailable
             if let executable { try await refreshExecutable(&session, to: executable, environment: environment, coordination: coordination) }
-            let codexTrust = coordination && session.launch.preset.kind == .codex ? await codexHookTrust(session, environment: environment) : nil
+            let preparation = coordination ? await prepareLaunch(session, environment: environment) : nil
             try Task.checkCancellation()
-            session.inboxReminders = coordination ? (session.launch.preset.kind == .claude || codexTrust != nil) : nil
-            let arguments = try CLIAdapter.arguments(session: session, endpoint: endpoint ?? "", ctlPath: ctlPath, integrationDirectory: integration, coordination: coordination, resume: true, codexHookTrust: codexTrust)
-            let pane = try await terminals.spawn(session: session, payload: ExecPayload(executable: session.launch.executablePath, arguments: arguments, environment: environment, directory: session.launch.workingDirectory), scrollback: settings.scrollbackLines)
+            session.inboxReminders = preparation?.inboxReminders
+            let native = try CLIAdapter.launch(session: session, endpoint: endpoint ?? "", ctlPath: ctlPath, integrationDirectory: integration, coordination: coordination, resume: true, preparation: preparation ?? LaunchPreparation())
+            environment.merge(native.environment) { _, provider in provider }
+            let pane = try await terminals.spawn(session: session, payload: ExecPayload(executable: session.launch.executablePath, arguments: native.arguments, environment: environment, directory: session.launch.workingDirectory), scrollback: settings.scrollbackLines)
             try Task.checkCancellation()
             session.processID = pane.processID; session.terminalIdentity = pane.paneID; session.state = .activityUnknown
             try await persist(session)
@@ -1053,14 +1055,12 @@ public actor RuntimeCoordinator {
         if coordination && !capabilities.coordination { throw ChauffeurError("integration_unavailable", capabilities.limitation ?? "The installed CLI no longer supports coordination") }
         session.launch.executablePath = resolved; session.launch.executableVersion = capabilities.version
     }
-    /// Hashes that let this launch trust Chauffeur's own Codex hooks, or nil to
-    /// launch without them (MCP and notify still work).
-    private func codexHookTrust(_ session: Session, environment: [String: String]) async -> [String: String]? {
-        let definitions = CLIAdapter.codexHookDefinitions(ctlPath: ctlPath)
-        guard let arguments = try? CLIAdapter.codexHookArguments(definitions) else { return nil }
-        let hashes = await CodexHookTrust.resolve(executable: session.launch.executablePath, version: session.launch.executableVersion, hookArguments: arguments, expected: definitions, environment: environment, cacheDirectory: root.appendingPathComponent("runtime"))
-        if hashes == nil { record(ChauffeurError("integration_unavailable", CodexHookTrust.unavailableMessage)) }
-        return hashes
+    /// Provider-specific setup for a coordinated launch, e.g. trusting Codex hooks.
+    private func prepareLaunch(_ session: Session, environment: [String: String]) async -> LaunchPreparation? {
+        guard let integration = session.launch.preset.kind.integration else { return nil }
+        let preparation = await integration.prepareLaunch(session: session, ctlPath: ctlPath, environment: environment, cacheDirectory: root.appendingPathComponent("runtime"))
+        if let warning = preparation.warning { record(warning) }
+        return preparation
     }
     private func finishFailedStartup(_ recorded: Session, error: Error) async throws -> Error {
         var session = recorded
@@ -1114,7 +1114,7 @@ public actor RuntimeCoordinator {
         case "session-start": break
         default: throw ChauffeurError("unknown_event", "Unsupported lifecycle event")
         }
-        if let nativeID = params["nativeConversationID"].string, UUID(uuidString: nativeID) != nil,
+        if let nativeID = params["nativeConversationID"].string, session.launch.preset.kind.provider?.validatesConversationID(nativeID) == true,
            !NativeConversation.same(session.nativeConversationID, nativeID) {
             // The session token already identifies the caller, so state always
             // applies. Only /clear and /resume move the session to another conversation.
@@ -1384,7 +1384,9 @@ public actor RuntimeCoordinator {
         value["folderID"] = current.map { .string($0.folderID.uuidString) } ?? .null
         value["progress"] = try current?.progress.map { try .from($0) } ?? .null
         let followUpSupported = current.map { TmuxHost.supportsFollowUp(kind: $0.launch.preset.kind, version: $0.launch.executableVersion) } ?? false
-        value["capabilities"] = .object(["scope": .string("currentSession"), "executableVersion": current.map { .string($0.launch.executableVersion) } ?? .null, "followUpSupported": .bool(followUpSupported), "inboxReminders": .bool(current?.inboxReminders == true), "waitCommand": current.flatMap { $0.launch.preset.kind == .claude && $0.coordinationEnabled ? .string(CLIAdapter.waitCommand(ctlPath: ctlPath)) : nil } ?? .null, "resultWake": .bool(current.map(resultWakeApplies) ?? false), "limitation": current?.inboxReminders == false ? .string(CodexHookTrust.unavailableMessage) : .null, "workerExecutionPolicy": .string("delegatedYOLO"), "modelAvailabilityVerified": .bool(false)])
+        let waitCommand: JSONValue = current.flatMap { $0.launch.preset.kind.provider?.wakeStrategy == .backgroundWaiter && $0.coordinationEnabled ? .string(CLIAdapter.waitCommand(ctlPath: ctlPath)) : nil } ?? .null
+        let limitation: JSONValue = current.flatMap { $0.inboxReminders == false ? $0.launch.preset.kind.integration?.inboxReminderLimitation.map(JSONValue.string) : nil } ?? .null
+        value["capabilities"] = .object(["scope": .string("currentSession"), "executableVersion": current.map { .string($0.launch.executableVersion) } ?? .null, "followUpSupported": .bool(followUpSupported), "inboxReminders": .bool(current?.inboxReminders == true), "waitCommand": waitCommand, "resultWake": .bool(current.map(resultWakeApplies) ?? false), "limitation": limitation, "workerExecutionPolicy": .string("delegatedYOLO"), "modelAvailabilityVerified": .bool(false)])
         return .object(value)
     }
     public func callTool(token: String, name: String, arguments: JSONValue) async throws -> JSONValue {
