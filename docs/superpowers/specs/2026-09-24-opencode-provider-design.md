@@ -17,8 +17,9 @@ for all providers.
 
 - **Integration approach:** run OpenCode's own TUI in tmux, like Claude and Codex, and inject a Chauffeur plugin per launch for status,
   inbox and waking. Pivot option: a headless `opencode serve` per session with `opencode attach` in tmux, where Chauffeur uses HTTP/SSE
-  for status, prompts and session IDs. We pivot only if the verification spike or implementation shows the plugin path cannot deliver
-  reliable status, inbox continuation or follow-ups. ACP (`opencode acp`) is rejected because it drops the native TUI.
+  for status, prompts and session IDs. The verification spike probes both approaches and picks one using the decision rule in section 5.
+  Later in implementation, we pivot only if the plugin path cannot deliver reliable status, inbox continuation or follow-ups. ACP
+  (`opencode acp`) is rejected because it drops the native TUI.
 - **Local models:** Chauffeur does not manage model servers. Models and providers come from the user's OpenCode config. If a local server
   is down, OpenCode reports the error. A reachability check or managed model server can come later.
 - **Configuration:** OpenCode uses the shared global config (`~/.config/opencode`) by default. A team preset may set another configuration
@@ -250,7 +251,21 @@ Throwaway work, done first. It checks against OpenCode 1.18.23 and the local MLX
 8. A plugin can spawn and kill a long-running child process (`wait-for-work`) without blocking OpenCode.
 9. The exact empty-composer line, and the line shown with a draft or an open dialog.
 
-If 1, 2 or 7 fails in a way that can't be worked around, stop and revisit approach 2 before continuing.
+10. Approach 2 probe: `opencode serve` plus `opencode attach <url>` in tmux, on the same machine and config:
+    - whether the attached TUI is equivalent for the user: rendering, input, permission and question dialogs, and resizing
+    - whether the server's event stream carries the same session events, with root and child sessions distinguishable
+    - whether a prompt can be submitted over HTTP while the TUI is attached, and shows in the TUI as if typed
+    - whether sessions can be created with an initial prompt and resumed by ID
+    - per-session cost: startup time, memory, choosing a port, and whether the server exits when the tmux session ends
+
+### Decision rule
+
+- If 1, 2 or 7 fails in a way that can't be worked around, use approach 2, as long as the probe in 10 passes.
+- If both approaches pass, prefer approach 2 when it removes a workaround approach 1 depends on, such as an unreliable composer rule
+  for follow-ups or flaky `promptAsync` continuation, and its lifecycle costs are acceptable. Otherwise keep approach 1, which reuses
+  the existing session model.
+- If approach 2 is chosen, sections 2–4 are revised before the implementation plan is written. The provider refactor, presets,
+  Auto-approve, onboarding and mobile parts carry over unchanged.
 
 ### Automated tests
 
@@ -284,4 +299,4 @@ Scripted where possible, otherwise done by hand:
 
 - Managing or health-checking local model servers.
 - Chauffeur-side model/provider configuration UI beyond the `opencode models` suggestions.
-- Approach 2 (`opencode serve` + `attach`), unless triggered by the pivot conditions above.
+- Building approach 2 (`opencode serve` + `attach`), unless the spike's decision rule selects it.
