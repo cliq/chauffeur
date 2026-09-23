@@ -1,6 +1,6 @@
 # Inbox reminders via native hooks, and native conversation identity
 
-Status: in progress (2026-09-23). T1–T4 implemented; T0, T5–T7 pending.
+Status: in progress (2026-09-23). T0–T4 done; T5–T7 pending.
 Coordinator: Claude Code session in the main repository checkout.
 
 ## Goal
@@ -253,7 +253,35 @@ task separately.
   - Record how long `hooks/list` preflight takes.
 - Acceptance: a findings section appended to this plan, with the exact `source`
   values for the Codex identity-changing set.
-- Status: pending.
+- Status: done 2026-09-23 on Codex 0.156.1 (Homebrew), TUI in a private tmux
+  socket, mock Responses provider and a stdio MCP server. Probe:
+  `Prototypes/inbox_hooks/codex_tui_probe.py`. Findings are below.
+
+#### T0 findings (Codex 0.156.1 interactive TUI)
+
+| Check | Result |
+| --- | --- |
+| Whole-map `-c hooks.state={…}` trust in the TUI | Works. The hook browser lists the session-flag hooks as **Trusted**; they run. |
+| User's own hooks | The trusted user hook (trust stored in the user's `config.toml`) keeps running; the untrusted one is skipped. The user's `[hooks.state]` table still applies alongside Chauffeur's `-c` map. |
+| User hooks in `config.toml` vs `-c hooks.X` | Separate layers (`user` and `sessionFlags` keys); nothing is replaced. |
+| Startup review dialog | Codex asks "Hooks need review" whenever the **user** has untrusted hooks, with or without Chauffeur's. "Continue without trusting" still runs trusted hooks. |
+| `UserPromptSubmit` `additionalContext` | Accepted; reaches the model as a **developer** message. |
+| MCP tool `PostToolUse` | Fires, `tool_name=mcp__<server>__<tool>`. Codex defers MCP tools behind `tool_search`; the call still produces `PostToolUse`. |
+| `PostToolUse` payload | Has `session_id`, `turn_id`, `tool_use_id`, `tool_name`, `tool_input`, `tool_response`. `Stop` has `stop_hook_active` and `turn_id`; `UserPromptSubmit` has `turn_id`. |
+| Launch | `SessionStart source=startup`. |
+| `/new` | `SessionStart source=startup` with a **new** ID. No `SessionEnd`. |
+| `/clear` | `SessionStart source=clear` with a new ID. |
+| `/resume` (picker) | `SessionEnd`, then `SessionStart source=resume` with the chosen ID. |
+| `/fork` | `SessionStart source=fork` with a new ID. |
+| `codex resume <id>` launch | `SessionStart source=resume`, same ID. |
+| `notify` `thread-id` | Follows the active thread after every change above. **But** Codex's title generator runs a separate thread with its own `notify` (another `thread-id`, same `client=codex-tui`), and on the first turn it arrives **before** the main thread's `notify`. Hooks do not run for that thread. |
+| `hooks/list` preflight | About 0.05 s. The hash is the same whether `CODEX_HOME` is an empty temp directory or the real one. The temp home fills with Codex state databases, so delete it afterwards. |
+| Native subagents | Not offered by default in 0.156.1 (no spawn tool in the request), so they aren't verified. The IPC still refuses hints for another native conversation. |
+
+Consequences for T5:
+- The Codex identity-changing set is `startup`, `clear`, `resume` and `fork`. `startup` has to count because `/new` reports it.
+- Register a trusted `SessionStart` status hook for Codex, so the native ID comes from the main thread and not the title thread's `notify`. A Codex session with no recorded ID then adopts only from a hook event while hooks are active. Without trusted hooks (fallback), the previous first-`notify` behavior stays.
+- A real model acting on the hint isn't verified in T0. T5/T7 acceptance covers it.
 
 ### T1: Native conversation identity fix
 - Depends on: none. Codex `source` values from T0 can come in a follow-up commit.
