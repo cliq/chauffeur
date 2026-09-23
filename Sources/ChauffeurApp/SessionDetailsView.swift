@@ -7,6 +7,8 @@ struct SessionDetailsView: View {
     let project: Project
     @State private var confirmingStop = false
     @State private var confirmingForceStop = false
+    @State private var title = ""
+    @FocusState private var titleFocused: Bool
     private var messages: [Message] { model.snapshot.messages.filter { $0.senderID == session.id || $0.recipientID == session.id }.sorted { $0.createdAt > $1.createdAt } }
     private var delegations: [Delegation] { model.snapshot.delegations.filter { $0.parentID == session.id || $0.childID == session.id } }
     var body: some View {
@@ -14,7 +16,14 @@ struct SessionDetailsView: View {
             VStack(alignment: .leading, spacing: 20) {
                 Text("Session Details").font(.title3)
                 section("Context") {
-                    detail("Title", session.title)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Title").font(.caption).foregroundStyle(.secondary)
+                        TextField("Title", text: $title).textFieldStyle(.roundedBorder).labelsHidden()
+                            .focused($titleFocused).disabled(!model.online)
+                            .onSubmit(commitTitle)
+                            .onChange(of: titleFocused) { _, focused in if !focused { commitTitle() } }
+                            .accessibilityIdentifier("session.details.title")
+                    }
                     if session.state != .activityUnknown {
                         detail("State", session.state.label)
                     }
@@ -106,6 +115,8 @@ struct SessionDetailsView: View {
                 }
             }.padding(18)
         }.background(.background)
+            .onAppear { title = session.title }
+            .onChange(of: session.title) { _, latest in if !titleFocused { title = latest } }
             .confirmationDialog("Stop \(session.title)?", isPresented: $confirmingStop, titleVisibility: .visible) {
                 Button("Stop Session", role: .destructive) { stop(force: false) }
             } message: { Text("This sends a graceful stop request to this execution. Delegated children keep running.") }
@@ -119,6 +130,11 @@ struct SessionDetailsView: View {
     private func groupName(_ id: UUID) -> String { project.groups.first { $0.id == id }?.name ?? "Group unavailable" }
     private func deliveryLabel(_ state: DeliveryState) -> String {
         switch state { case .queued: "Queued"; case .received: "Received by integration"; case .acknowledged: "Acknowledged by agent"; case .failed: "Failed"; case .cancelled: "Cancelled" }
+    }
+    private func commitTitle() {
+        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, trimmed != session.title else { title = session.title; return }
+        model.perform { _ = try await model.call("renameSession", .object(["sessionID": .string(session.id.uuidString), "title": .string(trimmed)])) }
     }
     private func stop(force: Bool) { model.perform { _ = try await model.call("stop", .object(["sessionID": .string(session.id.uuidString), "force": .bool(force)])) } }
 }

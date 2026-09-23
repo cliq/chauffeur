@@ -108,6 +108,8 @@ struct ProjectWindow: View {
     @State private var checkingTab = false
     @State private var tabError: String?
     @State private var deletingSession: Session?
+    @State private var renamingSession: Session?
+    @State private var renameTitle = ""
     @FocusState private var searchFocused: Bool
     init(projectID: UUID) { self.projectID = projectID; _layout = StateObject(wrappedValue: ProjectLayout(projectID: projectID)) }
     private var project: Project? { model.project(projectID) }
@@ -159,6 +161,12 @@ struct ProjectWindow: View {
                     Button("Delete Finished Session", role: .destructive) { if let session = deletingSession { deleteSession(session) }; deletingSession = nil }
                     Button("Cancel", role: .cancel) { deletingSession = nil }
                 } message: { Text("Permanently deletes this session and its saved terminal history.") }
+                .alert("Rename Session", isPresented: Binding(get: { renamingSession != nil }, set: { if !$0 { renamingSession = nil } })) {
+                    TextField("Title", text: $renameTitle)
+                    Button("Rename") { if let session = renamingSession { renameSession(session, to: renameTitle) }; renamingSession = nil }
+                        .disabled(renameTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    Button("Cancel", role: .cancel) { renamingSession = nil }
+                }
                 .confirmationDialog("Close \(closingTab?.session.title ?? "session")?", isPresented: Binding(get: { closingTab != nil }, set: { if !$0 { closingTab = nil } }), titleVisibility: .visible) {
                     Button("Close Tab") { if let closing = closingTab { closeTab(closing.session) }; closingTab = nil }
                     Button("Cancel", role: .cancel) { closingTab = nil }
@@ -457,6 +465,7 @@ struct ProjectWindow: View {
         }.buttonStyle(.plain).help("\(session.title)\n\(session.launch.workingDirectory)\n\(session.launch.configurationPath)")
             .contextMenu {
                 Button("Session Details") { selectSession(session.id); layout.detailsVisible = true }
+                Button("Rename…") { beginRename(session) }.disabled(!model.online)
                 if session.state.isLive { Button("Stop Session…") { selectSession(session.id); layout.detailsVisible = true } }
                 else { Button("Delete Finished Session…", role: .destructive) { deletingSession = session }.disabled(!model.online) }
             }
@@ -506,7 +515,7 @@ struct ProjectWindow: View {
                     if !sessions.isEmpty || !pending.isEmpty {
                         SessionStrip(pendingTabs: pending, selectPending: { layout.state.selectedSessionID = $0 }, sessions: sessions, project: project, keepFinishedSessions: model.snapshot.settings.keepFinishedSessions, close: { requestCloseTab($0) }, move: { source, target in
                             layout.state.sessionTabOrder = WorktreeSessions.movingTab(source, to: target, displayed: sessions.map(\.id), savedOrder: layout.state.sessionTabOrder)
-                        }, delete: { deletingSession = $0 }, selectedID: selectedID, select: { selectSession($0.id) }, details: { selectSession($0.id); layout.detailsVisible = true }, revealPath: { FilePanels.reveal($0.launch.workingDirectory) })
+                        }, delete: { deletingSession = $0 }, rename: { beginRename($0) }, selectedID: selectedID, select: { selectSession($0.id) }, details: { selectSession($0.id); layout.detailsVisible = true }, revealPath: { FilePanels.reveal($0.launch.workingDirectory) })
                         Divider()
                     }
                     if let selectedPending {
@@ -775,6 +784,15 @@ struct ProjectWindow: View {
         }
         markRead(id)
     }
+    private func beginRename(_ session: Session) {
+        renameTitle = session.title
+        renamingSession = session
+    }
+    private func renameSession(_ session: Session, to title: String) {
+        let title = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !title.isEmpty, title != session.title else { return }
+        model.perform { _ = try await model.call("renameSession", .object(["sessionID": .string(session.id.uuidString), "title": .string(title)])) }
+    }
     private func markRead(_ id: UUID) {
         guard model.session(id)?.unread == true else { return }
         model.perform { _ = try await model.call("markRead", .object(["sessionID": .string(id.uuidString)])) }
@@ -982,6 +1000,7 @@ private struct SessionStrip: View {
     let close: (Session) -> Void
     let move: (UUID, UUID) -> Void
     let delete: (Session) -> Void
+    let rename: (Session) -> Void
     let selectedID: UUID?
     let select: (Session) -> Void
     let details: (Session) -> Void
@@ -1123,6 +1142,7 @@ private struct SessionStrip: View {
             }
             .contextMenu {
                 Button("Session Details") { details(session) }
+                Button("Rename…") { rename(session) }
                 if session.state.isLive { Button("Stop Session…") { details(session) } }
                 else { Button("Delete Finished Session…", role: .destructive) { delete(session) } }
                 Button("Reveal in Finder") { revealPath(session) }

@@ -362,6 +362,18 @@ struct ShellSessionTests {
         #expect(await fixture.runtime.store.current().sessions.allSatisfy { $0.value.id != session.id })
     }
 
+    @Test func renamingASessionPersistsTheTrimmedTitle() async throws {
+        let fixture = try await LaunchFixture.make(); defer { fixture.cleanup() }
+        let session = try await fixture.runtime.launch(fixture.request)
+        let rename: (String) -> JSONValue = { .object(["sessionID": .string(session.id.uuidString), "title": .string($0)]) }
+        _ = try await fixture.runtime.handle(IPCRequest("renameSession", params: rename("  Review auth  ")))
+        #expect(try await fixture.runtime.snapshot()["sessions"].decode([Session].self).first { $0.id == session.id }?.title == "Review auth")
+        await #expect(throws: ChauffeurError.self) {
+            _ = try await fixture.runtime.handle(IPCRequest("renameSession", params: rename("   ")))
+        }
+        #expect(await fixture.runtime.store.current().sessions.first { $0.value.id == session.id }?.value.title == "Review auth")
+    }
+
     @Test func legacyRetentionSettingsDefaultToDiscardingClosedSessions() throws {
         let legacy = Data(#"{"scrollbackLines":1234,"snapshotBudgetBytes":1048576,"completedMessageDays":30,"maxLiveChildren":2}"#.utf8)
         let settings = try JSONCoding.decode(RetentionSettings.self, from: legacy)

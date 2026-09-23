@@ -18,7 +18,7 @@ struct SessionSidebarView: View {
             if showingProgress {
                 SessionProgressView(registration: session.progress).id(session.id)
             } else {
-                SessionDetailsView(session: session, project: project)
+                SessionDetailsView(session: session, project: project).id(session.id)
             }
         }
         .background(.background)
