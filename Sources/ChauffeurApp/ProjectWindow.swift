@@ -1028,18 +1028,19 @@ private struct SessionStrip: View {
                     .onAppear { revealSelectedFinished(); if let selectedID { proxy.scrollTo(selectedID) } }
                     .onChange(of: selectedID) { _, _ in revealSelectedFinished(); if let selectedID { proxy.scrollTo(selectedID) } }
             }
-            Button {
-                WorktreeSessions.finished(sessions).forEach(close)
-            } label: {
-                Image(systemName: "xmark.square.stack")
-                    .frame(width: 30, height: 30)
+            if !WorktreeSessions.finished(sessions).isEmpty {
+                Button {
+                    WorktreeSessions.finished(sessions).forEach(close)
+                } label: {
+                    Image(systemName: "rectangle.stack.badge.minus")
+                        .frame(width: 30, height: 30)
+                }
+                .buttonStyle(.borderless)
+                .help("Close all finished tabs")
+                .accessibilityLabel("Close all finished tabs")
+                .accessibilityIdentifier("session.strip.closeFinished")
+                .padding(.horizontal, 8)
             }
-            .buttonStyle(.borderless)
-            .disabled(WorktreeSessions.finished(sessions).isEmpty)
-            .help("Close all finished tabs")
-            .accessibilityLabel("Close all finished tabs")
-            .accessibilityIdentifier("session.strip.closeFinished")
-            .padding(.horizontal, 8)
         }.frame(height: 70).background(.bar)
     }
     private func cardHelp(_ session: Session) -> String {
