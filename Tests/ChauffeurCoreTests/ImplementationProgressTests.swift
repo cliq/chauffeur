@@ -64,3 +64,19 @@ struct ImplementationProgressTests {
         #expect(throws: ChauffeurError.self) { try ProgressFiles.htmlURL(directory.path) }
     }
 }
+
+struct ProgressMilestoneTests {
+    private func progress(now: String = "Working", phases: [(String, String, [(String, String)])]) throws -> ImplementationProgress {
+        let value: [String: Any] = ["title": "Task", "now": now, "updated": "2026-09-23T10:00:00Z",
+            "phases": phases.map { ["title": $0.0, "detail": "", "state": $0.1, "steps": $0.2.map { ["title": $0.0, "state": $0.1] }] }]
+        return try JSONCoding.decode(ImplementationProgress.self, from: JSONSerialization.data(withJSONObject: value))
+    }
+    @Test func onlyPhaseAndStepStatesAreMilestones() throws {
+        let base = try progress(phases: [("Build", "active", [("Compile", "active")])])
+        #expect(try !progress(now: "Still compiling", phases: [("Build", "active", [("Compile", "active")])]).changesMilestones(from: base))
+        #expect(try progress(phases: [("Build", "active", [("Compile", "done")])]).changesMilestones(from: base))
+        #expect(try progress(phases: [("Build", "blocked", [("Compile", "active")])]).changesMilestones(from: base))
+        #expect(try progress(phases: [("Build", "active", [("Compile", "active"), ("Link", "pending")])]).changesMilestones(from: base))
+        #expect(try progress(phases: [("Build", "active", [("Compile", "active")]), ("Verify", "pending", [])]).changesMilestones(from: base))
+    }
+}

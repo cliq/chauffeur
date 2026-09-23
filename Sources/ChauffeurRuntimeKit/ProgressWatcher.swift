@@ -3,7 +3,8 @@ import CoreServices
 import ChauffeurCore
 
 /// Watches the containing directory so atomic replacement does not orphan the watch.
-/// FSEvents coalesces writes; only a changed, valid progress document wakes the agent.
+/// FSEvents coalesces writes; only a valid document whose milestones changed wakes
+/// the agent, so frequent "now doing" updates do not re-enter a waiting coordinator.
 final class ProgressWatcher: @unchecked Sendable {
     private final class Buffer: @unchecked Sendable {
         let path: String
@@ -18,11 +19,7 @@ final class ProgressWatcher: @unchecked Sendable {
             guard let current = try? ProgressFiles.read(jsonPath: path) else { return }
             defer { previous = current }
             guard let previous else { changed(); return }
-            if current.title != previous.title || current.subtitle != previous.subtitle ||
-                current.now != previous.now || current.phases != previous.phases ||
-                current.percentComplete != previous.percentComplete {
-                changed()
-            }
+            if current.changesMilestones(from: previous) { changed() }
         }
     }
     private let buffer: Buffer

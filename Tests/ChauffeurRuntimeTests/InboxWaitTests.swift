@@ -76,12 +76,13 @@ struct InboxWaitTests {
     }
 
     @Test(arguments: [false, true])
-    func registeredProgressWakesOnContentChangesButNotTimestamps(atomic: Bool) async throws {
+    func registeredProgressWakesOnMilestonesButNotActivityText(atomic: Bool) async throws {
         let (ledger, token, parent, _, _, root) = try await fixture()
         defer { try? FileManager.default.removeItem(at: root) }
         let path = root.appendingPathComponent("progress.json")
-        func write(_ now: String, updated: String) throws {
-            let data = try JSONSerialization.data(withJSONObject: ["title": "Work", "now": now, "phases": [], "updated": updated])
+        func write(_ now: String, updated: String, state: String = "active") throws {
+            let phases: [[String: Any]] = [["title": "Build", "detail": "", "state": state, "steps": []]]
+            let data = try JSONSerialization.data(withJSONObject: ["title": "Work", "now": now, "phases": phases, "updated": updated])
             try data.write(to: path, options: atomic ? .atomic : [])
         }
         try write("Building", updated: "2026-09-22T12:00:00Z")
@@ -101,10 +102,12 @@ struct InboxWaitTests {
         try await subscribed(ledger)
         try write("Building", updated: "2026-09-22T12:00:01Z")
         try Data("Unrelated".utf8).write(to: root.appendingPathComponent("other.txt"))
+        // The worker's running commentary is not a reason to wake its coordinator.
+        try write("Capturing dark appearance", updated: "2026-09-22T12:00:02Z")
         try await Task.sleep(for: .milliseconds(700))
         #expect(await ledger.pendingInboxWaitCount == 1)
         let changed = ContinuousClock.now
-        try write("Capturing dark appearance", updated: "2026-09-22T12:00:02Z")
+        try write("Capturing dark appearance", updated: "2026-09-22T12:00:03Z", state: "done")
         #expect(try await waiting.value.isEmpty)
         #expect(changed.duration(to: .now) < .seconds(5))
         #expect(try await ledger.inbox(caller: parent).isEmpty)

@@ -24,6 +24,16 @@ public struct ImplementationProgress: Decodable, Equatable, Sendable {
 
     private enum CodingKeys: String, CodingKey { case schemaVersion, title, subtitle, now, updated, phases, percentComplete }
 
+    /// Whether a coordinator waiting on this worker should look again: a phase or
+    /// step appeared, disappeared or changed state. Free-text activity (`now`),
+    /// titles, details and timestamps change constantly and do not count.
+    public func changesMilestones(from previous: ImplementationProgress) -> Bool {
+        func milestones(_ value: ImplementationProgress) -> [[String]] {
+            value.phases.map { phase in [phase.title, phase.state.rawValue] + phase.steps.flatMap { [$0.title, $0.state.rawValue] } }
+        }
+        return milestones(self) != milestones(previous)
+    }
+
     public init(from decoder: any Decoder) throws {
         let fields = try decoder.container(keyedBy: CodingKeys.self)
         schemaVersion = try fields.decodeIfPresent(Int.self, forKey: .schemaVersion) ?? 1
