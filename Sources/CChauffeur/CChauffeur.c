@@ -43,6 +43,8 @@ pid_t chauffeur_spawn_pty(const char *executable, char *const argv[], char *cons
     // forkpty makes the child a session leader with a controlling terminal. Only
     // async-signal-safe C functions run between fork and exec (never Swift).
     struct winsize size = { .ws_row = rows, .ws_col = cols };
+    // Read the descriptor limit before fork; the child may only make syscalls.
+    int descriptor_limit = getdtablesize();
     pid_t pid = forkpty(master, NULL, NULL, &size);
     if (pid == 0) {
         // Dispatch/NIO worker threads can block signals. exec preserves that
@@ -57,6 +59,11 @@ pid_t chauffeur_spawn_pty(const char *executable, char *const argv[], char *cons
         sigset_t unblocked;
         sigemptyset(&unblocked);
         if (sigprocmask(SIG_SETMASK, &unblocked, NULL) < 0) _exit(126);
+        // Unlike Foundation's Process, forkpty passes on every descriptor that
+        // lacks FD_CLOEXEC, including pipes other threads are handing to their
+        // own commands. A long-lived tmux client holding such a pipe's write end
+        // keeps that command's output from ever reaching EOF.
+        for (int fd = STDERR_FILENO + 1; fd < descriptor_limit; fd++) close(fd);
         if (chdir(cwd) < 0) _exit(126);
         execve(executable, argv, envp);
         _exit(127);

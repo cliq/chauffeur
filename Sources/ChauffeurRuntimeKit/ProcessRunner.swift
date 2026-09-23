@@ -14,7 +14,10 @@ public enum ProcessRunner {
         return try await withTaskCancellationHandler {
             try Task.checkCancellation()
             return try await withCheckedThrowingContinuation { continuation in
-                DispatchQueue.global(qos: .userInitiated).async {
+                // Commands and their readers block, so they get dedicated threads.
+                // On the shared Dispatch pool, a busy runtime could leave a reader
+                // unscheduled past the grace period after exit (`command_pipe`).
+                Thread.detachNewThread {
                     do { continuation.resume(returning: try runSync(executable, arguments, directory: directory, environment: environment, timeout: timeout, outputLimit: outputLimit, keepOutputTail: keepOutputTail, cancellation: cancellation)) }
                     catch { continuation.resume(throwing: error) }
                 }
@@ -33,8 +36,8 @@ public enum ProcessRunner {
         let outputReader = BoundedReader(limit: outputLimit, keepTail: keepOutputTail), errorReader = BoundedReader()
         try process.run()
         let readers = DispatchGroup()
-        readers.enter(); DispatchQueue.global().async { outputReader.read(output.fileHandleForReading); readers.leave() }
-        readers.enter(); DispatchQueue.global().async { errorReader.read(errors.fileHandleForReading); readers.leave() }
+        readers.enter(); Thread.detachNewThread { outputReader.read(output.fileHandleForReading); readers.leave() }
+        readers.enter(); Thread.detachNewThread { errorReader.read(errors.fileHandleForReading); readers.leave() }
         let deadline = Date().addingTimeInterval(timeout)
         while process.isRunning && !cancellation.isCancelled && Date() < deadline { Thread.sleep(forTimeInterval: 0.01) }
         if process.isRunning {
