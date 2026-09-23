@@ -5,6 +5,8 @@ The panel is a static HTML page (assets/index.html) that re-reads progress.js
 every 2 seconds. State lives in progress.json next to it; every command rewrites
 progress.js from that file, so agents never hand-edit JS.
 
+Successful updates print nothing unless --verbose is given; warnings go to stderr.
+
 Usage (DIR defaults to $PROGRESS_DIR, then a project-specific OS temp directory):
   progress.py init  [--dir DIR] --title T [--subtitle S] --phase "Title::detail" ... [--now TEXT] [--open]
   progress.py now   [--dir DIR] "what you are doing right now"
@@ -47,7 +49,7 @@ def default_dir():
 
 
 
-def register_chauffeur(directory):
+def register_chauffeur(directory, verbose=False):
     """Use the session's local IPC grant; no coordinator MCP or extra tools required.
 
     Reassert the association after each command so a failed connection is retried
@@ -105,7 +107,8 @@ def register_chauffeur(directory):
         result = response.get("result")
         if not isinstance(result, dict) or not isinstance(result.get("progress"), dict):
             raise ValueError("missing registration acknowledgement")
-        print("Registered in Chauffeur’s Progress tab.", file=sys.stderr)
+        if verbose:
+            print("Registered in Chauffeur’s Progress tab.", file=sys.stderr)
     except (OSError, ValueError, struct.error):
         print("Panel is available locally; could not register with Chauffeur. "
               "The next panel command will retry.", file=sys.stderr)
@@ -182,7 +185,8 @@ def cmd_init(a):
     if phases:
         phases[0]["state"] = "active"
     save(a.dir, {"title": a.title, "subtitle": a.subtitle or "", "now": a.now or "Starting", "phases": phases})
-    print(os.path.join(a.dir, "index.html"))
+    if a.verbose:
+        print(os.path.join(a.dir, "index.html"))
     if a.open:
         cmd_open(a)
 
@@ -249,6 +253,8 @@ def main():
 
     def common(sp):
         sp.add_argument("--dir", default=default_dir())
+        sp.add_argument("--verbose", action="store_true",
+                        help="print the registration confirmation and, for init, the panel path")
 
     sp = sub.add_parser("init"); common(sp)
     sp.add_argument("--title", required=True); sp.add_argument("--subtitle")
@@ -266,7 +272,7 @@ def main():
     a.dir = str(Path(a.dir).expanduser().resolve())
     try:
         a.fn(a)
-        register_chauffeur(a.dir)
+        register_chauffeur(a.dir, a.verbose)
     except (OSError, ValueError) as exc:
         ap.exit(1, f"error: {exc}\n")
 

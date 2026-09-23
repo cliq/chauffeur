@@ -2,7 +2,7 @@
 name: implementation-progress
 description: Create and maintain an auto-refreshing progress panel in Chauffeur’s session Progress tab or a standalone browser, showing implementation phases, optional steps, and current activity. Use when the user asks for a progress panel, dashboard, or status page for a multi-step task, or when updating a panel already in use.
 metadata:
-  version: "1.1.0"
+  version: "1.2.0"
 ---
 
 # Implementation progress
@@ -50,12 +50,14 @@ python3 "$P" init --dir "$DIR" --title "Feature implementation" \
   --now "Reading the requirements"
 ```
 
-The first phase starts `active`; the others start `pending`. Inside Chauffeur,
-look for the script’s registration confirmation and tell the user the panel is
-available in the session’s **Progress** tab. No separate registration tool call
-or browser is needed. Outside Chauffeur, share the printed `index.html` path and
-use `open` (or `init --open`) to launch its default browser. `--open` also works
-inside Chauffeur if the user wants a separate browser window. If no browser is
+The first phase starts `active`; the others start `pending`. Commands other than
+`show` print nothing on success; warnings and errors go to stderr. Add `--verbose`
+to any command to print the registration confirmation and, for `init`, the panel
+path. Inside Chauffeur, a silent successful `init` means the panel is registered:
+tell the user it is available in the session’s **Progress** tab. No separate
+registration tool call or browser is needed. Outside Chauffeur, share
+`$DIR/index.html` and use `open` (or `init --open`) to launch its default
+browser. `--open` also works inside Chauffeur if the user wants a separate browser window. If no browser is
 available, the command prints a manual-open URI. Do not claim the user saw the
 panel merely because launching was requested. In a remote or headless environment,
 use `show` and explain that the page lives on that machine.
@@ -100,6 +102,14 @@ updated by case-insensitive title, and displayed under non-pending phases. Addin
 a step activates a pending phase. Marking a phase done completes its non-blocked
 steps; resolve blocked steps before treating the whole phase as complete. Changing
 one phase does not automatically activate or complete any other phase.
+
+Don't spend a tool call on progress alone: every standalone call is an extra model
+turn that re-reads the whole conversation. Put the update in the same tool call as
+the next real work, chained before it in one shell command (for example,
+`python3 "$P" now --dir "$DIR" "Running tests"; swift test`) or alongside it in a
+parallel batch. Chain several updates with `;` or `&&`. Since updates are silent,
+don't redirect their output. At the end, put the final update in the same call as
+the last check or commit when possible.
 
 Update `now` when the activity changes and phase/step states when they actually
 change. The footer flags updates older than 20 minutes; do not invent progress to

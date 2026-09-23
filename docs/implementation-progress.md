@@ -14,7 +14,9 @@ and the agent’s session credential, not MCP.
 Registration is attempted after every successful CLI command, including `show`
 and `open`, so the next command retries a failed connection. Repeated registration
 is idempotent. Failed registration never discards the local panel or prevents
-updates; the script prints a warning. Without a session credential it continues
+updates; the script prints a warning. Successful commands other than `show` print
+nothing, so agents can chain updates into other tool calls cheaply; `--verbose`
+prints the registration confirmation and the `init` panel path. Without a session credential it continues
 as a standalone browser panel. Use `--open` when a separate browser is wanted.
 Default panel paths include the session ID inside Chauffeur so agents sharing a
 checkout do not overwrite one another. An explicit `--dir` or `PROGRESS_DIR`

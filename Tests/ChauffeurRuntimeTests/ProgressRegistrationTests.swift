@@ -22,7 +22,7 @@ struct ProgressRegistrationTests {
                            "CHAUFFEUR_SOCKET": fixture.path("runtime/runtime.sock").path,
                            "CHAUFFEUR_SESSION_TOKEN": token, "CHAUFFEUR_SESSION_ID": session.id.uuidString]
         let created = try await ProcessRunner.run("/usr/bin/python3", [script.path, "init", "--dir", panel.path,
-            "--title", "No MCP", "--phase", "Build", "--phase", "Verify"], environment: environment)
+            "--title", "No MCP", "--phase", "Build", "--phase", "Verify", "--verbose"], environment: environment)
         #expect(created.status == 0)
         #expect(created.error.contains("Registered in Chauffeur"))
         let registration = try #require(await fixture.runtime.store.reload().sessions.first { $0.value.id == session.id }?.value.progress)
@@ -31,6 +31,7 @@ struct ProgressRegistrationTests {
         let updated = try await ProcessRunner.run("/usr/bin/python3", [script.path, "now", "--dir", panel.path,
             "Checking results"], environment: environment)
         #expect(updated.status == 0)
+        #expect(updated.output.isEmpty && updated.error.isEmpty)
         #expect(try ProgressFiles.read(jsonPath: registration.jsonPath).now == "Checking results")
         #expect(try await fixture.runtime.ledger.allSessions().first { $0.id == session.id }?.progress == registration)
         #expect(!(created.output + created.error + updated.output + updated.error).contains(token))

@@ -46,6 +46,20 @@ class ProgressTests(unittest.TestCase):
             self.assertEqual(snapshot()["now"], "Finished ✓")
             self.assertEqual((Path(directory) / "index.html").read_bytes(), original_html)
 
+    def test_successful_commands_are_silent_unless_verbose(self):
+        with tempfile.TemporaryDirectory() as directory:
+            def run(*args):
+                return subprocess.run([sys.executable, str(SCRIPT), *args, "--dir", directory],
+                                      env=ENV, check=True, capture_output=True, text=True)
+
+            for args in [("init", "--title", "Quiet", "--phase", "Build"), ("now", "Working"),
+                         ("step", "1", "First", "active"), ("phase", "1", "done")]:
+                result = run(*args)
+                self.assertEqual(result.stdout + result.stderr, "", args)
+            verbose = run("init", "--title", "Loud", "--phase", "Build", "--force", "--verbose")
+            self.assertEqual(verbose.stdout.strip(), str(Path(directory).resolve() / "index.html"))
+            self.assertIn("Loud", run("show").stdout)
+
     def test_legacy_json_is_upgraded_on_next_update(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "progress.json"
@@ -109,11 +123,15 @@ class ChauffeurRegistrationTests(unittest.TestCase):
                 environment = dict(ENV, CHAUFFEUR_SOCKET=socket_path,
                                    CHAUFFEUR_SESSION_TOKEN="fixture-private-token")
                 try:
-                    for command in [("init", "--title", "Fixture", "--phase", "Build"),
-                                    ("now", "Implementing"), ("show",)]:
+                    for command in [("init", "--title", "Fixture", "--phase", "Build", "--verbose"),
+                                    ("now", "Implementing"), ("show", "--verbose")]:
                         result = self.run_panel(directory, *command, environment=environment)
                         self.assertEqual(result.returncode, 0, result.stderr)
-                        self.assertIn("Registered in Chauffeur", result.stderr)
+                        if "--verbose" in command:
+                            self.assertIn("Registered in Chauffeur", result.stderr)
+                        else:
+                            # Successful updates stay silent so agents can chain them cheaply.
+                            self.assertEqual(result.stdout + result.stderr, "")
                         self.assertNotIn("fixture-private-token", result.stdout + result.stderr)
                 finally:
                     worker.join(timeout=6)
