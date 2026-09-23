@@ -127,3 +127,21 @@ Claude's TUI labels the one intended continuation "Stop hook error: Chauffeur: â
 The check fails on any other hook error, including "Hook reported a different
 native conversation". No real model was asked to act on a reminder in these
 runs; the mocks call `chauffeur_inbox` when a reminder is present.
+
+## Idle coordinators â€” 2026-09-23
+
+```sh
+swift build
+python3 Prototypes/coordinator_wait_smoke.py
+```
+
+Real runtime, real Claude Code 2.1.280 and Codex 0.156.1 TUIs, local mock providers.
+
+| Coordinator | How it waits | Result |
+| --- | --- | --- |
+| Claude Code | `chauffeurctl wait-for-work` in the background (discovery's `waitCommand`), then ends its turn | Pre-approved by Chauffeur's launch settings (no prompt). Tab shows "Waiting for workers"; no model requests while the Codex worker runs; one task-notification wake whose output holds the result, already acknowledged |
+| Codex | Ends its turn after delegating | One "Chauffeur: 1 new worker result" prompt typed by Chauffeur when the worker reports; the coordinator reads its inbox |
+
+Waiting inside `chauffeur_inbox` still works everywhere, and now wakes only on
+worker milestones, not on "now doing" text. Spike evidence is in
+`docs/chauffeur/plans/background-waiter.md`.

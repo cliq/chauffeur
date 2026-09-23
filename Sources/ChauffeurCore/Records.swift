@@ -211,6 +211,8 @@ public struct Session: Record, Equatable {
     /// Set while a live session's executable no longer exists, for example after a
     /// Homebrew upgrade removed the version it started from.
     public var executableWarning: String?
+    /// Set while the turn has ended but this session still waits on background work.
+    public var waiting: SessionWait?
     public var parentID: UUID?
     public var delegationID: UUID?
     public var historyProtected: Bool?
@@ -320,9 +322,12 @@ public struct RetentionSettings: Codable, Equatable, Sendable {
     public var snapshotBudgetBytes = 256 * 1024 * 1024
     public var completedMessageDays = 90
     public var maxLiveChildren = 4
+    /// Submit a short prompt to an idle Codex coordinator when a worker reports or
+    /// stops. Codex has no other way to start a turn for a coordinator that ended its own.
+    public var wakeIdleCoordinators = true
     public init() {}
     private enum CodingKeys: String, CodingKey {
-        case keepFinishedSessions, scrollbackLines, snapshotBudgetBytes, completedMessageDays, maxLiveChildren
+        case keepFinishedSessions, scrollbackLines, snapshotBudgetBytes, completedMessageDays, maxLiveChildren, wakeIdleCoordinators
     }
     public init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
@@ -331,6 +336,7 @@ public struct RetentionSettings: Codable, Equatable, Sendable {
         snapshotBudgetBytes = try values.decodeIfPresent(Int.self, forKey: .snapshotBudgetBytes) ?? 256 * 1024 * 1024
         completedMessageDays = try values.decodeIfPresent(Int.self, forKey: .completedMessageDays) ?? 90
         maxLiveChildren = try values.decodeIfPresent(Int.self, forKey: .maxLiveChildren) ?? 4
+        wakeIdleCoordinators = try values.decodeIfPresent(Bool.self, forKey: .wakeIdleCoordinators) ?? true
     }
     public func validate() throws {
         try Validation.require((100...100_000).contains(scrollbackLines), "Scrollback must be 100–100,000 lines")

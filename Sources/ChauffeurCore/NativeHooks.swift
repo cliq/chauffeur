@@ -13,6 +13,9 @@ public struct HookPayload: Equatable, Sendable {
     public var turnID: String?
     public var toolUseID: String?
     public var stopHookActive = false
+    /// Claude `Stop`: background commands that will wake the session when they end.
+    /// Open-ended monitors are excluded; nil when the payload was too large to read.
+    public var backgroundTasksActive: Int?
 
     public init(hookEvent: String? = nil, source: String? = nil, conversationID: String? = nil, turnID: String? = nil, toolUseID: String? = nil, stopHookActive: Bool = false) {
         self.hookEvent = hookEvent; self.source = source; self.conversationID = conversationID
@@ -30,6 +33,13 @@ public struct HookPayload: Equatable, Sendable {
             payload.turnID = identifier(value["turn_id"].string)
             payload.toolUseID = identifier(value["tool_use_id"].string)
             payload.stopHookActive = value["stop_hook_active"].bool ?? false
+            if case .array(let tasks) = value["background_tasks"] {
+                let finished: Set<String> = ["completed", "failed", "cancelled", "canceled", "killed", "stopped"]
+                let monitors: Set<String> = ["monitor", "monitor_ws", "monitor_mcp"]
+                payload.backgroundTasksActive = tasks.filter {
+                    !finished.contains(($0["status"].string ?? "").lowercased()) && !monitors.contains(($0["type"].string ?? "").lowercased())
+                }.count
+            }
             return payload
         }
         let fields = topLevelScalars(data.prefix(readLimit))

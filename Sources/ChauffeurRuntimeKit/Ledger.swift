@@ -1,4 +1,5 @@
 import Foundation
+import Darwin
 import CryptoKit
 import Security
 import CSQLite
@@ -68,6 +69,90 @@ public actor Ledger {
         }
         try Task.checkCancellation()
         return try inbox(caller: authenticate(token))
+    }
+    private var workWaiters: [UUID: UUID] = [:]
+    private var replacedWorkWaits = Set<UUID>()
+    var pendingWorkWaitCount: Int { workWaiters.count }
+
+    /// Blocks until the caller has something to act on, without delivering mail it
+    /// does not print. One wait per session: a newer call replaces the older one.
+    /// `processID` is the waiting `chauffeurctl`; the wait ends if it disappears.
+    public func waitForWork(token: String, milestones: Bool, timeoutSeconds: Int, processID: Int32? = nil) async throws -> WorkReport {
+        try Validation.require((1...86_400).contains(timeoutSeconds), "The wait must be between 1 second and 24 hours")
+        let caller = try authenticate(token)
+        let id = UUID()
+        if let previous = workWaiters[caller.sessionID] {
+            replacedWorkWaits.insert(previous)
+            inboxWaiters[previous]?.1.finish()
+        }
+        workWaiters[caller.sessionID] = id
+        let (stream, continuation) = AsyncStream<Bool>.makeStream()
+        inboxWaiters[id] = (caller.sessionID, continuation)
+        let controlled = try allDelegations().filter { $0.controllingParentID == caller.sessionID && $0.scope == caller.scope }
+        let baseline = Dictionary(controlled.compactMap { item in (try? peer(item.childID, caller: caller)).map { (item.id, $0.state) } }, uniquingKeysWith: { first, _ in first })
+        let changedMilestones = MilestoneLog()
+        let watchers = milestones ? controlled.compactMap { item -> ProgressWatcher? in
+            guard let child = try? peer(item.childID, caller: caller), child.state.isLive, let path = child.progress?.jsonPath else { return nil }
+            return ProgressWatcher(path: path) { changedMilestones.add(child.title); continuation.yield(false) }
+        } : []
+        let processGone = MilestoneLog()
+        let timer = Task {
+            do { try await Task.sleep(for: .seconds(timeoutSeconds)); continuation.finish() } catch {}
+        }
+        let monitor = Task {
+            guard let processID else { return }
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(2))
+                if kill(processID, 0) != 0 && errno == ESRCH { processGone.add("gone"); continuation.finish(); return }
+            }
+        }
+        defer {
+            withExtendedLifetime(watchers) {}
+            timer.cancel(); monitor.cancel(); continuation.finish()
+            inboxWaiters.removeValue(forKey: id)
+            if workWaiters[caller.sessionID] == id { workWaiters.removeValue(forKey: caller.sessionID) }
+            replacedWorkWaits.remove(id)
+        }
+        func check() throws -> WorkReport? {
+            if replacedWorkWaits.contains(id) { return WorkReport(reason: .replaced) }
+            guard let current = try? authenticate(token), current.sessionID == caller.sessionID, processGone.isEmpty else { return WorkReport(reason: .ended) }
+            var report = try collectWork(caller: caller, delegations: controlled, baseline: baseline)
+            report.milestones = changedMilestones.drain()
+            return report.isEmpty ? nil : report
+        }
+        if let report = try check() { return report }
+        for await _ in stream {
+            try Task.checkCancellation()
+            if let report = try check() { return report }
+        }
+        if let report = try check() { return report }
+        var timeout = WorkReport(reason: .timeout); timeout.timeoutMinutes = timeoutSeconds / 60
+        return timeout
+    }
+    /// Worker results that fit the budget are delivered and acknowledged here, since
+    /// they are printed in full. Everything else stays queued for `chauffeur_inbox`.
+    private func collectWork(caller: Caller, delegations: [Delegation], baseline: [UUID: SessionState]) throws -> WorkReport {
+        var report = WorkReport(reason: .work)
+        try transaction {
+            var budget = WorkReport.printedResultBudget
+            let queued = try rows("SELECT record FROM messages WHERE recipient_id=? AND project_id=? AND group_id=? AND state='queued' ORDER BY rowid", [caller.sessionID.uuidString] + scopeValues(caller)).map { try decode(Message.self, $0[0]) }
+            for var message in queued {
+                guard let delegationID = message.delegationID, let delegation = delegations.first(where: { $0.id == delegationID }),
+                      message.body.utf8.count <= budget else { report.queuedMessages += 1; continue }
+                budget -= message.body.utf8.count
+                let worker = (try? peer(delegation.childID, caller: caller))?.title ?? "Worker"
+                report.results.append(WorkReport.Result(messageID: message.id, delegationID: delegationID, worker: worker, body: message.body))
+                message.state = .acknowledged; message.receivedAt = message.receivedAt ?? Date(); message.acknowledgedAt = Date()
+                try saveMessage(message)
+            }
+        }
+        let reported = Set(report.results.map(\.delegationID))
+        for item in delegations {
+            guard let child = try? peer(item.childID, caller: caller), let before = baseline[item.id], child.state != before,
+                  [.needsAttention, .exited, .failed, .interrupted].contains(child.state) || (child.state == .turnFinished && !reported.contains(item.id)) else { continue }
+            report.workers.append(WorkReport.Worker(delegationID: item.id, worker: child.title, state: child.state))
+        }
+        return report
     }
     public init(path: String) throws {
         connection = try SQLiteConnection(path: path)
@@ -280,6 +365,12 @@ public actor Ledger {
         try execute("UPDATE grants SET revoked=1 WHERE session_id=?", [sessionID.uuidString])
         wakeInbox(sessionID, healthCheck: true)
     }
+    /// The runtime acting for a live session it owns, e.g. to wake it.
+    public func callerFor(sessionID: UUID) throws -> Caller {
+        guard let row = try rows("SELECT project_id,group_id FROM sessions WHERE id=? AND live=1", [sessionID.uuidString]).first,
+              let projectID = UUID(uuidString: row[0]), let groupID = UUID(uuidString: row[1]) else { throw denied() }
+        return Caller(sessionID: sessionID, scope: GroupScope(projectID: projectID, groupID: groupID))
+    }
     public func authenticate(_ token: String) throws -> Caller {
         guard !token.isEmpty, token.utf8.count <= 512,
               let row = try rows("SELECT s.id,s.project_id,s.group_id FROM grants g JOIN sessions s ON s.id=g.session_id WHERE g.hash=? AND g.revoked=0 AND s.live=1", [JSONCoding.digest(Data(token.utf8))]).first,
@@ -386,6 +477,20 @@ public actor Ledger {
             if let key { try execute("INSERT INTO inbox_hint_receipts(session_id,event,native_turn_id,tool_use_id,record,created_at) VALUES(?,?,?,?,?,?)", key + [try encode(summary), now]) }
             return summary
         }
+    }
+    /// Claims queued worker results that no reminder mentioned yet, for a result wake
+    /// of an idle coordinator. Like hints, it leaves delivery to `chauffeur_inbox`.
+    public func claimResultWake(caller: Caller) throws -> [UUID] {
+        try transaction {
+            let claimed = try rows("SELECT m.id FROM messages m WHERE m.recipient_id=? AND m.project_id=? AND m.group_id=? AND m.state='queued' AND json_extract(m.record,'$.delegationID') IS NOT NULL AND NOT EXISTS (SELECT 1 FROM inbox_hints h WHERE h.message_id=m.id) ORDER BY m.rowid", [caller.sessionID.uuidString] + scopeValues(caller)).map { $0[0] }
+            let now = String(Date().timeIntervalSince1970)
+            for id in claimed { try execute("INSERT INTO inbox_hints(message_id,recipient_id,event,native_turn_id,created_at) VALUES(?,?,?,?,?)", [id, caller.sessionID.uuidString, "ResultWake", nil, now]) }
+            return claimed.compactMap(UUID.init(uuidString:))
+        }
+    }
+    /// Returns claimed messages to "not yet mentioned" when the wake could not be submitted.
+    public func releaseHints(_ ids: [UUID]) throws {
+        try transaction { for id in ids { try execute("DELETE FROM inbox_hints WHERE message_id=?", [id.uuidString]) } }
     }
     func hintRowCount() throws -> Int { Int(try rows("SELECT COUNT(*) FROM inbox_hints").first?[0] ?? "") ?? 0 }
     private func saveMessage(_ message: Message) throws { try execute("UPDATE messages SET state=?,record=? WHERE id=?", [message.state.rawValue, try encode(message), message.id.uuidString]) }
@@ -571,4 +676,13 @@ public actor Ledger {
             return candidates.count
         }
     }
+}
+
+/// Collects names from watcher and monitor callbacks for the waiting actor task.
+private final class MilestoneLog: @unchecked Sendable {
+    private let lock = NSLock()
+    private var names: [String] = []
+    var isEmpty: Bool { lock.lock(); defer { lock.unlock() }; return names.isEmpty }
+    func add(_ name: String) { lock.lock(); if !names.contains(name) { names.append(name) }; lock.unlock() }
+    func drain() -> [String] { lock.lock(); defer { names = []; lock.unlock() }; return names }
 }

@@ -94,6 +94,9 @@ struct SettingsView: View {
                     TextField("Snapshot budget (bytes)", value: $retention.snapshotBudgetBytes, format: .number)
                     TextField("Completed message history (days)", value: $retention.completedMessageDays, format: .number)
                     Stepper("Live delegated children per parent: \(retention.maxLiveChildren)", value: $retention.maxLiveChildren, in: 1...32)
+                    Toggle("Wake idle Codex coordinators when workers report", isOn: $retention.wakeIdleCoordinators)
+                        .accessibilityIdentifier("settings.wake-idle-coordinators")
+                    Text("Codex can’t wake itself when a background command finishes. When on, Chauffeur types a one-line reminder into an idle Codex coordinator’s empty prompt when a worker reports a result or stops, so the coordinator can end its turn while workers run. Claude coordinators wait with a background command instead.").font(.caption).foregroundStyle(.secondary)
                     Button("Save Settings") { model.perform { _ = try await model.call("saveSettings", try .from(retention)) } }
                     Text("Saved terminal history: \(model.snapshot.snapshotStorage.files) files, \(ByteCountFormatter.string(fromByteCount: Int64(model.snapshot.snapshotStorage.bytes), countStyle: .file)).").font(.caption)
                     Text("History is captured every five seconds while the service is running. Older snapshots are removed to fit the disk budget, starting with ended sessions. Scrollback changes trim saved history immediately and apply to new live terminals. Queued and received messages and native CLI conversations are preserved.").font(.caption).foregroundStyle(.secondary)

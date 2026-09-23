@@ -19,7 +19,8 @@ import ChauffeurCore
                 chauffeurctl diagnostics [--socket PATH]
                 chauffeurctl request METHOD [JSON | --file PATH] [--socket PATH]
                 chauffeurctl event [--session UUID] EVENT [provider-notify-json]
-                chauffeurctl inbox-hook --provider claude|codex [--report-stop]
+                chauffeurctl inbox-hook --provider claude|codex [--report-stop] [--report-running]
+                chauffeurctl wait-for-work [--timeout MINUTES] [--no-milestones]
 
                 request sends structured commands to the per-user service. Native
                 hook payloads are reduced to event and conversation IDs; never logged.
@@ -56,6 +57,8 @@ import ChauffeurCore
             case "inbox-hook":
                 await inboxHook(args, socket: socket)
                 return
+            case "wait-for-work":
+                exit(await waitForWork(args, socket: socket))
             default: throw ChauffeurError("usage", "Unknown command. Run chauffeurctl help")
             }
             let result = try await RuntimeClient.call(request, socketPath: socket)
@@ -100,7 +103,51 @@ import ChauffeurCore
         if event == "Stop", args.contains("--report-stop"), summary?.block != true {
             var params: [String: JSONValue] = ["token": .string(token), "event": .string("turn-finished"), "hookEvent": .string(event)]
             if let nativeID = payload.conversationID { params["nativeConversationID"] = .string(nativeID) }
+            if let background = payload.backgroundTasksActive { params["backgroundTasks"] = .number(Double(background)) }
             _ = try? await RuntimeClient.call(IPCRequest("event", params: .object(params)), socketPath: socket)
+        }
+        // Codex reports status only through notify at the end of a turn; its trusted
+        // prompt and tool hooks show that a long turn is still running.
+        if event != "Stop", args.contains("--report-running") {
+            var params: [String: JSONValue] = ["token": .string(token), "event": .string("running"), "hookEvent": .string(event)]
+            if let nativeID = payload.conversationID { params["nativeConversationID"] = .string(nativeID) }
+            _ = try? await RuntimeClient.call(IPCRequest("event", params: .object(params)), socketPath: socket)
+        }
+    }
+    /// Run in the background by a coordinator that ended its turn: exits when the
+    /// session has a worker result, message, worker state change or progress milestone,
+    /// printing what to act on. 0 = work or timeout, 2 = replaced or ended, 1 = error.
+    private static func waitForWork(_ args: [String], socket: String) async -> Int32 {
+        guard let token = ProcessInfo.processInfo.environment["CHAUFFEUR_SESSION_TOKEN"] else {
+            print("Chauffeur: wait-for-work must run inside a Chauffeur agent session."); return 1
+        }
+        var minutes = 240
+        if let index = args.firstIndex(of: "--timeout") {
+            guard args.indices.contains(index + 1), let value = Int(args[index + 1]), (1...1440).contains(value) else {
+                print("Chauffeur: --timeout takes 1–1440 minutes."); return 1
+            }
+            minutes = value
+        }
+        // The shell that started this wait belongs to the agent. If the agent exits,
+        // stop waiting instead of lingering as an orphan.
+        let parent = getppid()
+        let watchdog = DispatchSource.makeTimerSource(queue: .global())
+        watchdog.schedule(deadline: .now() + 2, repeating: 2)
+        watchdog.setEventHandler { if getppid() != parent { exit(2) } }
+        watchdog.resume()
+        let params: JSONValue = .object(["token": .string(token), "timeoutSeconds": .number(Double(minutes * 60)),
+                                         "milestones": .bool(!args.contains("--no-milestones")), "processID": .number(Double(getpid()))])
+        do {
+            let result = try await RuntimeClient.call(IPCRequest("waitForWork", params: params), socketPath: socket, responseTimeout: minutes * 60 + 60)
+            let report = try result.decode(WorkReport.self)
+            print(WorkReportFormatter.text(report))
+            return [.replaced, .ended].contains(report.reason) ? 2 : 0
+        } catch let error as ChauffeurError where error.code == "socket_failed" || error.code == "connection_closed" || error.code == "service_unavailable" {
+            print("Chauffeur: cannot reach the Chauffeur service from this shell. A sandbox may block it; wait with chauffeur_inbox instead.")
+            return 1
+        } catch {
+            print("Chauffeur: wait-for-work failed (\((error as? ChauffeurError)?.code ?? "error")). Wait with chauffeur_inbox instead.")
+            return 1
         }
     }
     private static func execPayload(_ args: [String]) throws {

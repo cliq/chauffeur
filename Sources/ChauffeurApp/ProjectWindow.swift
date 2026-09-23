@@ -1209,7 +1209,8 @@ struct WindowObserver: NSViewRepresentable {
 private extension Session {
     var visibleStatus: String? {
         var parts: [String] = []
-        if state != .activityUnknown { parts.append(state.label) }
+        if state == .turnFinished, let waiting { parts.append(waiting.label) }
+        else if state != .activityUnknown { parts.append(state.label) }
         if pendingMessages > 0 { parts.append("\(pendingMessages) messages") }
         return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }

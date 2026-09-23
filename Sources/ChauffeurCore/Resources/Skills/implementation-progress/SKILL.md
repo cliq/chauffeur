@@ -2,7 +2,7 @@
 name: implementation-progress
 description: Create and maintain an auto-refreshing progress panel in Chauffeur’s session Progress tab or a standalone browser, showing implementation phases, optional steps, and current activity. Use when the user asks for a progress panel, dashboard, or status page for a multi-step task, or when updating a panel already in use.
 metadata:
-  version: "1.0.0"
+  version: "1.1.0"
 ---
 
 # Implementation progress
@@ -76,7 +76,9 @@ Registration is idempotent. Subsequent commands reassert the association, so
 resuming with `show` or updating a panel also repairs a failed connection. A
 connection failure leaves the local files usable, prints a warning, and retries
 on the next command. Report that warning rather than claiming registration
-succeeded. Without a session credential the script runs as a standalone tool.
+succeeded. Sandboxed Codex sessions (`workspace-write`, `read-only`) can't reach
+the local connection at all. There, if `chauffeur_register_progress` is available,
+call it once with the panel's absolute `progress.json` and `index.html` paths. Without a session credential the script runs as a standalone tool.
 Older Chauffeur runtimes may need an update/restart to support registration.
 
 ## Update at milestones

@@ -77,10 +77,11 @@ public final class SocketConnection: @unchecked Sendable {
 }
 
 public enum RuntimeClient {
-    public static func call(_ request: IPCRequest, socketPath: String = Paths.applicationSupport.appendingPathComponent("runtime/runtime.sock").path) async throws -> JSONValue {
+    /// `responseTimeout` bounds each socket read; long waits pass their own limit.
+    public static func call(_ request: IPCRequest, socketPath: String = Paths.applicationSupport.appendingPathComponent("runtime/runtime.sock").path, responseTimeout: Int = 30) async throws -> JSONValue {
         let connection = try SocketConnection(path: socketPath)
         defer { connection.close() }
-        var timeout = timeval(tv_sec: 30, tv_usec: 0)
+        var timeout = timeval(tv_sec: responseTimeout, tv_usec: 0)
         setsockopt(connection.descriptor, SOL_SOCKET, SO_RCVTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size))
         setsockopt(connection.descriptor, SOL_SOCKET, SO_SNDTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size))
         try await connection.sendAsync(request)

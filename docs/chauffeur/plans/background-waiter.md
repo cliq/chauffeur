@@ -1,6 +1,6 @@
 # Background waiter for idle coordinators
 
-Status: planned (2026-09-23). Spike done; no product changes yet.
+Status: implemented (2026-09-23). T1–T6 done; see "Outcome".
 
 ## Goal
 
@@ -58,6 +58,10 @@ Consequences:
   Whether a real model follows the new coordinator guidance is checked in T6.
 
 ## Design
+
+The design as planned before the decisions. Where it differs from "Outcome" (the
+timeout, printed results being acknowledged, Codex result wake, and a
+`Session.waiting` field instead of new session states), "Outcome" is what shipped.
 
 ### 1. Progress wake filter (both providers)
 
@@ -176,11 +180,39 @@ Chauffeur can be more precise, because the waiter is its own process:
 - One short real-model check per provider, with cheap models. It confirms a real
   model follows the guidance and wakes. Codex is run only if the account has quota.
 
-## Decisions needed
+## Decisions (2026-09-23)
 
-1. Should the waiter deliver and print worker results (recommended), or only
-   report that they arrived?
-2. Default timeout: 60 min (recommended) or longer?
-3. Should Codex coordinators get an opt-in "result wake" in which Chauffeur submits
-   a follow-up prompt through the checked composer path? It is the only way to
-   make an idle Codex coordinator free, and it does type into the terminal.
+1. The waiter prints worker results in full (up to 16 KiB) and delivers them.
+2. Default waiter timeout: 4 hours (worker turns can run longer than an hour). A
+   timeout costs one short turn; the coordinator then re-arms it.
+3. Codex coordinators get a result wake, **on by default**. It can be turned off in
+   Settings › Runtime ("Wake idle Codex coordinators when workers report").
+
+## Outcome
+
+- T1 `ImplementationProgress.changesMilestones(from:)`: only phases and steps being
+  added, removed or changing state wake a wait.
+- T2 `Ledger.waitForWork`, IPC `waitForWork`, `chauffeurctl wait-for-work
+  [--timeout MINUTES] [--no-milestones]`, `WorkReport` and `WorkReportFormatter` in
+  `ChauffeurCore/WorkWait.swift`. Printed results are acknowledged; the delegation
+  keeps the result. The wait ends when the ctl process disappears (checked every
+  2 s) or its parent changes.
+- T3 Claude launch settings allow exactly `Bash(<waitCommand>:*)`. Agent sessions
+  get `CHAUFFEUR_CTL`. Discovery reports `capabilities.waitCommand` (Claude) and
+  `capabilities.resultWake` (Codex).
+- T4 `Session.waiting` (`workers` / `backgroundTask`) instead of new session
+  states, so `isLive`, the remote protocol and the iPhone app are unchanged. Tabs
+  show "Waiting for workers" or "Background task running" and no completion
+  notice is sent. The Claude `Stop` hook forwards the count of running,
+  non-monitor `background_tasks`. Codex's trusted prompt and tool hooks report
+  `running` (`inbox-hook --report-running`).
+- T5 Result wake: on each reconcile tick (once per second, at most one attempt per
+  coordinator every 5 s), an idle Codex coordinator with unmentioned worker
+  results or a worker that stopped without reporting gets one prompt through the
+  checked follow-up path. A draft or busy composer releases the claim and retries.
+  Skills: Chauffeur 1.5.0, Orchestrator 1.2.0, Implementation Progress 1.1.0
+  (sandbox registration fallback).
+- T6 `Prototypes/coordinator_wait_smoke.py` passes: Claude waiter (pre-approved,
+  zero model requests while waiting, one wake carrying the result) and Codex result
+  wake (one typed prompt, inbox read). The inbox-hook and cross-provider smokes
+  still pass. The real-model checks weren't run; they need authorized profiles.

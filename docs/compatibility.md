@@ -147,6 +147,19 @@ Reminders never include senders or bodies and never wake an idle session.
 `Prototypes/cross_provider_inbox_smoke.py` check these behaviors through the real
 runtime and the real TUIs with local mock providers, so they need no accounts.
 
+### Idle coordinators
+
+- **Claude Code** starts a new turn when a background Bash command exits, and its
+  `Stop` hook lists running `background_tasks`. Coordinators wait with
+  `chauffeurctl wait-for-work` in the background and use no tokens meanwhile.
+- **Codex** keeps background commands running but never starts a turn when one
+  exits. With the result wake on (the default), Chauffeur types a one-line prompt
+  into an idle Codex coordinator when a worker reports or stops. Otherwise the
+  coordinator waits inside `chauffeur_inbox`.
+- **Codex sandboxes** (`workspace-write`, `read-only`) block commands from the
+  runtime socket. `wait-for-work` and progress auto-registration then fail with a
+  fallback message; MCP tools and hooks are unaffected.
+
 ### Orchestrated follow-up turns
 
 Automatic terminal submission checks provider identity, completion, live pane

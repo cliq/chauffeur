@@ -39,8 +39,15 @@ public enum CLIAdapter {
     /// Codex hooks Chauffeur adds for a coordinated session. The commands carry no
     /// session ID (the session comes from `CHAUFFEUR_SESSION_TOKEN`), so their
     /// trust hashes stay the same across sessions.
+    /// The exact command a Claude coordinator runs in the background to wait for
+    /// workers; launch settings pre-approve it and nothing broader.
+    public static func waitCommand(ctlPath: String) -> String {
+        let plain = ctlPath.unicodeScalars.allSatisfy { CharacterSet.alphanumerics.contains($0) || "/._-+".unicodeScalars.contains($0) }
+        return (plain ? ctlPath : shellQuote(ctlPath)) + " wait-for-work"
+    }
     public static func codexHookDefinitions(ctlPath: String) -> [CodexHookTrust.Definition] {
-        let inbox = [ctlPath, "inbox-hook", "--provider", "codex"].map(shellQuote).joined(separator: " ")
+        // Codex status otherwise comes only from notify at the end of a turn.
+        let inbox = [ctlPath, "inbox-hook", "--provider", "codex", "--report-running"].map(shellQuote).joined(separator: " ")
         return [CodexHookTrust.Definition(event: "SessionStart", command: [ctlPath, "event", "session-start"].map(shellQuote).joined(separator: " "))]
             + ["UserPromptSubmit", "PostToolUse", "Stop"].map { CodexHookTrust.Definition(event: $0, command: inbox) }
     }
@@ -113,7 +120,8 @@ public enum CLIAdapter {
                 for (hook, command) in [("UserPromptSubmit", inboxCommand), ("PostToolUse", inboxCommand), ("Stop", inboxCommand + " '--report-stop'")] {
                     hooks[hook] = .array((hooks[hook]?.array ?? []) + [.object(["hooks": .array([.object(["type": .string("command"), "command": .string(command), "timeout": .number(5)])])])])
                 }
-                var launchSettings: [String: JSONValue] = ["hooks": .object(hooks)]
+                var launchSettings: [String: JSONValue] = ["hooks": .object(hooks),
+                    "permissions": .object(["allow": .array([.string("Bash(\(waitCommand(ctlPath: ctlPath)):*)")])])]
                 // Generated suggestions render inside Claude's composer and
                 // cannot be distinguished safely from a user draft in plain
                 // terminal output. Disable them for delegated Claude sessions;

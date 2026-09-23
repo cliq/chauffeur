@@ -146,4 +146,22 @@ struct CLIAdapterTests {
         #expect(postToolUse.allSatisfy { $0["matcher"] == .null }, "MCP tool calls must reach the reminder")
         #expect(postToolUse.last?["hooks"].array.first?["timeout"].int == 5)
     }
+
+    @Test func claudeCoordinatorsMayRunOnlyTheWaiterWithoutAPrompt() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("chauffeur-waiter-\(UUID())")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        defer { try? FileManager.default.removeItem(at: root) }
+        let set = PresetSet(name: "Fixture")
+        let preset = AgentPreset(setID: set.id, name: "Fixture", kind: .claude, executable: "/bin/false", configurationDirectory: root.path)
+        let launch = LaunchSnapshot(preset: preset, set: set, executablePath: "/bin/false", executableVersion: "fixture", workingDirectory: root.path, additionalPaths: [])
+        let session = Session(projectID: UUID(), groupID: UUID(), title: "Fixture", launch: launch, folderID: UUID())
+        for (ctl, command) in [("/Applications/Chauffeur.app/Contents/MacOS/chauffeurctl", "/Applications/Chauffeur.app/Contents/MacOS/chauffeurctl wait-for-work"),
+                               ("/Users/o'neil/My Apps/chauffeurctl", #"'/Users/o'"'"'neil/My Apps/chauffeurctl' wait-for-work"#)] {
+            #expect(CLIAdapter.waitCommand(ctlPath: ctl) == command)
+            _ = try CLIAdapter.arguments(session: session, endpoint: "http://127.0.0.1:1/mcp", ctlPath: ctl, integrationDirectory: root, coordination: true, resume: false)
+            let settings = try JSONCoding.decode(JSONValue.self, from: Data(contentsOf: root.appendingPathComponent("settings.json")))
+            #expect(settings["permissions"]["allow"].array.compactMap(\.string) == ["Bash(\(command):*)"])
+        }
+        #expect(CLIAdapter.codexHookDefinitions(ctlPath: "/x/chauffeurctl").dropFirst().allSatisfy { $0.command.hasSuffix("'--report-running'") })
+    }
 }
