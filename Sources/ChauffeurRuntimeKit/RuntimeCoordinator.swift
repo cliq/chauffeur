@@ -24,6 +24,7 @@ public actor RuntimeCoordinator {
     private var checkoutClaims = CheckoutClaims()
     private var endpoint: String?
     private var settings = RetentionSettings()
+    private var eventTails: [UUID: Task<Void, Never>] = [:]
     private var recentErrors: [ChauffeurError] = []
     private let logs: RuntimeLogStore?
     private var metadataErrors: [ChauffeurError] = []
@@ -971,8 +972,22 @@ public actor RuntimeCoordinator {
         try await ledger.revoke(sessionID: session.id); try await persist(session)
         return failure
     }
+    /// Hooks for one session can arrive together (Claude runs an event's hooks in
+    /// parallel). Each event reads the session only after the previous one saved it,
+    /// so a status update cannot write back a conversation ID another event replaced.
     private func event(_ params: JSONValue) async throws -> JSONValue {
         let caller = try await ledger.authenticate(params.requiredString("token"))
+        let previous = eventTails[caller.sessionID]
+        let task = Task { () async throws -> JSONValue in
+            _ = await previous?.value
+            return try await self.applyEvent(params, caller: caller)
+        }
+        let tail = Task { _ = try? await task.value }
+        eventTails[caller.sessionID] = tail
+        defer { if eventTails[caller.sessionID] == tail { eventTails.removeValue(forKey: caller.sessionID) } }
+        return try await task.value
+    }
+    private func applyEvent(_ params: JSONValue, caller: Caller) async throws -> JSONValue {
         let sessionID = params["sessionID"] == .null ? caller.sessionID : try params.uuid("sessionID")
         guard caller.sessionID == sessionID, var session = sessions[sessionID], session.state.isLive else { throw ChauffeurError("unauthorized", "Event does not belong to this session") }
         var notification: AttentionReason?
@@ -990,7 +1005,9 @@ public actor RuntimeCoordinator {
            !NativeConversation.same(session.nativeConversationID, nativeID) {
             // The session token already identifies the caller, so state always
             // applies. Only /clear and /resume move the session to another conversation.
-            if session.nativeConversationID == nil || NativeConversation.adopts(kind: session.launch.preset.kind, hookEvent: params["hookEvent"].string, source: params["source"].string) {
+            let hooksTrusted = session.inboxReminders == true
+            if session.nativeConversationID == nil ? NativeConversation.adoptsFirst(kind: session.launch.preset.kind, hooksTrusted: hooksTrusted, hookEvent: params["hookEvent"].string)
+                : NativeConversation.adopts(kind: session.launch.preset.kind, hookEvent: params["hookEvent"].string, source: params["source"].string) {
                 let owner = sessions.values.first { $0.id != sessionID && $0.state.isLive && NativeConversation.same($0.nativeConversationID, nativeID) }
                 session.nativeConversationID = nativeID
                 session.conversationWarning = owner.map { "This conversation is also open in “\($0.title)”. Both sessions now write to the same native conversation." }
@@ -1007,8 +1024,9 @@ public actor RuntimeCoordinator {
         let caller = try await ledger.authenticate(params.requiredString("token"))
         guard let session = sessions[caller.sessionID], session.state.isLive,
               session.launch.preset.kind.rawValue == params["provider"].string else { throw ChauffeurError("unauthorized", "Hook does not belong to this session") }
-        if let reported = params["nativeConversationID"].string, session.nativeConversationID != nil,
-           !NativeConversation.same(session.nativeConversationID, reported) { return InboxHintSummary() }
+        // Only the recorded conversation may claim: a hook without a valid ID, or
+        // before the session's conversation is known, would spend its reminders.
+        guard NativeConversation.same(session.nativeConversationID, params["nativeConversationID"].string) else { return InboxHintSummary() }
         return try await ledger.claimInboxHint(caller: caller, event: params.requiredString("event"), nativeTurnID: params["turnID"].string, toolUseID: params["toolUseID"].string)
     }
     private var skillHome: String { baseEnvironment["HOME"] ?? root.path }

@@ -135,11 +135,13 @@ struct CLIAdapterTests {
         let inbox = #"'/Applications/Chauffeur'"'"'s Tools/chauffeurctl' 'inbox-hook' '--provider' 'claude'"#
         func commands(_ hook: String) -> [String] { hooks[hook].array.flatMap { $0["hooks"].array.compactMap { $0["command"].string } } }
         for (hook, event) in [("SessionStart", "running"), ("UserPromptSubmit", "running"), ("PostToolUse", "running"), ("PostToolUseFailure", "running"),
-                              ("Stop", "turn-finished"), ("StopFailure", "needs-attention"), ("Notification", "needs-attention"), ("PermissionRequest", "needs-attention")] {
+                              ("StopFailure", "needs-attention"), ("Notification", "needs-attention"), ("PermissionRequest", "needs-attention")] {
             let status = #"'/Applications/Chauffeur'"'"'s Tools/chauffeurctl' 'event' '--session' '\#(session.id.uuidString)' '\#(event)'"#
-            let expected = ["UserPromptSubmit", "PostToolUse", "Stop"].contains(hook) ? [status, inbox] : [status]
+            let expected = ["UserPromptSubmit", "PostToolUse"].contains(hook) ? [status, inbox] : [status]
             #expect(commands(hook) == expected, "\(hook)")
         }
+        // A blocked Stop is not the end of the turn, so one hook decides both.
+        #expect(commands("Stop") == [inbox + " '--report-stop'"])
         let postToolUse = hooks["PostToolUse"].array
         #expect(postToolUse.allSatisfy { $0["matcher"] == .null }, "MCP tool calls must reach the reminder")
         #expect(postToolUse.last?["hooks"].array.first?["timeout"].int == 5)

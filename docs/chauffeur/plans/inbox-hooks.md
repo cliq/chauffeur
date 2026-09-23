@@ -435,3 +435,26 @@ Consequences for T5:
 1. Conflict on `/resume`: adopt the conversation anyway and show a warning.
 2. Hint text: counts only.
 3. Stop continuation: on for every coordinated session, with no project setting.
+
+## Codex review follow-up (2026-09-23)
+
+A read-only Codex review found seven medium-severity issues. All were fixed, each with a regression test:
+
+1. Claude `Stop` has a single hook (`inbox-hook --report-stop`). It reports
+   turn-finished only when it lets the turn end, so a continuation for new mail no
+   longer marks the session finished or notifies watchers.
+2. With trusted Codex hooks, a session with no recorded conversation takes it only
+   from a hook event, never from `notify` (the title thread's notify arrives first).
+3. `chauffeurctl event` has the same 3 s exit-0 deadline as `inbox-hook`, including
+   while stdin stays open.
+4. Lifecycle events for one session are applied in order. A parallel status event
+   can no longer write back a conversation ID that `SessionStart` just replaced.
+5. `inboxHint` claims only when the reported native ID is valid and matches the
+   recorded one. A missing ID, or no recorded ID yet, gets an empty summary.
+6. A `PostToolUse` without `tool_use_id` gets no receipt, so tool calls in one turn
+   can't share an answer.
+7. Oversized payloads are read with a depth-aware scanner of the top-level object;
+   nested or quoted look-alike keys are ignored.
+
+`swift test --no-parallel` passes 427 tests. The parallel run shows the known
+pipe-drain flake in process-heavy suites. Both smokes pass.

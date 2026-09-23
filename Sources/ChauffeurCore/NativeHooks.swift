@@ -32,21 +32,73 @@ public struct HookPayload: Equatable, Sendable {
             payload.stopHookActive = value["stop_hook_active"].bool ?? false
             return payload
         }
-        let text = String(decoding: data.prefix(readLimit), as: UTF8.self)
-        payload.hookEvent = identifier(scalar("hook_event_name", in: text))
-        payload.source = identifier(scalar("source", in: text))
-        payload.conversationID = uuid(scalar("thread-id", in: text)) ?? uuid(scalar("session_id", in: text))
-        payload.turnID = identifier(scalar("turn_id", in: text))
-        payload.toolUseID = identifier(scalar("tool_use_id", in: text))
-        payload.stopHookActive = text.range(of: #"(?<!\\)"stop_hook_active"\s*:\s*true"#, options: .regularExpression) != nil
+        let fields = topLevelScalars(data.prefix(readLimit))
+        payload.hookEvent = identifier(fields["hook_event_name"])
+        payload.source = identifier(fields["source"])
+        payload.conversationID = uuid(fields["thread-id"]) ?? uuid(fields["session_id"])
+        payload.turnID = identifier(fields["turn_id"])
+        payload.toolUseID = identifier(fields["tool_use_id"])
+        payload.stopHookActive = fields["stop_hook_active"] == "true"
         return payload
     }
-    private static func scalar(_ key: String, in text: String) -> String? {
-        let pattern = #"(?<!\\)""# + NSRegularExpression.escapedPattern(for: key) + #""\s*:\s*"([^"\\]{1,200})""#
-        guard let regex = try? NSRegularExpression(pattern: pattern),
-              let match = regex.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)),
-              let range = Range(match.range(at: 1), in: text) else { return nil }
-        return String(text[range])
+    /// Scalar members of the top-level object in a possibly truncated JSON prefix.
+    /// Nested objects, arrays and string contents (tool input and output) are
+    /// skipped by depth, so they cannot supply a top-level field.
+    static func topLevelScalars(_ data: Data) -> [String: String] {
+        let bytes = [UInt8](data)
+        var index = 0
+        while index < bytes.count, [0x20, 0x09, 0x0A, 0x0D].contains(bytes[index]) { index += 1 }
+        guard index < bytes.count, bytes[index] == UInt8(ascii: "{") else { return [:] }
+        var result: [String: String] = [:], depth = 0, key: String?, afterColon = false
+        // The decoded string and the index after its closing quote, or nil if cut off.
+        func string(at start: Int) -> (String, Int)? {
+            var value: [UInt8] = [], cursor = start + 1
+            while cursor < bytes.count {
+                switch bytes[cursor] {
+                case UInt8(ascii: "\\"):
+                    guard cursor + 1 < bytes.count else { return nil }
+                    let escaped = bytes[cursor + 1]
+                    // Only literal escapes matter for identifiers; others make the value invalid.
+                    value.append([UInt8(ascii: "\""), UInt8(ascii: "\\"), UInt8(ascii: "/")].contains(escaped) ? escaped : 0)
+                    cursor += escaped == UInt8(ascii: "u") ? 6 : 2
+                case UInt8(ascii: "\""): return (String(decoding: value, as: UTF8.self), cursor + 1)
+                default: value.append(bytes[cursor]); cursor += 1
+                }
+            }
+            return nil
+        }
+        while index < bytes.count {
+            let byte = bytes[index]
+            switch byte {
+            case UInt8(ascii: "{"), UInt8(ascii: "["):
+                if depth == 1 { key = nil; afterColon = false }
+                depth += 1; index += 1
+            case UInt8(ascii: "}"), UInt8(ascii: "]"):
+                depth -= 1; index += 1
+                if depth <= 0 { return result }
+            case UInt8(ascii: "\""):
+                guard let (value, next) = string(at: index) else { return result }
+                if depth == 1 {
+                    if afterColon, let name = key { result[name] = value; key = nil; afterColon = false } else { key = value }
+                }
+                index = next
+            case UInt8(ascii: ":"):
+                if depth == 1, key != nil { afterColon = true }
+                index += 1
+            case UInt8(ascii: ","):
+                if depth == 1 { key = nil; afterColon = false }
+                index += 1
+            case UInt8(ascii: "t"), UInt8(ascii: "f"):
+                if depth == 1, afterColon, let name = key {
+                    let literal = Array((byte == UInt8(ascii: "t") ? "true" : "false").utf8)
+                    if bytes.count >= index + literal.count, Array(bytes[index..<index + literal.count]) == literal { result[name] = String(decoding: literal, as: UTF8.self) }
+                    key = nil; afterColon = false
+                }
+                index += 1
+            default: index += 1
+            }
+        }
+        return result
     }
     private static func uuid(_ value: String?) -> String? { value.flatMap { UUID(uuidString: $0) == nil ? nil : $0 } }
     /// Event names, sources and provider IDs are short tokens; anything else is dropped.
@@ -72,6 +124,11 @@ public enum NativeConversation {
         case .codex: ["startup", "clear", "resume", "fork"]
         case .shell: []
         }
+    }
+    /// A session with no recorded conversation yet. With trusted Codex hooks, only
+    /// a hook names it: Codex's title generator sends `notify` from another thread.
+    public static func adoptsFirst(kind: CLIKind, hooksTrusted: Bool, hookEvent: String?) -> Bool {
+        !(kind == .codex && hooksTrusted && hookEvent == nil)
     }
     public static func adopts(kind: CLIKind, hookEvent: String?, source: String?) -> Bool {
         guard hookEvent == "SessionStart", let source else { return false }

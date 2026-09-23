@@ -19,7 +19,7 @@ import ChauffeurCore
                 chauffeurctl diagnostics [--socket PATH]
                 chauffeurctl request METHOD [JSON | --file PATH] [--socket PATH]
                 chauffeurctl event [--session UUID] EVENT [provider-notify-json]
-                chauffeurctl inbox-hook --provider claude|codex
+                chauffeurctl inbox-hook --provider claude|codex [--report-stop]
 
                 request sends structured commands to the per-user service. Native
                 hook payloads are reduced to event and conversation IDs; never logged.
@@ -36,6 +36,8 @@ import ChauffeurCore
             case "event":
                 // Native hooks call this. A rejected event must not surface as a
                 // provider hook error; the runtime records its own diagnostics.
+                // Provider hook timeouts are a few seconds; never outlast them.
+                DispatchQueue.global().asyncAfter(deadline: .now() + hookDeadline) { exit(0) }
                 // Without --session the credential names the session, which keeps
                 // the command identical across sessions (Codex hook trust hashes it).
                 var params: [String: JSONValue] = [:]
@@ -72,26 +74,34 @@ import ChauffeurCore
         while let more = try? input.read(upToCount: HookPayload.readLimit), !more.isEmpty {}
         return data ?? Data()
     }
+    /// Hook-driven commands exit 0 by this deadline; provider hook timeouts are 5 s.
+    private static let hookDeadline: TimeInterval = 3
     /// Prints a metadata-only inbox reminder for a native lifecycle hook. Every
     /// failure prints nothing and exits 0: a hint is best effort, the inbox is durable.
+    /// With --report-stop (Claude), a Stop that is allowed to end the turn is also
+    /// reported as turn-finished; a Stop this hook blocks is not the end of the turn.
     private static func inboxHook(_ args: [String], socket: String) async {
-        // Hook timeouts are a few seconds; give up well before the provider does.
-        DispatchQueue.global().asyncAfter(deadline: .now() + 1.5) { exit(0) }
+        DispatchQueue.global().asyncAfter(deadline: .now() + hookDeadline) { exit(0) }
         let payload = HookPayload.parse(hookInput())
         guard let index = args.firstIndex(of: "--provider"), args.indices.contains(index + 1),
               let provider = CLIKind(rawValue: args[index + 1]), provider.isAgent,
               let token = ProcessInfo.processInfo.environment["CHAUFFEUR_SESSION_TOKEN"],
-              let event = payload.hookEvent, InboxHintFormatter.hookEvents.contains(event),
-              // A continuation after a blocked Stop always ends the turn.
-              !(event == "Stop" && payload.stopHookActive) else { return }
-        var params: [String: JSONValue] = ["token": .string(token), "provider": .string(provider.rawValue), "event": .string(event)]
-        if let nativeID = payload.conversationID { params["nativeConversationID"] = .string(nativeID) }
-        if let turnID = payload.turnID { params["turnID"] = .string(turnID) }
-        if let toolUseID = payload.toolUseID { params["toolUseID"] = .string(toolUseID) }
-        guard let result = try? await RuntimeClient.call(IPCRequest("inboxHint", params: .object(params)), socketPath: socket),
-              let summary = try? result.decode(InboxHintSummary.self),
-              let output = InboxHintFormatter.output(event: event, summary: summary) else { return }
-        FileHandle.standardOutput.write(output)
+              let event = payload.hookEvent, InboxHintFormatter.hookEvents.contains(event) else { return }
+        var summary: InboxHintSummary?
+        // A continuation after a blocked Stop always ends the turn.
+        if !(event == "Stop" && payload.stopHookActive) {
+            var params: [String: JSONValue] = ["token": .string(token), "provider": .string(provider.rawValue), "event": .string(event)]
+            if let nativeID = payload.conversationID { params["nativeConversationID"] = .string(nativeID) }
+            if let turnID = payload.turnID { params["turnID"] = .string(turnID) }
+            if let toolUseID = payload.toolUseID { params["toolUseID"] = .string(toolUseID) }
+            summary = (try? await RuntimeClient.call(IPCRequest("inboxHint", params: .object(params)), socketPath: socket)).flatMap { try? $0.decode(InboxHintSummary.self) }
+            if let summary, let output = InboxHintFormatter.output(event: event, summary: summary) { FileHandle.standardOutput.write(output) }
+        }
+        if event == "Stop", args.contains("--report-stop"), summary?.block != true {
+            var params: [String: JSONValue] = ["token": .string(token), "event": .string("turn-finished"), "hookEvent": .string(event)]
+            if let nativeID = payload.conversationID { params["nativeConversationID"] = .string(nativeID) }
+            _ = try? await RuntimeClient.call(IPCRequest("event", params: .object(params)), socketPath: socket)
+        }
     }
     private static func execPayload(_ args: [String]) throws {
         guard args.count == 1 else { throw ChauffeurError("usage", "Invalid launch handoff") }

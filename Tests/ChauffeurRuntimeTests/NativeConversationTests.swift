@@ -54,6 +54,26 @@ struct NativeConversationTests {
         #expect(arguments.suffix(2) == ["--resume", cleared])
     }
 
+    @Test func parallelStatusEventsCannotUndoAnAdoptedConversation() async throws {
+        let fixture = try await LaunchFixture.make(); defer { fixture.cleanup() }
+        let (launched, token) = try await launch(fixture, fixture.request)
+        for round in 0..<5 {
+            let cleared = UUID().uuidString.lowercased()
+            let stale = try #require(try await fixture.session().nativeConversationID)
+            try await withThrowingTaskGroup(of: Void.self) { group in
+                for index in 0..<12 {
+                    group.addTask {
+                        if index == 3 { _ = try await event(fixture, launched, token: token, "running", native: cleared, hook: "SessionStart", source: "clear") }
+                        else { _ = try await event(fixture, launched, token: token, "running", native: stale, hook: "PostToolUse") }
+                    }
+                }
+                try await group.waitForAll()
+            }
+            #expect(try await fixture.session().nativeConversationID == cleared, "round \(round)")
+        }
+        _ = try await fixture.stop()
+    }
+
     @Test func resumingAnotherLiveSessionsConversationAdoptsItWithAWarning() async throws {
         let fixture = try await LaunchFixture.make(); defer { fixture.cleanup() }
         let (first, token) = try await launch(fixture, fixture.request)
@@ -82,8 +102,14 @@ struct NativeConversationTests {
             return try await fixture.runtime.handle(IPCRequest("inboxHint", params: .object(params))).decode(InboxHintSummary.self)
         }
         await #expect(throws: ChauffeurError.self) { try await hint(provider: "codex", native: nil) }
-        #expect(try await hint(provider: "claude", native: launched.id.uuidString.lowercased()) == InboxHintSummary())
+        let peer = LedgerTests().session(project: launched.projectID, group: launched.groupID)
+        try await fixture.runtime.ledger.register(peer)
+        let sender = try await fixture.runtime.ledger.authenticate(fixture.runtime.ledger.issueGrant(sessionID: peer.id))
+        _ = try await fixture.runtime.ledger.send(caller: sender, recipientID: launched.id, body: "Mail", retryKey: "mail")
+        // Another conversation, or a hook without a usable ID, leaves the reminder for the session itself.
         #expect(try await hint(provider: "claude", native: UUID().uuidString) == InboxHintSummary())
+        #expect(try await hint(provider: "claude", native: nil) == InboxHintSummary())
+        #expect(try await hint(provider: "claude", native: launched.id.uuidString.lowercased()).count == 1)
         await #expect(throws: ChauffeurError.self) {
             _ = try await fixture.runtime.handle(IPCRequest("inboxHint", params: .object(["token": .string("forged"), "provider": .string("claude"), "event": .string("Stop")])))
         }

@@ -12,21 +12,25 @@ struct InboxHookCommandTests {
         let url = Bundle(for: Marker.self).bundleURL.deletingLastPathComponent().appendingPathComponent("chauffeurctl")
         return FileManager.default.isExecutableFile(atPath: url.path) ? url : nil
     }
-    private func run(_ ctl: URL, input: Data, token: String, socket: String, provider: String = "claude") throws -> (status: Int32, output: Data, elapsed: Duration) {
+    private func run(_ ctl: URL, input: Data, token: String, socket: String, provider: String = "claude", arguments: [String]? = nil, closeInput: Bool = true) throws -> (status: Int32, output: Data, elapsed: Duration) {
         let process = Process()
         process.executableURL = ctl
-        process.arguments = ["inbox-hook", "--provider", provider]
+        process.arguments = arguments ?? ["inbox-hook", "--provider", provider]
         process.environment = ["CHAUFFEUR_SESSION_TOKEN": token, "CHAUFFEUR_SOCKET": socket]
         let stdin = Pipe(), stdout = Pipe()
         process.standardInput = stdin; process.standardOutput = stdout; process.standardError = FileHandle.nullDevice
         let start = ContinuousClock.now
+        // Time the process itself: a concurrently spawned child in another test can
+        // inherit this pipe and delay end-of-file on stdout.
+        let exited = LockedInstant()
+        process.terminationHandler = { _ in exited.set(.now) }
         try process.run()
         // Write concurrently: a payload larger than the pipe buffer must not deadlock.
-        let writer = Thread { try? stdin.fileHandleForWriting.write(contentsOf: input); try? stdin.fileHandleForWriting.close() }
+        let writer = Thread { try? stdin.fileHandleForWriting.write(contentsOf: input); if closeInput { try? stdin.fileHandleForWriting.close() } }
         writer.start()
         let output = stdout.fileHandleForReading.readDataToEndOfFile()
         process.waitUntilExit()
-        return (process.terminationStatus, output, start.duration(to: .now))
+        return (process.terminationStatus, output, start.duration(to: exited.get() ?? .now))
     }
     private func payload(_ event: String, session: String, extra: String = "") -> Data {
         Data(#"{"session_id":"\#(session)","hook_event_name":"\#(event)"\#(extra)}"#.utf8)
@@ -76,4 +80,50 @@ struct InboxHookCommandTests {
         }
         _ = try await fixture.stop()
     }
+
+    @Test func claudeStopReportsTurnFinishedOnlyWhenItLetsTheTurnEnd() async throws {
+        let ctl = try #require(ctl)
+        let fixture = try await LaunchFixture.make(); defer { fixture.cleanup() }
+        let server = try IPCServer(root: fixture.root, runtime: fixture.runtime); server.start()
+        let socket = fixture.path("runtime/runtime.sock").path
+        let launched = try await fixture.runtime.launch(fixture.request)
+        let token = try String(contentsOf: fixture.path("probe-token"), encoding: .utf8)
+        let native = launched.id.uuidString.lowercased()
+        let stop = ["inbox-hook", "--provider", "claude", "--report-stop"]
+        func state() async throws -> SessionState { try await fixture.session().state }
+        func running() async throws {
+            _ = try await fixture.runtime.handle(IPCRequest("event", params: .object(["token": .string(token), "event": .string("running")])))
+        }
+
+        try await running()
+        _ = try run(ctl, input: payload("Stop", session: native, extra: ",\"stop_hook_active\":false"), token: token, socket: socket, arguments: stop)
+        #expect(try await state() == .turnFinished, "No mail: the turn ends")
+
+        try await running()
+        let peer = LedgerTests().session(project: launched.projectID, group: launched.groupID)
+        try await fixture.runtime.ledger.register(peer)
+        let sender = try await fixture.runtime.ledger.authenticate(fixture.runtime.ledger.issueGrant(sessionID: peer.id))
+        _ = try await fixture.runtime.ledger.send(caller: sender, recipientID: launched.id, body: "Late", retryKey: "late")
+        let blocked = try run(ctl, input: payload("Stop", session: native, extra: ",\"stop_hook_active\":false"), token: token, socket: socket, arguments: stop)
+        #expect(try JSONCoding.decode(JSONValue.self, from: blocked.output)["decision"].string == "block")
+        #expect(try await state() == .running, "A blocked Stop is not a finished turn")
+
+        _ = try run(ctl, input: payload("Stop", session: native, extra: ",\"stop_hook_active\":true"), token: token, socket: socket, arguments: stop)
+        #expect(try await state() == .turnFinished, "The continuation ends the turn")
+        _ = try await fixture.stop()
+    }
+
+    @Test func eventHooksGiveUpWhileStdinStaysOpen() throws {
+        let ctl = try #require(ctl)
+        let result = try run(ctl, input: Data(#"{"hook_event_name":"PostToolUse""#.utf8), token: "token", socket: "/tmp/missing-\(UUID()).sock",
+                             arguments: ["event", "running"], closeInput: false)
+        #expect(result.status == 0 && result.elapsed < .seconds(4.5))
+    }
+}
+
+private final class LockedInstant: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value: ContinuousClock.Instant?
+    func set(_ instant: ContinuousClock.Instant) { lock.lock(); value = instant; lock.unlock() }
+    func get() -> ContinuousClock.Instant? { lock.lock(); defer { lock.unlock() }; return value }
 }

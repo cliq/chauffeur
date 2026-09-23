@@ -356,7 +356,10 @@ public actor Ledger {
         try Validation.require([nativeTurnID, toolUseID].allSatisfy { ($0?.count ?? 0) <= 200 }, "Hook identifiers are too long")
         let session = caller.sessionID.uuidString
         // A provider that retries a hook call gets the answer it was first given.
-        let key: [String?]? = nativeTurnID == nil && toolUseID == nil ? nil : [session, event, nativeTurnID ?? "", toolUseID ?? ""]
+        // A PostToolUse without its tool ID (cut from an oversized payload) cannot be
+        // told apart from the turn's other tool calls, so it gets no receipt.
+        let keyed = event == "PostToolUse" ? toolUseID != nil : (nativeTurnID != nil || toolUseID != nil)
+        let key: [String?]? = keyed ? [session, event, nativeTurnID ?? "", toolUseID ?? ""] : nil
         return try transaction {
             if let key, let row = try rows("SELECT record FROM inbox_hint_receipts WHERE session_id=? AND event=? AND native_turn_id=? AND tool_use_id=?", key).first {
                 return try decode(InboxHintSummary.self, row[0])

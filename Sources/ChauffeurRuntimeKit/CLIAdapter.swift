@@ -94,7 +94,7 @@ public enum CLIAdapter {
                 var hooks: [String: JSONValue] = [:]
                 for (hook, event) in [("SessionStart", "running"), ("UserPromptSubmit", "running"),
                                       ("PostToolUse", "running"), ("PostToolUseFailure", "running"),
-                                      ("Stop", "turn-finished"), ("StopFailure", "needs-attention"),
+                                      ("StopFailure", "needs-attention"),
                                       ("Notification", "needs-attention"), ("PermissionRequest", "needs-attention")] {
                     let command = [ctlPath, "event", "--session", session.id.uuidString, event].map(shellQuote).joined(separator: " ")
                     var group: [String: JSONValue] = ["hooks": .array([.object(["type": .string("command"), "command": .string(command), "timeout": .number(5)])])]
@@ -107,9 +107,11 @@ public enum CLIAdapter {
                 }
                 // Metadata-only mail reminders run beside the status hooks. No
                 // matcher on PostToolUse, so Chauffeur's own MCP tools count too.
+                // Stop has a single hook: it reports turn-finished only when it does
+                // not keep the turn going for new mail.
                 let inboxCommand = [ctlPath, "inbox-hook", "--provider", "claude"].map(shellQuote).joined(separator: " ")
-                for hook in ["UserPromptSubmit", "PostToolUse", "Stop"] {
-                    hooks[hook] = .array((hooks[hook]?.array ?? []) + [.object(["hooks": .array([.object(["type": .string("command"), "command": .string(inboxCommand), "timeout": .number(5)])])])])
+                for (hook, command) in [("UserPromptSubmit", inboxCommand), ("PostToolUse", inboxCommand), ("Stop", inboxCommand + " '--report-stop'")] {
+                    hooks[hook] = .array((hooks[hook]?.array ?? []) + [.object(["hooks": .array([.object(["type": .string("command"), "command": .string(command), "timeout": .number(5)])])])])
                 }
                 var launchSettings: [String: JSONValue] = ["hooks": .object(hooks)]
                 // Generated suggestions render inside Claude's composer and

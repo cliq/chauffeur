@@ -81,6 +81,14 @@ struct InboxHintTests {
         #expect(try await f.ledger.claimInboxHint(caller: f.recipient, event: "PostToolUse", nativeTurnID: "turn", toolUseID: "next").count == 1)
     }
 
+    @Test func postToolUseWithoutAToolIDIsNeverAnsweredFromAReceipt() async throws {
+        let f = try await fixture(); defer { f.cleanup() }
+        #expect(try await f.ledger.claimInboxHint(caller: f.recipient, event: "PostToolUse", nativeTurnID: "turn").count == 0)
+        _ = try await f.send("one")
+        #expect(try await f.ledger.claimInboxHint(caller: f.recipient, event: "PostToolUse", nativeTurnID: "turn").count == 1, "Another tool call in the same turn")
+        #expect(try await f.ledger.claimInboxHint(caller: f.recipient, event: "PostToolUse", nativeTurnID: "turn").count == 0, "Nor repeated")
+    }
+
     @Test func concurrentClaimsMentionEachMessageOnce() async throws {
         let f = try await fixture(); defer { f.cleanup() }
         for index in 0..<5 { _ = try await f.send("m\(index)") }

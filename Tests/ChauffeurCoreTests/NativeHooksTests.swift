@@ -27,6 +27,25 @@ struct NativeHooksTests {
         #expect(HookPayload.parse(Data("[1,2]".utf8)) == HookPayload())
     }
 
+    @Test func truncatedPayloadsReadOnlyTopLevelFields() {
+        let real = UUID().uuidString.lowercased(), planted = UUID().uuidString.lowercased()
+        // Tool input can carry look-alike keys, nested or inside strings; neither may win.
+        let nested = #"{"session_id":"\#(real)","hook_event_name":"PostToolUse","tool_input":{"thread-id":"\#(planted)","hook_event_name":"Stop","stop_hook_active":true},"tool_response":"\"thread-id\":\"\#(planted)\" \#(String(repeating: "x", count: HookPayload.readLimit))"}"#
+        let payload = HookPayload.parse(Data(nested.utf8).prefix(HookPayload.readLimit))
+        #expect(payload.conversationID == real && payload.hookEvent == "PostToolUse" && !payload.stopHookActive)
+        // Fields before the cut survive, including booleans; a value cut in half is dropped.
+        let stop = HookPayload.parse(Data(#"{"hook_event_name":"Stop","stop_hook_active":true,"turn_id":"turn-9","session_id":"\#(real)"#.utf8))
+        #expect(stop.stopHookActive && stop.turnID == "turn-9" && stop.conversationID == nil)
+        #expect(HookPayload.parse(Data(#"["session_id","\#(real)"]"#.utf8)) == HookPayload())
+    }
+
+    @Test func trustedCodexHooksAloneNameAFreshConversation() {
+        #expect(!NativeConversation.adoptsFirst(kind: .codex, hooksTrusted: true, hookEvent: nil), "title-thread notify")
+        #expect(NativeConversation.adoptsFirst(kind: .codex, hooksTrusted: true, hookEvent: "SessionStart"))
+        #expect(NativeConversation.adoptsFirst(kind: .codex, hooksTrusted: false, hookEvent: nil), "notify-only fallback")
+        #expect(NativeConversation.adoptsFirst(kind: .claude, hooksTrusted: true, hookEvent: nil))
+    }
+
     @Test func conversationsCompareAsUUIDsAndOnlyClearOrResumeMoveThem() {
         let id = UUID()
         #expect(NativeConversation.same(id.uuidString, id.uuidString.lowercased()))
