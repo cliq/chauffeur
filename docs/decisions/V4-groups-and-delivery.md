@@ -38,3 +38,30 @@ Parent attribution remains immutable. A separate controller identity permits an
 explicit same-group recovery operation after a coordinator has ended. Recovery
 cannot take workers from a live coordinator. Results route to the current
 controller and are attributed to the actual worker and current turn.
+
+## Inbox reminders through native hooks (2026-09-23)
+
+Busy Claude Code and Codex sessions learn about new mail through native
+lifecycle hooks: `UserPromptSubmit`, `PostToolUse` and `Stop`. The
+`chauffeurctl inbox-hook` command asks the runtime to claim queued messages that
+no hook has mentioned yet, and prints a fixed, metadata-only reminder: counts and
+worker-result counts, never senders or bodies. A claim does not change the
+message's delivery state; only `chauffeur_inbox` delivers.
+
+- Hooks run only at lifecycle boundaries. They never type into the PTY, never
+  start a turn, and do not wake an idle session. An idle recipient is still
+  prompted by the user or through `chauffeur_follow_up`.
+- `Stop` keeps a turn going at most once per native turn (Claude: once until the
+  next prompt), and only when that call claimed new mail. Mail that arrives
+  after that waits for the next prompt's `UserPromptSubmit` reminder.
+- Delivery of a reminder is at-most-once. A crash after the claim commits, but
+  before the provider reads the hook's output, loses that reminder, not the
+  message. The inbox is the durable record.
+- The same hooks report `/clear`, `/resume`, `/new` and `/fork`, so Chauffeur
+  follows the active native conversation and Resume reopens it. Codex hooks are
+  trusted per launch with a whole `hooks.state` map for Chauffeur's own
+  session-flag hooks only; the user's own hooks keep their trust.
+
+Evidence and design: `docs/chauffeur/plans/inbox-hooks.md`,
+`Prototypes/codex_inbox_hooks_smoke.py` and
+`Prototypes/cross_provider_inbox_smoke.py`.

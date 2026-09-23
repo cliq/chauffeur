@@ -1,6 +1,6 @@
 # CLI and platform compatibility
 
-Last inspected: 2026-09-22. These are observed development-machine versions,
+Last inspected: 2026-09-23. These are observed development-machine versions,
 not a completed real-provider support matrix.
 
 | Component | Version | Current evidence |
@@ -13,6 +13,8 @@ not a completed real-provider support matrix.
 | Hummingbird | 2.26.0 | Actual loopback MCP requests exercised with fixture credentials |
 | Codex | 0.154.0 | Three real sessions/two profiles; authenticated messages, native approvals/completion, scoped stop, explicit resume and runtime reconnect pass. Native UI input/clipboard/resize/history and normal/forced UI quit preserve the process and draft |
 | Codex | 0.155.1 | Authenticated cross-provider MCP delegation, messages/results, model/effort overrides, same-session follow-up, retry and retained closure pass; see [orchestration validation](orchestration-validation.md) |
+| Codex | 0.156.1 | Inbox-reminder hooks in the interactive TUI: whole-map selective hook trust, `UserPromptSubmit`/`PostToolUse` context and one `Stop` continuation, MCP `PostToolUse`, and `/new`, `/clear`, `/resume`, `/fork` identity tracking, with a mock provider; see [inbox reminders](#inbox-reminders) |
+| Claude Code | 2.1.280 | Inbox-reminder hooks, one `Stop` continuation, and `/clear`/`/resume` identity tracking in the interactive TUI with a mock provider; cross-provider mail with Codex 0.156.1 |
 | Claude Code | 2.1.278 | Same orchestration checks pass in both coordinator and worker roles |
 | Claude Code | 2.1.272 | Three real sessions/two profiles; native account/process configuration, authenticated messages, permission/completion hooks, scoped stop, explicit resume and runtime reconnect pass; both profiles report the same account |
 | Claude Code | 2.1.273 | Basic-terminal launch/resume and checkout recovery pass; native UI input/clipboard/resize/history and normal/forced UI quit preserve the process and draft. Native permission/completion hooks, read-only MCP discovery and normal exit pass; full coordination remains unverified |
@@ -115,6 +117,35 @@ coverage remains open. See
 discovery/isolation/removal checks for the optional
 [Chauffeur skill](coordination-skill.md). File installation status does not
 override CLI skill policies or establish model use of the guidance.
+
+### Inbox reminders
+
+Coordinated Claude Code and Codex sessions get a short "Chauffeur: N new inbox
+messages" reminder through native hooks when mail arrives while they are busy:
+after the next tool call (`PostToolUse`, including MCP tools), at the start of a
+prompt (`UserPromptSubmit`), or as one continuation before the turn ends (`Stop`).
+Reminders never include senders or bodies and never wake an idle session.
+
+- **Claude Code** runs the hooks from Chauffeur's launch-scoped `--settings` file.
+  Its TUI labels the one intended continuation "Stop hook error: Chauffeur: …";
+  that label is Claude's, and the turn continues normally.
+- **Codex** skips hooks it does not trust. Before each launch Chauffeur runs
+  `codex app-server --stdio` in an empty temporary `CODEX_HOME`, reads
+  `hooks/list`, and trusts exactly its own session-flag hooks with a whole
+  `-c hooks.state={…}` map. Hashes are cached per executable, version and hook
+  definition. The user's own trusted hooks keep running, untrusted ones stay
+  skipped, and nothing is written to `~/.codex`. If `hooks/list` fails, times out
+  or lists anything unexpected, the session launches without reminders and
+  discovery reports "Inbox reminders unavailable for this Codex version".
+- Codex still prompts "Hooks need review" at startup when the **user** has
+  untrusted hooks of their own; "Continue without trusting" keeps Chauffeur's.
+- Codex's title generator runs a side thread whose `notify` carries another
+  thread ID. Chauffeur takes the native conversation from the trusted
+  `SessionStart` hook instead.
+
+`Prototypes/codex_inbox_hooks_smoke.py` and
+`Prototypes/cross_provider_inbox_smoke.py` check these behaviors through the real
+runtime and the real TUIs with local mock providers, so they need no accounts.
 
 ### Orchestrated follow-up turns
 
