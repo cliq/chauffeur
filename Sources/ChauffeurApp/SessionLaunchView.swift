@@ -36,6 +36,9 @@ struct SessionLaunchView: View {
     @State private var additional = Set<UUID>()
     @State private var shared = false
     @State private var coordination = false
+    @State private var editingGroups = false
+    // Picker tag for the "Manage Groups…" item; never stored as a selection.
+    private static let manageGroupsTag = UUID()
     @State private var modelOverride: String?
     @State private var reasoningOverride: String?
     #if DEBUG
@@ -144,6 +147,13 @@ struct SessionLaunchView: View {
                     VStack(alignment: .leading, spacing: 6) {
                         Toggle("Enable Chauffeur messaging and delegation", isOn: $coordination)
                         Text(coordination ? "Experimental: CLI integration is under compatibility validation. Profile names identify configuration directories; they do not verify an account." : "Basic terminal mode (default): Chauffeur messaging, delegation, and semantic status signals are unavailable. Turn the experimental integration on for this launch to try them.").font(.caption).foregroundStyle(.secondary)
+                        Picker("Group", selection: Binding(get: { groupID }, set: { if $0 == Self.manageGroupsTag { editingGroups = true } else { groupID = $0 } })) {
+                            Text("Choose a group").tag(UUID?.none)
+                            ForEach(currentProject.groups.filter { !$0.archived }) { group in Text(group.name).tag(Optional(group.id)) }
+                            Divider()
+                            Text("Manage Groups…").tag(Optional(Self.manageGroupsTag))
+                        }.fixedSize().padding(.top, 4).accessibilityIdentifier("session.group")
+                        Text("Sessions message and delegate only within their group.").font(.caption).foregroundStyle(.secondary)
                     }
                 }.padding(24).padding(.trailing, NSScroller.scrollerWidth(for: .regular, scrollerStyle: .legacy))
                     .background(PersistentScrollbars()).disabled(operation.isBusy)
@@ -165,6 +175,14 @@ struct SessionLaunchView: View {
             }.padding(20)
         }.frame(width: 680, height: max(420, min(650, (NSScreen.main?.visibleFrame.height ?? 800) - 100)))
             .interactiveDismissDisabled(operation.isBusy)
+            .sheet(isPresented: $editingGroups) {
+                GroupsEditor(project: currentProject) { saved in
+                    // Select a newly added group; otherwise keep the choice unless it was archived.
+                    let known = Set(currentProject.groups.map(\.id))
+                    if let added = saved.last(where: { !known.contains($0.id) && !$0.archived }) { groupID = added.id }
+                    else if !saved.contains(where: { $0.id == groupID && !$0.archived }) { groupID = saved.first(where: \.isDefault)?.id }
+                }
+            }
             .onAppear {
                 groupID = currentProject.groups.first { $0.id == initialGroupID && !$0.archived }?.id ?? currentProject.groups.first(where: \.isDefault)?.id
                 let choices = presets.map(\.id)
@@ -210,10 +228,6 @@ struct SessionLaunchView: View {
     private var sessionFields: some View {
         Form {
             TextField("Title (optional)", text: $title).accessibilityIdentifier("session.title")
-            Picker("Group", selection: $groupID) {
-                Text("Choose a group").tag(UUID?.none)
-                ForEach(currentProject.groups.filter { !$0.archived }) { group in Text(group.name).tag(Optional(group.id)) }
-            }
             Picker("Agent preset", selection: $presetID) {
                 Text("Choose an agent preset").tag(UUID?.none)
                 ForEach(presets) { preset in Text("\(preset.name) · \(preset.kind.displayName)").tag(Optional(preset.id)) }

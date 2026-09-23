@@ -153,6 +153,7 @@ struct GroupsEditor: View {
     @EnvironmentObject private var model: AppModel
     @Environment(\.dismiss) private var dismiss
     let project: Project
+    var onSave: ([AgentGroup]) -> Void = { _ in }
     @State private var groups: [AgentGroup] = []
     @State private var newName = ""
     @State private var version: String?
@@ -177,7 +178,7 @@ struct GroupsEditor: View {
                 Spacer()
                 Button("Save Groups") {
                     var value = project; value.groups = groups; value.updatedAt = Date()
-                    Task { do { try await model.save("saveProject", value, version: version); dismiss() } catch { failure = error.localizedDescription } }
+                    Task { do { try await model.save("saveProject", value, version: version); onSave(groups); dismiss() } catch { failure = error.localizedDescription } }
                 }.keyboardShortcut(.defaultAction)
             }
         }.padding(24).frame(width: 540)
