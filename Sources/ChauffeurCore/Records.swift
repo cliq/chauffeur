@@ -221,6 +221,8 @@ public struct Session: Record, Equatable {
     public var pendingMessages = 0
     public var createdAt = Date()
     public var updatedAt = Date()
+    /// Launched with Chauffeur's MCP server and lifecycle hooks, not basic terminal mode.
+    public var coordinationEnabled: Bool { launch.preset.kind.isAgent && launch.preset.integration != .unavailable }
     public var needsAttention: Bool { pendingMessages > 0 || state == .needsAttention || state == .failed || (state == .turnFinished && unread) }
     public init(projectID: UUID, groupID: UUID, title: String, launch: LaunchSnapshot, folderID: UUID) {
         self.projectID = projectID; self.groupID = groupID; self.title = title; self.launch = launch; self.folderID = folderID

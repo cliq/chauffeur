@@ -1042,6 +1042,12 @@ private struct SessionStrip: View {
             .padding(.horizontal, 8)
         }.frame(height: 70).background(.bar)
     }
+    private func cardHelp(_ session: Session) -> String {
+        var lines = [session.title, session.launch.workingDirectory]
+        if session.coordinationEnabled { lines.append("Chauffeur coordination on") }
+        if let warning = session.conversationWarning { lines.append(warning) }
+        return lines.joined(separator: "\n")
+    }
     private func revealSelectedFinished() {
         if finished.contains(where: { $0.id == selectedID }) { showFinished = true }
     }
@@ -1052,7 +1058,18 @@ private struct SessionStrip: View {
         return Button { select(session) } label: {
             VStack(alignment: .leading, spacing: 2) {
                 Text(session.title).fontWeight(selected ? .semibold : .medium).lineLimit(1)
-                Text("\(preset) · \(group)").font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                HStack(spacing: 4) {
+                    if session.coordinationEnabled {
+                        Image(systemName: "point.3.connected.trianglepath.dotted")
+                            .accessibilityLabel("Coordination on")
+                            .accessibilityIdentifier("session.coordination.\(session.id.uuidString)")
+                    }
+                    if session.conversationWarning != nil {
+                        Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+                            .accessibilityLabel("Conversation also open in another session")
+                    }
+                    Text("\(preset) · \(group)").lineLimit(1)
+                }.font(.caption).foregroundStyle(.secondary)
                 if let status = session.visibleStatus {
                     Text(status).font(.caption).foregroundStyle(session.needsAttention ? .orange : .secondary).lineLimit(1)
                 }
@@ -1060,7 +1077,7 @@ private struct SessionStrip: View {
                 .padding(.leading, 10).padding(.trailing, 30).padding(.vertical, 6)
                 .background(selected ? Color.accentColor.opacity(0.15) : Color.clear, in: RoundedRectangle(cornerRadius: 6))
                 .contentShape(Rectangle())
-        }.buttonStyle(.plain).help("\(session.title)\n\(session.launch.workingDirectory)")
+        }.buttonStyle(.plain).help(cardHelp(session))
             .accessibilityIdentifier("session.card.\(session.id.uuidString)")
             .accessibilityAddTraits(selected ? .isSelected : [])
             .draggable("chauffeur-tab:\(project.id):\(session.id)")
