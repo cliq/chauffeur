@@ -1,12 +1,19 @@
 # Releases and notarization
 
 The [release workflow](../.github/workflows/release.yml) runs in GitHub Actions
-when a version tag is pushed. It builds Chauffeur for Apple Silicon with Xcode
-26.3, signs the app and embedded executables with Developer ID and secure
-timestamps, creates a DMG with an Applications shortcut, and submits it to Apple.
-Only after Apple accepts the submission and the stapled ticket passes validation
-does it attach `Chauffeur.dmg` to the GitHub Release. The DMG is also saved as a
-workflow artifact; failed submissions retain available notarization diagnostics.
+when a version tag is pushed. It runs [`Scripts/distribute.sh`](../Scripts/distribute.sh),
+the same script used for local releases, which:
+
+1. builds Chauffeur for Apple Silicon and signs the app and embedded executables
+   with Developer ID, the hardened runtime, and secure timestamps;
+2. notarizes the app and staples its ticket, so a copy dragged out of the DMG
+   passes Gatekeeper even offline;
+3. wraps it in a styled drag-to-Applications DMG (background in
+   `Resources/dmg/background.tiff`), then signs, notarizes, and staples the DMG.
+
+Only after both submissions are accepted and every check passes does the workflow
+attach `Chauffeur.dmg` to the GitHub Release. The DMG is also saved as a workflow
+artifact; failed submissions keep Apple's notarization logs as diagnostics.
 
 ## One-time GitHub setup
 
@@ -52,20 +59,33 @@ gh workflow run release.yml --ref v1.0
 The workflow must exist on the default branch for manual dispatch. A manual run
 on a tag also publishes or updates that tag's release.
 
-## Local builds
-
-`make release` still only builds, signs, and verifies locally. It does not contact
-Apple's notary service or publish anything. Notarization can also run on a local
-Mac with the same credentials and Apple's `xcrun notarytool` and `xcrun stapler`;
-GitHub Actions is where this project's automated release process runs.
-
-For a local build intended for subsequent notarization, explicitly enable secure
-timestamps for the embedded helpers and the final app signature:
+To rehearse a release before tagging, run the workflow from a branch. It builds
+and notarizes the version in `project.yml` and keeps the DMG as a workflow
+artifact, but publishes nothing:
 
 ```sh
-make release CODESIGN_FLAGS=--timestamp \
-  XCODEBUILD_ARGS="CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY='Developer ID Application' DEVELOPMENT_TEAM=YOUR_TEAM_ID CHAUFFEUR_NOTARIZE=1 OTHER_CODE_SIGN_FLAGS='--timestamp --options=runtime'"
+gh workflow run release.yml --ref main
 ```
+
+## Local releases
+
+`make release` only builds, signs, and verifies. To produce the same notarized DMG
+as CI on your Mac, install `create-dmg` (`brew install create-dmg`), store
+notarization credentials once, and run the distribution script with a version and
+build number:
+
+```sh
+xcrun notarytool store-credentials chauffeur-notary \
+  --key AuthKey_XXXXXXXXXX.p8 --key-id XXXXXXXXXX --issuer YOUR_ISSUER_UUID
+CHAUFFEUR_NOTARY_PROFILE=chauffeur-notary Scripts/distribute.sh 1.4.0 1
+```
+
+It signs with the Developer ID identity from `Configuration/LocalSigning.xcconfig`
+(override with `CHAUFFEUR_DEVELOPER_ID` and `CHAUFFEUR_TEAM_ID`) and writes
+`dist/Chauffeur.dmg`. Nothing is published. macOS may ask to let your terminal
+control Finder the first time, while `create-dmg` lays out the DMG window.
+`Scripts/distribute.sh --help` lists every option, including passing an API key
+file directly instead of a Keychain profile.
 
 See Apple's [notarization workflow documentation](https://developer.apple.com/documentation/security/customizing-the-notarization-workflow)
 for submitting and stapling locally.

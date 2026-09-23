@@ -66,8 +66,9 @@ make release XCODEBUILD_ARGS='CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY=-'
 Service update checks use the same certificate for Debug and Release builds.
 Ad-hoc builds remain useful for isolated fixture tests; changing ad-hoc helper
 signatures can trigger macOS launch-constraint failures. The Makefile uses Xcode's
-resolved identity for the app and every embedded helper. Local builds are not
-notarized or published. Tagged releases are notarized by GitHub Actions; see
+resolved identity for the app and every embedded helper. `make` builds are not
+notarized or published. Tagged releases are notarized by GitHub Actions, and
+`Scripts/distribute.sh` produces the same notarized DMG locally; see
 [release and notarization setup](notarization.md).
 
 The build explicitly allows the pinned SwiftTerm build plugin, which generates

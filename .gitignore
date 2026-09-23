@@ -13,3 +13,4 @@ __pycache__/
 # Local signing overrides — each contributor keeps their own.
 Configuration/LocalSigning.xcconfig
 .claude/worktrees/
+dist/

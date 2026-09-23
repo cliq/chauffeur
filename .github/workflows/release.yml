@@ -1,5 +1,9 @@
 name: Release
 
+# Push a vX.Y[.Z] tag to publish a notarized DMG to GitHub Releases. A manual run
+# from a branch rehearses the same build and notarization, keeps the DMG as a
+# workflow artifact, and publishes nothing.
+
 on:
   push:
     tags:
@@ -34,9 +38,17 @@ jobs:
           NOTARY_ISSUER_ID: ${{ vars.NOTARY_ISSUER_ID }}
         run: |
           set -euo pipefail
-          if [[ "$GITHUB_REF_TYPE" != tag || ! "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+(\.[0-9]+)?$ ]]; then
-            echo '::error::Select or push a release tag such as v0.1.0 (or v0.1).'
-            exit 1
+          if [[ "$GITHUB_REF_TYPE" == tag ]]; then
+            if [[ ! "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+(\.[0-9]+)?$ ]]; then
+              echo '::error::Release tags must look like v0.1.0 (or v0.1).'
+              exit 1
+            fi
+            version=${GITHUB_REF_NAME#v}
+            publish=true
+          else
+            version=$(awk -F'"' '/MARKETING_VERSION:/ { print $2; exit }' project.yml)
+            publish=false
+            echo "::notice::Rehearsal of $version from $GITHUB_REF_NAME; nothing will be published."
           fi
           for name in BUILD_CERTIFICATE_BASE64 P12_PASSWORD KEYCHAIN_PASSWORD TEAM_ID \
             NOTARY_KEY_BASE64 NOTARY_KEY_ID NOTARY_ISSUER_ID; do
@@ -45,15 +57,19 @@ jobs:
               exit 1
             fi
           done
-          echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "publish=$publish" >> "$GITHUB_OUTPUT"
 
       - name: Select Xcode and install XcodeGen
         run: |
           set -euo pipefail
-          sudo xcode-select -s /Applications/Xcode_26.3.app
+          for candidate in /Applications/Xcode_26.3.app /Applications/Xcode_26.2.app \
+            /Applications/Xcode_26.1.app /Applications/Xcode_26.0.app; do
+            if [[ -d "$candidate" ]]; then sudo xcode-select -s "$candidate"; break; fi
+          done
           xcodebuild -version
           test "$(uname -m)" = arm64
-          brew install xcodegen
+          brew install xcodegen create-dmg
 
       - name: Import Developer ID certificate
         env:
@@ -74,95 +90,40 @@ jobs:
           security set-key-partition-list -S apple-tool:,apple: -k "$KEYCHAIN_PASSWORD" "$keychain_path" >/dev/null
           rm -f "$cert_path"
 
-      - name: Build and verify signed app and helpers
+      - name: Build, notarize, and staple app and DMG
         env:
-          TEAM_ID: ${{ vars.TEAM_ID }}
+          CHAUFFEUR_TEAM_ID: ${{ vars.TEAM_ID }}
+          NOTARY_KEY_BASE64: ${{ secrets.NOTARY_KEY_BASE64 }}
+          CHAUFFEUR_NOTARY_KEY_ID: ${{ vars.NOTARY_KEY_ID }}
+          CHAUFFEUR_NOTARY_ISSUER_ID: ${{ vars.NOTARY_ISSUER_ID }}
           RELEASE_VERSION: ${{ steps.version.outputs.version }}
         run: |
           set -euo pipefail
-          make release CODESIGN_FLAGS=--timestamp \
-            XCODEBUILD_ARGS="ARCHS=arm64 CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY='Developer ID Application' DEVELOPMENT_TEAM=$TEAM_ID CHAUFFEUR_NOTARIZE=1 ENABLE_HARDENED_RUNTIME=YES OTHER_CODE_SIGN_FLAGS='--timestamp --options=runtime' MARKETING_VERSION=$RELEASE_VERSION CURRENT_PROJECT_VERSION=$GITHUB_RUN_NUMBER"
-
-      - name: Check app and helper entitlements for notarization
-        run: |
-          set -euo pipefail
-          python3 - <<'PY'
-          import pathlib
-          import plistlib
-          import subprocess
-
-          app = pathlib.Path("build/Build/Products/Release/Chauffeur.app")
-          executables = sorted(app.glob("**/Contents/MacOS/*"))
-          if not executables:
-              raise SystemExit("::error::No release executables found")
-          for executable in executables:
-              if not executable.is_file():
-                  continue
-              result = subprocess.run(
-                  ["codesign", "--display", "--entitlements", "-", "--xml", str(executable)],
-                  check=True, capture_output=True,
-              )
-              entitlements = plistlib.loads(result.stdout) if result.stdout.strip() else {}
-              if entitlements.get("com.apple.security.get-task-allow"):
-                  raise SystemExit(f"::error::{executable} has get-task-allow enabled")
-              print(f"Notarization entitlements OK: {executable}")
-          PY
-
-      - name: Build signed DMG
-        run: |
-          set -euo pipefail
-          mkdir -p build/dmg
-          ditto build/Build/Products/Release/Chauffeur.app build/dmg/Chauffeur.app
-          ln -s /Applications build/dmg/Applications
-          hdiutil create -volname Chauffeur -srcfolder build/dmg -ov -format UDZO build/Chauffeur.dmg
-          identity=$(cat build/Build/Products/Release/Chauffeur.signing-identity)
-          codesign --force --timestamp --sign "$identity" build/Chauffeur.dmg
-
-      - name: Notarize and staple DMG
-        env:
-          NOTARY_KEY_BASE64: ${{ secrets.NOTARY_KEY_BASE64 }}
-          NOTARY_KEY_ID: ${{ vars.NOTARY_KEY_ID }}
-          NOTARY_ISSUER_ID: ${{ vars.NOTARY_ISSUER_ID }}
-        run: |
-          set -euo pipefail
           umask 077
-          key_path="$RUNNER_TEMP/AuthKey.p8"
-          printf '%s' "$NOTARY_KEY_BASE64" | base64 --decode > "$key_path"
-          notary_args=(--key "$key_path" --key-id "$NOTARY_KEY_ID" --issuer "$NOTARY_ISSUER_ID")
-          xcrun notarytool submit build/Chauffeur.dmg "${notary_args[@]}" \
-            --wait --timeout 30m --output-format json > build/notarization.json
-          cat build/notarization.json
-          submission_id=$(plutil -extract id raw build/notarization.json)
-          status=$(plutil -extract status raw build/notarization.json)
-          if [[ "$status" != Accepted ]]; then
-            xcrun notarytool log "$submission_id" "${notary_args[@]}" build/notarization-log.json
-            cat build/notarization-log.json
-            echo '::error::Apple did not accept the notarization submission.'
-            exit 1
-          fi
-          xcrun stapler staple build/Chauffeur.dmg
-          xcrun stapler validate build/Chauffeur.dmg
-          spctl --assess --type open --context context:primary-signature --verbose=2 build/Chauffeur.dmg
+          export CHAUFFEUR_NOTARY_KEY_PATH="$RUNNER_TEMP/AuthKey.p8"
+          printf '%s' "$NOTARY_KEY_BASE64" | base64 --decode > "$CHAUFFEUR_NOTARY_KEY_PATH"
+          Scripts/distribute.sh "$RELEASE_VERSION" "$GITHUB_RUN_NUMBER"
 
       - name: Upload DMG as workflow artifact
         uses: actions/upload-artifact@v4
         with:
           name: Chauffeur-dmg
-          path: build/Chauffeur.dmg
+          path: dist/Chauffeur.dmg
           if-no-files-found: error
 
       - name: Upload to GitHub Release
+        if: steps.version.outputs.publish == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
-          test -s build/Chauffeur.dmg
+          test -s dist/Chauffeur.dmg
           if ! gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
             gh release create "$GITHUB_REF_NAME" --draft --verify-tag --generate-notes
           fi
           for attempt in 1 2 3 4; do
-            if gh release upload "$GITHUB_REF_NAME" build/Chauffeur.dmg --clobber; then
+            if gh release upload "$GITHUB_REF_NAME" dist/Chauffeur.dmg --clobber; then
               gh release edit "$GITHUB_REF_NAME" --draft=false
               exit 0
             fi
