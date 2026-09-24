@@ -137,7 +137,8 @@ import ChauffeurCore
     /// session has a worker result, message, worker state change or progress milestone,
     /// printing what to act on. 0 = work or timeout, 2 = replaced or ended, 1 = error.
     /// With --json (the OpenCode plugin), every outcome is one `{"reason","text"}` line;
-    /// failures report `ended`, since the plugin acts only on `work`.
+    /// failures report `ended`, since the plugin acts only on `work`. The plugin prompts on every report, so mail
+    /// already mentioned to the session (by a hook or an earlier wait) doesn't end a `--json` wait.
     private static func waitForWork(_ args: [String], socket: String) async -> Int32 {
         let json = args.contains("--json")
         func fail(_ text: String) -> Int32 {
@@ -161,7 +162,8 @@ import ChauffeurCore
         watchdog.setEventHandler { if getppid() != parent { exit(2) } }
         watchdog.resume()
         let params: JSONValue = .object(["token": .string(token), "timeoutSeconds": .number(Double(minutes * 60)),
-                                         "milestones": .bool(!args.contains("--no-milestones")), "processID": .number(Double(getpid()))])
+                                         "milestones": .bool(!args.contains("--no-milestones")), "processID": .number(Double(getpid())),
+                                         "unmentionedMailOnly": .bool(json)])
         do {
             let result = try await RuntimeClient.call(IPCRequest("waitForWork", params: params), socketPath: socket, responseTimeout: minutes * 60 + 60)
             let report = try result.decode(WorkReport.self)

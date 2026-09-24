@@ -140,6 +140,8 @@ Each ctl call gets one JSON object on stdin, in the Claude hook shape that `Hook
 ```
 
 - `reason: "work"`: the plugin calls `promptAsync(text)`.
+- Queued mail that a hook or an earlier `--json` wait already mentioned doesn't count as work, and mail a wait reports is marked
+  mentioned. Otherwise mail the model left unread would end every wait at once and re-prompt it on each idle.
 - Any other reason: nothing happens.
 - The plugin kills the waiter with SIGTERM when the root session turns busy, and on dispose or exit. At most one waiter runs at a
   time.

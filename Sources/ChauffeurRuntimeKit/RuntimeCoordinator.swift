@@ -1149,7 +1149,8 @@ public actor RuntimeCoordinator {
         let report: WorkReport
         do {
             try await setWaiting(caller.sessionID, true)
-            report = try await ledger.waitForWork(token: token, milestones: params["milestones"].bool ?? true, timeoutSeconds: timeout, processID: processID)
+            report = try await ledger.waitForWork(token: token, milestones: params["milestones"].bool ?? true, timeoutSeconds: timeout, processID: processID,
+                                                  unmentionedMailOnly: params["unmentionedMailOnly"].bool == true)
         } catch { await endWorkWait(caller.sessionID); throw error }
         await endWorkWait(caller.sessionID)
         return report

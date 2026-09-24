@@ -59,6 +59,32 @@ struct WorkWaitTests {
         #expect(!WorkReportFormatter.text(report).contains("Peer note"))
     }
 
+    @Test func mentionedMailDoesNotEndEveryPluginWaitAtOnce() async throws {
+        let f = try await fixture(); defer { f.cleanup() }
+        let (ledger, token) = (f.ledger, f.token)
+        let big = String(repeating: "x", count: WorkReport.printedResultBudget + 1)
+        _ = try await ledger.reportResult(caller: f.worker, delegationID: f.delegation.id, result: big, retryKey: "big")
+        _ = try await ledger.send(caller: f.peer, recipientID: f.coordinator.sessionID, body: "Peer note", retryKey: "peer")
+        // The Stop hook mentioned both, the model ended its turn without reading them, and the plugin starts its waiter.
+        #expect(try await ledger.claimInboxHint(caller: f.coordinator, event: "Stop", newTurn: true).count == 2)
+        #expect(try await ledger.waitForWork(token: token, milestones: true, timeoutSeconds: 1, unmentionedMailOnly: true).reason == .timeout)
+        // Claude's waiter is unchanged: the model decides whether to wait again.
+        #expect(try await ledger.waitForWork(token: token, milestones: true, timeoutSeconds: 1).queuedMessages == 2)
+
+        // Mail no hook mentioned ends one wait, and only that one.
+        _ = try await ledger.send(caller: f.peer, recipientID: f.coordinator.sessionID, body: "Second note", retryKey: "peer-2")
+        let first = try await ledger.waitForWork(token: token, milestones: true, timeoutSeconds: 1, unmentionedMailOnly: true)
+        #expect(first.reason == .work && first.queuedMessages == 1)
+        let wait = Task { try await ledger.waitForWork(token: token, milestones: true, timeoutSeconds: 60, unmentionedMailOnly: true) }
+        try await waiting(ledger)
+        try await Task.sleep(for: .milliseconds(200))
+        #expect(await ledger.pendingWorkWaitCount == 1, "Mail an earlier wait reported doesn't end the next one")
+        _ = try await ledger.send(caller: f.peer, recipientID: f.coordinator.sessionID, body: "Third note", retryKey: "peer-3")
+        let next = try await wait.value
+        #expect(next.reason == .work && next.queuedMessages == 1)
+        #expect(try await ledger.inbox(caller: f.coordinator).count == 4, "Everything stays in the inbox for chauffeur_inbox")
+    }
+
     @Test func workerStateChangesWakeButOnlyForThisCoordinatorsWorkers() async throws {
         var f = try await fixture(); defer { f.cleanup() }
         let (ledger, token) = (f.ledger, f.token)

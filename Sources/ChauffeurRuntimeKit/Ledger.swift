@@ -77,7 +77,10 @@ public actor Ledger {
     /// Blocks until the caller has something to act on, without delivering mail it
     /// does not print. One wait per session: a newer call replaces the older one.
     /// `processID` is the waiting `chauffeurctl`; the wait ends if it disappears.
-    public func waitForWork(token: String, milestones: Bool, timeoutSeconds: Int, processID: Int32? = nil) async throws -> WorkReport {
+    /// With `unmentionedMailOnly` (the OpenCode plugin, which prompts on every report) queued mail that a hook or an
+    /// earlier wait already mentioned doesn't count, and mail this wait reports is marked mentioned; otherwise mail
+    /// the model left unread would end every wait at once and re-prompt it on each idle.
+    public func waitForWork(token: String, milestones: Bool, timeoutSeconds: Int, processID: Int32? = nil, unmentionedMailOnly: Bool = false) async throws -> WorkReport {
         try Validation.require((1...86_400).contains(timeoutSeconds), "The wait must be between 1 second and 24 hours")
         let caller = try authenticate(token)
         let id = UUID()
@@ -116,7 +119,7 @@ public actor Ledger {
         func check() throws -> WorkReport? {
             if replacedWorkWaits.contains(id) { return WorkReport(reason: .replaced) }
             guard let current = try? authenticate(token), current.sessionID == caller.sessionID, processGone.isEmpty else { return WorkReport(reason: .ended) }
-            var report = try collectWork(caller: caller, delegations: controlled, baseline: baseline)
+            var report = try collectWork(caller: caller, delegations: controlled, baseline: baseline, unmentionedMailOnly: unmentionedMailOnly)
             report.milestones = changedMilestones.drain()
             return report.isEmpty ? nil : report
         }
@@ -131,19 +134,29 @@ public actor Ledger {
     }
     /// Worker results that fit the budget are delivered and acknowledged here, since
     /// they are printed in full. Everything else stays queued for `chauffeur_inbox`.
-    private func collectWork(caller: Caller, delegations: [Delegation], baseline: [UUID: SessionState]) throws -> WorkReport {
+    private func collectWork(caller: Caller, delegations: [Delegation], baseline: [UUID: SessionState], unmentionedMailOnly: Bool) throws -> WorkReport {
         var report = WorkReport(reason: .work)
+        var counted: [UUID] = []
         try transaction {
             var budget = WorkReport.printedResultBudget
-            let queued = try rows("SELECT record FROM messages WHERE recipient_id=? AND project_id=? AND group_id=? AND state='queued' ORDER BY rowid", [caller.sessionID.uuidString] + scopeValues(caller)).map { try decode(Message.self, $0[0]) }
-            for var message in queued {
+            let queued = try rows("SELECT m.record, EXISTS (SELECT 1 FROM inbox_hints h WHERE h.message_id=m.id) FROM messages m WHERE m.recipient_id=? AND m.project_id=? AND m.group_id=? AND m.state='queued' ORDER BY m.rowid", [caller.sessionID.uuidString] + scopeValues(caller))
+            for row in queued {
+                var message = try decode(Message.self, row[0])
                 guard let delegationID = message.delegationID, let delegation = delegations.first(where: { $0.id == delegationID }),
-                      message.body.utf8.count <= budget else { report.queuedMessages += 1; continue }
+                      message.body.utf8.count <= budget else {
+                    if !unmentionedMailOnly || row[1] == "0" { report.queuedMessages += 1; counted.append(message.id) }
+                    continue
+                }
                 budget -= message.body.utf8.count
                 let worker = (try? peer(delegation.childID, caller: caller))?.title ?? "Worker"
                 report.results.append(WorkReport.Result(messageID: message.id, delegationID: delegationID, worker: worker, body: message.body))
                 message.state = .acknowledged; message.receivedAt = message.receivedAt ?? Date(); message.acknowledgedAt = Date()
                 try saveMessage(message)
+            }
+            // Counted mail ends this wait, so the next one of this session skips it.
+            if unmentionedMailOnly, !counted.isEmpty {
+                let now = String(Date().timeIntervalSince1970)
+                for id in counted { try execute("INSERT OR IGNORE INTO inbox_hints(message_id,recipient_id,event,native_turn_id,created_at) VALUES(?,?,?,?,?)", [id.uuidString, caller.sessionID.uuidString, "WaitForWork", nil, now]) }
             }
         }
         let reported = Set(report.results.map(\.delegationID))
