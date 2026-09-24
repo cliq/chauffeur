@@ -34,13 +34,21 @@ public enum ProcessRunner {
         let output = Pipe(), errors = Pipe()
         process.standardOutput = output; process.standardError = errors
         let outputReader = BoundedReader(limit: outputLimit, keepTail: keepOutputTail), errorReader = BoundedReader()
+        // `isRunning` flips about 80ms after the child exits, which made every
+        // git and tmux call pay that delay. The termination handler is prompt.
+        let exited = DispatchSemaphore(value: 0)
+        process.terminationHandler = { _ in exited.signal() }
         try process.run()
         let readers = DispatchGroup()
         readers.enter(); Thread.detachNewThread { outputReader.read(output.fileHandleForReading); readers.leave() }
         readers.enter(); Thread.detachNewThread { errorReader.read(errors.fileHandleForReading); readers.leave() }
         let deadline = Date().addingTimeInterval(timeout)
-        while process.isRunning && !cancellation.isCancelled && Date() < deadline { Thread.sleep(forTimeInterval: 0.01) }
-        if process.isRunning {
+        var finished = false
+        while !finished && !cancellation.isCancelled && Date() < deadline {
+            // The handler can wait for a busy Dispatch pool; `isRunning` cannot.
+            finished = exited.wait(timeout: .now() + .milliseconds(10)) == .success || !process.isRunning
+        }
+        if !finished && process.isRunning {
             process.terminate()
             let stopDeadline = Date().addingTimeInterval(1)
             while process.isRunning && Date() < stopDeadline { Thread.sleep(forTimeInterval: 0.01) }
