@@ -11,6 +11,9 @@ Chauffeur runs separate interactive CLI sessions with group-scoped messaging.
 Get the current session, project, group, checkout identity, repository paths,
 presets, current-session capabilities, curated model/effort suggestions, and peers
 from `chauffeur_discover`. This file contains no session-specific context.
+Tools are named here without the prefix your CLI adds: Claude Code calls
+`chauffeur_discover` `mcp__chauffeur__chauffeur_discover`, and OpenCode calls it
+`chauffeur_chauffeur_discover`.
 If Chauffeur's tools are unavailable, explain that coordination is unavailable
 and continue work that does not require them. Do not infer peers or credentials
 from another session's files.

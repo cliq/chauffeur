@@ -344,6 +344,10 @@ public struct OpenCodeProvider: AgentProvider {
         return .ready
     }
 
+    /// OpenCode names MCP tools `<server>_<tool>`, so `chauffeur_inbox` is
+    /// `chauffeur_chauffeur_inbox` there. Local models don't map one to the other.
+    public static func toolName(_ name: String) -> String { "chauffeur_" + name }
+
     /// `ses_` followed by 26 alphanumerics.
     public static func isConversationID(_ id: String) -> Bool {
         id.hasPrefix("ses_") && id.count == 30 && id.dropFirst(4).allSatisfy { $0.isASCII && ($0.isLetter || $0.isNumber) }

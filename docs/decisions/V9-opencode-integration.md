@@ -53,7 +53,9 @@ follow-ups on idle and deliver them with `promptAsync`, like the waiter.
 
 ### MCP
 
-- Tools are named `<server>_<tool>`, e.g. `chauffeur_inbox`.
+- Tools are named `<server>_<tool>`, so Chauffeur's `chauffeur_inbox` is `chauffeur_chauffeur_inbox`. The end-to-end smoke
+  found that a local model told to call `chauffeur_discover` called that name, got OpenCode's "unavailable tool" error and gave
+  up. Texts that reach an OpenCode model (inbox hints, waiter prompts) therefore use the exposed names.
 - Permission rules use the last match, so `chauffeur_*` must come after any `*` rule. The content's keys follow the user's.
 - `mcp.<name>.timeout` (ms) controls the tool-call timeout. Without it, calls fail after about 60 s.
 - **A plain JSON reply fails after about 300 s, whatever the timeout.** Only an SSE response with periodic keepalive comments
