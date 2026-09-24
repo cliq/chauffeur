@@ -109,6 +109,7 @@ struct ProjectWindow: View {
     @State private var tabError: String?
     @State private var deletingSession: Session?
     @State private var clearingFinished: [Session]?
+    @State private var recentConversationsRow: CheckoutRow?
     @State private var renamingSession: Session?
     @State private var renameTitle = ""
     @FocusState private var searchFocused: Bool
@@ -155,6 +156,7 @@ struct ProjectWindow: View {
                 .sheet(isPresented: $editingProject) { ProjectEditor(project: project) { _ in editingProject = false } }
                 .sheet(isPresented: $editingGroups) { GroupsEditor(project: project) }
                 .sheet(item: $worktreeSheet) { selection in WorktreesView(project: project, initialFolderID: selection.folderID, worktreeCreated: revealCreatedWorktree) }
+                .sheet(item: $recentConversationsRow) { row in RecentConversationsSheet(row: row) }
                 .sheet(item: $deletingCheckout) { row in
                     WorktreeDeletionSheet(row: row, preview: deletionPreview, confirm: { deleteWorktree(row); deletingCheckout = nil }, cancel: { deletingCheckout = nil })
                 }
@@ -461,6 +463,7 @@ struct ProjectWindow: View {
         Button("Launch Agent…") { launchAgent(in: row, folder: folder) }.disabled(!canLaunch(in: row))
         Button("Open Shell") { openShell(in: row, folder: folder) }.disabled(!canLaunch(in: row))
         Divider()
+        Button("Recent Conversations…") { recentConversationsRow = row }.disabled(!model.online)
         Button("Manage Worktrees…") { showWorktrees(folderID: folder.id) }
         Button("Reveal in Finder") { FilePanels.reveal(row.path) }.disabled(row.availability != .available)
         if !row.isMain {
@@ -588,6 +591,7 @@ struct ProjectWindow: View {
                     Button("Launch Agent…") { launchAgent(in: row, folder: folder) }.buttonStyle(.borderedProminent).disabled(!canLaunch(in: row)).accessibilityIdentifier("checkout.empty.launch")
                     Button("Open Shell") { openShell(in: row, folder: folder) }.disabled(!canLaunch(in: row)).accessibilityIdentifier("checkout.empty.shell")
                 }
+                Button("Recent Conversations…") { recentConversationsRow = row }.disabled(!model.online).accessibilityIdentifier("checkout.empty.recentConversations")
             }
         }.frame(maxWidth: .infinity, maxHeight: .infinity)
     }

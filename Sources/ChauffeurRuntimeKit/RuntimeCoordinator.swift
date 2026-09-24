@@ -526,6 +526,10 @@ public actor RuntimeCoordinator {
             if project.folders.contains(where: { $0.registered && repositoryInventories.observation(for: $0.canonicalPath) == nil }) { rescanWorktrees() }
             return try .from(saved)
         case "saveWindow": return try .from(await store.save(params["record"].decode(WindowState.self), expectedVersion: params["version"].string))
+        case "recentConversations":
+            let path = try params.requiredString("path")
+            let sources = recentConversationSources(await store.refresh())
+            return try .from(await Task.detached { RecentConversationScanner.scan(path: path, sources: sources) }.value)
         case "discoverFolders":
             let parent = try params.requiredString("path")
             return try .from(await Task.detached { RepositoryDiscovery.scan(parent: parent) }.value)
@@ -685,6 +689,24 @@ public actor RuntimeCoordinator {
             session.folderID == folderID && (session.worktreeID.map(worktreeIDs.contains) == true
                 || (session.worktreeID == nil && Paths.canonical(session.launch.workingDirectory) == canonical))
         }
+    }
+    /// Every configuration directory an agent could have used: each team's
+    /// resolved agents, fixed preset directories, recorded sessions and the
+    /// provider defaults.
+    private func recentConversationSources(_ snapshot: StoreSnapshot) -> RecentConversationScanner.Sources {
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        var directories: [CLIKind: [String]] = [:]
+        func add(_ kind: CLIKind, _ path: String?) {
+            guard let path, !path.isEmpty else { return }
+            let canonical = Paths.canonical(path)
+            if directories[kind]?.contains(canonical) != true { directories[kind, default: []].append(canonical) }
+        }
+        for team in snapshot.presetSets.map(\.value) { for agent in snapshot.agents(in: team, includeArchived: true) { add(agent.kind, agent.configurationDirectory) } }
+        for preset in snapshot.baseAgentPresets.map(\.value) { add(preset.kind, preset.configurationDirectoryOverride) }
+        for session in sessions.values { add(session.launch.preset.kind, session.launch.configurationPath) }
+        for kind in [CLIKind.claude, .codex] { add(kind, kind.provider?.defaultConfigurationDirectory(home: home)) }
+        return RecentConversationScanner.Sources(claude: directories[.claude] ?? [], codex: directories[.codex] ?? [],
+                                                 openCodeDatabases: [RecentConversationScanner.openCodeDatabase(home: home)])
     }
     private func deleteFinishedSession(_ sessionID: UUID) async throws {
         // Natural-exit retention and an explicit close can finish the same cleanup.
