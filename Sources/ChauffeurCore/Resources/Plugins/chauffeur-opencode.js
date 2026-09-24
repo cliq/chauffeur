@@ -63,8 +63,19 @@ function createChauffeurPlugin({
     enqueue(() => run(["event", "--session", chauffeurSession, status], body, cfg.ctlTimeoutMs));
   }
 
+  /** Resolves whether OpenCode accepted the prompt; the SDK reports most failures as `{error}` rather than throwing. */
   async function prompt(text) {
-    try { await client?.session?.promptAsync({ path: { id: s.root }, body: { parts: [{ type: "text", text }] } }); } catch {}
+    try {
+      const r = await client.session.promptAsync({ path: { id: s.root }, body: { parts: [{ type: "text", text }] } });
+      return !r?.error;
+    } catch { return false; }
+  }
+
+  // Nothing continues the turn (a prompt failed, or no waiter is waiting), so it ends as finished work: the runtime
+  // marks the session unread and notifies, which a Stop that blocked or started a waiter left out.
+  function turnFinished() {
+    s.stopActive = false;
+    report("turn-finished");
   }
 
   function adopt(id, source) {
@@ -75,17 +86,24 @@ function createChauffeurPlugin({
   function startWaiter() {
     if (s.waiter) return;
     let child;
-    try { child = spawn(ctl, ["wait-for-work", "--json"], { env, stdio: ["ignore", "pipe", "ignore"] }); } catch { return; }
-    const waiter = { child, killed: false, out: "" };
+    try { child = spawn(ctl, ["wait-for-work", "--json"], { env, stdio: ["ignore", "pipe", "ignore"] }); } catch { turnFinished(); return; }
+    const waiter = { child, killed: false, done: false, out: "" };
     s.waiter = waiter;
-    child.on("error", () => { if (s.waiter === waiter) s.waiter = null; });
-    child.stdout?.on("data", (d) => { waiter.out += d; });
-    child.on("close", () => {
+    // `error` (the ctl didn't start) and `close` can both arrive; only the first counts.
+    const exited = async () => {
+      if (waiter.done) return;
+      waiter.done = true;
       if (s.waiter === waiter) s.waiter = null;
-      if (waiter.killed) return;
+      if (waiter.killed) return; // a new turn started, or OpenCode is exiting
+      const turn = s.turn;
       const r = parseLine(waiter.out);
-      if (r?.reason === "work" && typeof r.text === "string" && r.text) prompt(r.text);
-    });
+      if (r?.reason === "replaced") return; // another wait of this session carries on
+      if (r?.reason === "work" && typeof r.text === "string" && r.text && await prompt(r.text)) return;
+      if (s.turn === turn) turnFinished();
+    };
+    child.on("error", exited);
+    child.stdout?.on("data", (d) => { waiter.out += d; });
+    child.on("close", exited);
   }
   function killWaiter() {
     const w = s.waiter;
@@ -124,7 +142,8 @@ function createChauffeurPlugin({
       if (s.turn !== turn) return; // the user started a turn meanwhile; the mail stays in the inbox
       if (r?.block === true && typeof r.text === "string" && r.text) {
         s.stopActive = true;
-        await prompt(r.text);
+        // The ctl left the turn running for this continuation; without it nothing would ever end the turn.
+        if (!(await prompt(r.text)) && s.turn === turn) turnFinished();
       } else {
         s.stopActive = false;
         if (r?.waitForWorkers === true) startWaiter();

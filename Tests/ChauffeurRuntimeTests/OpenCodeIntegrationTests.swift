@@ -267,6 +267,10 @@ struct OpenCodeHookCommandTests {
         #expect(waiting == .object(["block": .bool(false), "text": .null, "waitForWorkers": .bool(true)]))
         let finished = try await fixture.session()
         #expect(finished.state == .turnFinished && !finished.unread)
+        // When the waiter can't start or stops without work, the plugin reports the turn finished again, as finished work.
+        _ = try run(ctl, ["event", "--session", launched.id.uuidString, "turn-finished"], input: #"{"session_id":"\#(conversation)"}"#, environment: environment)
+        let fallback = try await fixture.session()
+        #expect(fallback.state == .turnFinished && fallback.unread)
 
         var closed = delegation; closed.closureOutcome = "accepted"
         try await fixture.runtime.ledger.updateDelegation(closed)

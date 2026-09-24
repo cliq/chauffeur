@@ -51,11 +51,10 @@ export function fakeClient() {
 }
 
 /** Builds a plugin with fakes; `emit(type, properties)` delivers an OpenCode bus event and lets queued ctl calls run. */
-export async function harness({ reply, options = {} } = {}) {
+export async function harness({ reply, options = {}, client = fakeClient() } = {}) {
   const ctl = fakeCtl(reply);
-  const client = fakeClient();
   const exits = [];
-  const hooks = createChauffeurPlugin({ client, env, spawn: ctl.spawn, onExit: (fn) => exits.push(fn), attentionDelayMs: 30, ...options });
+  const hooks = createChauffeurPlugin({ client, env: { ...env }, spawn: ctl.spawn, onExit: (fn) => exits.push(fn), attentionDelayMs: 30, ...options });
   const emit = async (type, properties) => { await hooks.event({ event: { type, properties } }); await tick(5); };
   const statuses = () => ctl.calls.filter((c) => c.args[0] === "event").map((c) => c.args[3]);
   const stops = () => ctl.calls.filter((c) => c.args[0] === "inbox-hook" && c.args.includes("--report-stop"));

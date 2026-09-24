@@ -237,7 +237,7 @@ test("PostToolUse leaves output alone without a hint, and is bounded when ctl ha
 
 test("hooks never throw, even when spawn and promptAsync do", async () => {
   const client = { session: { promptAsync: async () => { throw new Error("boom"); } } };
-  const hooks = createChauffeurPlugin({ env, client, onExit: () => {}, spawn: () => { throw new Error("spawn failed"); } });
+  const hooks = createChauffeurPlugin({ env: { ...env }, client, onExit: () => {}, spawn: () => { throw new Error("spawn failed"); } });
   await hooks.event({ event: { type: "session.created", properties: { info: { id: ROOT } } } });
   await hooks.event({ event: null });
   await hooks.event({});
@@ -258,16 +258,74 @@ test("waiter starts on waitForWorkers, and work wakes the session", async () => 
   assert.deepEqual(h.client.prompts, [{ path: { id: ROOT }, body: { parts: [{ type: "text", text: "Worker Ada reported a milestone." }] } }]);
 });
 
-test("waiter reasons other than work do nothing", async () => {
-  for (const reason of ["timeout", "replaced", "ended"]) {
-    const h = await harness({ reply: (args) => (args.includes("--report-stop") ? { stdout: '{"block":false,"waitForWorkers":true}' } : args[0] === "wait-for-work" ? { stdout: JSON.stringify({ reason, text: "x" }) } : {}) });
+test("a waiter that stops without work ends the turn as finished, unless another wait replaced it", async () => {
+  for (const [stdout, finished] of [['{"reason":"timeout","text":"x"}', true], ['{"reason":"ended","text":"x"}', true], ["", true], ["garbage", true], ['{"reason":"replaced","text":"x"}', false]]) {
+    const h = await harness({ reply: (args) => (args.includes("--report-stop") ? { stdout: '{"block":false,"waitForWorkers":true}' } : args[0] === "wait-for-work" ? { stdout } : {}) });
     await h.emit(...created(ROOT));
     await h.emit(...busy());
     await h.emit(...idle());
     await tick(10);
     assert.equal(h.waiters().length, 1);
     assert.equal(h.client.prompts.length, 0);
+    assert.deepEqual(h.statuses(), ["session-start", "running", ...(finished ? ["turn-finished"] : [])], stdout);
+    if (finished) {
+      const call = h.ctl.calls.find((c) => c.args[3] === "turn-finished");
+      assert.deepEqual(call.args, ["event", "--session", env.CHAUFFEUR_SESSION_ID, "turn-finished"]);
+      assert.deepEqual(call.payload, { session_id: ROOT });
+    }
   }
+});
+
+test("a waiter that cannot start ends the turn as finished", async () => {
+  for (const how of ["throw", "error"]) {
+    const ctl = fakeCtl((args) => (args.includes("--report-stop") ? { stdout: '{"block":false,"waitForWorkers":true}' } : {}));
+    const spawn = (cmd, args, opts) => {
+      if (args[0] !== "wait-for-work") return ctl.spawn(cmd, args, opts);
+      if (how === "throw") throw new Error("EMFILE");
+      const child = ctl.spawn(cmd, ["wait-for-work-hang"], opts); // never answers by itself
+      setImmediate(() => { child.emit("error", new Error("ENOENT")); child.emit("close", -2, null); });
+      return child;
+    };
+    const hooks = createChauffeurPlugin({ client: fakeClient(), env: { ...env }, spawn, onExit: () => {} });
+    for (const [type, properties] of [created(ROOT), busy(), idle()]) { await hooks.event({ event: { type, properties } }); await tick(5); }
+    await tick(20);
+    const statuses = ctl.calls.filter((c) => c.args[0] === "event").map((c) => c.args[3]);
+    assert.deepEqual(statuses, ["session-start", "running", "turn-finished"], how);
+  }
+});
+
+test("a failed wake prompt from the waiter ends the turn as finished", async () => {
+  for (const promptAsync of [async () => { throw new Error("server gone"); }, async () => ({ error: { name: "NotFound" } })]) {
+    const h = await harness({
+      client: { session: { promptAsync } },
+      reply: (args) => (args.includes("--report-stop") ? { stdout: '{"block":false,"waitForWorkers":true}' } : args[0] === "wait-for-work" ? { stdout: '{"reason":"work","text":"Worker Ada reported."}' } : {}),
+    });
+    await h.emit(...created(ROOT));
+    await h.emit(...busy());
+    await h.emit(...idle());
+    await tick(10);
+    assert.deepEqual(h.statuses(), ["session-start", "running", "turn-finished"]);
+  }
+});
+
+test("a failed continuation after a blocking Stop ends the turn instead of leaving it running", async () => {
+  let fail = true;
+  const h = await harness({
+    client: { session: { promptAsync: async () => { if (fail) throw new Error("server gone"); return {}; } } },
+    reply: (args) => (args.includes("--report-stop") ? { stdout: '{"block":true,"text":"New mail from Ada."}' } : {}),
+  });
+  await h.emit(...created(ROOT));
+  await h.emit(...busy());
+  await h.emit(...idle());
+  await tick(10);
+  assert.deepEqual(h.statuses(), ["session-start", "running", "turn-finished"]);
+  // The continuation never happened, so the next Stop is a fresh one.
+  fail = false;
+  await h.emit(...busy());
+  await h.emit(...idle());
+  await tick(10);
+  assert.deepEqual(h.stops().map((c) => c.payload.stop_hook_active), [false, false]);
+  assert.deepEqual(h.statuses(), ["session-start", "running", "turn-finished", "running"], "a continuation that started reports nothing more");
 });
 
 test("no waiter without waitForWorkers", async () => {

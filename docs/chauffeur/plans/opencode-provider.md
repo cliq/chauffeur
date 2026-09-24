@@ -113,6 +113,7 @@ Each ctl call gets one JSON object on stdin, in the Claude hook shape that `Hook
 | `session-start` | The first root session is seen. `source` is `startup` after `session.created`, and `resume` when the ID is adopted from another root event. |
 | `running` | Busy, or a permission or question is answered. Sent only on transitions. |
 | `needs-attention` | A permission or question has stayed open for 250 ms, or a `session.error` other than `MessageAbortedError`. |
+| `turn-finished` | Nothing continues a turn the Stop hook left open: the `promptAsync` for a blocking Stop or for the waiter's work failed, or the waiter couldn't start or exited with `timeout`, `ended`, an error or no output. Without `waitingForWorkers`, so the runtime marks the session unread and notifies. |
 
 ### Inbox
 
@@ -139,9 +140,10 @@ Each ctl call gets one JSON object on stdin, in the Claude hook shape that `Hook
 {"reason": "work" | "timeout" | "replaced" | "ended", "text": "…"}
 ```
 
-- `reason: "work"`: the plugin calls `promptAsync(text)`.
+- `reason: "work"`: the plugin calls `promptAsync(text)`; if that fails it reports `turn-finished`.
 - Queued mail that a hook or an earlier `--json` wait already mentioned doesn't count as work, and mail a wait reports is marked
   mentioned. Otherwise mail the model left unread would end every wait at once and re-prompt it on each idle.
-- Any other reason: nothing happens.
+- `reason: "replaced"`: nothing happens.
+- Any other outcome reports `turn-finished`.
 - The plugin kills the waiter with SIGTERM when the root session turns busy, and on dispose or exit. At most one waiter runs at a
   time.
