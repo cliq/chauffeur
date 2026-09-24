@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """One OpenCode session through the real runtime against a real local model (not
 scripted): an OpenAI-compatible server such as `mlx_lm.server`. The model is asked
-to call `chauffeur_discover` (exposed as `chauffeur_chauffeur_discover`) and to run
+to call `chauffeur_discover`, the name the skills use, and to run
 one bash command; the smoke checks the plugin's status reports (Running → Turn
 finished), the adopted `ses_…` ID, the MCP call and the command's effect.
 
@@ -24,7 +24,6 @@ parser.add_argument('--runtime', type=Path, default=repo / '.build/debug/Chauffe
 parser.add_argument('--base-url', default='http://127.0.0.1:8081/v1')
 parser.add_argument('--model', default='/Users/leolobato/models/Qwen3-14B-4bit')
 parser.add_argument('--timeout', type=int, default=900, help='seconds for the whole turn')
-parser.add_argument('--skill-name', action='store_true', help='ask for `chauffeur_discover`, as the skills name it, instead of the exposed tool name')
 parser.add_argument('--artifacts', type=Path, default=repo / '.local/opencode-live-smoke')
 options = parser.parse_args()
 tmux = shutil.which('tmux')
@@ -88,7 +87,7 @@ try:
     call('saveProject', {'record': {'id': project_id, 'name': 'Live', 'presetSetID': set_id, 'folders': [{'id': folder_id, 'name': 'Checkout', 'selectedPath': str(checkout), 'canonicalPath': str(checkout), 'availability': 'available', 'registered': True}], 'groups': [{'id': group_id, 'name': 'Default', 'isDefault': True, 'archived': False, 'createdAt': now, 'updatedAt': now}], 'archived': False, 'createdAt': now, 'updatedAt': now, 'lastOpenedAt': now}})
     session = call('launch', {'projectID': project_id, 'groupID': group_id, 'presetID': preset, 'folderID': folder_id, 'additionalFolderIDs': [], 'title': 'Live', 'allowSharedCheckout': True, 'coordinationEnabled': True, 'retryKey': uid()}, timeout=90)
     wait(lambda: 'Ask anything' in screen(session), timeout=90, label='prompt')
-    tool_name = 'chauffeur_discover' if options.skill_name else 'chauffeur_chauffeur_discover'
+    tool_name = 'chauffeur_discover'
     task = (f'Do exactly two things, then stop. First call the {tool_name} tool (no arguments). '
             'Then use the bash tool to run: echo "$(pwd)" > live.txt . Finally reply with the word DONE and the value of scope from the discover result. /no_think')
     tmux_run('send-keys', '-t', session['id'], '-l', '--', task); time.sleep(0.8); tmux_run('send-keys', '-t', session['id'], 'Enter')
@@ -101,11 +100,11 @@ try:
     (artifacts / 'terminal.private.txt').write_text(view)
     final = current(session)
     result = {'states': states, 'nativeConversationID': final['nativeConversationID'], 'seconds': round(time.monotonic() - started),
-              # A successful MCP call shows as `⚙ chauffeur_chauffeur_discover`; a wrong name as OpenCode's
+              # A successful MCP call shows as `⚙ chauffeur_discover`; a wrong name as OpenCode's
               # "unavailable tool '…'. Available tools: …" error.
-              'discoverCalled': bool(re.search(r'⚙ chauffeur_chauffeur_discover', view)),
+              'discoverCalled': bool(re.search(r'⚙ chauffeur_discover', view)),
               'invalidToolCalls': sorted(set(re.findall(r"'([\w-]+)'\. Available tools", view))), 'bashRan': (checkout / 'live.txt').exists(),
-              'repliedDone': 'DONE' in view.split('chauffeur_chauffeur_discover')[-1]}
+              'repliedDone': 'DONE' in view.split('chauffeur_discover')[-1]}
     ok = bool(re.fullmatch(r'ses_[A-Za-z0-9]{26}', final['nativeConversationID'] or '')) and result['discoverCalled'] and result['bashRan']
     result['result'] = 'pass' if ok else 'fail'
 except BaseException as error:

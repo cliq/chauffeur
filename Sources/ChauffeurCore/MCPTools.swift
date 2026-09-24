@@ -20,6 +20,15 @@ public enum MCPTools {
             }
         }
     }
+    static let prefix = "chauffeur_"
+    /// A definition as listed to a CLI that adds the server name itself.
+    public static func withoutPrefix(_ definition: JSONValue) -> JSONValue {
+        guard case .object(var fields) = definition, let name = fields["name"]?.string, name.hasPrefix(prefix) else { return definition }
+        fields["name"] = .string(String(name.dropFirst(prefix.count)))
+        return .object(fields)
+    }
+    /// Accepts a called name in either form.
+    public static func prefixed(_ name: String) -> String { name.hasPrefix(prefix) ? name : prefix + name }
     public static var definitions: [JSONValue] {
         let string: JSONValue = .object(["type": .string("string")])
         let strings: JSONValue = .object(["type": .string("array"), "items": string])

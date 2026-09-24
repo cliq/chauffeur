@@ -1425,6 +1425,11 @@ public actor RuntimeCoordinator {
         let directory = provider.environment(configurationDirectory: Paths.canonical(preset.configurationDirectory))[provider.configurationEnvironmentKey] ?? ""
         return provider.modelSuggestions + ModelSuggestionCache.models(kind: preset.kind, executable: executable, configurationDirectory: directory, at: ModelSuggestionCache.url(root: root))
     }
+    /// Whether this caller's CLI shows MCP tools as `<server>_<tool>` (see `prefixesMCPToolsWithServer`).
+    public func exposesShortToolNames(token: String) async -> Bool {
+        guard let caller = try? await ledger.authenticate(token) else { return false }
+        return sessions[caller.sessionID]?.launch.preset.kind.provider?.prefixesMCPToolsWithServer == true
+    }
     public func callTool(token: String, name: String, arguments: JSONValue) async throws -> JSONValue {
         let caller = try await ledger.authenticate(token)
         try MCPTools.validate(name: name, arguments: arguments)

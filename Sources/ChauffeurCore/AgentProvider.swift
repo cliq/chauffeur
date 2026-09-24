@@ -110,6 +110,9 @@ public protocol AgentProvider: Sendable {
     var wakeStrategy: CoordinatorWakeStrategy { get }
     /// The longest `chauffeur_inbox` wait the provider's MCP transport survives.
     var maxInboxWaitSeconds: Int? { get }
+    /// The CLI shows MCP tools as `<server>_<tool>`, so Chauffeur lists them without its own
+    /// `chauffeur_` prefix and the CLI shows exactly the names the skills and hints use.
+    var prefixesMCPToolsWithServer: Bool { get }
 }
 
 public extension AgentProvider {
@@ -121,6 +124,7 @@ public extension AgentProvider {
         return composerReadiness(activeLine: screen.lines[screen.cursorY].trimmingCharacters(in: .whitespaces))
     }
     var maxInboxWaitSeconds: Int? { nil }
+    var prefixesMCPToolsWithServer: Bool { false }
     func environment(configurationDirectory: String) -> [String: String] { [configurationEnvironmentKey: configurationDirectory] }
     func defaultConfigurationDirectory(home: String) -> String { URL(fileURLWithPath: home).appendingPathComponent(defaultHomeFolder).path }
     func permitsManaged(_ key: String, value: String?) -> Bool { false }
@@ -344,10 +348,6 @@ public struct OpenCodeProvider: AgentProvider {
         return .ready
     }
 
-    /// OpenCode names MCP tools `<server>_<tool>`, so `chauffeur_inbox` is
-    /// `chauffeur_chauffeur_inbox` there. Local models don't map one to the other.
-    public static func toolName(_ name: String) -> String { "chauffeur_" + name }
-
     /// `ses_` followed by 26 alphanumerics.
     public static func isConversationID(_ id: String) -> Bool {
         id.hasPrefix("ses_") && id.count == 30 && id.dropFirst(4).allSatisfy { $0.isASCII && ($0.isLetter || $0.isNumber) }
@@ -358,4 +358,5 @@ public struct OpenCodeProvider: AgentProvider {
     public var wakeStrategy: CoordinatorWakeStrategy { .plugin }
     /// Plain JSON MCP replies fail after about 300 s (V9).
     public var maxInboxWaitSeconds: Int? { 240 }
+    public var prefixesMCPToolsWithServer: Bool { true }
 }

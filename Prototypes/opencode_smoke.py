@@ -22,8 +22,8 @@ Checks:
   the composer rule. Real screens (first turn, idle, draft, busy) are captured and
   classified with the same rule as `OpenCodeProvider.composerReadiness(screen:)`.
 - Resume: stop and resume uses `-s <ses_…>` and keeps the conversation.
-- OpenCode exposes Chauffeur's MCP tools as `chauffeur_chauffeur_<tool>`; the mock
-  calls them by that name.
+- Chauffeur lists its MCP tools to OpenCode without the `chauffeur_` prefix, so
+  OpenCode shows (and the mock calls) the names the skills use, e.g. `chauffeur_inbox`.
 - `chauffeur_inbox` waits are capped at 240 s for OpenCode (skip with --quick).
 - The snapshot and the remote inventory mapping name the session kind `opencode`.
 
@@ -71,10 +71,9 @@ def oc_turn(messages):
         if m['role'] == 'user' and text_of(m).strip().startswith(MARKERS):
             return text_of(m).strip(), messages[index + 1:]
     return '', []
-# OpenCode names MCP tools `<server>_<tool>`, so Chauffeur's are `chauffeur_chauffeur_inbox` and so on.
-MCP_PREFIX = 'chauffeur_'
-def oc_wire(name): return MCP_PREFIX + name if name.startswith('chauffeur_') else name
-def oc_name(name): return name[len(MCP_PREFIX):] if name.startswith(MCP_PREFIX + 'chauffeur_') else name
+# OpenCode names MCP tools `<server>_<tool>`; Chauffeur lists `inbox` etc. to it, so OpenCode shows `chauffeur_inbox`.
+def oc_wire(name): return name
+def oc_name(name): return name
 def oc_calls(turn): return [oc_name(c['function']['name']) for m in turn if m['role'] == 'assistant' for c in (m.get('tool_calls') or [])]
 def oc_results(turn, name):
     ids = {c['id'] for m in turn if m['role'] == 'assistant' for c in (m.get('tool_calls') or []) if oc_name(c['function']['name']) == name}

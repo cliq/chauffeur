@@ -30,10 +30,12 @@ public enum MCPServer {
             switch method {
             case "initialize": result = .object(["protocolVersion": .string("2025-11-25"), "capabilities": .object(["tools": .object([:])]), "serverInfo": .object(["name": .string("chauffeur"), "version": .string(RuntimeVersion.current)]), "instructions": .string("Use chauffeur_discover for your authenticated group. Messages are durable inbox entries; they do not automatically wake a CLI. Use bounded inbox waits when awaiting delegated work.")])
             case "ping": result = .object([:])
-            case "tools/list": result = .object(["tools": .array(MCPTools.definitions)])
+            case "tools/list":
+                let short = await runtime.exposesShortToolNames(token: token)
+                result = .object(["tools": .array(short ? MCPTools.definitions.map(MCPTools.withoutPrefix) : MCPTools.definitions)])
             case "tools/call":
                 do {
-                    let value = try await runtime.callTool(token: token, name: body["params"].requiredString("name"), arguments: body["params"]["arguments"] == .null ? .object([:]) : body["params"]["arguments"])
+                    let value = try await runtime.callTool(token: token, name: MCPTools.prefixed(body["params"].requiredString("name")), arguments: body["params"]["arguments"] == .null ? .object([:]) : body["params"]["arguments"])
                     result = .object(["content": .array([.object(["type": .string("text"), "text": .string(String(decoding: try JSONCoding.encode(value), as: UTF8.self))])]), "isError": .bool(false)])
                 } catch {
                     await runtime.record(error as? ChauffeurError ?? ChauffeurError("operation_failed", "Tool operation failed"))
