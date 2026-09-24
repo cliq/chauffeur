@@ -7,6 +7,7 @@ DERIVED_DATA_PATH ?= build
 XCODEBUILD_ARGS ?=
 CODESIGN_FLAGS ?=
 INSTALL_DIR ?= /Applications
+NODE ?= node
 
 PRODUCTS_DIR = $(DERIVED_DATA_PATH)/Build/Products/$(CONFIGURATION)
 APP_NAME = $(if $(filter Debug,$(CONFIGURATION)),Chauffeur Debug,Chauffeur)
@@ -18,7 +19,7 @@ XCODEBUILD = xcodebuild -project Chauffeur.xcodeproj -scheme Chauffeur \
 	-destination 'platform=macOS,arch=arm64' -skipPackagePluginValidation \
 	$(XCODEBUILD_ARGS)
 
-.PHONY: gen build debug release install open test test-ui verify clean
+.PHONY: gen build debug release install open test test-plugin test-ui verify clean
 
 gen:
 	xcodegen generate
@@ -65,8 +66,12 @@ install: release
 open: gen
 	open Chauffeur.xcodeproj
 
-test:
+test: test-plugin
 	swift test
+
+# The bundled OpenCode plugin is plain JavaScript, tested with node's built-in runner.
+test-plugin:
+	$(NODE) --test Tests/OpenCodePlugin/*.test.mjs
 
 test-ui:
 	$(MAKE) build BUILD_ACTION=build-for-testing
