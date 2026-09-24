@@ -70,8 +70,18 @@ public enum LaunchPolicy {
             !deniedNames.contains(key) && !deniedPrefixes.contains(where: key.hasPrefix)
         }
     }
+    /// A launch's configuration directory. It must exist unless the launch uses the provider's default, which the CLI
+    /// creates on its first run: a team without a directory (`allowMissing`), or one the provider doesn't export at all
+    /// (OpenCode's `~/.config/opencode`), as for a freshly installed CLI launched from the seeded preset.
+    public static func configurationDirectory(_ path: String, kind: CLIKind, allowMissing: Bool = false) throws -> String {
+        allowMissing || !configurationMustExist(path, kind: kind) ? Paths.canonical(path) : try Paths.directory(path)
+    }
+    static func configurationMustExist(_ path: String, kind: CLIKind) -> Bool {
+        kind.provider?.environment(configurationDirectory: Paths.canonical(path)).isEmpty != true
+    }
+
     public static func environment(base: [String: String], preset: AgentPreset, projectID: UUID, sessionID: UUID, token: String, configurationEnvironment: [String: String]? = nil, allowMissingConfiguration: Bool = false) throws -> [String: String] {
-        let directory = allowMissingConfiguration ? Paths.canonical(preset.configurationDirectory) : try Paths.directory(preset.configurationDirectory)
+        let directory = try configurationDirectory(preset.configurationDirectory, kind: preset.kind, allowMissing: allowMissingConfiguration)
         var result = sanitizedEnvironment(base: base)
         result.merge(preset.kind.provider?.environment(configurationDirectory: directory) ?? [:]) { _, profile in profile }
         if let configurationEnvironment {

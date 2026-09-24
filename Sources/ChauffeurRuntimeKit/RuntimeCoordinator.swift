@@ -933,7 +933,7 @@ public actor RuntimeCoordinator {
                     throw ChauffeurError("worktree_unavailable", "The selected checkout was replaced. Refresh the Git inventory and select its current record", path: session.launch.workingDirectory)
                 }
             }
-            session.launch.configurationPath = launch.configurationUsesDefault == true ? Paths.canonical(preset.configurationDirectory) : try Paths.directory(preset.configurationDirectory)
+            session.launch.configurationPath = try LaunchPolicy.configurationDirectory(preset.configurationDirectory, kind: preset.kind, allowMissing: launch.configurationUsesDefault == true)
             session.launch.executablePath = try Paths.executable(preset.executable, environment: baseEnvironment)
             let sharing = sessions.values.filter { peer in
                 peer.id != session.id && peer.state.isLive && peer.launch.preset.kind.isAgent && (peer.launch.workingDirectory == session.launch.workingDirectory
@@ -1010,7 +1010,7 @@ public actor RuntimeCoordinator {
         // A rejected resume keeps the ended session and its saved terminal.
         // Preflight must finish before stopping the pane or persisting startup.
         try await worktrees.validateResume(session.launch)
-        if session.launch.configurationUsesDefault != true { _ = try Paths.directory(session.launch.configurationPath) }
+        _ = try LaunchPolicy.configurationDirectory(session.launch.configurationPath, kind: session.launch.preset.kind, allowMissing: session.launch.configurationUsesDefault == true)
         // Resume starts the preset's executable as it resolves now: a recorded real
         // path (e.g. a versioned Homebrew Caskroom directory) disappears on upgrade.
         let executable = session.launch.preset.kind.isAgent ? try Paths.executable(session.launch.preset.executable, environment: baseEnvironment) : nil

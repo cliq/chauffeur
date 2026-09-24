@@ -1,6 +1,6 @@
 import Foundation
 import Testing
-import ChauffeurCore
+@testable import ChauffeurCore
 
 struct OpenCodeProviderTests {
     private let provider = OpenCodeProvider()
@@ -99,6 +99,26 @@ struct OpenCodeProviderTests {
         preset.configurationDirectory = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".config/opencode").path
         let global = try LaunchPolicy.environment(base: base, preset: preset, projectID: UUID(), sessionID: UUID(), token: "t", allowMissingConfiguration: true)
         #expect(global["OPENCODE_CONFIG_DIR"] == nil)
+    }
+
+    @Test func theDefaultConfigurationDirectoryNeedNotExistYet() throws {
+        // A fresh OpenCode install that never ran has no ~/.config/opencode; Chauffeur exports nothing for it.
+        let fresh = FileManager.default.temporaryDirectory.appendingPathComponent("chauffeur-opencode-home-\(UUID())").path
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        let missing = URL(fileURLWithPath: home).appendingPathComponent(".config/opencode-\(UUID())").path
+        var preset = AgentPreset(setID: UUID(), name: "Fixture", kind: .opencode, executable: "opencode", configurationDirectory: fresh)
+        // Only the provider's default is exempt: a selected directory must still exist.
+        #expect(throws: ChauffeurError.self) { try LaunchPolicy.environment(base: [:], preset: preset, projectID: UUID(), sessionID: UUID(), token: "t") }
+        #expect(throws: ChauffeurError.self) { try LaunchPolicy.configurationDirectory(missing, kind: .opencode) }
+        #expect(throws: ChauffeurError.self) { try LaunchPolicy.configurationDirectory(fresh, kind: .claude) }
+        #expect(try LaunchPolicy.configurationDirectory(fresh, kind: .claude, allowMissing: true) == Paths.canonical(fresh))
+        // The default itself: whether it exists on this Mac doesn't matter, nothing is exported for it.
+        #expect(!LaunchPolicy.configurationMustExist(OpenCodeProvider().defaultConfigurationDirectory(home: home), kind: .opencode))
+        #expect(LaunchPolicy.configurationMustExist(missing, kind: .opencode) && LaunchPolicy.configurationMustExist(fresh, kind: .codex))
+        let standard = OpenCodeProvider().defaultConfigurationDirectory(home: home)
+        preset.configurationDirectory = standard
+        #expect(try LaunchPolicy.configurationDirectory(standard, kind: .opencode) == Paths.canonical(standard))
+        #expect(try LaunchPolicy.environment(base: [:], preset: preset, projectID: UUID(), sessionID: UUID(), token: "t")["OPENCODE_CONFIG_DIR"] == nil)
     }
 
     @Test func conversationIDs() {
