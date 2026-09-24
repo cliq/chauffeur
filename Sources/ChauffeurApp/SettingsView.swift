@@ -47,7 +47,7 @@ struct SettingsView: View {
                                 Text(set.configurationDirectory(for: kind)).font(.caption).textSelection(.enabled)
                             } label: {
                                 VStack(alignment: .leading, spacing: 2) {
-                                    Text(kind == .claude ? "Claude config folder" : "Codex config folder")
+                                    Text(kind == .claude ? "Claude config folder" : kind == .codex ? "Codex config folder" : "\(kind.displayName) config folder")
                                     Text(ShellAgentEnvironment.variableName(for: kind)!).font(.caption.monospaced()).foregroundStyle(.secondary)
                                 }
                             }
@@ -298,8 +298,11 @@ struct PresetSetEditor: View {
         var value = presetSet ?? PresetSet(name: name, agentSelection: selection)
         if presetSet == nil { value.id = newTeamID }
         value.agentSelection = selection
-        value.configurationDirectories = ["claude": (claudeDirectory as NSString).expandingTildeInPath,
-                                          "codex": (codexDirectory as NSString).expandingTildeInPath]
+        // Other agents' directories are kept until this editor shows them.
+        var directories = value.configurationDirectories ?? [:]
+        directories["claude"] = (claudeDirectory as NSString).expandingTildeInPath
+        directories["codex"] = (codexDirectory as NSString).expandingTildeInPath
+        value.configurationDirectories = directories
         value.name = name; value.archived = archived; value.isDefault = isDefault
         Task {
             defer { saving = false }
@@ -367,9 +370,9 @@ struct PresetEditor: View {
         VStack(alignment: .leading, spacing: 16) {
             Text(title).font(.title2).accessibilityIdentifier("preset.title")
             Form {
-                Picker("Agent", selection: $kind) { Text("Codex").tag(CLIKind.codex); Text("Claude Code").tag(CLIKind.claude) }
+                Picker("Agent", selection: $kind) { ForEach(AgentProviders.all, id: \.kind) { Text($0.displayName).tag($0.kind) } }
                     .accessibilityIdentifier("preset.agent")
-                    .onChange(of: kind) { _, value in if executable == "codex" || executable == "claude" { executable = value == .codex ? "codex" : "claude" } }
+                    .onChange(of: kind) { _, value in if AgentProviders.all.contains(where: { $0.kind.rawValue == executable }) { executable = value.rawValue } }
                 TextField("Name", text: $name, prompt: Text(kind.displayName)).accessibilityIdentifier("preset.name")
                 Text("Optional. Leave blank to name the agent preset “\(kind.displayName)”.").font(.caption).foregroundStyle(.secondary)
                 HStack { TextField("Executable", text: $executable).accessibilityIdentifier("preset.executable"); Button("Choose…") { if let path = FilePanels.executable() { executable = path } }.accessibilityIdentifier("preset.choose-executable") }

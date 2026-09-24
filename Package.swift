@@ -25,7 +25,7 @@ let package = Package(
         .package(url: "https://github.com/LebJe/TOMLKit.git", exact: "0.6.0")
     ],
     targets: [
-        .target(name: "ChauffeurCore", dependencies: ["CChauffeur"], resources: [.copy("Resources/Skills")]),
+        .target(name: "ChauffeurCore", dependencies: ["CChauffeur"], resources: [.copy("Resources/Skills"), .copy("Resources/Plugins")]),
         .systemLibrary(name: "CSQLite", pkgConfig: "sqlite3"),
         .target(name: "CChauffeur", publicHeadersPath: "include"),
         .target(name: "ChauffeurRuntimeKit", dependencies: ["ChauffeurCore", "ChauffeurRemoteProtocol", "CSQLite", "CChauffeur", .product(name: "Hummingbird", package: "hummingbird"), .product(name: "TOMLKit", package: "TOMLKit")]),

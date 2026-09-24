@@ -7,9 +7,16 @@ public enum CopyCategory: String, Codable, CaseIterable, Sendable {
         switch kind {
         case .claude: Set(allCases)
         case .codex: [.preferences, .instructions, .reusable, .plugins, .connections]
-        case .shell: []
+        // `OPENCODE_CONFIG_DIR` layers over the global directory: copying would load it twice (V9).
+        case .opencode, .shell: []
         }
     }
+}
+
+public extension CLIKind {
+    /// Agents first-run setup detects and signs in. OpenCode joins with its
+    /// authentication adapter; until then it is added through agent presets.
+    static let onboardingKinds: [CLIKind] = [.codex, .claude]
 }
 
 public enum SetupAuthPhase: String, Codable, Sendable, CaseIterable {

@@ -42,7 +42,12 @@ public struct ResolvedLaunchOptions: Equatable, Sendable {
 /// Provider-specific launch option parsing and rewriting shared by UI and API launches.
 /// Curated values are suggestions only; callers may provide any non-empty value.
 public enum LaunchOptions {
-    public static func modelSuggestions(for kind: CLIKind) -> [String] { kind.provider?.modelSuggestions ?? [] }
+    /// Curated values, then what a probing provider listed (`ModelSuggestionCache`)
+    /// for any of its executables and configurations.
+    public static func modelSuggestions(for kind: CLIKind) -> [String] {
+        guard let provider = kind.provider else { return [] }
+        return provider.modelSuggestions + (provider.probesModels ? ModelSuggestionCache.models(kind: kind) : [])
+    }
     public static func reasoningSuggestions(for kind: CLIKind) -> [String] { kind.provider?.reasoningSuggestions ?? [] }
     /// nil for kinds without an auto-approve mode.
     public static func autoApproveCaption(for kind: CLIKind) -> String? { kind.provider?.autoApprove.caption }

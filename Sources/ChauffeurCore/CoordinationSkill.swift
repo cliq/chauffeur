@@ -109,3 +109,16 @@ public struct SkillInstallation: Codable, Sendable, Identifiable {
         self.installedVersion = installedVersion; self.message = message; self.revision = revision
     }
 }
+
+/// Chauffeur's OpenCode launch plugin, bundled beside the skills.
+public enum OpenCodePlugin {
+    public static let fileName = "chauffeur-opencode.js"
+    public static func bundledSource() throws -> Data {
+        let appBundle = Bundle.main.resourceURL.flatMap { Bundle(url: $0.appendingPathComponent("Chauffeur_ChauffeurCore.bundle")) }
+        guard Bundle.main.bundleURL.pathExtension != "app" || appBundle != nil,
+              let url = (appBundle ?? Bundle.module).url(forResource: "chauffeur-opencode", withExtension: "js", subdirectory: "Plugins") else {
+            throw ChauffeurError("plugin_bundle", "The bundled OpenCode plugin is missing. Reinstall Chauffeur")
+        }
+        return try Data(contentsOf: url)
+    }
+}

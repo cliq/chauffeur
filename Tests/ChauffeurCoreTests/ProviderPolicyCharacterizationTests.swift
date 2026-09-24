@@ -76,7 +76,7 @@ struct ProviderPolicyCharacterizationTests {
     }
 
     @Test func launchEnvironmentSelectsTheProviderProfile() throws {
-        #expect(LaunchPolicy.deniedPrefixes == ["CODEX_", "CLAUDE_", "CLAUDECODE", "OPENAI_", "ANTHROPIC_", "AZURE_OPENAI_", "CHAUFFEUR_", "AWS_", "GOOGLE_", "VERTEX_", "BEDROCK_"])
+        #expect(LaunchPolicy.deniedPrefixes == ["CODEX_", "CLAUDE_", "CLAUDECODE", "OPENCODE_", "OPENAI_", "ANTHROPIC_", "AZURE_OPENAI_", "CHAUFFEUR_", "AWS_", "GOOGLE_", "VERTEX_", "BEDROCK_"])
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("chauffeur-env-\(UUID())")
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: root) }

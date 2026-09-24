@@ -110,7 +110,8 @@ public struct HookPayload: Equatable, Sendable {
         }
         return result
     }
-    private static func uuid(_ value: String?) -> String? { value.flatMap { UUID(uuidString: $0) == nil ? nil : $0 } }
+    /// UUIDs, or OpenCode's `ses_…` session IDs.
+    private static func uuid(_ value: String?) -> String? { value.flatMap { UUID(uuidString: $0) != nil || OpenCodeProvider.isConversationID($0) ? $0 : nil } }
     /// Event names, sources and provider IDs are short tokens; anything else is dropped.
     private static func identifier(_ value: String?) -> String? {
         guard let value, (1...200).contains(value.count),
@@ -123,6 +124,7 @@ public struct HookPayload: Equatable, Sendable {
 public enum NativeConversation {
     /// Providers report the same conversation in different letter case.
     public static func same(_ lhs: String?, _ rhs: String?) -> Bool {
+        if let lhs, let rhs, OpenCodeProvider.isConversationID(lhs) { return lhs == rhs }
         guard let lhs = lhs.flatMap(UUID.init(uuidString:)), let rhs = rhs.flatMap(UUID.init(uuidString:)) else { return false }
         return lhs == rhs
     }

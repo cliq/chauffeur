@@ -68,8 +68,9 @@ struct BaseAgentEditor: View {
                 Picker("Agent", selection: $kind) {
                     Text("Claude Code").tag(CLIKind.claude)
                     Text("Codex").tag(CLIKind.codex)
+                    Text("OpenCode").tag(CLIKind.opencode)
                 }.onChange(of: kind) { _, value in
-                    if executable == "claude" || executable == "codex" { executable = value.rawValue }
+                    if AgentProviders.all.contains(where: { $0.kind.rawValue == executable }) { executable = value.rawValue }
                 }
                 HStack {
                     TextField("Executable", text: $executable).accessibilityIdentifier("base-agent.executable")
@@ -146,7 +147,7 @@ struct AgentKindBadge: View {
     let kind: CLIKind
 
     var body: some View {
-        AgentBadge(label: kind.displayName, color: kind == .claude ? .orange : kind == .codex ? .blue : .gray)
+        AgentBadge(label: kind.displayName, color: kind == .claude ? .orange : kind == .codex ? .blue : kind == .opencode ? .teal : .gray)
     }
 }
 

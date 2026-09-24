@@ -18,7 +18,7 @@ import ChauffeurCore
     private var pollTask: Task<Void, Never>?
     var home: String { inventory?.homePath ?? FileManager.default.homeDirectoryForCurrentUser.path }
     var pairs: [SetupAgentPair] { draft.teams.flatMap(\.agents) }
-    var selectedKinds: [CLIKind] { CLIKind.allCases.filter { $0.isAgent && draft.accountCounts[$0.rawValue] != nil } }
+    var selectedKinds: [CLIKind] { CLIKind.onboardingKinds.filter { $0.isAgent && draft.accountCounts[$0.rawValue] != nil } }
 
     func load(app: AppModel) async {
         guard !loaded else { return }
@@ -33,7 +33,7 @@ import ChauffeurCore
                 for pair in self.pairs { self.executables[pair.kind.rawValue] = pair.executable }
             } else {
                 self.draft = SetupDraft()
-                for kind in CLIKind.allCases where kind.isAgent && self.executables[kind.rawValue] != nil {
+                for kind in CLIKind.onboardingKinds where kind.isAgent && self.executables[kind.rawValue] != nil {
                     self.draft.accountCounts[kind.rawValue] = .single
                 }
                 self.version = stored?.version
@@ -51,7 +51,7 @@ import ChauffeurCore
 
     private func useDetectedExecutables() {
         executables = inventory?.executables ?? [:]
-        for kind in CLIKind.allCases where kind.isAgent && executables[kind.rawValue] == nil {
+        for kind in CLIKind.onboardingKinds where kind.isAgent && executables[kind.rawValue] == nil {
             draft.accountCounts[kind.rawValue] = nil
         }
     }
@@ -60,7 +60,7 @@ import ChauffeurCore
         let previouslyDetected = inventory?.executables ?? [:]
         inventory = try await call("setupInventory").decode(SetupInventory.self)
         useDetectedExecutables()
-        for kind in CLIKind.allCases where kind.isAgent && previouslyDetected[kind.rawValue] == nil && executables[kind.rawValue] != nil {
+        for kind in CLIKind.onboardingKinds where kind.isAgent && previouslyDetected[kind.rawValue] == nil && executables[kind.rawValue] != nil {
             draft.accountCounts[kind.rawValue] = .single
         }
         try await save()
@@ -114,18 +114,18 @@ import ChauffeurCore
 
     func newPair(kind: CLIKind, teamName: String) -> SetupAgentPair {
         let current = inventory?.configurations.first { $0.kind == kind && $0.isCurrent }?.path
-            ?? "\(home)/.\(kind == .claude ? "claude" : "codex")"
+            ?? "\(home)/\(kind.defaultHomeFolder)"
         return SetupAgentPair(kind: kind, executable: executables[kind.rawValue] ?? kind.rawValue,
-            choice: .current, sourcePath: "\(home)/.\(kind == .claude ? "claude" : "codex")", destinationPath: current)
+            choice: .current, sourcePath: "\(home)/\(kind.defaultHomeFolder)", destinationPath: current)
     }
 
     func suggestedDestination(kind: CLIKind, name: String) -> String {
-        "\(home)/.\(kind == .claude ? "claude" : "codex")-\(Paths.slug(name))"
+        "\(home)/\(kind.defaultHomeFolder)-\(Paths.slug(name))"
     }
 
     func currentPath(_ kind: CLIKind) -> String {
         inventory?.configurations.first { $0.kind == kind && $0.isCurrent }?.path
-            ?? "\(home)/.\(kind == .claude ? "claude" : "codex")"
+            ?? "\(home)/\(kind.defaultHomeFolder)"
     }
 
     func next() async {

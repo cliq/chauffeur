@@ -6,7 +6,7 @@ struct AgentSetupStep: View {
     var body: some View {
         Text("Which agents do you use?").font(.headline)
         Text("Teams let you choose which account and settings to use for each project. You can separate Personal, Work, or client settings even with one account.")
-        ForEach(CLIKind.allCases.filter(\.isAgent), id: \.self) { kind in
+        ForEach(CLIKind.onboardingKinds, id: \.self) { kind in
             GroupBox {
                 VStack(alignment: .leading, spacing: 12) {
                     let detected = setup.inventory?.executables[kind.rawValue] != nil

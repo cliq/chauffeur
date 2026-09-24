@@ -6,6 +6,8 @@ public enum CoordinatorWakeStrategy: Sendable, Equatable {
     case backgroundWaiter
     /// The runtime types a short prompt into the idle coordinator's composer.
     case typedPrompt
+    /// Chauffeur's launch plugin runs the waiter and continues the turn itself.
+    case plugin
 }
 
 /// Where a provider discovers user skills.
@@ -49,6 +51,8 @@ public protocol AgentProvider: Sendable {
     var badgeColorName: String { get }
     /// Recognizes the provider from `--version` output without pinning a release.
     func identifies(version: String) -> Bool
+    /// Recognizes the provider from `--version` and `--help` output together.
+    func identifies(version: String, help: String) -> Bool
     /// Why coordination is limited for a recognized build, if it is.
     var coordinationLimitation: String? { get }
 
@@ -71,6 +75,8 @@ public protocol AgentProvider: Sendable {
     func validateAdditionalDirectories(arguments: [String]) throws
 
     var modelSuggestions: [String] { get }
+    /// Model suggestions come from the capability probe (`ModelSuggestionCache`).
+    var probesModels: Bool { get }
     var reasoningSuggestions: [String] { get }
     var supportsReasoning: Bool { get }
     /// Model and reasoning only; `autoApprove` is read from `autoApprove`.
@@ -95,6 +101,8 @@ public protocol AgentProvider: Sendable {
 
 public extension AgentProvider {
     var coordinationLimitation: String? { nil }
+    func identifies(version: String, help: String) -> Bool { identifies(version: version) }
+    var probesModels: Bool { false }
     func environment(configurationDirectory: String) -> [String: String] { [configurationEnvironmentKey: configurationDirectory] }
     func defaultConfigurationDirectory(home: String) -> String { URL(fileURLWithPath: home).appendingPathComponent(defaultHomeFolder).path }
     func permitsManaged(_ key: String, value: String?) -> Bool { false }
@@ -108,12 +116,14 @@ public extension AgentProvider {
 
 public enum AgentProviders {
     /// In `CLIKind.allCases` order.
-    public static let all: [any AgentProvider] = [CodexProvider(), ClaudeProvider()]
+    public static let all: [any AgentProvider] = [CodexProvider(), ClaudeProvider(), OpenCodeProvider()]
 }
 
 public extension CLIKind {
     /// nil for `.shell`, which has no native agent integration.
     var provider: (any AgentProvider)? { AgentProviders.all.first { $0.kind == self } }
+    /// The profile folder under the user's home, e.g. `.claude`.
+    var defaultHomeFolder: String { provider?.defaultHomeFolder ?? ".\(rawValue)" }
 }
 
 public struct ClaudeProvider: AgentProvider {
@@ -237,4 +247,67 @@ public struct CodexProvider: AgentProvider {
     /// generator sends `notify` from another thread.
     public func adoptsFirstConversation(hooksTrusted: Bool, hookEvent: String?) -> Bool { !(hooksTrusted && hookEvent == nil) }
     public var wakeStrategy: CoordinatorWakeStrategy { .typedPrompt }
+}
+
+public struct OpenCodeProvider: AgentProvider {
+    public init() {}
+    public var kind: CLIKind { .opencode }
+    public var displayName: String { "OpenCode" }
+    public var installURL: URL { URL(string: "https://opencode.ai")! }
+    public var badgeColorName: String { "teal" }
+    /// `--version` is a bare semver, so the help's own subcommands confirm it.
+    public func identifies(version: String) -> Bool {
+        let core = version.split(separator: "-", maxSplits: 1).first.map(String.init) ?? ""
+        let parts = core.split(separator: ".", omittingEmptySubsequences: false)
+        return parts.count == 3 && parts.allSatisfy { !$0.isEmpty && $0.allSatisfy(\.isASCII) && $0.allSatisfy(\.isNumber) }
+    }
+    public func identifies(version: String, help: String) -> Bool {
+        identifies(version: version) && help.contains("opencode serve") && help.contains("opencode acp")
+    }
+    public var defaultHomeFolder: String { ".config/opencode" }
+    public var configurationEnvironmentKey: String { "OPENCODE_CONFIG_DIR" }
+    /// `OPENCODE_CONFIG_DIR` adds a layer over `~/.config/opencode`; naming the
+    /// global directory again would load its plugins twice.
+    public func environment(configurationDirectory: String) -> [String: String] {
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        return Paths.canonical(configurationDirectory) == Paths.canonical(defaultConfigurationDirectory(home: home)) ? [:] : [configurationEnvironmentKey: configurationDirectory]
+    }
+    public var skillDiscovery: SkillDiscovery { .sharedAgentsHome }
+
+    /// `--pure` disables the status plugin; `--mini` is a different UI.
+    public var managedOptions: Set<String> {
+        ["-c", "--continue", "-s", "--session", "--fork", "--prompt", "--port", "--hostname", "--mdns", "--mdns-domain", "--cors", "--pure", "--mini", "--no-replay", "--replay-limit"]
+    }
+    public var managedShortPrefixes: [String] { ["-c", "-s"] }
+    public var valueOptions: Set<String> { ["-m", "--model", "--agent", "--log-level"] }
+    public var flagOptions: Set<String> { ["--auto", "--print-logs"] }
+
+    public var modelSuggestions: [String] { [] }
+    public var probesModels: Bool { true }
+    public var reasoningSuggestions: [String] { [] }
+    public func recognize(_ argument: String, field: LaunchOptionField) -> LaunchOptionMatch {
+        guard field == .model else { return .none }
+        if argument == "-m" || argument == "--model" { return .separate }
+        if argument.hasPrefix("--model=") { return .inline(String(argument.dropFirst("--model=".count))) }
+        if argument.hasPrefix("-m=") { return .inline(String(argument.dropFirst(3))) }
+        return .none
+    }
+    public func canonical(_ field: LaunchOptionField, value: String) -> [String] { field == .model ? ["--model", value] : [] }
+    public var autoApprove: AutoApprovePolicy {
+        AutoApprovePolicy(flag: "--auto", caption: "Approves anything not explicitly denied", replacedFlags: ["--auto"], replacedValueOptions: [])
+    }
+
+    /// The active line cannot prove an empty prompt, so follow-ups wait for a screen rule.
+    public func composerReadiness(activeLine line: String) -> ComposerReadiness {
+        guard line.first == "┃" else { return .unrecognized }
+        return line.dropFirst().trimmingCharacters(in: .whitespaces).isEmpty ? .unrecognized : .inputPending
+    }
+    /// `ses_` followed by 26 alphanumerics.
+    public static func isConversationID(_ id: String) -> Bool {
+        id.hasPrefix("ses_") && id.count == 30 && id.dropFirst(4).allSatisfy { $0.isASCII && ($0.isLetter || $0.isNumber) }
+    }
+    public func validatesConversationID(_ id: String) -> Bool { Self.isConversationID(id) }
+    /// The plugin reports only the first root session, so nothing moves the session later.
+    public var identityChangingSources: Set<String> { [] }
+    public var wakeStrategy: CoordinatorWakeStrategy { .plugin }
 }

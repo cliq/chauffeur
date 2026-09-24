@@ -44,7 +44,8 @@ public extension PresetSet {
         return Paths.canonical(kind.provider?.defaultConfigurationDirectory(home: home) ?? home)
     }
     var configurationEnvironment: [String: String] {
-        Dictionary(uniqueKeysWithValues: AgentProviders.all.map { ($0.configurationEnvironmentKey, configurationDirectory(for: $0.kind)) })
+        // Through each provider, so OpenCode's default directory adds no layer.
+        AgentProviders.all.reduce(into: [:]) { result, provider in result.merge(provider.environment(configurationDirectory: configurationDirectory(for: provider.kind))) { _, new in new } }
     }
 }
 

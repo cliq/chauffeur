@@ -23,6 +23,8 @@ public struct LaunchContext: Sendable {
     public var coordination: Bool
     public var resume: Bool
     public var preparation: LaunchPreparation
+    /// The published launch plugin, for providers that load one (`publishPlugin`).
+    public var pluginPath: String?
 
     /// The recorded native conversation, checked against the provider's ID shape.
     func resumeID(_ provider: any AgentProvider) throws -> String {
@@ -41,7 +43,11 @@ public struct ProviderLaunch: Sendable, Equatable {
 /// The I/O half of a provider: probing the executable, preparing and building launches.
 public protocol ProviderIntegration: Sendable {
     var provider: any AgentProvider { get }
-    func capabilities(executable: String, environment: [String: String]) async throws -> CLICapabilities
+    /// `modelCache` receives the models a probing provider lists; nil skips listing.
+    func capabilities(executable: String, environment: [String: String], modelCache: URL?) async throws -> CLICapabilities
+    /// Publishes a bundled launch plugin under `root` when its content changed,
+    /// returning its path; nil for providers without one.
+    func publishPlugin(root: URL) throws -> String?
     /// Runs once per coordinated launch or resume, before `launch`.
     func prepareLaunch(session: Session, ctlPath: String, environment: [String: String], cacheDirectory: URL) async -> LaunchPreparation
     /// Builds the command line and writes any per-launch files into `integrationDirectory`.
@@ -51,15 +57,16 @@ public protocol ProviderIntegration: Sendable {
 }
 
 public extension ProviderIntegration {
-    func capabilities(executable: String, environment: [String: String]) async throws -> CLICapabilities {
+    func capabilities(executable: String, environment: [String: String], modelCache: URL?) async throws -> CLICapabilities {
         try await CLIAdapter.probe(executable: executable, provider: provider, environment: environment)
     }
+    func publishPlugin(root: URL) throws -> String? { nil }
     func prepareLaunch(session: Session, ctlPath: String, environment: [String: String], cacheDirectory: URL) async -> LaunchPreparation { LaunchPreparation() }
     var inboxReminderLimitation: String? { nil }
 }
 
 public enum ProviderIntegrations {
-    public static let all: [any ProviderIntegration] = [CodexIntegration(), ClaudeIntegration()]
+    public static let all: [any ProviderIntegration] = [CodexIntegration(), ClaudeIntegration(), OpenCodeIntegration()]
 }
 
 public extension CLIKind {
@@ -171,5 +178,84 @@ public struct CodexIntegration: ProviderIntegration {
         if context.resume { arguments += ["resume", try context.resumeID(provider)] }
         else if let task = session.initialTask, !task.isEmpty { arguments += ["--", task] }
         return ProviderLaunch(arguments: arguments)
+    }
+}
+
+public struct OpenCodeIntegration: ProviderIntegration {
+    public init() {}
+    public var provider: any AgentProvider { OpenCodeProvider() }
+
+    /// `--help` goes to stderr. OpenCode has no `--add-dir`: extra folders are granted
+    /// through `permission.external_directory` in the launch configuration.
+    public func capabilities(executable: String, environment: [String: String], modelCache: URL?) async throws -> CLICapabilities {
+        let probe = try await CLIAdapter.probeOutput(executable: executable, environment: environment)
+        let help = probe.help + "\n" + probe.helpError
+        let identified = provider.identifies(version: probe.version, help: help)
+        if identified, let modelCache {
+            // Suggestions only: listing never delays or fails the launch.
+            Task.detached { await Self.refreshModels(executable: executable, environment: environment, cache: modelCache) }
+        }
+        return CLICapabilities(version: String(probe.version.prefix(200)), coordination: identified, statusSignals: identified,
+                               additionalDirectories: true, resume: help.contains("--session"), delegatedYOLO: help.contains(provider.autoApprove.flag),
+                               limitation: identified ? nil : CLIAdapter.unidentifiedLimitation)
+    }
+
+    /// Stores `opencode models` for this executable and configuration directory.
+    static func refreshModels(executable: String, environment: [String: String], cache: URL) async {
+        guard let listed = try? await ProcessRunner.run(executable, ["models"], environment: environment, timeout: 30, outputLimit: 256 * 1024), listed.status == 0 else { return }
+        let models = listed.output.split(whereSeparator: \.isNewline).map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { $0.contains("/") && !$0.contains(where: \.isWhitespace) }
+        guard !models.isEmpty else { return }
+        try? ModelSuggestionCache.store(models, kind: .opencode, executable: executable, configurationDirectory: environment[provider.configurationEnvironmentKey] ?? "", at: cache)
+    }
+    private static var provider: OpenCodeProvider { OpenCodeProvider() }
+
+    public func publishPlugin(root: URL) throws -> String? {
+        let source = try OpenCodePlugin.bundledSource()
+        let directory = root.appendingPathComponent("plugins")
+        let url = directory.appendingPathComponent(OpenCodePlugin.fileName)
+        if (try? Data(contentsOf: url)) != source {
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+            try source.write(to: url, options: .atomic)
+        }
+        return url.path
+    }
+
+    public func launch(_ context: LaunchContext) throws -> ProviderLaunch {
+        let session = context.session
+        var arguments = context.userArguments
+        if context.resume { arguments += ["-s", try context.resumeID(provider)] }
+        else if let task = session.initialTask, !task.isEmpty {
+            // An attached value keeps a task that starts with a dash from reading as an option.
+            arguments += task.hasPrefix("-") ? ["--prompt=" + task] : ["--prompt", task]
+        }
+        guard let content = try Self.configContent(endpoint: context.endpoint, pluginPath: context.pluginPath, coordination: context.coordination, additionalPaths: session.launch.additionalPaths) else {
+            return ProviderLaunch(arguments: arguments)
+        }
+        return ProviderLaunch(arguments: arguments, environment: ["OPENCODE_CONFIG_CONTENT": content])
+    }
+
+    /// The layer each launch adds over the user's configuration. OpenCode concatenates
+    /// `plugin`, merges `mcp`, and appends these `permission` keys after the user's (V9).
+    static func configContent(endpoint: String, pluginPath: String?, coordination: Bool, additionalPaths: [String]) throws -> String? {
+        var config: [String: JSONValue] = [:], permission: [String: JSONValue] = [:]
+        if coordination {
+            guard let pluginPath else { throw ChauffeurError("integration_unavailable", "The OpenCode plugin could not be published. Retry or explicitly select basic terminal mode") }
+            config["plugin"] = .array([.string(URL(fileURLWithPath: pluginPath).absoluteString)])
+            config["mcp"] = .object(["chauffeur": .object([
+                "type": .string("remote"), "url": .string(endpoint),
+                "headers": .object(["Authorization": .string("Bearer {env:CHAUFFEUR_SESSION_TOKEN}")]),
+                // Waits are capped below the transport's own limit (`maxInboxWaitSeconds`).
+                "timeout": .number(300_000)
+            ])])
+            permission["chauffeur_*"] = .string("allow")
+        }
+        if !additionalPaths.isEmpty {
+            permission["external_directory"] = .object(Dictionary(uniqueKeysWithValues: additionalPaths.map { ($0 + "/**", JSONValue.string("allow")) }))
+        }
+        if !permission.isEmpty { config["permission"] = .object(permission) }
+        guard !config.isEmpty else { return nil }
+        let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
+        return String(decoding: try encoder.encode(JSONValue.object(config)), as: UTF8.self)
     }
 }

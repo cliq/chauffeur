@@ -40,10 +40,10 @@ public struct ConfigurationDiscovery: Sendable {
             ))
         }
 
-        for kind in CLIKind.allCases where kind.isAgent {
+        for kind in CLIKind.onboardingKinds where kind.isAgent {
             let current = effectivePath(for: kind)
             add(kind: kind, path: current, current: true)
-            let standardName = kind == .claude ? ".claude" : ".codex"
+            let standardName = kind.provider?.defaultHomeFolder ?? ".\(kind.rawValue)"
             add(kind: kind, path: home.appendingPathComponent(standardName).path, current: Paths.canonical(current) == Paths.canonical(home.appendingPathComponent(standardName).path))
             for path in configuredPaths[kind.rawValue] ?? [] { add(kind: kind, path: path, current: Paths.canonical(path) == Paths.canonical(current)) }
         }
@@ -69,7 +69,7 @@ public struct ConfigurationDiscovery: Sendable {
 
         var executables: [String: String] = [:]
         var missingAgents: [CLIKind] = []
-        for kind in CLIKind.allCases where kind.isAgent {
+        for kind in CLIKind.onboardingKinds where kind.isAgent {
             let override = environment["CHAUFFEUR_\(kind.rawValue.uppercased())_EXECUTABLE"]
             do {
                 // Validate now, but persist the stable command/symlink rather than
@@ -129,9 +129,10 @@ public struct ConfigurationDiscovery: Sendable {
     }
 
     private func effectivePath(for kind: CLIKind) -> String {
-        let variable = kind == .claude ? "CLAUDE_CONFIG_DIR" : "CODEX_HOME"
-        let fallback = kind == .claude ? ".claude" : ".codex"
-        return Paths.canonical(environment[variable] ?? home.appendingPathComponent(fallback).path)
+        let fallback = home.appendingPathComponent(kind.provider?.defaultHomeFolder ?? ".\(kind.rawValue)").path
+        // OpenCode's variable adds a layer; the global directory stays current.
+        guard kind != .opencode, let variable = kind.provider?.configurationEnvironmentKey else { return Paths.canonical(fallback) }
+        return Paths.canonical(environment[variable] ?? fallback)
     }
 
     private func candidateKind(name: String) -> CLIKind? {

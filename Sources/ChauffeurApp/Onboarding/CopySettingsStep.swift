@@ -33,7 +33,7 @@ struct ConfigurationCopyOptions: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             Toggle("Start fresh", isOn: Binding(get: { pair.sourcePath == nil }, set: {
-                pair.sourcePath = $0 ? nil : "\(home)/.\(pair.kind == .claude ? "claude" : "codex")"
+                pair.sourcePath = $0 ? nil : "\(home)/\(pair.kind.defaultHomeFolder)"
                 invalidate()
             }))
             if pair.sourcePath != nil {

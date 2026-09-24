@@ -260,9 +260,19 @@ public actor FileStore {
             if snapshot.baseAgentPresets.isEmpty {
                 try save(BaseAgentPreset(name: "Claude", kind: .claude, executable: "claude"))
                 try save(BaseAgentPreset(name: "Codex", kind: .codex, executable: "codex"))
+                try save(BaseAgentPreset(name: "OpenCode", kind: .opencode, executable: "opencode"))
             }
             try manager.createDirectory(at: marker.deletingLastPathComponent(), withIntermediateDirectories: true)
             try Data("{\"version\":2}".utf8).write(to: marker, options: .atomic)
+        }
+        // Existing catalogs gain OpenCode once. One the user emptied stays empty.
+        let openCodeMarker = root.appendingPathComponent("migrations/opencode-base-preset/complete.json")
+        if !manager.fileExists(atPath: openCodeMarker.path) {
+            if !snapshot.baseAgentPresets.contains(where: { $0.value.kind == .opencode }), snapshot.baseAgentPresets.contains(where: { !$0.value.archived }) {
+                try save(BaseAgentPreset(name: "OpenCode", kind: .opencode, executable: "opencode"))
+            }
+            try manager.createDirectory(at: openCodeMarker.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try Data("{\"version\":1}".utf8).write(to: openCodeMarker, options: .atomic)
         }
     }
 
