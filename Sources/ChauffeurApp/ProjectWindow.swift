@@ -846,8 +846,13 @@ struct ProjectWindow: View {
     }
     private func showLaunch(folderID: UUID? = nil, worktreeID: UUID? = nil, newWorktree: Bool = false) {
         if folderID == nil, !newWorktree, let folder = selectedFolder, let project {
+            let row = checkout(folder: folder, path: layout.selectedWorktreePath ?? folder.canonicalPath, project: project)
             // The selected checkout may be a Git worktree Chauffeur has not recorded yet.
-            launchAgent(in: checkout(folder: folder, path: layout.selectedWorktreePath ?? folder.canonicalPath, project: project), folder: folder)
+            if canLaunch(in: row) { launchAgent(in: row, folder: folder); return }
+            // A finished or missing checkout cannot host a session; offer the
+            // repository instead of doing nothing.
+            guard canLaunch else { return }
+            launchSheet = LaunchSheet(folderID: folder.id, worktreeID: nil, newWorktree: false)
             return
         }
         launchSheet = LaunchSheet(folderID: folderID ?? selectedFolder?.id, worktreeID: worktreeID, newWorktree: newWorktree)
