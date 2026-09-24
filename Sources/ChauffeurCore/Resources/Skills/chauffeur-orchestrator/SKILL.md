@@ -78,12 +78,17 @@ While a worker is active, wait in the cheapest way this session supports.
    uses no tokens. Keep one waiter per session; a new one replaces the old. After
    a timeout (four hours by default), check `chauffeur_delegation_status` and wait
    again if the worker is still busy. If the command reports that it can't reach
-   Chauffeur, fall back to option 3.
+   Chauffeur, fall back to option 4.
 2. **`resultWake` is true (Codex):** end your turn after delegating and recording
    the plan. When a worker reports or stops, Chauffeur types a one-line
    "Chauffeur: …" reminder into your empty prompt. Then call `chauffeur_inbox` and
    continue. Don't keep a turn open just to wait.
-3. **Otherwise:** keep the turn active with one outstanding
+3. **`pluginWait` is true (OpenCode):** end your turn after delegating and
+   recording the plan. Chauffeur's OpenCode plugin waits for you and starts your
+   next turn with a "Chauffeur: …" prompt that says what to act on: worker results
+   in full, or what to call next. Act on it, then end your turn again if work
+   remains. Don't keep a turn open just to wait.
+4. **Otherwise:** keep the turn active with one outstanding
    `chauffeur_inbox({"waitSeconds": 300})` call. Chauffeur suspends the call until a
    message, a worker state event or a progress milestone arrives, or five minutes
    pass. Messages and result reports return immediately; 300 is a maximum wait,

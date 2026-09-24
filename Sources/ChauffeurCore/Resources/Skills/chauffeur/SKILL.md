@@ -28,8 +28,9 @@ Read `chauffeur_inbox` when checking for replies or coordination updates.
 the call immediately. An empty response is a timeout, a worker progress milestone
 (a phase or step changing state), or a worker state change: inspect delegation
 status before waiting again. When `chauffeur_discover` lists
-`capabilities.waitCommand` or `capabilities.resultWake`, a coordinator can end its
-turn while workers run instead; the orchestrator skill describes both. Do not poll rapidly or send repeated progress pings. Acknowledge message
+`capabilities.waitCommand`, `capabilities.resultWake` or `capabilities.pluginWait`,
+a coordinator can end its turn while workers run instead; the orchestrator skill
+describes each. OpenCode sessions wait at most 240 seconds per call. Do not poll rapidly or send repeated progress pings. Acknowledge message
 IDs after processing them. Queued means stored for delivery; it does not prove
 the recipient has read, acted on, or completed the request. Busy and exited
 recipients retain their inbox. Do not paste messages into a terminal or submit

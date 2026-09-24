@@ -178,7 +178,8 @@ struct OpenCodeIntegrationTests {
         #expect(try await fixture.session().nativeConversationID == conversation)
 
         let discovered = try await fixture.runtime.callTool(token: token, name: "chauffeur_discover", arguments: .object([:]))
-        #expect(discovered["capabilities"]["waitCommand"] == .null && discovered["capabilities"]["resultWake"] == .bool(false))
+        #expect(discovered["capabilities"]["waitCommand"] == .null && discovered["capabilities"]["resultWake"] == .bool(false)
+            && discovered["capabilities"]["pluginWait"] == .bool(true))
         #expect(discovered["capabilities"]["inboxReminders"] == .bool(true))
         _ = try await fixture.stop()
     }
