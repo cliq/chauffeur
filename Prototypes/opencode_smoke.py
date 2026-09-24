@@ -10,7 +10,7 @@ plugin's percent-encoded file:// URL is exercised.
 Checks:
 - Launch: the plugin loads, `session-start` adopts the `ses_…` ID, and the status
   goes Running → Turn finished.
-- Attention: a bash command under an "ask" rule shows Needs attention in an
+- Attention: a bash command under an "ask" rule and a question prompt show Needs attention in an
   interactive session; answering it returns to Running. With --auto, no attention.
 - Mail: mail arriving mid-turn is appended once to the next tool output
   (PostToolUse); mail arriving while the model writes its final answer continues
@@ -50,7 +50,7 @@ assert options.opencode and options.claude and tmux, 'Install OpenCode, Claude C
 artifacts = options.artifacts.resolve(); artifacts.mkdir(parents=True, exist_ok=True)
 for old in artifacts.glob('*'):
     if old.is_file(): old.unlink()
-MARKERS = ('ASK', 'AUTO', 'BUSY', 'QUICK', 'SEND', 'DELEGATE', 'WORKER', 'FOLLOWUP', 'RESUMED', 'Chauffeur:')
+MARKERS = ('ASK', 'QUESTION', 'AUTO', 'BUSY', 'QUICK', 'SEND', 'DELEGATE', 'WORKER', 'FOLLOWUP', 'RESUMED', 'Chauffeur:')
 HINT = 'Chauffeur: '
 
 def uid(): return str(uuid.uuid4()).upper()
@@ -98,6 +98,11 @@ def oc_decide(body):
         name = prompt.split(' ')[0].lower() + '-' + prompt.split(' ')[1]
         if 'bash' not in calls: return tool('bash', {'command': f'touch {name}.txt', 'description': 'Create a marker file'})
         return say(prompt.split(' ')[0] + '_DONE')
+    if prompt.startswith('QUESTION'):
+        if 'question' not in calls:
+            return tool('question', {'questions': [{'question': 'Which marker should I use?', 'header': 'Marker', 'options': [
+                {'label': 'Alpha', 'description': 'The first marker'}, {'label': 'Beta', 'description': 'The second marker'}]}]})
+        return say('QUESTION_DONE ' + ('answered' if 'Alpha' in json.dumps(oc_results(turn, 'question')) else 'unanswered'))
     if prompt.startswith('BUSY'):
         if 'bash' not in calls: return tool('bash', {'command': 'sleep 7', 'description': 'Wait a little'})
         if hinted and 'chauffeur_inbox' not in calls: return tool('chauffeur_inbox', {})
@@ -334,6 +339,18 @@ try:
         assert (checkout / 'ask-one.txt').exists(), 'the permitted command ran'
         return {'states': seen}
     check('attention', attention)
+    def question():
+        keys(a, 'QUESTION one')
+        wait(lambda: current(a)['state'] == 'needsAttention', timeout=40, label='question needs attention')
+        time.sleep(0.5); capture(a, 'question-dialog')
+        tmux_run('send-keys', '-t', a['id'], 'Enter')
+        done = wait(lambda: issued_for('opencode', 'text', 'QUESTION one'), timeout=30, label='QUESTION finished')
+        wait(lambda: current(a)['state'] == 'turnFinished', timeout=30, label='A turn finished')
+        seen = states(a); i = len(seen) - 1 - seen[::-1].index('needsAttention')
+        assert 'running' in seen[i + 1:], seen
+        assert done[-1][3] == 'QUESTION_DONE answered', done[-1][3]
+        return {'answer': done[-1][3], 'states': seen[i - 1:]}
+    check('questionAttention', question)
     def adoption():
         native = current(a)['nativeConversationID']
         assert native and re.fullmatch(r'ses_[A-Za-z0-9]{26}', native), native
