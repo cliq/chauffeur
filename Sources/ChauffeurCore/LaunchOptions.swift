@@ -89,8 +89,9 @@ public enum LaunchOptions {
         return ArgumentText.format(arguments)
     }
 
-    /// Turning on adds the canonical flag unless a recognized form is present;
-    /// turning off removes every recognized form.
+    /// Turning on replaces the provider's approval and sandbox options with the
+    /// canonical flag (the CLIs refuse them together) unless a recognized form is
+    /// already present; turning off removes every recognized form.
     public static func updatingAutoApprove(_ on: Bool, rawArguments: String, kind: CLIKind) throws -> String {
         ArgumentText.format(settingAutoApprove(on, in: try ArgumentText.parse(rawArguments), kind: kind))
     }
@@ -210,7 +211,7 @@ public enum LaunchOptions {
 
     private static func settingAutoApprove(_ on: Bool, in arguments: [String], kind: CLIKind) -> [String] {
         guard let policy = kind.provider?.autoApprove else { return arguments }
-        if on { return autoApproves(arguments, kind: kind) ? arguments : arguments + [policy.flag] }
+        if on { return autoApproves(arguments, kind: kind) ? arguments : enforcingYOLO(in: arguments, kind: kind) }
         var result: [String] = [], index = 0
         while index < arguments.count {
             switch autoApproveForm(arguments, at: index, policy: policy) {

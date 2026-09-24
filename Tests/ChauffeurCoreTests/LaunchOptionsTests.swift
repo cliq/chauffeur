@@ -152,12 +152,28 @@ struct LaunchOptionsTests {
     @Test func checkingAutoApproveAddsTheCanonicalFlagOnce() throws {
         #expect(try setting(true, "--model opus", .claude) == ["--model", "opus", "--dangerously-skip-permissions"])
         #expect(try setting(true, "--permission-mode bypassPermissions", .claude) == ["--permission-mode", "bypassPermissions"])
-        #expect(try setting(true, "--permission-mode plan", .claude) == ["--permission-mode", "plan", "--dangerously-skip-permissions"])
+        #expect(try setting(true, "--permission-mode plan", .claude) == ["--dangerously-skip-permissions"])
         #expect(try setting(true, "--yolo", .codex) == ["--yolo"])
         #expect(try setting(true, "--search", .codex) == ["--search", "--dangerously-bypass-approvals-and-sandbox"])
         #expect(try setting(true, "-l", .shell) == ["-l"])
         let viaField = try LaunchOptions.updating(field: .autoApprove, value: "true", rawArguments: "", kind: .codex)
         #expect(try ArgumentText.parse(viaField) == ["--dangerously-bypass-approvals-and-sandbox"])
+    }
+
+    @Test func checkingAutoApproveDropsOptionsTheCLIRefusesAlongsideIt() throws {
+        // Codex refuses `-a`/`--sandbox` with the bypass flag; Claude's plan mode conflicts with skipping permissions.
+        #expect(try setting(true, "--search -a on-request", .codex) == ["--search", "--dangerously-bypass-approvals-and-sandbox"])
+        #expect(try setting(true, "--sandbox read-only --search", .codex) == ["--search", "--dangerously-bypass-approvals-and-sandbox"])
+        #expect(try setting(true, "--ask-for-approval=never -s workspace-write --approve-for-me", .codex) == ["--dangerously-bypass-approvals-and-sandbox"])
+        #expect(try setting(true, "--model opus --permission-mode plan", .claude) == ["--model", "opus", "--dangerously-skip-permissions"])
+        #expect(try setting(true, "--allow-dangerously-skip-permissions --permission-mode=acceptEdits", .claude) == ["--dangerously-skip-permissions"])
+        #expect(try setting(true, "--agent plan", .opencode) == ["--agent", "plan", "--auto"])
+        let codex = try LaunchOptions.resolve(preset: preset(.codex, raw: "-a on-request --sandbox read-only --search"), autoApproveOverride: true)
+        #expect(codex.arguments == ["--search", "--dangerously-bypass-approvals-and-sandbox"])
+        let claude = try LaunchOptions.resolve(preset: preset(.claude, raw: "--permission-mode plan --verbose"), autoApproveOverride: true)
+        #expect(claude.arguments == ["--verbose", "--dangerously-skip-permissions"])
+        let opencode = try LaunchOptions.resolve(preset: preset(.opencode, raw: "--agent plan"), autoApproveOverride: true)
+        #expect(opencode.arguments == ["--agent", "plan", "--auto"])
     }
 
     @Test func uncheckingAutoApproveRemovesEveryRecognizedForm() throws {
