@@ -167,7 +167,13 @@ function createChauffeurPlugin({
       if (type === "session.created" && info.id && !s.root) { adopt(info.id, "startup"); return; }
     }
     const sid = p.sessionID ?? p.info?.id;
-    if (typeof sid !== "string" || s.children.has(sid)) return;
+    if (typeof sid !== "string") return;
+    if (s.children.has(sid)) {
+      // A subagent's dialog blocks the whole TUI, so it needs attention like the root's own.
+      if (type === "permission.asked" || type === "question.asked") onAsked(p.id);
+      else if (type === "permission.replied" || type === "question.replied" || type === "question.rejected") onReplied(p.requestID);
+      return;
+    }
     if (!s.root) adopt(sid, "resume"); // `-s <id>` emits no session.created
     if (sid !== s.root) return;
     switch (type) {

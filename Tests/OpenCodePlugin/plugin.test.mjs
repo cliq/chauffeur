@@ -52,7 +52,6 @@ test("child sessions are ignored, including their bare session.idle", async () =
   await h.emit(...busy());
   await h.emit(...created(CHILD, ROOT));
   await h.emit(...busy(CHILD));
-  await h.emit("permission.asked", { id: "per_c", sessionID: CHILD, permission: "bash" });
   await h.emit("session.error", { sessionID: CHILD, error: { name: "APIError", data: { message: "x" } } });
   await h.emit(...idle(CHILD));
   await tick(50);
@@ -62,6 +61,18 @@ test("child sessions are ignored, including their bare session.idle", async () =
   await r.emit(...created(ROOT));
   await r.hooks["tool.execute.after"]({ tool: "bash", sessionID: CHILD, callID: "c" }, { title: "", output: "x", metadata: {} });
   assert.equal(r.ctl.calls.filter((c) => c.args[0] === "inbox-hook").length, 0);
+});
+
+test("a subagent's open dialog needs attention like the root's own", async () => {
+  const h = await harness();
+  await h.emit(...created(ROOT));
+  await h.emit(...busy());
+  await h.emit(...created(CHILD, ROOT));
+  await h.emit("permission.asked", { id: "per_c", sessionID: CHILD, permission: "bash" });
+  await tick(60);
+  assert.deepEqual(h.statuses(), ["session-start", "running", "needs-attention"]);
+  await h.emit("permission.replied", { sessionID: CHILD, requestID: "per_c", reply: "once" });
+  assert.deepEqual(h.statuses(), ["session-start", "running", "needs-attention", "running"]);
 });
 
 test("another root session is ignored once one is adopted", async () => {
