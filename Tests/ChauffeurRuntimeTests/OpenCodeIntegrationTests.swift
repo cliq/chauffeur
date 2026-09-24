@@ -141,4 +141,141 @@ struct OpenCodeIntegrationTests {
         #expect(try Data(contentsOf: URL(fileURLWithPath: path)) == bundled)
         #expect(try ClaudeIntegration().publishPlugin(root: root) == nil && CodexIntegration().publishPlugin(root: root) == nil)
     }
+
+    @Test func inboxWaitsAreClampedForOpenCode() {
+        #expect(RuntimeCoordinator.inboxWait(requested: 300, kind: .opencode) == 240)
+        #expect(RuntimeCoordinator.inboxWait(requested: 30, kind: .opencode) == 30)
+        #expect(RuntimeCoordinator.inboxWait(requested: 300, kind: .claude) == 300)
+        #expect(RuntimeCoordinator.inboxWait(requested: 300, kind: .codex) == 300)
+        #expect(RuntimeCoordinator.inboxWait(requested: 300, kind: nil) == 300)
+    }
+
+    @Test func runtimeLaunchPassesTheConfigurationLayerAndAdoptsTheSession() async throws {
+        let fixture = try await LaunchFixture.make(kind: .opencode); defer { fixture.cleanup() }
+        await fixture.runtime.setEndpoint(port: 4242)
+        var request = fixture.request; request.coordinationEnabled = true; request.task = "Say hi"
+        let launched = try await fixture.runtime.launch(request)
+        #expect(launched.nativeConversationID == nil, "OpenCode names its own session")
+        try await fixture.wait { FileManager.default.fileExists(atPath: fixture.path("launch-record").path) }
+        let record = try JSONCoding.decode(JSONValue.self, from: Data(contentsOf: fixture.path("launch-record")))
+        #expect(record["argv"] == .array([.string("--prompt"), .string("Say hi")]))
+        #expect(record["cwd"].string == Paths.canonical(fixture.root.path))
+        let environment = record["env"]
+        #expect(environment["OPENCODE_CONFIG_DIR"].string == Paths.canonical(fixture.root.path))
+        #expect(environment["CHAUFFEUR_SESSION_ID"].string == launched.id.uuidString && environment["CHAUFFEUR_CTL"].string != nil)
+        #expect(environment["CHAUFFEUR_SESSION_TOKEN"].string != nil && environment["CHAUFFEUR_SOCKET"].string != nil)
+        let content = try JSONCoding.decode(JSONValue.self, from: Data(try #require(environment["OPENCODE_CONFIG_CONTENT"].string).utf8))
+        let plugin = try #require(content["plugin"].array.first?.string.flatMap(URL.init(string:)))
+        #expect(plugin.path == fixture.path("plugins/chauffeur-opencode.js").path && FileManager.default.fileExists(atPath: plugin.path))
+        #expect(content["mcp"]["chauffeur"]["url"].string == "http://127.0.0.1:4242/mcp")
+
+        let token = try String(contentsOf: fixture.path("probe-token"), encoding: .utf8)
+        let conversation = "ses_0123456789abcdefghijABCDEF"
+        _ = try await fixture.runtime.handle(IPCRequest("event", params: .object(["token": .string(token), "event": .string("session-start"), "nativeConversationID": .string(conversation), "hookEvent": .string("SessionStart"), "source": .string("startup")])))
+        #expect(try await fixture.session().nativeConversationID == conversation)
+        // A later root or child ID never replaces it.
+        _ = try await fixture.runtime.handle(IPCRequest("event", params: .object(["token": .string(token), "event": .string("session-start"), "nativeConversationID": .string("ses_ZZZZZZZZZZZZZZZZZZZZZZZZZZ"), "hookEvent": .string("SessionStart"), "source": .string("startup")])))
+        #expect(try await fixture.session().nativeConversationID == conversation)
+
+        let discovered = try await fixture.runtime.callTool(token: token, name: "chauffeur_discover", arguments: .object([:]))
+        #expect(discovered["capabilities"]["waitCommand"] == .null && discovered["capabilities"]["resultWake"] == .bool(false))
+        #expect(discovered["capabilities"]["inboxReminders"] == .bool(true))
+        _ = try await fixture.stop()
+    }
+}
+
+/// Drives the built `chauffeurctl` the way the OpenCode plugin does.
+struct OpenCodeHookCommandTests {
+    private final class Marker {}
+    private var ctl: URL? {
+        let url = Bundle(for: Marker.self).bundleURL.deletingLastPathComponent().appendingPathComponent("chauffeurctl")
+        return FileManager.default.isExecutableFile(atPath: url.path) ? url : nil
+    }
+    private func run(_ ctl: URL, _ arguments: [String], input: String, environment: [String: String]) throws -> (status: Int32, output: String) {
+        let process = Process()
+        process.executableURL = ctl; process.arguments = arguments; process.environment = environment
+        let stdin = Pipe(), stdout = Pipe()
+        process.standardInput = stdin; process.standardOutput = stdout; process.standardError = FileHandle.nullDevice
+        try process.run()
+        try stdin.fileHandleForWriting.write(contentsOf: Data(input.utf8)); try stdin.fileHandleForWriting.close()
+        let output = stdout.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+        return (process.terminationStatus, String(decoding: output, as: UTF8.self))
+    }
+
+    @Test func inboxHookAnswersThePluginContract() async throws {
+        let ctl = try #require(ctl, "chauffeurctl must be built next to the test bundle")
+        let fixture = try await LaunchFixture.make(kind: .opencode); defer { fixture.cleanup() }
+        let server = try IPCServer(root: fixture.root, runtime: fixture.runtime); server.start()
+        let launched = try await fixture.runtime.launch(fixture.request)
+        let token = try String(contentsOf: fixture.path("probe-token"), encoding: .utf8)
+        let environment = ["CHAUFFEUR_SESSION_TOKEN": token, "CHAUFFEUR_SOCKET": fixture.path("runtime/runtime.sock").path]
+        let conversation = "ses_0123456789abcdefghijABCDEF"
+        let stop = ["inbox-hook", "--provider", "opencode", "--report-stop"]
+        func hook(_ event: String, _ extra: String = "", arguments: [String]? = nil) throws -> JSONValue? {
+            let result = try run(ctl, arguments ?? stop, input: #"{"session_id":"\#(conversation)","hook_event_name":"\#(event)"\#(extra)}"#, environment: environment)
+            #expect(result.status == 0 && (result.output.isEmpty || result.output.hasSuffix("}\n")))
+            return result.output.isEmpty ? nil : try JSONCoding.decode(JSONValue.self, from: Data(result.output.utf8))
+        }
+        func state() async throws -> SessionState { try await fixture.session().state }
+
+        // The plugin's session-start names the conversation through the ctl.
+        let started = try run(ctl, ["event", "--session", launched.id.uuidString, "session-start"], input: #"{"session_id":"\#(conversation)","hook_event_name":"SessionStart","source":"startup"}"#, environment: environment)
+        #expect(started.status == 0)
+        #expect(try await fixture.session().nativeConversationID == conversation)
+        _ = try run(ctl, ["event", "--session", launched.id.uuidString, "running"], input: #"{"session_id":"\#(conversation)"}"#, environment: environment)
+        #expect(try await state() == .running)
+
+        #expect(try hook("Stop", #","stop_hook_active":false"#) == .object(["block": .bool(false), "text": .null, "waitForWorkers": .bool(false)]))
+        #expect(try await state() == .turnFinished)
+
+        let peer = LedgerTests().session(project: launched.projectID, group: launched.groupID)
+        try await fixture.runtime.ledger.register(peer)
+        let sender = try await fixture.runtime.ledger.authenticate(fixture.runtime.ledger.issueGrant(sessionID: peer.id))
+        _ = try await fixture.runtime.ledger.send(caller: sender, recipientID: launched.id, body: "Never in hook output", retryKey: "one")
+        let tool = try #require(try hook("PostToolUse", arguments: ["inbox-hook", "--provider", "opencode"]))
+        #expect(tool == .object(["block": .bool(false), "text": .string(InboxHintFormatter.text(InboxHintSummary(count: 1))), "waitForWorkers": .bool(false)]))
+        #expect(try hook("PostToolUse", arguments: ["inbox-hook", "--provider", "opencode"])?["text"] == .null, "Each message is mentioned once")
+
+        _ = try run(ctl, ["event", "--session", launched.id.uuidString, "running"], input: #"{"session_id":"\#(conversation)"}"#, environment: environment)
+        _ = try await fixture.runtime.ledger.send(caller: sender, recipientID: launched.id, body: "Second", retryKey: "two")
+        let blocked = try #require(try hook("Stop", #","stop_hook_active":false"#))
+        #expect(blocked["block"] == .bool(true) && blocked["text"].string == InboxHintFormatter.text(InboxHintSummary(count: 1)))
+        #expect(try await state() == .running, "A blocked Stop is not a finished turn")
+        #expect(try hook("Stop", #","stop_hook_active":true"#)?["block"] == .bool(false))
+        #expect(try await state() == .turnFinished, "The continuation ends the turn")
+
+        // A coordinator with an open worker is told to wait, and gets no completion notice.
+        _ = try run(ctl, ["event", "--session", launched.id.uuidString, "running"], input: #"{"session_id":"\#(conversation)"}"#, environment: environment)
+        _ = try await fixture.runtime.handle(IPCRequest("markRead", params: .object(["sessionID": .string(launched.id.uuidString)])))
+        let caller = try await fixture.runtime.ledger.authenticate(token)
+        let (delegation, _) = try await fixture.runtime.ledger.reserveDelegation(caller: caller, task: "Work", presetID: UUID(), folderID: UUID(), shareCheckout: true, retryKey: "worker", limit: 4)
+        #expect(await fixture.runtime.hasOpenWorkers(launched.id))
+        _ = try await fixture.runtime.ledger.send(caller: sender, recipientID: launched.id, body: "Third", retryKey: "three")
+        #expect(try hook("Stop", #","stop_hook_active":false"#)?["waitForWorkers"] == .bool(false), "A blocked Stop does not wait yet")
+        let waiting = try #require(try hook("Stop", #","stop_hook_active":true"#))
+        #expect(waiting == .object(["block": .bool(false), "text": .null, "waitForWorkers": .bool(true)]))
+        let finished = try await fixture.session()
+        #expect(finished.state == .turnFinished && !finished.unread)
+
+        var closed = delegation; closed.closureOutcome = "accepted"
+        try await fixture.runtime.ledger.updateDelegation(closed)
+        #expect(!(await fixture.runtime.hasOpenWorkers(launched.id)))
+        #expect(try hook("Stop", #","stop_hook_active":false"#)?["waitForWorkers"] == .bool(false))
+
+        // Claude's output is unchanged by the new field.
+        let claude = try run(ctl, ["inbox-hook", "--provider", "claude"], input: #"{"session_id":"\#(conversation)","hook_event_name":"Stop"}"#, environment: environment)
+        #expect(claude.status == 0 && claude.output.isEmpty)
+        _ = try await fixture.stop()
+    }
+
+    @Test func waitForWorkPrintsJSONForThePlugin() throws {
+        let ctl = try #require(ctl)
+        let result = try run(ctl, ["wait-for-work", "--json"], input: "", environment: [:])
+        #expect(result.status == 1)
+        let value = try JSONCoding.decode(JSONValue.self, from: Data(result.output.utf8))
+        #expect(value["reason"] == .string("ended") && value["text"].string?.hasPrefix("Chauffeur:") == true)
+        let plain = try run(ctl, ["wait-for-work"], input: "", environment: [:])
+        #expect(plain.output == "Chauffeur: wait-for-work must run inside a Chauffeur agent session.\n")
+    }
 }

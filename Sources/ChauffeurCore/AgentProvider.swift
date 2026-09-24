@@ -97,12 +97,15 @@ public protocol AgentProvider: Sendable {
     var identityChangingSources: Set<String> { get }
     func adoptsFirstConversation(hooksTrusted: Bool, hookEvent: String?) -> Bool
     var wakeStrategy: CoordinatorWakeStrategy { get }
+    /// The longest `chauffeur_inbox` wait the provider's MCP transport survives.
+    var maxInboxWaitSeconds: Int? { get }
 }
 
 public extension AgentProvider {
     var coordinationLimitation: String? { nil }
     func identifies(version: String, help: String) -> Bool { identifies(version: version) }
     var probesModels: Bool { false }
+    var maxInboxWaitSeconds: Int? { nil }
     func environment(configurationDirectory: String) -> [String: String] { [configurationEnvironmentKey: configurationDirectory] }
     func defaultConfigurationDirectory(home: String) -> String { URL(fileURLWithPath: home).appendingPathComponent(defaultHomeFolder).path }
     func permitsManaged(_ key: String, value: String?) -> Bool { false }
@@ -310,4 +313,6 @@ public struct OpenCodeProvider: AgentProvider {
     /// The plugin reports only the first root session, so nothing moves the session later.
     public var identityChangingSources: Set<String> { [] }
     public var wakeStrategy: CoordinatorWakeStrategy { .plugin }
+    /// Plain JSON MCP replies fail after about 300 s (V9).
+    public var maxInboxWaitSeconds: Int? { 240 }
 }

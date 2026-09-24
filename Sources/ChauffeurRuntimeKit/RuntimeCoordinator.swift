@@ -950,7 +950,7 @@ public actor RuntimeCoordinator {
             let coordination = !isShell && request.coordinationEnabled
             let integration = root.appendingPathComponent("runtime/integration/\(session.id)")
             if !isShell {
-                let capabilities = try await CLIAdapter.capabilities(executable: session.launch.executablePath, kind: preset.kind, environment: environment)
+                let capabilities = try await CLIAdapter.capabilities(executable: session.launch.executablePath, kind: preset.kind, environment: environment, modelCache: ModelSuggestionCache.url(root: root))
                 try Task.checkCancellation()
                 session.launch.executableVersion = capabilities.version
                 if child != nil && !capabilities.delegatedYOLO { throw ChauffeurError("worker_policy_unavailable", "Installed CLI does not support delegated YOLO mode") }
@@ -962,7 +962,7 @@ public actor RuntimeCoordinator {
             let preparation = coordination ? await prepareLaunch(session, environment: environment) : nil
             try Task.checkCancellation()
             session.inboxReminders = preparation?.inboxReminders
-            let native = try CLIAdapter.launch(session: session, endpoint: endpoint ?? "", ctlPath: ctlPath, integrationDirectory: integration, coordination: coordination, resume: false, preparation: preparation ?? LaunchPreparation())
+            let native = try CLIAdapter.launch(session: session, endpoint: endpoint ?? "", ctlPath: ctlPath, integrationDirectory: integration, coordination: coordination, resume: false, preparation: preparation ?? LaunchPreparation(), pluginPath: coordination ? try publishPlugin(preset.kind) : nil)
             environment.merge(native.environment) { _, provider in provider }
             try await persist(session)
             try Task.checkCancellation()
@@ -1033,7 +1033,7 @@ public actor RuntimeCoordinator {
             let preparation = coordination ? await prepareLaunch(session, environment: environment) : nil
             try Task.checkCancellation()
             session.inboxReminders = preparation?.inboxReminders
-            let native = try CLIAdapter.launch(session: session, endpoint: endpoint ?? "", ctlPath: ctlPath, integrationDirectory: integration, coordination: coordination, resume: true, preparation: preparation ?? LaunchPreparation())
+            let native = try CLIAdapter.launch(session: session, endpoint: endpoint ?? "", ctlPath: ctlPath, integrationDirectory: integration, coordination: coordination, resume: true, preparation: preparation ?? LaunchPreparation(), pluginPath: coordination ? try publishPlugin(session.launch.preset.kind) : nil)
             environment.merge(native.environment) { _, provider in provider }
             let pane = try await terminals.spawn(session: session, payload: ExecPayload(executable: session.launch.executablePath, arguments: native.arguments, environment: environment, directory: session.launch.workingDirectory), scrollback: settings.scrollbackLines)
             try Task.checkCancellation()
@@ -1050,10 +1050,15 @@ public actor RuntimeCoordinator {
         let kind = session.launch.preset.kind
         session.executableWarning = nil
         guard resolved != session.launch.executablePath else { return }
-        let capabilities = try await CLIAdapter.capabilities(executable: resolved, kind: kind, environment: environment)
+        let capabilities = try await CLIAdapter.capabilities(executable: resolved, kind: kind, environment: environment, modelCache: ModelSuggestionCache.url(root: root))
         try Task.checkCancellation()
         if coordination && !capabilities.coordination { throw ChauffeurError("integration_unavailable", capabilities.limitation ?? "The installed CLI no longer supports coordination") }
         session.launch.executablePath = resolved; session.launch.executableVersion = capabilities.version
+    }
+    /// Each launch refreshes the published plugin, so an app update reaches new sessions.
+    private func publishPlugin(_ kind: CLIKind) throws -> String? {
+        do { return try kind.integration?.publishPlugin(root: root) }
+        catch { throw ChauffeurError("integration_unavailable", "The \(kind.displayName) plugin could not be published. Retry or explicitly select basic terminal mode") }
     }
     /// Provider-specific setup for a coordinated launch, e.g. trusting Codex hooks.
     private func prepareLaunch(_ session: Session, environment: [String: String]) async -> LaunchPreparation? {
@@ -1106,7 +1111,8 @@ public actor RuntimeCoordinator {
             if session.waiting != .workers {
                 session.waiting = (params["backgroundTasks"].int ?? 0) > 0 ? .backgroundTask : nil
             }
-            if session.waiting == nil { session.unread = true; notification = .completion }
+            // The OpenCode plugin starts its waiter right after this: not finished work either.
+            if session.waiting == nil, params["waitingForWorkers"].bool != true { session.unread = true; notification = .completion }
         case "needs-attention":
             if session.state != .needsAttention { notification = .input }
             session.state = .needsAttention; session.unread = true
@@ -1170,7 +1176,20 @@ public actor RuntimeCoordinator {
         // Only the recorded conversation may claim: a hook without a valid ID, or
         // before the session's conversation is known, would spend its reminders.
         guard NativeConversation.same(session.nativeConversationID, params["nativeConversationID"].string) else { return InboxHintSummary() }
-        return try await ledger.claimInboxHint(caller: caller, event: params.requiredString("event"), nativeTurnID: params["turnID"].string, toolUseID: params["toolUseID"].string)
+        let event = try params.requiredString("event")
+        // A continuation after a blocked Stop claims nothing; OpenCode still asks whether to wait.
+        var summary = params["claim"].bool == false ? InboxHintSummary()
+            : try await ledger.claimInboxHint(caller: caller, event: event, nativeTurnID: params["turnID"].string, toolUseID: params["toolUseID"].string, newTurn: params["newTurn"].bool == true)
+        if event == "Stop", session.launch.preset.kind.provider?.wakeStrategy == .plugin { summary.waitForWorkers = await hasOpenWorkers(session.id) }
+        return summary
+    }
+    /// Workers this session controls that are neither closed nor done reporting.
+    func hasOpenWorkers(_ sessionID: UUID) async -> Bool {
+        guard let delegations = try? await ledger.allDelegations() else { return false }
+        return delegations.contains { item in
+            item.controllingParentID == sessionID && item.closureOutcome == nil && [.reserved, .launching, .running].contains(item.state)
+                && (sessions[item.childID].map { $0.state.isLive && $0.closureOutcome == nil } ?? true)
+        }
     }
     private var skillHome: String { baseEnvironment["HOME"] ?? root.path }
     private func managedSkillInstaller() throws -> SkillInstaller {
@@ -1367,7 +1386,7 @@ public actor RuntimeCoordinator {
             return .object(["id": .string(preset.id.uuidString), "name": .string(preset.name), "kind": .string(preset.kind.rawValue),
                             "model": inspection.model.map(JSONValue.string) ?? .null,
                             "reasoningEffort": inspection.reasoning.map(JSONValue.string) ?? .null,
-                            "modelSuggestions": .array(LaunchOptions.modelSuggestions(for: preset.kind).map(JSONValue.string)),
+                            "modelSuggestions": .array(modelSuggestions(for: preset).map(JSONValue.string)),
                             "reasoningSuggestions": .array(LaunchOptions.reasoningSuggestions(for: preset.kind).map(JSONValue.string))])
         }
         var value: [String: JSONValue] = ["sessionID": .string(caller.sessionID.uuidString),
@@ -1389,6 +1408,18 @@ public actor RuntimeCoordinator {
         value["capabilities"] = .object(["scope": .string("currentSession"), "executableVersion": current.map { .string($0.launch.executableVersion) } ?? .null, "followUpSupported": .bool(followUpSupported), "inboxReminders": .bool(current?.inboxReminders == true), "waitCommand": waitCommand, "resultWake": .bool(current.map(resultWakeApplies) ?? false), "limitation": limitation, "workerExecutionPolicy": .string("delegatedYOLO"), "modelAvailabilityVerified": .bool(false)])
         return .object(value)
     }
+    /// Clamped to what the caller's MCP transport survives (OpenCode: V9).
+    static func inboxWait(requested: Int, kind: CLIKind?) -> Int {
+        min(requested, kind?.provider?.maxInboxWaitSeconds ?? requested)
+    }
+    /// Curated values, then what this preset's executable and configuration listed.
+    private func modelSuggestions(for preset: AgentPreset) -> [String] {
+        guard let provider = preset.kind.provider else { return [] }
+        guard provider.probesModels else { return provider.modelSuggestions }
+        let executable = (try? Paths.executable(preset.executable, environment: baseEnvironment)) ?? preset.executable
+        let directory = provider.environment(configurationDirectory: Paths.canonical(preset.configurationDirectory))[provider.configurationEnvironmentKey] ?? ""
+        return provider.modelSuggestions + ModelSuggestionCache.models(kind: preset.kind, executable: executable, configurationDirectory: directory, at: ModelSuggestionCache.url(root: root))
+    }
     public func callTool(token: String, name: String, arguments: JSONValue) async throws -> JSONValue {
         let caller = try await ledger.authenticate(token)
         try MCPTools.validate(name: name, arguments: arguments)
@@ -1406,7 +1437,7 @@ public actor RuntimeCoordinator {
             let acknowledge = try arguments["acknowledge"].array.map { item -> UUID in
                 guard let value = item.string.flatMap(UUID.init(uuidString:)) else { throw ChauffeurError("invalid_argument", "Acknowledge IDs must be UUIDs") }; return value
             }
-            let wait = arguments["waitSeconds"].int ?? 0
+            let wait = Self.inboxWait(requested: arguments["waitSeconds"].int ?? 0, kind: sessions[caller.sessionID]?.launch.preset.kind)
             return try .from(await ledger.waitForInbox(token: token, acknowledge: acknowledge, waitSeconds: wait))
         case "chauffeur_reply":
             let message = try await ledger.message(arguments.uuid("messageID"), caller: caller)

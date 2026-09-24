@@ -19,8 +19,8 @@ import ChauffeurCore
                 chauffeurctl diagnostics [--socket PATH]
                 chauffeurctl request METHOD [JSON | --file PATH] [--socket PATH]
                 chauffeurctl event [--session UUID] EVENT [provider-notify-json]
-                chauffeurctl inbox-hook --provider claude|codex [--report-stop] [--report-running]
-                chauffeurctl wait-for-work [--timeout MINUTES] [--no-milestones]
+                chauffeurctl inbox-hook --provider claude|codex|opencode [--report-stop] [--report-running]
+                chauffeurctl wait-for-work [--timeout MINUTES] [--no-milestones] [--json]
 
                 request sends structured commands to the per-user service. Native
                 hook payloads are reduced to event and conversation IDs; never logged.
@@ -90,6 +90,7 @@ import ChauffeurCore
               let provider = CLIKind(rawValue: args[index + 1]), provider.isAgent,
               let token = ProcessInfo.processInfo.environment["CHAUFFEUR_SESSION_TOKEN"],
               let event = payload.hookEvent, InboxHintFormatter.hookEvents.contains(event) else { return }
+        if provider == .opencode { await openCodeInboxHook(args, payload: payload, event: event, token: token, socket: socket); return }
         var summary: InboxHintSummary?
         // A continuation after a blocked Stop always ends the turn.
         if !(event == "Stop" && payload.stopHookActive) {
@@ -114,17 +115,41 @@ import ChauffeurCore
             _ = try? await RuntimeClient.call(IPCRequest("event", params: .object(params)), socketPath: socket)
         }
     }
+    /// The OpenCode plugin's hook: always one `{"block","text","waitForWorkers"}` line
+    /// once the runtime answers. A continuation Stop (`stop_hook_active`) claims no
+    /// mail but still learns whether the coordinator should wait for its workers.
+    private static func openCodeInboxHook(_ args: [String], payload: HookPayload, event: String, token: String, socket: String) async {
+        var params: [String: JSONValue] = ["token": .string(token), "provider": .string(CLIKind.opencode.rawValue), "event": .string(event)]
+        if let nativeID = payload.conversationID { params["nativeConversationID"] = .string(nativeID) }
+        if event == "Stop" { params[payload.stopHookActive ? "claim" : "newTurn"] = .bool(!payload.stopHookActive) }
+        let summary = (try? await RuntimeClient.call(IPCRequest("inboxHint", params: .object(params)), socketPath: socket)).flatMap { try? $0.decode(InboxHintSummary.self) }
+        let output = summary.flatMap { InboxHintFormatter.openCodeOutput(event: event, summary: $0) }
+        let block = output.flatMap { try? JSONCoding.decode(JSONValue.self, from: $0) }?["block"].bool == true
+        if event == "Stop", args.contains("--report-stop"), !block {
+            var stop: [String: JSONValue] = ["token": .string(token), "event": .string("turn-finished"), "hookEvent": .string(event)]
+            if let nativeID = payload.conversationID { stop["nativeConversationID"] = .string(nativeID) }
+            if output != nil, summary?.waitForWorkers == true { stop["waitingForWorkers"] = .bool(true) }
+            _ = try? await RuntimeClient.call(IPCRequest("event", params: .object(stop)), socketPath: socket)
+        }
+        if let output { FileHandle.standardOutput.write(output + Data("\n".utf8)) }
+    }
     /// Run in the background by a coordinator that ended its turn: exits when the
     /// session has a worker result, message, worker state change or progress milestone,
     /// printing what to act on. 0 = work or timeout, 2 = replaced or ended, 1 = error.
+    /// With --json (the OpenCode plugin), every outcome is one `{"reason","text"}` line;
+    /// failures report `ended`, since the plugin acts only on `work`.
     private static func waitForWork(_ args: [String], socket: String) async -> Int32 {
+        let json = args.contains("--json")
+        func fail(_ text: String) -> Int32 {
+            print(json ? WorkReportFormatter.json(reason: .ended, text: text) : text); return 1
+        }
         guard let token = ProcessInfo.processInfo.environment["CHAUFFEUR_SESSION_TOKEN"] else {
-            print("Chauffeur: wait-for-work must run inside a Chauffeur agent session."); return 1
+            return fail("Chauffeur: wait-for-work must run inside a Chauffeur agent session.")
         }
         var minutes = 240
         if let index = args.firstIndex(of: "--timeout") {
             guard args.indices.contains(index + 1), let value = Int(args[index + 1]), (1...1440).contains(value) else {
-                print("Chauffeur: --timeout takes 1–1440 minutes."); return 1
+                return fail("Chauffeur: --timeout takes 1–1440 minutes.")
             }
             minutes = value
         }
@@ -140,14 +165,12 @@ import ChauffeurCore
         do {
             let result = try await RuntimeClient.call(IPCRequest("waitForWork", params: params), socketPath: socket, responseTimeout: minutes * 60 + 60)
             let report = try result.decode(WorkReport.self)
-            print(WorkReportFormatter.text(report))
+            print(json ? WorkReportFormatter.json(report) : WorkReportFormatter.text(report))
             return [.replaced, .ended].contains(report.reason) ? 2 : 0
         } catch let error as ChauffeurError where error.code == "socket_failed" || error.code == "connection_closed" || error.code == "service_unavailable" {
-            print("Chauffeur: cannot reach the Chauffeur service from this shell. A sandbox may block it; wait with chauffeur_inbox instead.")
-            return 1
+            return fail("Chauffeur: cannot reach the Chauffeur service from this shell. A sandbox may block it; wait with chauffeur_inbox instead.")
         } catch {
-            print("Chauffeur: wait-for-work failed (\((error as? ChauffeurError)?.code ?? "error")). Wait with chauffeur_inbox instead.")
-            return 1
+            return fail("Chauffeur: wait-for-work failed (\((error as? ChauffeurError)?.code ?? "error")). Wait with chauffeur_inbox instead.")
         }
     }
     private static func execPayload(_ args: [String]) throws {

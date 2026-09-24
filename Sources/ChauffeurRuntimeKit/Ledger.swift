@@ -442,7 +442,8 @@ public actor Ledger {
     /// reminder. Message state, `receivedAt` and bodies are untouched: only
     /// `chauffeur_inbox` delivers. IDs are tracked, never counts, so a new arrival
     /// is claimed even when an acknowledgement keeps the total the same.
-    public func claimInboxHint(caller: Caller, event: String, nativeTurnID: String? = nil, toolUseID: String? = nil) throws -> InboxHintSummary {
+    /// `newTurn` marks a `Stop` that ends a fresh turn (OpenCode sends no prompt hook).
+    public func claimInboxHint(caller: Caller, event: String, nativeTurnID: String? = nil, toolUseID: String? = nil, newTurn: Bool = false) throws -> InboxHintSummary {
         try Validation.require(InboxHintFormatter.hookEvents.contains(event), "Unsupported hook event")
         try Validation.require([nativeTurnID, toolUseID].allSatisfy { ($0?.count ?? 0) <= 200 }, "Hook identifiers are too long")
         let session = caller.sessionID.uuidString
@@ -455,7 +456,7 @@ public actor Ledger {
             if let key, let row = try rows("SELECT record FROM inbox_hint_receipts WHERE session_id=? AND event=? AND native_turn_id=? AND tool_use_id=?", key).first {
                 return try decode(InboxHintSummary.self, row[0])
             }
-            if event == "UserPromptSubmit" { try execute("DELETE FROM inbox_hint_stops WHERE session_id=?", [session]) }
+            if event == "UserPromptSubmit" || newTurn { try execute("DELETE FROM inbox_hint_stops WHERE session_id=?", [session]) }
             // Stop continues a turn at most once. Claude reports no turn ID, so
             // its flag lasts until the next prompt; mail then waits for that prompt.
             if event == "Stop", let blocked = try rows("SELECT native_turn_id FROM inbox_hint_stops WHERE session_id=?", [session]).first,

@@ -472,7 +472,8 @@ struct LaunchFixture: Sendable {
     let tmux: String
     func path(_ name: String) -> URL { root.appendingPathComponent(name) }
     var handoff: URL { path("runtime/launch-\(request.retryKey).json") }
-    static func make(gatedCreation: Bool = false) async throws -> Self {
+    /// `.opencode` answers like OpenCode (help on stderr, `models`) and records each launch in `launch-record`.
+    static func make(gatedCreation: Bool = false, kind: CLIKind = .claude) async throws -> Self {
         // Keep the Unix-domain tmux socket below macOS's path-length limit.
         let root = URL(fileURLWithPath: "/tmp/chauffeur-cancel-\(UUID())").resolvingSymlinksInPath()
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
@@ -507,9 +508,12 @@ struct LaunchFixture: Sendable {
             mark('probe-token', os.environ['CHAUFFEUR_SESSION_TOKEN'])
             mark('version-entered', os.getpid())
             while (root / 'block-version').exists(): time.sleep(0.01)
-            print('2.1.272 (Claude Code)')
+            print('1.18.32' if (root / 'opencode').exists() else '2.1.272 (Claude Code)')
         elif '--help' in sys.argv:
-            print('--resume --add-dir')
+            if (root / 'opencode').exists(): print('opencode serve\nopencode acp\n-s, --session\n--auto', file=sys.stderr)
+            else: print('--resume --add-dir')
+        elif sys.argv[1:] == ['models']:
+            print('opencode/big-pickle\nlocal/qwen')
         elif len(sys.argv) > 1 and sys.argv[1] == 'internal-exec':
             mark('handoff-entered', os.getpid())
             if (root / 'fail-handoff').exists(): sys.exit(0)
@@ -519,6 +523,7 @@ struct LaunchFixture: Sendable {
             os.execve(payload['executable'], [payload['executable'], *payload['arguments']], payload['environment'])
         else:
             signal.signal(signal.SIGUSR1, lambda *_: sys.exit(0))
+            if (root / 'opencode').exists(): mark('launch-record', json.dumps({'argv': sys.argv[1:], 'cwd': os.getcwd(), 'env': dict(os.environ)}))
             mark('started', os.getpid())
             if (root / 'unicode-output').exists():
                 print((root / 'unicode-output').read_text(encoding='utf-8'), flush=True)
@@ -534,9 +539,10 @@ struct LaunchFixture: Sendable {
             try Data(tmux.utf8).write(to: root.appendingPathComponent("real-tmux"))
             environment["PATH"] = bin.path + ":" + environment["PATH"]!
         }
+        if kind == .opencode { try Data().write(to: root.appendingPathComponent("opencode")) }
         let runtime = try RuntimeCoordinator(root: root, ctlPath: executable.path, environment: environment)
         let set = PresetSet(name: "Cancellation fixture")
-        let preset = AgentPreset(setID: set.id, name: "Fixture", kind: .claude, executable: executable.path, configurationDirectory: root.path)
+        let preset = AgentPreset(setID: set.id, name: "Fixture", kind: kind, executable: executable.path, configurationDirectory: root.path)
         var project = Project(name: "Cancellation fixture", presetSetID: set.id)
         project.addFolder(ProjectFolder(path: root.path))
         try await runtime.store.save(set); try await runtime.store.save(preset); try await runtime.store.save(project)

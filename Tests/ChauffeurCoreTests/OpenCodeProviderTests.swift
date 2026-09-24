@@ -20,8 +20,9 @@ struct OpenCodeProviderTests {
         #expect(provider.installURL.absoluteString == "https://opencode.ai")
         #expect(AgentProviders.all.map(\.kind) == [.codex, .claude, .opencode])
         #expect(provider.supportsReasoning == false && provider.preassignsConversationID == false)
-        #expect(provider.wakeStrategy == .plugin)
+        #expect(provider.wakeStrategy == .plugin && provider.maxInboxWaitSeconds == 240)
         #expect(provider.skillDiscovery == .sharedAgentsHome && provider.probesModels)
+        #expect(ClaudeProvider().maxInboxWaitSeconds == nil && CodexProvider().maxInboxWaitSeconds == nil)
     }
 
     @Test func identificationNeedsSemverAndOpenCodeHelp() {
@@ -114,6 +115,29 @@ struct OpenCodeProviderTests {
         // The plugin reports only the first root session.
         #expect(!NativeConversation.adopts(kind: .opencode, hookEvent: "SessionStart", source: "startup"))
         #expect(NativeConversation.adoptsFirst(kind: .opencode, hooksTrusted: true, hookEvent: nil))
+    }
+
+    @Test func inboxHookOutputForThePlugin() throws {
+        func decode(_ data: Data?) throws -> JSONValue { try JSONCoding.decode(JSONValue.self, from: #require(data)) }
+        let blocked = try decode(InboxHintFormatter.openCodeOutput(event: "Stop", summary: InboxHintSummary(count: 2, results: 1, block: true, waitForWorkers: true)))
+        #expect(blocked == .object(["block": .bool(true), "text": .string(InboxHintFormatter.text(InboxHintSummary(count: 2, results: 1))), "waitForWorkers": .bool(false)]))
+        let idle = try decode(InboxHintFormatter.openCodeOutput(event: "Stop", summary: InboxHintSummary(waitForWorkers: true)))
+        #expect(idle == .object(["block": .bool(false), "text": .null, "waitForWorkers": .bool(true)]))
+        let quiet = try decode(InboxHintFormatter.openCodeOutput(event: "Stop", summary: InboxHintSummary()))
+        #expect(quiet == .object(["block": .bool(false), "text": .null, "waitForWorkers": .bool(false)]))
+        let tool = try decode(InboxHintFormatter.openCodeOutput(event: "PostToolUse", summary: InboxHintSummary(count: 1, waitForWorkers: true)))
+        #expect(tool == .object(["block": .bool(false), "text": .string(InboxHintFormatter.text(InboxHintSummary(count: 1))), "waitForWorkers": .bool(false)]))
+        let line = String(decoding: try #require(InboxHintFormatter.openCodeOutput(event: "Stop", summary: InboxHintSummary())), as: UTF8.self)
+        #expect(!line.contains("\n"))
+        // Claude and Codex output ignores the new field.
+        #expect(InboxHintFormatter.output(event: "Stop", summary: InboxHintSummary(waitForWorkers: true)) == nil)
+    }
+
+    @Test func waitForWorkJSON() throws {
+        var report = WorkReport(reason: .timeout); report.timeoutMinutes = 5
+        let value = try JSONCoding.decode(JSONValue.self, from: Data(WorkReportFormatter.json(report).utf8))
+        #expect(value == .object(["reason": .string("timeout"), "text": .string(WorkReportFormatter.text(report))]))
+        #expect(!WorkReportFormatter.json(WorkReport(reason: .work)).contains("\n"))
     }
 
     @Test func modelSuggestionCache() throws {

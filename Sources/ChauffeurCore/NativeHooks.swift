@@ -148,7 +148,12 @@ public struct InboxHintSummary: Codable, Equatable, Sendable {
     public var results: Int
     /// A `Stop` hook should keep the turn going so the agent reads its inbox.
     public var block: Bool
-    public init(count: Int = 0, results: Int = 0, block: Bool = false) { self.count = count; self.results = results; self.block = block }
+    /// The session coordinates workers that are still open, so the OpenCode plugin
+    /// starts its waiter when the turn ends. Only set for OpenCode `Stop` hooks.
+    public var waitForWorkers: Bool?
+    public init(count: Int = 0, results: Int = 0, block: Bool = false, waitForWorkers: Bool? = nil) {
+        self.count = count; self.results = results; self.block = block; self.waitForWorkers = waitForWorkers
+    }
 }
 
 public enum InboxHintFormatter {
@@ -173,7 +178,19 @@ public enum InboxHintFormatter {
             value = .object(["hookSpecificOutput": .object(["hookEventName": .string(event), "additionalContext": .string(text(summary))])])
         default: return nil
         }
-        // One compact line, as provider hook runners expect.
+        return line(value)
+    }
+
+    /// The line the OpenCode plugin parses: `{"block","text","waitForWorkers"}`.
+    /// Printed for every answered hook; `text` is null when there is nothing to say.
+    public static func openCodeOutput(event: String, summary: InboxHintSummary) -> Data? {
+        let block = event == "Stop" && summary.block && summary.count > 0
+        let hint: JSONValue = summary.count > 0 && (block || event == "PostToolUse") ? .string(text(summary)) : .null
+        return line(.object(["block": .bool(block), "text": hint, "waitForWorkers": .bool(event == "Stop" && !block && summary.waitForWorkers == true)]))
+    }
+
+    /// One compact line, as provider hook runners expect.
+    private static func line(_ value: JSONValue) -> Data? {
         let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
         return try? encoder.encode(value)
     }
