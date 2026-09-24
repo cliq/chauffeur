@@ -149,10 +149,11 @@ public actor TmuxHost {
             let lostSink = previous.sink
             Task.detached { await lostSink.close(reason: .controlLost, message: "Another client took control of this terminal") }
         }
-        // SwiftTerm supports OSC 8 links, but tmux's generic xterm-256color
-        // features do not advertise them. Set this on every attachment so links
-        // survive redraws and reconnects to already-running tmux servers too.
-        // SwiftTerm always decodes UTF-8. launchd may supply no locale; without
+        // The app's terminal engines (Ghostty on macOS, SwiftTerm on iOS)
+        // support OSC 8 links, but tmux's generic xterm-256color features do
+        // not advertise them. Set this on every attachment so links survive
+        // redraws and reconnects to already-running tmux servers too.
+        // Both engines always decode UTF-8. launchd may supply no locale; without
         // -u tmux replaces Unicode with underscores before it reaches the UI.
         let pty = try PTYAttachment(executable: executable, arguments: ["-u", "-S", socketPath, "-T", "hyperlinks,clipboard", "attach-session", "-t", sessionID.uuidString], directory: runtimeDirectory.path, environment: environment.merging(["TERM": "xterm-256color"], uniquingKeysWith: { _, new in new }), cols: cols, rows: rows)
         let pump = AttachmentPump(generation: generation, sink: sink) { [weak self] ended in

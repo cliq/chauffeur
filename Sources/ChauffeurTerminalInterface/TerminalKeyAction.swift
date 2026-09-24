@@ -23,7 +23,8 @@ public enum TerminalKeyAction: Equatable, Sendable, Hashable {
     case function(Int)
 }
 
-/// Terminal modes that affect key encoding. The adapter reports the live values from the engine.
+/// Terminal modes that affect key encoding, for adapters that encode keys themselves with
+/// `TerminalKeyEncoder` instead of delegating to their engine.
 public struct TerminalModes: Equatable, Sendable {
     public var applicationCursor: Bool
     public var bracketedPaste: Bool

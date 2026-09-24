@@ -189,18 +189,22 @@ The main listener rate-limits connections: 8 concurrent connections, 5 failed
 deadline. The separate pairing listener stops after 5 failed handshakes and
 closes after 120 seconds or one successful pairing.
 
-## 7. Replacing the terminal engine
+## 7. Terminal engines
 
-SwiftTerm is the current terminal engine on both desktop and iOS, but the
-architecture keeps it replaceable — Ghostty is under consideration as a future
-engine. All session/launch/transport logic talks to the terminal only through
-`TerminalEngineAdapter` (`Sources/ChauffeurTerminalInterface/TerminalEngineAdapter.swift`),
-an engine-neutral, `@MainActor` contract: feed ordered output bytes, reset for
-a fresh attachment, focus, dispose, configure appearance, report generated
-input bytes and cell size, and encode semantic key actions
-(`TerminalKeyAction`) using the engine's live modes. SwiftTerm types never
-leave `ChauffeurTerminalSwiftTerm`; nothing outside that module may
+The desktop renders with **Ghostty** (`ChauffeurTerminalGhostty`, libghostty from the pinned
+[libghostty-spm](https://github.com/Lakr233/libghostty-spm) xcframework with host-managed I/O);
+the iOS client renders with **SwiftTerm** 1.20.0 (`ChauffeurTerminalSwiftTerm`). All
+session/launch/transport logic talks to either only through `TerminalEngineAdapter`
+(`Sources/ChauffeurTerminalInterface/TerminalEngineAdapter.swift`), an engine-neutral,
+`@MainActor` contract: feed ordered output bytes (or replay saved history), reset for a fresh
+attachment, focus, dispose, configure appearance, report generated input bytes and cell size,
+encode semantic key actions (`TerminalKeyAction`) for the engine's live modes, read screen text,
+and search. Engine types never leave their module: nothing else may `import GhosttyKit` or
 `import SwiftTerm`.
+
+Ghostty encodes keys and pastes itself from its live modes. SwiftTerm's key-sending API is
+internal, so its adapter encodes with `TerminalKeyEncoder` from the reported
+`applicationCursor`/`bracketedPasteMode` state.
 
 `TerminalCapabilities` (`Sources/ChauffeurTerminalInterface/TerminalCapabilities.swift`)
 is an `OptionSet` describing optional features (selection, clipboard copy,
@@ -216,18 +220,8 @@ same contract with no rendering engine at all, so session/connection logic can
 compile and run in tests, and the iOS app can run UI-only builds (via a
 `--fake-terminal` launch argument), without SwiftTerm.
 
-A Ghostty adapter would need to implement `TerminalEngineAdapter` end to end
-inside its own module (mirroring `ChauffeurTerminalSwiftTerm`), including
-mode-aware key/paste encoding — SwiftTerm's key-sending API is internal, so
-the interface module encodes arrows/control keys itself from the adapter's
-reported `applicationCursor`/`bracketedPasteMode` state — and pass
-`TerminalAdapterConformance.check(_:)` plus the manual checks documented in
-[`SwiftTermAdapter`'s header comment](../Sources/ChauffeurTerminalSwiftTerm/SwiftTermAdapter.swift):
-keyboard input round-tripping through the delegate exactly once per key with no
-local echo, correct escape sequences for arrows/backspace in both normal and
-application-cursor modes, bracketed-paste framing, no replay after
-`setInputEnabled(false)`/`true`, correct cell-size reporting on rotation/resize,
-title/bell/clipboard-copy/link events, a clean `reset()` and redraw, and
-`selectedText()` behavior. See
-[M1 — terminal engine](decisions/M1-mobile-transport-and-terminal.md#terminal-engine)
-for the constraints that shaped this boundary and the current engine decision.
+Each adapter's header comment lists its manual checks
+([`GhosttyTerminalAdapter`](../Sources/ChauffeurTerminalGhostty/GhosttyTerminalAdapter.swift),
+[`SwiftTermAdapter`](../Sources/ChauffeurTerminalSwiftTerm/SwiftTermAdapter.swift)). See
+[M1 — terminal engine](decisions/M1-mobile-transport-and-terminal.md#terminal-engine) and the
+[Ghostty migration plan](ghostty-migration-plan.md) for the decisions behind them.

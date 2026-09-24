@@ -12,6 +12,8 @@ let package = Package(
         .library(name: "ChauffeurRemoteClient", targets: ["ChauffeurRemoteClient"]),
         .library(name: "ChauffeurTerminalInterface", targets: ["ChauffeurTerminalInterface"]),
         .library(name: "ChauffeurTerminalSwiftTerm", targets: ["ChauffeurTerminalSwiftTerm"]),
+        // macOS only: the desktop's Ghostty engine. The iOS client keeps SwiftTerm.
+        .library(name: "ChauffeurTerminalGhostty", targets: ["ChauffeurTerminalGhostty"]),
         .library(name: "ChauffeurTerminalTesting", targets: ["ChauffeurTerminalTesting"]),
         .executable(name: "ChauffeurRuntime", targets: ["ChauffeurRuntime"]),
         .executable(name: "ChauffeurSessions", targets: ["ChauffeurSessions"]),
@@ -21,6 +23,7 @@ let package = Package(
     ],
     dependencies: [
         .package(url: "https://github.com/migueldeicaza/SwiftTerm.git", exact: "1.20.0"),
+        .package(url: "https://github.com/Lakr233/libghostty-spm.git", exact: "1.6.20260922"),
         .package(url: "https://github.com/hummingbird-project/hummingbird.git", exact: "2.26.0"),
         .package(url: "https://github.com/LebJe/TOMLKit.git", exact: "0.6.0")
     ],
@@ -34,6 +37,7 @@ let package = Package(
         .target(name: "ChauffeurTerminalInterface"),
         .target(name: "ChauffeurTerminalTesting", dependencies: ["ChauffeurTerminalInterface"]),
         .target(name: "ChauffeurTerminalSwiftTerm", dependencies: ["ChauffeurTerminalInterface", .product(name: "SwiftTerm", package: "SwiftTerm")]),
+        .target(name: "ChauffeurTerminalGhostty", dependencies: ["ChauffeurTerminalInterface", .product(name: "GhosttyKit", package: "libghostty-spm")]),
         .target(name: "ChauffeurRemoteClient", dependencies: ["ChauffeurRemoteProtocol", "ChauffeurTerminalInterface"]),
         .executableTarget(name: "ChauffeurRuntime", dependencies: ["ChauffeurRuntimeKit"]),
         .executableTarget(name: "ChauffeurSessions", dependencies: ["ChauffeurCore"]),
@@ -43,6 +47,7 @@ let package = Package(
         .testTarget(name: "ChauffeurCoreTests", dependencies: ["ChauffeurCore"]),
         .testTarget(name: "ChauffeurRuntimeTests", dependencies: ["ChauffeurRuntimeKit", "ChauffeurRemoteProtocol", "ChauffeurRemoteClient", "ChauffeurTerminalTesting"]),
         .testTarget(name: "ChauffeurRemoteProtocolTests", dependencies: ["ChauffeurRemoteProtocol"]),
+        .testTarget(name: "ChauffeurTerminalGhosttyTests", dependencies: ["ChauffeurTerminalGhostty", "ChauffeurTerminalInterface"]),
         .testTarget(name: "ChauffeurTerminalInterfaceTests", dependencies: ["ChauffeurTerminalInterface", "ChauffeurTerminalTesting"]),
         .testTarget(name: "ChauffeurRemoteClientTests", dependencies: ["ChauffeurRemoteClient", "ChauffeurRemoteProtocol", "ChauffeurTerminalInterface", "ChauffeurTerminalTesting"])
     ]

@@ -100,9 +100,14 @@ arrows and control keys are encoded by the interface module from `applicationCur
 and `bracketedPasteMode`; `feed` is main-thread only; the iOS view already disables
 autocorrection, smart quotes and capitalization.
 
-Ghostty remains under consideration. It was not evaluated with a build spike in this
-increment; a future adapter must pass the conformance check and the fixture tests
-without changing the wire protocol or session logic.
+**Update (2026-09-24): the desktop moved to Ghostty; iOS stays on SwiftTerm.**
+`ChauffeurTerminalGhostty` wraps libghostty from the pinned libghostty-spm xcframework
+(`1.6.20260922`, Ghostty `3c47ca159368`) with its host-managed I/O backend, in our own AppKit
+view on the C API. The runtime still owns the tmux attachment, the wire protocol and session
+logic are unchanged, and the adapter passes the conformance check and the native window probe.
+`modes` left the adapter protocol because Ghostty encodes keys itself and exposes no mode query;
+`replay`, `screenText` and search were added. Rationale, the survey of other libghostty apps,
+and remaining risks are in [the Ghostty migration plan](../ghostty-migration-plan.md).
 
 ## Platform decisions
 

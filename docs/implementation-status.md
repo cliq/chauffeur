@@ -12,7 +12,7 @@ does not establish unverified real-CLI or native behavior.
 
 - Swift package: core records, validation, file store, runtime kit, runtime binary,
   helper, and tests.
-- Debug and Release native apps build with embedded signed runtime/helper, SwiftTerm views,
+- Debug and Release native apps build with embedded signed runtime/helper, Ghostty terminal views,
   project/preset/group editors, session launch/details, worktrees, and the
   checkout-driven project window (Repositories/Sessions sidebar, session strip,
   shell sessions). See [worktree navigation plan](worktree-navigation-plan.md).

@@ -52,7 +52,7 @@ struct PendingTerminalTab: Identifiable {
     /// view yet, and a just-launched one is not in the snapshot yet either.
     private func requestFocus(_ id: UUID?) {
         focusRequest = id
-        guard let id, let controller = controllers[id], controller.terminal.window != nil else { return }
+        guard let id, let controller = controllers[id], controller.view.window != nil else { return }
         focusRequest = nil
         controller.focus()
     }
@@ -767,10 +767,9 @@ struct ProjectWindow: View {
                 .accessibilityIdentifier("new-tab.prompt")
         }
     }
-    /// Handle the chord before SwiftTerm or the native Close Window shortcut.
+    /// Handle the chord before the terminal or the native Close Window shortcut.
     /// The prompt state changes synchronously so a fast second key is not lost.
     private func handleKey(_ event: NSEvent) -> Bool {
-        if let terminal = event.window?.firstResponder as? ThemedTerminalView, terminal.sendWordNavigation(event) { return true }
         let modifiers = event.modifierFlags.intersection([.command, .control, .option, .shift])
         let key = event.charactersIgnoringModifiers?.lowercased()
         if layout.newTabPresented {

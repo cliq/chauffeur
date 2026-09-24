@@ -1,14 +1,12 @@
 import Foundation
 
 /// An engine-neutral terminal contract so the app's session/connection logic never touches
-/// a specific rendering engine (SwiftTerm, Ghostty, ...) directly. The connection controller
+/// a specific rendering engine directly. The connection controller
 /// feeds ordered output bytes in and receives generated input bytes and cell-size changes out.
 @MainActor
 public protocol TerminalEngineAdapter: AnyObject {
     var delegate: (any TerminalEngineAdapterDelegate)? { get set }
     var capabilities: TerminalCapabilities { get }
-    /// Live engine modes, used for key/paste encoding.
-    var modes: TerminalModes { get }
     var cellSize: TerminalCellSize { get }
     var isInputEnabled: Bool { get }
 
@@ -17,16 +15,38 @@ public protocol TerminalEngineAdapter: AnyObject {
     func configure(_ appearance: TerminalAppearance)
     /// Ordered output from the remote process.
     func feed(_ bytes: Data)
+    /// Saved output shown read-only (terminal history). Unlike `feed`, the engine must not answer
+    /// queries the bytes contain.
+    func replay(_ bytes: Data)
     /// Clears screen, scrollback, and modes before a fresh attachment (e.g. feed ESC c).
     func reset()
-    /// Encodes with `TerminalKeyEncoder` using the current modes, then routes like typed input.
+    /// Encodes the key the way the engine's live modes require (application cursor keys, keyboard
+    /// protocols), then routes it like typed input.
     func sendKey(_ action: TerminalKeyAction)
+    /// Sends text as a paste: bracketed when the remote program asked for it, gated like typing.
     func paste(_ text: String)
     /// When `false`, generated input is DROPPED (never queued) — the app must not replay keystrokes.
     func setInputEnabled(_ enabled: Bool)
     func focus()
     func selectedText() -> String?
+    /// The visible rows, or the whole buffer including scrollback, as plain text with trailing
+    /// blanks trimmed. `nil` when the engine has nothing to read yet.
+    func screenText(includingScrollback: Bool) -> String?
+    /// Highlights matches of `query` in the buffer and scrolls to the current one. Requires `.search`.
+    func search(_ query: String)
+    func searchNext()
+    func searchPrevious()
+    func endSearch()
     func dispose()
+}
+
+public extension TerminalEngineAdapter {
+    func replay(_ bytes: Data) { feed(bytes) }
+    func screenText(includingScrollback: Bool) -> String? { nil }
+    func search(_ query: String) {}
+    func searchNext() {}
+    func searchPrevious() {}
+    func endSearch() {}
 }
 
 public struct TerminalCellSize: Equatable, Sendable {
@@ -47,6 +67,8 @@ public protocol TerminalEngineAdapterDelegate: AnyObject {
     func terminalDidRingBell(_ adapter: any TerminalEngineAdapter)
     func terminal(_ adapter: any TerminalEngineAdapter, didCopyToClipboard text: String)
     func terminal(_ adapter: any TerminalEngineAdapter, didRequestOpenLink link: String)
+    /// Match count and the 1-based current match of an active `search`; `nil` while unknown.
+    func terminal(_ adapter: any TerminalEngineAdapter, didUpdateSearchTotal total: Int?, selected: Int?)
 }
 
 public extension TerminalEngineAdapterDelegate {
@@ -54,6 +76,7 @@ public extension TerminalEngineAdapterDelegate {
     func terminalDidRingBell(_ adapter: any TerminalEngineAdapter) {}
     func terminal(_ adapter: any TerminalEngineAdapter, didCopyToClipboard text: String) {}
     func terminal(_ adapter: any TerminalEngineAdapter, didRequestOpenLink link: String) {}
+    func terminal(_ adapter: any TerminalEngineAdapter, didUpdateSearchTotal total: Int?, selected: Int?) {}
 }
 
 /// Diagnostics that help catch adapter implementations that violate the contract.

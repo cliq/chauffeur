@@ -2,10 +2,10 @@ import SwiftUI
 import AppKit
 import ChauffeurCore
 import ChauffeurTerminalInterface
-import ChauffeurTerminalSwiftTerm
+import ChauffeurTerminalGhostty
 
 @MainActor final class SetupTerminalController: ObservableObject, TerminalEngineAdapterDelegate {
-    let adapter: SwiftTermAdapter
+    let adapter: GhosttyTerminalAdapter
     @Published var error: String?
     private let app: AppModel
     private var handle: SetupLoginHandle
@@ -15,7 +15,7 @@ import ChauffeurTerminalSwiftTerm
     private var cursor: UInt64 = 0
     init(app: AppModel, handle: SetupLoginHandle) {
         self.app = app; self.handle = handle
-        adapter = SwiftTermAdapter(appearance: TerminalAppearance(fontSize: 12, scrollbackLines: 1000, followsSystemColors: true))
+        adapter = GhosttyTerminalAdapter(appearance: TerminalAppearance(fontSize: 12, scrollbackLines: 1000, followsSystemColors: true))
         adapter.delegate = self
         adapter.setInputEnabled(false)
     }

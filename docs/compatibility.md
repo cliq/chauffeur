@@ -9,7 +9,8 @@ not a completed real-provider support matrix.
 | Swift | 6.2.4 | Swift 6 package builds; concurrency checking enabled |
 | Xcode | 26.3 (17C529) | Native app builds and is signed locally |
 | tmux | 3.6a | Alternate-screen redraw, resize, input, detachment/restart, native mouse/link forwarding, and sustained bounded capture pass; attachments advertise OSC 8 hyperlinks |
-| SwiftTerm | 1.20.0 | Pinned; native terminal views implemented and exercised by the Debug probe |
+| libghostty-spm | 1.6.20260922 (Ghostty `3c47ca159368`) | Pinned; desktop terminal views (host-managed I/O) exercised by the Debug probe |
+| SwiftTerm | 1.20.0 | Pinned; iOS terminal view |
 | Hummingbird | 2.26.0 | Actual loopback MCP requests exercised with fixture credentials |
 | Codex | 0.154.0 | Three real sessions/two profiles; authenticated messages, native approvals/completion, scoped stop, explicit resume and runtime reconnect pass. Native UI input/clipboard/resize/history and normal/forced UI quit preserve the process and draft |
 | Codex | 0.155.1 | Authenticated cross-provider MCP delegation, messages/results, model/effort overrides, same-session follow-up, retry and retained closure pass; see [orchestration validation](orchestration-validation.md) |

@@ -44,9 +44,7 @@ targets:
       - package: Chauffeur
         product: ChauffeurTerminalInterface
       - package: Chauffeur
-        product: ChauffeurTerminalSwiftTerm
-      - package: SwiftTerm
-        product: SwiftTerm
+        product: ChauffeurTerminalGhostty
     info:
       path: .build/generated/Chauffeur-Info.plist
       properties:

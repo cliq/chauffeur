@@ -66,7 +66,7 @@ with tempfile.TemporaryDirectory(prefix="chauffeur-native-", dir="/tmp") as dire
         wait_for(lambda: call("status").get("mcpEndpoint"))
         config = root / "existing profile"; config.mkdir()
         set_id, preset_id = uid(), uid()
-        call("savePresetSet", {"record": {"id": set_id, "name": "Fixture Personal", "revision": 1, "archived": False}})
+        call("savePresetSet", {"record": {"id": set_id, "name": "Fixture Personal", "agentSelection": "custom", "revision": 1, "archived": False}})
         call("savePreset", {"record": {"id": preset_id, "setID": set_id, "name": "Fake Codex", "kind": "codex", "executable": str(repository / "Prototypes/fake_cli.py"), "configurationDirectory": str(config), "arguments": [], "integration": "unverified", "archived": False}})
         now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         for index in range(1, 5):

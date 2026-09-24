@@ -2,7 +2,7 @@ import SwiftUI
 import AppKit
 import ChauffeurCore
 import ChauffeurTerminalInterface
-import ChauffeurTerminalSwiftTerm
+import ChauffeurTerminalGhostty
 
 /// Whether this view controls the session's terminal. A terminal whose control
 /// was taken by another client stays `controlLost` until the user takes it
@@ -11,21 +11,22 @@ enum TerminalControlState: Equatable { case detached, connecting, connected, con
 
 /// Owns one session's IPC attachment (connection, attachment generation, control
 /// state, outgoing queue) and drives an engine-neutral `TerminalEngineAdapter`.
-/// Every byte in or out crosses the adapter; the controller never talks to
-/// SwiftTerm for I/O. Engine-specific desktop features (history find, focus
-/// deferral, accessibility, the Debug probe) reach the themed view through
-/// `desktopAdapter`/`terminal` only.
+/// Every byte in or out crosses the adapter, and so do history search, focus
+/// and the Debug probe's screen reads; the controller never names the engine
+/// beyond creating it.
 @MainActor final class TerminalController: ObservableObject, TerminalEngineAdapterDelegate {
     let sessionID: UUID
     /// The engine-neutral terminal this controller feeds and listens to.
     let adapter: any TerminalEngineAdapter
-    /// The same object as `adapter` when it is the production SwiftTerm adapter;
-    /// `nil` when a test or probe injected another engine.
-    let desktopAdapter: SwiftTermAdapter?
     @Published var status: String?
     @Published var connected = false
     @Published var controlState: TerminalControlState = .detached { didSet { syncInputGate() } }
     @Published var historyPresented = false
+    /// The read-only history's find bar and the engine's match count for it.
+    @Published var findPresented = false
+    @Published var findQuery = ""
+    @Published private(set) var searchTotal: Int?
+    @Published private(set) var searchSelected: Int?
     private let readOnly: Bool
     var historyController: TerminalController?
     private var connection: SocketConnection?
@@ -46,49 +47,32 @@ enum TerminalControlState: Equatable { case detached, connecting, connected, con
         if debugEvents.count > 40 { debugEvents.removeFirst(debugEvents.count - 40) }
     }
     #endif
-    /// Creates the controller around the desktop SwiftTerm adapter wrapping the
-    /// app's themed view, unless `adapter` injects another engine (probes, tests).
+    /// Creates the controller around the desktop Ghostty adapter, unless
+    /// `adapter` injects another engine (probes, tests).
     init(sessionID: UUID, scrollback: Int, readOnly: Bool = false, adapter: (any TerminalEngineAdapter)? = nil) {
         self.sessionID = sessionID
         self.readOnly = readOnly
-        // `ThemedTerminalView` owns the colors (it re-applies them on appearance
-        // changes), so the adapter is told not to touch them.
-        let appearance = TerminalAppearance(fontSize: 13, scrollbackLines: scrollback, followsSystemColors: false)
-        let engine: any TerminalEngineAdapter = adapter ?? SwiftTermAdapter(view: ThemedTerminalView(frame: NSRect(x: 0, y: 0, width: 900, height: 620)), appearance: appearance)
+        // Default colors follow the system appearance; file drops paste quoted
+        // paths through the adapter's input gate and bracketed paste.
+        let appearance = TerminalAppearance(fontSize: 13, scrollbackLines: scrollback, followsSystemColors: true)
+        let engine: any TerminalEngineAdapter = adapter ?? GhosttyTerminalAdapter(appearance: appearance, acceptsFileDrops: !readOnly)
         self.adapter = engine
-        self.desktopAdapter = engine as? SwiftTermAdapter
         engine.delegate = self
-        if let view = themedView {
-            view.acceptsFileDrops = !readOnly
-            view.applyAppearance()
-            view.setAccessibilityIdentifier("\(readOnly ? "history" : "terminal")-\(sessionID.uuidString)")
-            view.setAccessibilityLabel(readOnly ? "Saved terminal history" : "Agent terminal")
-            // Drops go through the adapter so the input gate and the bracketed
-            // paste encoding are the engine's, not the view's.
-            view.pasteHandler = { [weak self] text in self?.adapter.paste(text) }
-        }
+        view.setAccessibilityIdentifier("\(readOnly ? "history" : "terminal")-\(sessionID.uuidString)")
+        view.setAccessibilityLabel(readOnly ? "Saved terminal history" : "Agent terminal")
         #if DEBUG
         assert(TerminalAdapterConformance.check(engine).isEmpty, "Terminal adapter violates its contract: \(TerminalAdapterConformance.check(engine))")
         #endif
         syncInputGate()
     }
-    /// The desktop's themed SwiftTerm view, when the production adapter is in
-    /// use. Only for engine-specific desktop features (focus deferral, find, the
-    /// Debug probe); never for bytes.
-    private var themedView: ThemedTerminalView? { desktopAdapter?.view as? ThemedTerminalView }
-    /// The themed view for callers that only exist on the desktop (`ProjectWindow`
-    /// focus checks, `NativeProbe`). Traps when another engine was injected.
-    var terminal: ThemedTerminalView {
-        guard let themedView else { preconditionFailure("TerminalController.terminal requires the SwiftTerm desktop adapter") }
-        return themedView
-    }
+    /// The engine's view, for window and focus checks; never for bytes.
+    var view: NSView { adapter.makeView() }
     /// Input may leave the terminal only while this controller holds a live
     /// attachment it controls. Anything typed otherwise is dropped by the
     /// adapter, never queued, so nothing replays after a reconnect.
     private func syncInputGate() {
         let enabled = !readOnly && attachmentGeneration != nil && controlState == .connected
         if adapter.isInputEnabled != enabled { adapter.setInputEnabled(enabled) }
-        themedView?.inputEnabled = enabled
     }
     /// Attaches to the live terminal. Automatic calls (layout synchronization)
     /// leave a terminal alone once another client took control of it; only an
@@ -197,14 +181,14 @@ enum TerminalControlState: Equatable { case detached, connecting, connected, con
         // leaves the terminal with the client that took it.
         if case .controlLost = controlState {} else { controlState = .detached }
     }
-    /// Focuses the terminal, or arranges for it once the view is on screen: a
-    /// newly selected tab is not in the window yet when its selection changes.
+    /// Focuses the terminal; the engine defers it until the view is on screen
+    /// when a newly selected tab is not in the window yet.
     func focus() {
         guard !readOnly else { return }
-        if let themedView, themedView.window == nil { themedView.focusesWhenAttached = true } else { adapter.focus() }
+        adapter.focus()
     }
     func find() {
-        if readOnly { desktopAdapter?.view.performTextFinderAction(findSender()) }
+        if readOnly { findPresented = true }
         else if historyPresented, let historyController { historyController.find() }
         else {
             historyController = TerminalController(sessionID: sessionID, scrollback: 10_000, readOnly: true)
@@ -216,11 +200,31 @@ enum TerminalControlState: Equatable { case detached, connecting, connected, con
         #if DEBUG
         trace("display history bytes=\(snapshot.history.utf8.count) screen bytes=\(snapshot.screen.utf8.count)")
         #endif
-        adapter.configure(TerminalAppearance(fontSize: 13, scrollbackLines: snapshot.lineLimit + snapshot.rows, followsSystemColors: false))
+        adapter.configure(TerminalAppearance(fontSize: 13, scrollbackLines: snapshot.lineLimit + snapshot.rows, followsSystemColors: true))
         adapter.reset()
-        adapter.feed(Data(snapshot.rendering.utf8))
+        // Replayed, so queries inside the saved output are never answered.
+        adapter.replay(Data(snapshot.rendering.utf8))
+        if findPresented && !findQuery.isEmpty { adapter.search(findQuery) }
     }
-    private func findSender() -> NSMenuItem { let item = NSMenuItem(); item.tag = NSTextFinder.Action.showFindInterface.rawValue; return item }
+    /// Searches the read-only history; an empty query clears the highlights.
+    func search(_ query: String) {
+        findQuery = query
+        adapter.search(query)
+    }
+    func findNext() { if !findQuery.isEmpty { adapter.searchNext() } }
+    func findPrevious() { if !findQuery.isEmpty { adapter.searchPrevious() } }
+    func closeFind() {
+        adapter.endSearch()
+        findPresented = false
+    }
+    #if DEBUG
+    /// The engine's buffer, scrollback included, for the Debug probe.
+    var screenText: String { adapter.screenText(includingScrollback: true) ?? "" }
+    /// Types as the input method would, through the engine's own text input.
+    func simulateTyping(_ text: String) {
+        (view as? NSTextInputClient)?.insertText(text, replacementRange: NSRange(location: NSNotFound, length: 0))
+    }
+    #endif
     private func enqueue(_ request: IPCRequest) {
         guard !readOnly, let attachmentGeneration else { return }
         var request = request
@@ -245,6 +249,9 @@ enum TerminalControlState: Equatable { case detached, connecting, connected, con
     }
     func terminal(_ adapter: any TerminalEngineAdapter, didChangeCellSize size: TerminalCellSize) { sendResize(size) }
     func terminal(_ adapter: any TerminalEngineAdapter, didChangeTitle title: String) {}
+    func terminal(_ adapter: any TerminalEngineAdapter, didUpdateSearchTotal total: Int?, selected: Int?) {
+        searchTotal = total; searchSelected = selected
+    }
     func terminalDidRingBell(_ adapter: any TerminalEngineAdapter) { NSSound.beep() }
     /// OSC 52: the adapter only reports the request; writing the pasteboard is the app's call.
     func terminal(_ adapter: any TerminalEngineAdapter, didCopyToClipboard text: String) {
@@ -340,6 +347,7 @@ private struct TerminalHistoryView: View {
             }
             if let failure { Text(failure).foregroundStyle(.orange) }
             if loading { ProgressView().controlSize(.small) }
+            if controller.findPresented { HistoryFindBar(controller: controller) }
             TerminalHost(controller: controller).frame(maxWidth: .infinity, maxHeight: .infinity)
         }.padding().frame(minWidth: 720, idealWidth: 980, minHeight: 480, idealHeight: 680)
             .task { await refresh(); if snapshot != nil { controller.find() } }
@@ -352,5 +360,32 @@ private struct TerminalHistoryView: View {
             let saved = try await Task.detached { try result.decode(TerminalSnapshot.self) }.value
             try saved.validate(); snapshot = saved; controller.display(saved); controller.status = nil
         } catch { failure = (error as? ChauffeurError)?.message ?? "Could not load saved terminal history"; controller.status = failure }
+    }
+}
+
+/// Searches the read-only history through the terminal engine's own search.
+private struct HistoryFindBar: View {
+    @ObservedObject var controller: TerminalController
+    @FocusState private var focused: Bool
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+            TextField("Find in history", text: Binding(get: { controller.findQuery }, set: { controller.search($0) }))
+                .textFieldStyle(.roundedBorder).focused($focused)
+                .onSubmit { controller.findNext() }
+                .onKeyPress(.escape) { controller.closeFind(); return .handled }
+                .accessibilityIdentifier("history.find")
+            Text(matchLabel).font(.caption).monospacedDigit().foregroundStyle(.secondary).frame(minWidth: 72, alignment: .trailing)
+            Button { controller.findPrevious() } label: { Image(systemName: "chevron.up") }
+                .keyboardShortcut("g", modifiers: [.command, .shift]).help("Previous match")
+            Button { controller.findNext() } label: { Image(systemName: "chevron.down") }
+                .keyboardShortcut("g", modifiers: .command).help("Next match")
+            Button("Done") { controller.closeFind() }
+        }.onAppear { focused = true }
+    }
+    private var matchLabel: String {
+        guard !controller.findQuery.isEmpty, let total = controller.searchTotal else { return "" }
+        guard total > 0 else { return "No matches" }
+        return controller.searchSelected.map { "\($0) of \(total)" } ?? "\(total) matches"
     }
 }

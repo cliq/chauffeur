@@ -73,7 +73,7 @@ import ChauffeurCore
                         try await wait("rendered fixture terminal \(session.id)") {
                             guard let controller = layout.controllers[session.id] else { return false }
                             let text = screen(controller).replacingOccurrences(of: "\n", with: "")
-                            return controller.connected && controller.terminal.window === layout.window && text.contains("Chauffeur fixture — 日本語 café")
+                            return controller.connected && controller.view.window === layout.window && text.contains("Chauffeur fixture — 日本語 café")
                         }
                     }
                     // Restore selection without overwriting geometry saved while
@@ -107,13 +107,13 @@ import ChauffeurCore
                     controller.simulateConnectionDrop()
                     try await wait("dropped stream scheduled reconnect") { !controller.connected && controller.status == "Reconnecting…" }
                     try await wait("dropped stream recovered automatically") { controller.connected }
-                    controller.terminal.insertText("native café 日本語", replacementRange: NSRange(location: NSNotFound, length: 0))
+                    controller.simulateTyping("native café 日本語")
                     try await wait("native input echoed") { screen(controller).contains("INPUT=native café 日本語") }
                     let window = first.window!
                     window.setContentSize(NSSize(width: 1180, height: 760))
                     try await wait("terminal PTY resize") {
-                        let terminal = controller.terminal.getTerminal()
-                        return screen(controller).contains("SIZE=\(terminal.cols)x\(terminal.rows)")
+                        let size = controller.adapter.cellSize
+                        return screen(controller).contains("SIZE=\(size.cols)x\(size.rows)")
                     }
                     controller.detach()
                     try await Task.sleep(for: .milliseconds(300))
@@ -123,11 +123,14 @@ import ChauffeurCore
                 controller.find()
                 try await wait("searchable normal terminal history") {
                     guard let history = controller.historyController else { return false }
-                    return history.terminal.window != nil && history.terminal.findNext("fixture-history-249")
+                    return history.view.window != nil && screen(history).contains("fixture-history-249")
                 }
                 let history = controller.historyController!
-                guard history.terminal.findNext("INPUT=native café 日本語") else { throw ChauffeurError("native_probe", "Active screen is missing from searchable history") }
-                history.terminal.insertText("history-must-not-send", replacementRange: NSRange(location: NSNotFound, length: 0))
+                guard screen(history).contains("INPUT=native café 日本語") else { throw ChauffeurError("native_probe", "Active screen is missing from searchable history") }
+                history.search("fixture-history-249")
+                try await wait("history search found a match") { (history.searchTotal ?? 0) > 0 }
+                history.closeFind()
+                history.simulateTyping("history-must-not-send")
                 try await Task.sleep(for: .milliseconds(200))
                 guard !screen(controller).contains("history-must-not-send") else { throw ChauffeurError("native_probe", "Read-only history sent terminal input") }
                 controller.historyPresented = false
@@ -171,7 +174,7 @@ import ChauffeurCore
                 let result: JSONValue = .object(["passed": .bool(true), "phase": .string(phase), "windows": .number(4), "sessions": .number(10), "renderedTerminals": .number(10), "unsentInput": .string("preserved"), "historySearch": .string("normal history and active screen found; read-only input ignored"), "split": .bool(first.state.splitSessionID != nil), "frame": .string(NSStringFromRect(first.window!.frame))])
                 try JSONCoding.encode(result).write(to: root.appendingPathComponent("native-phase-\(phase).json"), options: .atomic)
             } catch {
-                let result: JSONValue = .object(["passed": .bool(false), "error": .string(error.localizedDescription), "appError": model.error.map(JSONValue.string) ?? .null, "layouts": .number(Double(layouts.count)), "windows": .array(NSApp.windows.map { .string($0.title) }), "terminals": .array(layouts.values.flatMap { $0.controllers.values }.map { .object(["id": .string($0.sessionID.uuidString), "connected": .bool($0.connected), "size": .string("\($0.terminal.getTerminal().cols)x\($0.terminal.getTerminal().rows)"), "status": $0.status.map(JSONValue.string) ?? .null, "historyPresented": .bool($0.historyPresented), "historyAttached": .bool($0.historyController?.terminal.window != nil), "historyStatus": $0.historyController?.status.map(JSONValue.string) ?? .null, "historyEvents": .array(($0.historyController?.debugEvents ?? []).map(JSONValue.string)), "historyTail": $0.historyController.map { .string(String(screen($0).suffix(4000))) } ?? .null, "screen": .string(screen($0))]) })])
+                let result: JSONValue = .object(["passed": .bool(false), "error": .string(error.localizedDescription), "appError": model.error.map(JSONValue.string) ?? .null, "layouts": .number(Double(layouts.count)), "windows": .array(NSApp.windows.map { .string($0.title) }), "terminals": .array(layouts.values.flatMap { $0.controllers.values }.map { .object(["id": .string($0.sessionID.uuidString), "connected": .bool($0.connected), "size": .string("\($0.adapter.cellSize.cols)x\($0.adapter.cellSize.rows)"), "status": $0.status.map(JSONValue.string) ?? .null, "historyPresented": .bool($0.historyPresented), "historyAttached": .bool($0.historyController?.view.window != nil), "historyStatus": $0.historyController?.status.map(JSONValue.string) ?? .null, "historyEvents": .array(($0.historyController?.debugEvents ?? []).map(JSONValue.string)), "historyTail": $0.historyController.map { .string(String(screen($0).suffix(4000))) } ?? .null, "screen": .string(screen($0))]) })])
                 try? JSONCoding.encode(result).write(to: root.appendingPathComponent("native-phase-\(phase).json"), options: .atomic)
                 let traces = Dictionary(uniqueKeysWithValues: layouts.values.flatMap { $0.controllers.values }.map { ($0.sessionID.uuidString, $0.debugEvents) })
                 try? JSONCoding.encode(traces).write(to: root.appendingPathComponent("native-phase-\(phase)-trace.json"), options: .atomic)
@@ -185,8 +188,7 @@ import ChauffeurCore
         }
     }
     private static func screen(_ controller: TerminalController) -> String {
-        // SwiftTerm exports NUL continuation cells after wide glyphs.
-        String(decoding: controller.terminal.getTerminal().getBufferAsData(), as: UTF8.self).replacingOccurrences(of: "\0", with: "")
+        controller.screenText
     }
     private static func wait(_ label: String, until probe: @MainActor () -> Bool) async throws {
         let deadline = ContinuousClock.now.advanced(by: .seconds(20))
