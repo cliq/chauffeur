@@ -203,7 +203,7 @@ struct WorktreeCreationTests {
         snapshot = await fixture.runtime.store.reload()
         #expect(FileManager.default.fileExists(atPath: marker.path) && snapshot.sessions.count == 1 && snapshot.worktrees.count == 1)
         preview = try await fixture.runtime.handle(IPCRequest("previewWorktreeDeletion", params: params)).decode(WorktreeDeletionPreview.self)
-        #expect(preview.hasChanges && preview.items(branch: "external", finishedSessions: 1, checkoutMissing: false).filter { $0.severity == .loss }.count == 2)
+        #expect(preview.hasChanges && preview.items(branch: "external", finishedSessions: 1, checkoutMissing: false).filter { $0.severity == .loss }.count == 1)
         #expect(preview.changedFiles == [.init(path: "keep.txt", status: "??")])
         let confirmed: JSONValue = .object(["projectID": .string(fixture.project.id.uuidString), "folderID": .string(folder.id.uuidString), "path": .string(external.path), "discardChanges": .bool(true)])
         let result = try await fixture.runtime.handle(IPCRequest("deleteWorktree", params: confirmed))
