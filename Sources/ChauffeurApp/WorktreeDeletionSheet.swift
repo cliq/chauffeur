@@ -3,7 +3,8 @@ import ChauffeurCore
 
 /// Confirms a worktree removal with one verdict a glance can read: red with
 /// the issues that lose work, or green with the reasons nothing is lost. The
-/// two are never mixed in one list. Branch bookkeeping is a footnote.
+/// two are never mixed in one list. Branch bookkeeping and finished session
+/// history removal are footnotes.
 struct WorktreeDeletionSheet: View {
     let row: CheckoutRow
     let preview: WorktreeDeletionPreview

@@ -110,7 +110,7 @@ public struct WorktreeDeletionPreview: Codable, Equatable, Sendable {
         case safe
         /// Work disappears with the checkout.
         case loss
-        /// A consequence worth knowing that loses nothing.
+        /// An informational consequence that does not warrant a work-loss warning.
         case note
     }
     public struct Item: Equatable, Sendable, Identifiable {
@@ -148,7 +148,7 @@ public struct WorktreeDeletionPreview: Codable, Equatable, Sendable {
             }
         }
         items.append(finishedSessions > 0
-            ? Item(.loss, "\(finishedSessions) finished session\(finishedSessions == 1 ? "" : "s") and their terminal history are deleted")
+            ? Item(.note, "\(finishedSessions) finished session\(finishedSessions == 1 ? "" : "s") and their terminal history are deleted")
             : Item(.safe, "No session history is affected"))
         return items
     }
