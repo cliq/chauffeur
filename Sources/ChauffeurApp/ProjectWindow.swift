@@ -14,7 +14,14 @@ struct PendingTerminalTab: Identifiable {
     @Published var state: WindowState
     @Published var search = ""
     @Published var detailsVisible = false
-    @Published var closedSessionIDs = Set<UUID>()
+    /// Tabs the user closed. Saved with the window so a kept finished session
+    /// does not come back as a tab after a restart.
+    @Published var closedSessionIDs = Set<UUID>() {
+        didSet {
+            let saved = closedSessionIDs.sorted { $0.uuidString < $1.uuidString }
+            if state.closedSessionTabs != saved { state.closedSessionTabs = saved }
+        }
+    }
     @Published var newTabPresented = false
     @Published var pendingTabs: [PendingTerminalTab] = []
     var controllers: [UUID: TerminalController] = [:]
@@ -983,7 +990,11 @@ struct ProjectWindow: View {
             QuickSessionProbe.openWorktrees[projectID] = { folderID in showWorktrees(folderID: folderID) }
         }
         #endif
-        if let saved = model.snapshot.store.windows.first(where: { $0.value.id == projectID })?.value { layout.state = saved }
+        if let saved = model.snapshot.store.windows.first(where: { $0.value.id == projectID })?.value {
+            layout.state = saved
+            // Forget closed tabs of deleted sessions, once the session list is known.
+            layout.closedSessionIDs = Set(model.online ? saved.closedSessionTabs.filter { model.session($0) != nil } : saved.closedSessionTabs)
+        }
         model.beginWindowEditing(projectID)
         // Tabs and split panes are gone; a legacy record keeps its selected session.
         layout.state.tabs = []; layout.state.splitSessionID = nil

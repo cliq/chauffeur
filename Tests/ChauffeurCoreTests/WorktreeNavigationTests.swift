@@ -34,9 +34,22 @@ struct WorktreeNavigationTests {
 
     @Test func olderWindowRecordsDefaultToUnsortedTabs() throws {
         var value = try JSONCoding.decode(JSONValue.self, from: JSONCoding.encode(WindowState(projectID: UUID())))
-        if case .object(var fields) = value { fields.removeValue(forKey: "sessionTabOrder"); value = .object(fields) }
+        if case .object(var fields) = value {
+            fields.removeValue(forKey: "sessionTabOrder"); fields.removeValue(forKey: "closedSessionTabs"); value = .object(fields)
+        }
         let restored = try value.decode(WindowState.self)
         #expect(restored.sessionTabOrder.isEmpty)
+        #expect(restored.closedSessionTabs.isEmpty)
+    }
+
+    @Test func closedTabsSurviveARestart() throws {
+        var state = WindowState(projectID: UUID())
+        let closed = [UUID(), UUID()]
+        state.closedSessionTabs = closed
+        let restored = try JSONCoding.decode(WindowState.self, from: JSONCoding.encode(state))
+        #expect(restored.closedSessionTabs == closed)
+        state.closedSessionTabs = [closed[0], closed[0]]
+        #expect(throws: (any Error).self) { try state.validate() }
     }
 
     @Test func sessionsGroupByWorktreeRecordThenWorkingDirectory() throws {

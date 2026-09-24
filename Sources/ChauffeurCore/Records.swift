@@ -287,6 +287,9 @@ public struct WindowState: Record, Equatable {
     public var sidebarMode: SidebarMode = .repositories
     /// User ordering of session tabs; each checkout displays its matching subset.
     public var sessionTabOrder: [UUID] = []
+    /// Sessions whose tabs the user closed while the session record was kept (finished
+    /// sessions with history retained). Their tabs stay hidden until selected again.
+    public var closedSessionTabs: [UUID] = []
     /// Legacy tab layout fields. Older records still carry them; new writes
     /// leave them empty.
     public var tabs: [UUID] = []
@@ -305,6 +308,7 @@ public struct WindowState: Record, Equatable {
         selectedWorktreePath = try container.decodeIfPresent(String.self, forKey: .selectedWorktreePath)
         sidebarMode = try container.decodeIfPresent(SidebarMode.self, forKey: .sidebarMode) ?? .repositories
         sessionTabOrder = try container.decodeIfPresent([UUID].self, forKey: .sessionTabOrder) ?? []
+        closedSessionTabs = try container.decodeIfPresent([UUID].self, forKey: .closedSessionTabs) ?? []
         tabs = try container.decodeIfPresent([UUID].self, forKey: .tabs) ?? []
         splitSessionID = try container.decodeIfPresent(UUID.self, forKey: .splitSessionID)
         sidebarVisible = try container.decodeIfPresent(Bool.self, forKey: .sidebarVisible) ?? true
@@ -313,6 +317,7 @@ public struct WindowState: Record, Equatable {
     public func validate() throws {
         try Validation.unique(tabs, field: "tab")
         try Validation.unique(sessionTabOrder, field: "session tab")
+        try Validation.unique(closedSessionTabs, field: "closed session tab")
         if let selectedWorktreePath { try Validation.absolutePath(selectedWorktreePath) }
     }
 }
