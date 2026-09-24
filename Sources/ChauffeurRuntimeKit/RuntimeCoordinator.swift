@@ -1186,10 +1186,15 @@ public actor RuntimeCoordinator {
     /// Workers this session controls that are neither closed nor done reporting.
     func hasOpenWorkers(_ sessionID: UUID) async -> Bool {
         guard let delegations = try? await ledger.allDelegations() else { return false }
-        return delegations.contains { item in
-            item.controllingParentID == sessionID && item.closureOutcome == nil && [.reserved, .launching, .running].contains(item.state)
-                && (sessions[item.childID].map { $0.state.isLive && $0.closureOutcome == nil } ?? true)
-        }
+        return delegations.contains { $0.controllingParentID == sessionID && Self.isOpenWorker($0, child: sessions[$0.childID]) }
+    }
+    /// A worker the OpenCode plugin waits for. One that finished its turn without
+    /// reporting (e.g. after a follow-up) will not report by itself, and a waiter that
+    /// starts after that change never sees it, so waiting for it would never end.
+    static func isOpenWorker(_ item: Delegation, child: Session?) -> Bool {
+        guard item.closureOutcome == nil, [.reserved, .launching, .running].contains(item.state) else { return false }
+        guard let child else { return true }
+        return child.state.isLive && child.closureOutcome == nil && child.state != .turnFinished
     }
     private var skillHome: String { baseEnvironment["HOME"] ?? root.path }
     private func managedSkillInstaller() throws -> SkillInstaller {

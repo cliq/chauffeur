@@ -276,6 +276,27 @@ struct OpenCodeHookCommandTests {
         _ = try await fixture.stop()
     }
 
+    @Test func thePluginWaitsOnlyForWorkersThatMayStillReport() {
+        let project = UUID(), group = UUID()
+        var worker = LedgerTests().session(project: project, group: group, parent: UUID())
+        var item = Delegation(scope: GroupScope(projectID: project, groupID: group), parentID: worker.parentID!, childID: worker.id, task: "Work", presetID: UUID(), folderID: UUID(), shareCheckout: true)
+        item.state = .running
+        #expect(RuntimeCoordinator.isOpenWorker(item, child: nil), "Not launched yet")
+        for state in [SessionState.starting, .activityUnknown, .running, .needsAttention] {
+            worker.state = state
+            #expect(RuntimeCoordinator.isOpenWorker(item, child: worker), "\(state)")
+        }
+        // Idle without a report for this turn (e.g. a follow-up it answered in text): it will not report.
+        worker.state = .turnFinished
+        #expect(!RuntimeCoordinator.isOpenWorker(item, child: worker))
+        worker.state = .exited
+        #expect(!RuntimeCoordinator.isOpenWorker(item, child: worker))
+        worker.state = .running; item.state = .resultReported
+        #expect(!RuntimeCoordinator.isOpenWorker(item, child: worker))
+        item.state = .running; item.closureOutcome = "accepted"
+        #expect(!RuntimeCoordinator.isOpenWorker(item, child: worker))
+    }
+
     @Test func waitForWorkPrintsJSONForThePlugin() throws {
         let ctl = try #require(ctl)
         let result = try run(ctl, ["wait-for-work", "--json"], input: "", environment: [:])
