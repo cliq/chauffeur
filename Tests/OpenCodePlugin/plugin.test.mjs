@@ -328,6 +328,19 @@ test("a failed continuation after a blocking Stop ends the turn instead of leavi
   assert.deepEqual(h.statuses(), ["session-start", "running", "turn-finished", "running"], "a continuation that started reports nothing more");
 });
 
+test("a nested OpenCode started from a tool is a no-op; the launched one marks itself the owner", async () => {
+  const shared = { ...env };
+  const ctl = fakeCtl();
+  const outer = createChauffeurPlugin({ client: fakeClient(), env: shared, spawn: ctl.spawn, onExit: () => {}, pid: 100 });
+  assert.equal(typeof outer.event, "function");
+  assert.equal(shared.CHAUFFEUR_OPENCODE_OWNER, "100");
+  // A restart of the same process (plugin reloaded) keeps working.
+  assert.equal(typeof createChauffeurPlugin({ client: fakeClient(), env: shared, spawn: ctl.spawn, onExit: () => {}, pid: 100 }).event, "function");
+  const nested = createChauffeurPlugin({ client: fakeClient(), env: { ...shared }, spawn: ctl.spawn, onExit: () => {}, pid: 200 });
+  assert.deepEqual(nested, {});
+  assert.equal(ctl.calls.length, 0);
+});
+
 test("no waiter without waitForWorkers", async () => {
   const h = await harness({ reply: stopReply({ block: false, waitForWorkers: false }) });
   await h.emit(...created(ROOT));

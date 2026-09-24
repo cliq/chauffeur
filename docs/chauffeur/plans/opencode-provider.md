@@ -92,6 +92,8 @@ runtime publishes it to `<Application Support>/Chauffeur/…/plugins/chauffeur-o
 - `CHAUFFEUR_CTL` is the path to `chauffeurctl`.
 - `CHAUFFEUR_SESSION_TOKEN` and `CHAUFFEUR_SOCKET` are already set for every agent session.
 - The plugin is a no-op unless `CHAUFFEUR_SESSION_ID` and `CHAUFFEUR_CTL` are set.
+- On load the plugin sets `CHAUFFEUR_OPENCODE_OWNER` to its process ID. Tool subprocesses inherit it, so a nested `opencode run`
+  (from the bash tool) finds another process's ID there and stays a no-op instead of reporting into the outer session.
 
 ### Hook payload
 

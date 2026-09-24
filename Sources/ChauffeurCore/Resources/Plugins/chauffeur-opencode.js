@@ -18,11 +18,17 @@ function createChauffeurPlugin({
   setTimeout: setTimer = setTimeout,
   clearTimeout: clearTimer = clearTimeout,
   onExit = (fn) => process.once("exit", fn),
+  pid = process.pid,
   ...options
 } = {}) {
   const ctl = env.CHAUFFEUR_CTL;
   const chauffeurSession = env.CHAUFFEUR_SESSION_ID;
   if (!ctl || !chauffeurSession) return {};
+  // Tool subprocesses inherit the launch environment, so an `opencode run` from the bash tool loads this plugin too.
+  // Only the OpenCode that Chauffeur launched reports into the session.
+  const owner = String(pid);
+  if (env.CHAUFFEUR_OPENCODE_OWNER && env.CHAUFFEUR_OPENCODE_OWNER !== owner) return {};
+  env.CHAUFFEUR_OPENCODE_OWNER = owner;
   const cfg = { ...defaults, ...options };
 
   const s = {
@@ -193,7 +199,9 @@ function createChauffeurPlugin({
       else if (type === "permission.replied" || type === "question.replied" || type === "question.rejected") onReplied(p.requestID);
       return;
     }
-    if (!s.root) adopt(sid, "resume"); // `-s <id>` emits no session.created
+    // The first root session wins (V9): it is the one the TUI opened, and `-s <id>` emits no session.created, so a
+    // resumed root is adopted from its first event. Any later root (another session opened in the TUI) is ignored.
+    if (!s.root) adopt(sid, "resume");
     if (sid !== s.root) return;
     switch (type) {
       case "session.status": if (p.status?.type === "busy") onBusy(); break;
