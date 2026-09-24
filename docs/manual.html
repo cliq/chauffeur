@@ -275,7 +275,7 @@
       <p>While the service is running, the Chauffeur cap in the menu bar lists projects with active sessions and their counts. Choose a project to open it, or use <strong>Open Chauffeur…</strong>. The menu remains available after the app quits. Its Quit action follows the same keep-running/review choice as <kbd>⌘Q</kbd>; it does not stop the background service.</p>
       <h3>Enable notifications</h3>
       <ol>
-        <li>Open <strong>Settings → Runtime</strong> and enable <strong>Show session notifications</strong>.</li>
+        <li>Open <strong>Settings → General</strong> and enable <strong>Show session notifications</strong>.</li>
         <li>Allow <strong>Chauffeur Notifications</strong> in the macOS prompt.</li>
         <li>Use <strong>Send Test Notification</strong> with an existing session to check delivery.</li>
       </ol>
@@ -291,13 +291,13 @@
 
     <section id="launcher">
       <h2>12. Open a project from Terminal</h2>
-      <p>Choose <strong>Settings → Runtime → Terminal Command → Install Terminal Command…</strong>. The destination is <code>/usr/local/bin/chauffeur</code>. macOS requests administrator authentication if that folder is not writable.</p>
+      <p>Choose <strong>Settings → General → Terminal Command → Install Terminal Command…</strong>. The destination is <code>/usr/local/bin/chauffeur</code>. macOS requests administrator authentication if that folder is not writable.</p>
       <pre><code>chauffeur
 chauffeur ~/Projects/website
 chauffeur "./folder with spaces"
 chauffeur -- ./-example</code></pre>
       <p>With no argument, Chauffeur uses the current folder. A path can point to a repository, worktree, or a folder inside one. The command chooses the closest registered match, opens its project, and selects its repository. If multiple projects share that match, the app asks you to choose. If nothing matches, Create Project opens with the folder already added and its name prefilled. Choose a team, review the details, and save, or cancel.</p>
-      <p>Opening a folder does not start an agent. Repeated commands reuse the existing project window. After updating or moving the app, choose <strong>Reinstall Terminal Command…</strong> in Settings → Runtime. It remains available even when the command is already installed and points it at this app’s bundled launcher. An unrelated existing <code>chauffeur</code> command is preserved and reported as a conflict.</p>
+      <p>Opening a folder does not start an agent. Repeated commands reuse the existing project window. After updating or moving the app, choose <strong>Reinstall Terminal Command…</strong> in Settings → General. It remains available even when the command is already installed and points it at this app’s bundled launcher. An unrelated existing <code>chauffeur</code> command is preserved and reported as a conflict.</p>
     </section>
 
     <section id="history">

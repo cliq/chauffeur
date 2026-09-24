@@ -18,6 +18,12 @@ struct SettingsView: View {
     @State private var retention = RetentionSettings()
     var body: some View {
         TabView {
+            // App preferences; the Runtime tab is only about the background service.
+            Form {
+                NotificationSettingsSection()
+                GlobalHotkeySettingsSection()
+                TerminalLauncherSettings()
+            }.formStyle(.grouped).tabItem { Label("General", systemImage: "gearshape") }
             BaseAgentPresetsView().tabItem { Label("Agent Presets", systemImage: "terminal") }
             HSplitView {
                 VStack(alignment: .leading, spacing: 0) {
@@ -84,9 +90,6 @@ struct SettingsView: View {
                     }
                     Text("Quitting the service keeps agents running but pauses updates and coordination. Start it again here or reopen Chauffeur to reconnect.").font(.caption).foregroundStyle(.secondary)
                 }
-                NotificationSettingsSection()
-                GlobalHotkeySettingsSection()
-                TerminalLauncherSettings()
                 Section("Retention and Delegation") {
                     Toggle("Keep finished sessions", isOn: $retention.keepFinishedSessions)
                         .accessibilityIdentifier("settings.keep-finished-sessions")

@@ -1,6 +1,6 @@
 # Session notifications
 
-Notifications are off by default. In **Chauffeur → Settings → Runtime**, enable
+Notifications are off by default. In **Chauffeur → Settings → General**, enable
 **Show session notifications**, then allow **Chauffeur Notifications** in the
 macOS permission prompt. If access was denied, change it in System Settings →
 Notifications. Focus and other macOS settings can silence alerts.
