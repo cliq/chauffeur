@@ -101,9 +101,10 @@ try:
     (artifacts / 'terminal.private.txt').write_text(view)
     final = current(session)
     result = {'states': states, 'nativeConversationID': final['nativeConversationID'], 'seconds': round(time.monotonic() - started),
-              # A successful MCP call shows as `⚙ chauffeur_chauffeur_discover`; a wrong name as `⚙ invalid [tool=…]`.
+              # A successful MCP call shows as `⚙ chauffeur_chauffeur_discover`; a wrong name as OpenCode's
+              # "unavailable tool '…'. Available tools: …" error.
               'discoverCalled': bool(re.search(r'⚙ chauffeur_chauffeur_discover', view)),
-              'invalidToolCalls': re.findall(r'invalid \[tool=([\w-]+)', view), 'bashRan': (checkout / 'live.txt').exists(),
+              'invalidToolCalls': sorted(set(re.findall(r"'([\w-]+)'\. Available tools", view))), 'bashRan': (checkout / 'live.txt').exists(),
               'repliedDone': 'DONE' in view.split('chauffeur_chauffeur_discover')[-1]}
     ok = bool(re.fullmatch(r'ses_[A-Za-z0-9]{26}', final['nativeConversationID'] or '')) and result['discoverCalled'] and result['bashRan']
     result['result'] = 'pass' if ok else 'fail'
