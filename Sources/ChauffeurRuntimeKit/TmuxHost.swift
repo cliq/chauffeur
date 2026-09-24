@@ -271,11 +271,11 @@ public actor TmuxHost {
             throw ChauffeurError("follow_up_unavailable", "The provider terminal identity is unavailable")
         }
         let socketPath = try await socket(for: session.id)
-        let metadata = try await command(["display-message", "-p", "-t", session.id.uuidString, "#{pane_id}|#{pane_pid}|#{pane_dead}|#{cursor_y}|#{pane_height}"], socket: socketPath)
+        let metadata = try await command(["display-message", "-p", "-t", session.id.uuidString, "#{pane_id}|#{pane_pid}|#{pane_dead}|#{cursor_y}|#{pane_height}|#{cursor_x}"], socket: socketPath)
         let fields = metadata.output.trimmingCharacters(in: .newlines).split(separator: "|", omittingEmptySubsequences: false).map(String.init)
-        guard metadata.status == 0, fields.count == 5, fields[0] == expectedPane,
+        guard metadata.status == 0, fields.count == 6, fields[0] == expectedPane,
               Int32(fields[1]) == expectedPID, fields[2] == "0",
-              let cursorY = Int(fields[3]), let height = Int(fields[4]),
+              let cursorY = Int(fields[3]), let height = Int(fields[4]), let cursorX = Int(fields[5]),
               cursorY >= 0, cursorY < height else {
             throw ChauffeurError("follow_up_unavailable", "The provider terminal identity or cursor state could not be verified")
         }
@@ -289,7 +289,7 @@ public actor TmuxHost {
               owner.paneID == expectedPane, owner.processID == expectedPID, !owner.dead else {
             throw ChauffeurError("follow_up_unavailable", "The provider terminal changed while input readiness was inspected")
         }
-        let composer = Self.composerReadiness(kind: kind, activeLine: lines[cursorY])
+        let composer = Self.composerReadiness(kind: kind, screen: ComposerScreen(lines: lines, cursorX: cursorX, cursorY: cursorY))
         switch composer {
         case .ready: return
         case .inputPending:
@@ -301,6 +301,9 @@ public actor TmuxHost {
 
     static func composerReadiness(kind: CLIKind, activeLine: String) -> ComposerReadiness {
         kind.provider?.composerReadiness(activeLine: activeLine.trimmingCharacters(in: .whitespaces)) ?? .unrecognized
+    }
+    static func composerReadiness(kind: CLIKind, screen: ComposerScreen) -> ComposerReadiness {
+        kind.provider?.composerReadiness(screen: screen) ?? .unrecognized
     }
     private func ensureClipboardForwarding(socket: String) async {
         guard !clipboardForwardingEnsured.contains(socket) else { return }

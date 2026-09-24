@@ -20,6 +20,15 @@ public enum SkillDiscovery: Sendable, Equatable {
 
 public enum ComposerReadiness: Equatable, Sendable { case ready, inputPending, unrecognized }
 
+/// The visible pane and cursor, for composers that can only be read in context.
+public struct ComposerScreen: Equatable, Sendable {
+    public var lines: [String]
+    /// Cell column and row of the cursor.
+    public var cursorX: Int
+    public var cursorY: Int
+    public init(lines: [String], cursorX: Int, cursorY: Int) { self.lines = lines; self.cursorX = cursorX; self.cursorY = cursorY }
+}
+
 /// How one argument relates to a launch option.
 public enum LaunchOptionMatch: Equatable, Sendable { case none, separate, inline(String) }
 
@@ -89,6 +98,8 @@ public protocol AgentProvider: Sendable {
 
     /// Whether the cursor line (trimmed) is an empty composer, a draft or a dialog.
     func composerReadiness(activeLine: String) -> ComposerReadiness
+    /// The same, for rules that need the lines around the cursor.
+    func composerReadiness(screen: ComposerScreen) -> ComposerReadiness
 
     /// Chauffeur names the native conversation before launch.
     var preassignsConversationID: Bool { get }
@@ -105,6 +116,10 @@ public extension AgentProvider {
     var coordinationLimitation: String? { nil }
     func identifies(version: String, help: String) -> Bool { identifies(version: version) }
     var probesModels: Bool { false }
+    func composerReadiness(screen: ComposerScreen) -> ComposerReadiness {
+        guard screen.lines.indices.contains(screen.cursorY) else { return .unrecognized }
+        return composerReadiness(activeLine: screen.lines[screen.cursorY].trimmingCharacters(in: .whitespaces))
+    }
     var maxInboxWaitSeconds: Int? { nil }
     func environment(configurationDirectory: String) -> [String: String] { [configurationEnvironmentKey: configurationDirectory] }
     func defaultConfigurationDirectory(home: String) -> String { URL(fileURLWithPath: home).appendingPathComponent(defaultHomeFolder).path }
@@ -300,11 +315,35 @@ public struct OpenCodeProvider: AgentProvider {
         AutoApprovePolicy(flag: "--auto", caption: "Approves anything not explicitly denied", replacedFlags: ["--auto"], replacedValueOptions: [])
     }
 
-    /// The active line cannot prove an empty prompt, so follow-ups wait for a screen rule.
+    /// Only the active line is known here, which cannot prove an empty prompt.
     public func composerReadiness(activeLine line: String) -> ComposerReadiness {
         guard line.first == "┃" else { return .unrecognized }
         return line.dropFirst().trimmingCharacters(in: .whitespaces).isEmpty ? .unrecognized : .inputPending
     }
+    /// The prompt is a `┃` box above an agent/model line and a `╹▀` edge, and it
+    /// looks the same while busy. The footer's `esc interrupt` tells busy apart, and
+    /// dialogs move the cursor out of the box (V9).
+    public func composerReadiness(screen: ComposerScreen) -> ComposerReadiness {
+        let lines = screen.lines, y = screen.cursorY
+        func bar(_ index: Int) -> (column: Int, rest: String)? {
+            guard lines.indices.contains(index) else { return nil }
+            let scalars = Array(lines[index].unicodeScalars)
+            guard let column = scalars.firstIndex(where: { $0 != " " }), scalars[column] == "┃" else { return nil }
+            return (column, String(String.UnicodeScalarView(scalars[(column + 1)...])).trimmingCharacters(in: .whitespaces))
+        }
+        guard let cursor = bar(y) else { return .unrecognized }
+        let above = bar(y - 1)
+        let placeholder = cursor.rest.hasPrefix("Ask anything")
+        if (!cursor.rest.isEmpty && !placeholder) || (above.map { !$0.rest.isEmpty && $0.column == cursor.column } ?? false) { return .inputPending }
+        guard screen.cursorX == cursor.column + 3, let above, above.column == cursor.column,
+              let below = bar(y + 1), below.column == cursor.column, below.rest.isEmpty,
+              lines.indices.contains(y + 3) else { return .unrecognized }
+        let status = lines[y + 2].trimmingCharacters(in: .whitespaces)
+        guard !status.isEmpty, status != "┃", !status.hasPrefix("╹"), lines[y + 3].trimmingCharacters(in: .whitespaces).hasPrefix("╹▀") else { return .unrecognized }
+        guard !lines[(y + 4)...].contains(where: { $0.contains("esc interrupt") }) else { return .unrecognized }
+        return .ready
+    }
+
     /// `ses_` followed by 26 alphanumerics.
     public static func isConversationID(_ id: String) -> Bool {
         id.hasPrefix("ses_") && id.count == 30 && id.dropFirst(4).allSatisfy { $0.isASCII && ($0.isLetter || $0.isNumber) }

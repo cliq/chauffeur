@@ -117,6 +117,47 @@ struct OpenCodeProviderTests {
         #expect(NativeConversation.adoptsFirst(kind: .opencode, hooksTrusted: true, hookEvent: nil))
     }
 
+    // The TUI's prompt box, as V9 describes it: `┃` bar, agent/model line, `╹▀` edge.
+    private let idle = [
+        "  I updated the README.",
+        "",
+        "  ┃",
+        "  ┃",
+        "  ┃",
+        "  ┃  Build  Qwen3-14B-4bit mlxspike",
+        "  ╹▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀",
+        "                           tab agents  ctrl+p commands",
+    ]
+    private func screen(_ lines: [String], x: Int = 5, y: Int = 3) -> ComposerScreen { ComposerScreen(lines: lines, cursorX: x, cursorY: y) }
+
+    @Test func composerReadinessReadsTheBoxAroundTheCursor() {
+        #expect(provider.composerReadiness(screen: screen(idle)) == .ready)
+        var first = idle; first[3] = "  ┃  Ask anything… \"Fix a TODO in the codebase\""
+        #expect(provider.composerReadiness(screen: screen(first)) == .ready)
+
+        var draft = idle; draft[3] = "  ┃  fix the build"
+        #expect(provider.composerReadiness(screen: screen(draft, x: 18)) == .inputPending)
+        var secondLine = idle; secondLine[2] = "  ┃  first line"
+        #expect(provider.composerReadiness(screen: screen(secondLine)) == .inputPending)
+
+        var busy = idle; busy[7] = "  ⬝⬝■■  esc interrupt"
+        #expect(provider.composerReadiness(screen: screen(busy)) == .unrecognized)
+        // A dialog moves the cursor into the transcript.
+        #expect(provider.composerReadiness(screen: screen(idle, x: 2, y: 0)) == .unrecognized)
+        #expect(provider.composerReadiness(screen: screen(idle, x: 6)) == .unrecognized, "Cursor not at the bar column plus 3")
+        var noEdge = idle; noEdge[6] = "  ┃"
+        #expect(provider.composerReadiness(screen: screen(noEdge)) == .unrecognized)
+        var noStatus = idle; noStatus[5] = "  ┃"
+        #expect(provider.composerReadiness(screen: screen(noStatus)) == .unrecognized)
+        #expect(provider.composerReadiness(screen: screen(idle, y: 40)) == .unrecognized)
+        // The active line alone can show a draft but never proves an empty prompt.
+        #expect(provider.composerReadiness(activeLine: "┃") == .unrecognized)
+        #expect(provider.composerReadiness(activeLine: "┃  draft") == .inputPending)
+        // Claude and Codex read only the cursor line through the screen, as before.
+        #expect(ClaudeProvider().composerReadiness(screen: screen(["x", "  ❯  "], x: 0, y: 1)) == .ready)
+        #expect(CodexProvider().composerReadiness(screen: screen(["› Ask Codex to do anything"], x: 0, y: 0)) == .ready)
+    }
+
     @Test func inboxHookOutputForThePlugin() throws {
         func decode(_ data: Data?) throws -> JSONValue { try JSONCoding.decode(JSONValue.self, from: #require(data)) }
         let blocked = try decode(InboxHintFormatter.openCodeOutput(event: "Stop", summary: InboxHintSummary(count: 2, results: 1, block: true, waitForWorkers: true)))
