@@ -2,6 +2,7 @@
 import AppKit
 import Combine
 import ChauffeurCore
+import ChauffeurTerminalInterface
 
 /// Direct app integration probe, enabled only in Debug with an isolated socket.
 /// This checks our native views; it does not replace macOS UI automation/Spaces tests.
@@ -115,6 +116,53 @@ import ChauffeurCore
                         let size = controller.adapter.cellSize
                         return screen(controller).contains("SIZE=\(size.cols)x\(size.rows)")
                     }
+                    // Zoom and a new default style apply to the live terminal in
+                    // place: the grid changes, the process sees the resize, and
+                    // the screen keeps its text.
+                    let unzoomed = controller.adapter.cellSize
+                    controller.adjustFontSize(by: 4)
+                    try await wait("zoomed terminal resized its process") {
+                        let size = controller.adapter.cellSize
+                        return size.cols < unzoomed.cols && screen(controller).contains("SIZE=\(size.cols)x\(size.rows)")
+                    }
+                    // Compare with the zoomed grid: the window may still have been
+                    // settling its own resize when `unzoomed` was read.
+                    let zoomed = controller.adapter.cellSize
+                    controller.resetFontSize()
+                    try await wait("zoom reset grew the grid back") {
+                        let size = controller.adapter.cellSize
+                        return size.cols > zoomed.cols && screen(controller).contains("SIZE=\(size.cols)x\(size.rows)")
+                    }
+                    let unstyled = controller.adapter.cellSize
+                    let original = controller.style
+                    controller.setStyle(TerminalStyle(fontFamily: "Menlo", fontSize: original.fontSize + 5, light: .named("Nord Light"), dark: .named("Nord")))
+                    try await wait("restyled terminal kept its screen") {
+                        let size = controller.adapter.cellSize
+                        return size.cols < unstyled.cols && screen(controller).contains("INPUT=native café 日本語")
+                            && screen(controller).contains("SIZE=\(size.cols)x\(size.rows)")
+                    }
+                    controller.setStyle(original)
+                    try await wait("original style restored the grid") { controller.adapter.cellSize == unstyled }
+                    // Colors follow the app's appearance, a style change resets a
+                    // zoomed terminal, and custom colors reach the screen.
+                    let savedAppearance = NSApp.appearance
+                    NSApp.appearance = NSAppearance(named: .aqua)
+                    controller.adjustFontSize(by: 3)
+                    try await wait("zoomed before restyling") { controller.adapter.cellSize.cols < unstyled.cols }
+                    let themed = TerminalStyle(fontFamily: nil, fontSize: original.fontSize, light: .named("Solarized Light"), dark: .named("Tokyo Night"))
+                    controller.setStyle(themed)
+                    try await wait("zoom reset by the new style") { controller.adapter.cellSize == unstyled }
+                    try await expectBackground("#fdf6e3", of: controller, in: root, step: "light-theme")
+                    NSApp.appearance = NSAppearance(named: .darkAqua)
+                    try await expectBackground("#1a1b26", of: controller, in: root, step: "dark-theme")
+                    var custom = TerminalThemeCatalog.theme(named: "Tokyo Night")!
+                    custom.background = "#2d1b4e"
+                    controller.setStyle(TerminalStyle(fontFamily: nil, fontSize: original.fontSize, light: themed.light, dark: .custom(custom)))
+                    try await expectBackground("#2d1b4e", of: controller, in: root, step: "custom-colors")
+                    NSApp.appearance = NSAppearance(named: .aqua)
+                    try await expectBackground("#fdf6e3", of: controller, in: root, step: "light-again")
+                    NSApp.appearance = savedAppearance
+                    controller.setStyle(original)
                     controller.detach()
                     try await Task.sleep(for: .milliseconds(300))
                     controller.attach(socketPath: model.socketPath)
@@ -186,6 +234,44 @@ import ChauffeurCore
                 model.quit()
             }
         }
+    }
+    /// Waits until the terminal's on-screen background near its bottom-right corner is `hex`.
+    /// The smoke script takes the screen capture; Metal output cannot be read back in-process.
+    private static func expectBackground(_ hex: String, of controller: TerminalController, in root: URL, step: String) async throws {
+        var sampled = "nothing"
+        for attempt in 0..<40 {
+            let view = controller.view
+            guard let window = view.window else { break }
+            // An occluded surface stops rendering; bring the window forward without activating.
+            window.orderFrontRegardless()
+            // The view in window coordinates (bottom-left origin over the whole frame).
+            let rect = view.convert(view.bounds, to: nil)
+            let name = "\(step)-\(attempt)"
+            let capture = root.appendingPathComponent("capture-\(name).png")
+            try JSONSerialization.data(withJSONObject: ["name": name, "window": window.windowNumber] as [String: Any])
+                .write(to: root.appendingPathComponent("capture-request.json"))
+            for _ in 0..<50 where !FileManager.default.fileExists(atPath: capture.path) { try await Task.sleep(for: .milliseconds(100)) }
+            try await Task.sleep(for: .milliseconds(100))
+            if let bitmap = NSBitmapImageRep(data: (try? Data(contentsOf: capture)) ?? Data()), window.frame.width > 0 {
+                let scale = CGFloat(bitmap.pixelsWide) / window.frame.width
+                let x = Int((rect.maxX - 10) * scale), y = Int((window.frame.height - rect.minY - 10) * scale)
+                guard let color = bitmap.colorAt(x: x, y: y)?.usingColorSpace(.sRGB) else { continue }
+                sampled = color.terminalHex
+                try? FileManager.default.removeItem(at: capture)
+                // Ghostty converts colors into a Display P3 surface; dark colors land a few
+                // percent lighter on screen. The steps below differ by at least 0.16 per channel.
+                if colorDistance(sampled, hex) < 0.08 { return }
+            }
+            try await Task.sleep(for: .milliseconds(250))
+        }
+        throw ChauffeurError("native_probe", "Terminal background for \(step) is \(sampled), expected \(hex)")
+    }
+    private static func colorDistance(_ lhs: String, _ rhs: String) -> Double {
+        func components(_ hex: String) -> [Double] {
+            let value = UInt32(hex.drop { $0 == "#" }, radix: 16) ?? 0
+            return [value >> 16 & 0xff, value >> 8 & 0xff, value & 0xff].map { Double($0) / 255 }
+        }
+        return zip(components(lhs), components(rhs)).map { abs($0 - $1) }.max() ?? 1
     }
     private static func screen(_ controller: TerminalController) -> String {
         controller.screenText

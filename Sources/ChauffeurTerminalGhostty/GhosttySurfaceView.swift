@@ -30,6 +30,9 @@ final class GhosttySurfaceView: NSView {
     private(set) var surface: ghostty_surface_t?
     let output = GhosttyOutput()
     private let callbacks = GhosttySurfaceCallbacks()
+    /// A configuration applied to the live surface after it was created from `runtime`'s,
+    /// kept alive while the surface uses it.
+    private var appliedConfig: GhosttyLoadedConfig?
 
     /// Keyboard focus requested while the view was not in a window yet.
     var focusesWhenAttached = false
@@ -89,6 +92,7 @@ final class GhosttySurfaceView: NSView {
         callbacks.setSurface(surface)
         synchronizeSize()
         updateDisplayID()
+        applyConfiguration()
         ghostty_surface_set_color_scheme(surface, GhosttyRuntime.colorScheme(for: effectiveAppearance))
         updateFocus()
         updateOcclusion()
@@ -105,18 +109,31 @@ final class GhosttySurfaceView: NSView {
         // Ghostty may still be delivering a callback for this surface on another thread; the
         // callbacks object (held by `self`) outlives the free.
         ghostty_surface_free(surface)
+        appliedConfig = nil
         accessibilityCache = nil
     }
 
-    /// Switches to another configuration. Ghostty applies scrollback and fonts per app, so the
-    /// surface is recreated and its contents are lost; callers reset and refill it.
+    /// Switches to another configuration. A live surface is updated in place, keeping its screen
+    /// and scrollback; without one, the next surface is created from the new configuration.
     func reconfigure(_ configuration: GhosttyConfiguration) {
         guard configuration != self.configuration else { return }
-        tearDownSurface()
+        self.configuration = configuration
+        if surface != nil { applyConfiguration(); return }
         runtime?.release()
         runtime = nil
-        self.configuration = configuration
         createSurfaceIfReady()
+    }
+
+    /// Gives the live surface the configuration for the view's current appearance, unless it
+    /// already has it. The shared runtime's config is reused when it matches.
+    private func applyConfiguration() {
+        guard let surface else { return }
+        let dark = GhosttyRuntime.isDark(effectiveAppearance)
+        let current = appliedConfig ?? runtime?.config
+        guard current?.configuration != configuration || current?.dark != dark else { return }
+        guard let config = GhosttyLoadedConfig(configuration, dark: dark) else { return }
+        ghostty_surface_update_config(surface, config.raw)
+        appliedConfig = config
     }
 
     func releaseRuntime() {
@@ -140,6 +157,9 @@ final class GhosttySurfaceView: NSView {
         case .mouseShape(let raw):
             cursor = Self.cursor(for: ghostty_action_mouse_shape_e(rawValue: raw))
             window?.invalidateCursorRects(for: self)
+        case .reloadConfig:
+            guard let surface, let config = appliedConfig ?? runtime?.config else { return }
+            ghostty_surface_update_config(surface, config.raw)
         default:
             host?.surfaceDidReceive(event)
         }
@@ -222,6 +242,8 @@ final class GhosttySurfaceView: NSView {
     override func viewDidChangeEffectiveAppearance() {
         super.viewDidChangeEffectiveAppearance()
         runtime?.setColorScheme(for: effectiveAppearance)
+        applyConfiguration()
+        // Still reported so programs that asked for color-scheme updates (mode 2031) hear it.
         if let surface { ghostty_surface_set_color_scheme(surface, GhosttyRuntime.colorScheme(for: effectiveAppearance)) }
     }
 

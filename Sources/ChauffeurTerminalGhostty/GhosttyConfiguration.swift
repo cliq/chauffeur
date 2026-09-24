@@ -17,15 +17,20 @@ struct GhosttyConfiguration: Hashable, Sendable {
         fontName = appearance.fontName
         fontSize = appearance.fontSize
         scrollbackLines = appearance.scrollbackLines
-        colors = appearance.followsSystemColors ? .system() : nil
+        let light = appearance.lightColors, dark = appearance.darkColors
+        colors = appearance.followsSystemColors || light != nil || dark != nil
+            ? GhosttyColorPair(light: light.map(GhosttyPalette.init) ?? .resolved(in: .aqua), dark: dark.map(GhosttyPalette.init) ?? .resolved(in: .darkAqua))
+            : nil
     }
 
     /// Ghostty limits scrollback in bytes, not lines. A row costs its cells (8 bytes each) plus
     /// page metadata; budget for wide rows so the line count is a floor, not a ceiling.
     static let bytesPerScrollbackLine = 2_048
 
-    /// Renders the config file, pointing `theme` at `themeFiles` when colors are set.
-    func rendered(themeFiles: (light: URL, dark: URL)?) -> String {
+    /// Renders the config file with the colors for one appearance. Colors are written out
+    /// explicitly rather than through `theme = light:…,dark:…`: the view swaps configs when its
+    /// appearance changes, which does not depend on Ghostty rebuilding conditional themes.
+    func rendered(dark: Bool) -> String {
         var lines = [
             "font-size = \(Self.literal(fontSize))",
             "scrollback-limit = \(max(1, scrollbackLines) * Self.bytesPerScrollbackLine)",
@@ -37,6 +42,8 @@ struct GhosttyConfiguration: Hashable, Sendable {
             "keybind = alt+left=esc:b",
             "keybind = alt+right=esc:f",
             "keybind = alt+backspace=text:\\x1b\\x7f",
+            // The app menu's Bigger item is Cmd-+; accept the unshifted key too, as Terminal.app does.
+            "keybind = super+equal=increase_font_size:1",
             "macos-option-as-alt = true",
             // Programs may set the clipboard (OSC 52) through the adapter, never read it.
             "clipboard-read = deny",
@@ -55,8 +62,8 @@ struct GhosttyConfiguration: Hashable, Sendable {
         if let fontName, !fontName.isEmpty {
             lines.insert("font-family = \(fontName)", at: 0)
         }
-        if let themeFiles {
-            lines.append("theme = light:\(themeFiles.light.path),dark:\(themeFiles.dark.path)")
+        if let colors {
+            lines += (dark ? colors.dark : colors.light).configLines
         }
         return lines.joined(separator: "\n") + "\n"
     }
@@ -84,45 +91,41 @@ struct GhosttyPalette: Hashable, Sendable {
     var background: String
     var foreground: String
     var selectionBackground: String
+    var cursor: String?
+    var cursorText: String?
+    var selectionForeground: String?
+    var ansi = TerminalThemeCatalog.basicANSI
+
+    init(background: String, foreground: String, selectionBackground: String) {
+        self.background = background
+        self.foreground = foreground
+        self.selectionBackground = selectionBackground
+    }
+
+    init(_ theme: TerminalColorTheme) {
+        background = theme.background
+        foreground = theme.foreground
+        selectionBackground = theme.selectionBackground ?? theme.foreground
+        cursor = theme.cursor
+        cursorText = theme.cursorText
+        selectionForeground = theme.selectionForeground
+        ansi = theme.palette.count == 16 ? theme.palette : TerminalThemeCatalog.basicANSI
+    }
 
     @MainActor
     static func resolved(in name: NSAppearance.Name) -> GhosttyPalette {
-        var palette = GhosttyPalette(background: "#ffffff", foreground: "#000000", selectionBackground: "#b4d5fe")
-        NSAppearance(named: name)?.performAsCurrentDrawingAppearance {
-            palette = GhosttyPalette(
-                background: NSColor.textBackgroundColor.ghosttyHex,
-                foreground: NSColor.textColor.ghosttyHex,
-                selectionBackground: NSColor.selectedTextBackgroundColor.ghosttyHex
-            )
-        }
-        return palette
+        GhosttyPalette(TerminalColorTheme.system(dark: name == .darkAqua))
     }
 
-    /// Terminal.app's "Basic" ANSI colors, which read on both light and dark backgrounds.
-    static let ansi = [
-        "#000000", "#990000", "#00a600", "#999900", "#0000b2", "#b200b2", "#00a6b2", "#bfbfbf",
-        "#666666", "#e50000", "#00d900", "#e5e500", "#0000ff", "#e500e5", "#00e5e5", "#e5e5e5",
-    ]
-
-    var themeFile: String {
-        var lines = [
+    var configLines: [String] {
+        [
             "background = \(background)",
             "foreground = \(foreground)",
-            "cursor-color = \(foreground)",
-            "cursor-text = \(background)",
+            "cursor-color = \(cursor ?? foreground)",
+            "cursor-text = \(cursorText ?? background)",
             "selection-background = \(selectionBackground)",
-            "selection-foreground = \(foreground)",
-        ]
-        lines += Self.ansi.enumerated().map { "palette = \($0.offset)=\($0.element)" }
-        return lines.joined(separator: "\n") + "\n"
-    }
-}
-
-private extension NSColor {
-    var ghosttyHex: String {
-        guard let rgb = usingColorSpace(.sRGB) else { return "#000000" }
-        func byte(_ component: CGFloat) -> Int { Int((min(max(component, 0), 1) * 255).rounded()) }
-        return String(format: "#%02x%02x%02x", byte(rgb.redComponent), byte(rgb.greenComponent), byte(rgb.blueComponent))
+            "selection-foreground = \(selectionForeground ?? foreground)",
+        ] + ansi.enumerated().map { "palette = \($0.offset)=\($0.element)" }
     }
 }
 #endif

@@ -1,5 +1,6 @@
 import SwiftUI
 import ChauffeurCore
+import ChauffeurTerminalInterface
 
 struct SettingsView: View {
     @EnvironmentObject private var model: AppModel
@@ -223,7 +224,146 @@ struct AppearanceSettingsView: View {
                 Text("System follows your Mac’s appearance. Changes apply to all Chauffeur windows and terminal default colors.")
                     .font(.caption).foregroundStyle(.secondary)
             }
+            Section("Terminal") {
+                Picker("Font", selection: $model.terminalStyle.fontFamily) {
+                    Text("Default (JetBrains Mono)").tag(String?.none)
+                    Divider()
+                    ForEach(families, id: \.self) { family in Text(family).tag(String?.some(family)) }
+                }.accessibilityIdentifier("terminal-font.family")
+                Stepper(value: $model.terminalStyle.fontSize, in: TerminalStyle.fontSizes, step: 1) {
+                    LabeledContent("Size", value: "\(Int(model.terminalStyle.fontSize)) pt")
+                }.accessibilityIdentifier("terminal-font.size")
+                themePicker("Light Mode Colors", dark: false).accessibilityIdentifier("terminal-theme.light")
+                themePicker("Dark Mode Colors", dark: true).accessibilityIdentifier("terminal-theme.dark")
+                HStack(spacing: 8) {
+                    TerminalStylePreview(colors: model.terminalStyle.colors(dark: false), style: model.terminalStyle, label: "Light")
+                    TerminalStylePreview(colors: model.terminalStyle.colors(dark: true), style: model.terminalStyle, label: "Dark")
+                }
+                Text("Applies to all terminals immediately and resets any zoom. Use View ▸ Bigger or Smaller (⌘+ and ⌘−) to zoom one terminal until you close it. Colors an agent draws itself stay under that CLI’s control.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Section("Terminal Colors") {
+                Picker("Editing", selection: $editsDark) {
+                    Text("Light Mode").tag(false)
+                    Text("Dark Mode").tag(true)
+                }.pickerStyle(.segmented).accessibilityIdentifier("terminal-colors.mode")
+                TerminalColorEditor(style: $model.terminalStyle, dark: editsDark)
+                Text("Changing a color switches this mode to Custom. Custom colors replace the previous custom set; they are not saved as a named theme.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
         }.formStyle(.grouped)
+            .onAppear {
+                if families.isEmpty { families = TerminalStyle.monospacedFamilies() }
+                editsDark = colorScheme == .dark
+            }
+    }
+    @Environment(\.colorScheme) private var colorScheme
+    @State private var families: [String] = []
+    @State private var editsDark = false
+    /// System, Custom, then the themes whose background suits the mode, then the rest.
+    private func themePicker(_ title: String, dark: Bool) -> some View {
+        let themes = TerminalThemeCatalog.all
+        let selection = Binding<String?>(get: { model.terminalStyle.choice(dark: dark).tag },
+                                         set: { model.terminalStyle.select(tag: $0, dark: dark) })
+        return Picker(title, selection: selection) {
+            Text("System").tag(String?.none)
+            Text("Custom").tag(String?.some(TerminalColorChoice.customTag))
+            Divider()
+            ForEach(themes.filter { $0.isDark == dark }) { theme in Text(theme.name).tag(String?.some(theme.name)) }
+            Divider()
+            ForEach(themes.filter { $0.isDark != dark }) { theme in Text(theme.name).tag(String?.some(theme.name)) }
+        }
+    }
+}
+
+/// A few lines in the chosen font and one mode's colors.
+private struct TerminalStylePreview: View {
+    let colors: TerminalColorTheme
+    let style: TerminalStyle
+    let label: String
+    var body: some View {
+        let foreground = Color(hex: colors.foreground)
+        VStack(alignment: .leading, spacing: 2) {
+            Text(label).font(.caption2).foregroundStyle(foreground.opacity(0.6))
+            HStack(spacing: 0) {
+                Text("~/repo $ ").foregroundStyle(Color(hex: colors.palette[2]))
+                Text("git status").foregroundStyle(foreground)
+                Text(" ").background(Color(hex: colors.cursor ?? colors.foreground))
+            }
+            HStack(spacing: 0) {
+                ForEach(1..<7, id: \.self) { index in Text("█").foregroundStyle(Color(hex: colors.palette[index])) }
+                Text(" 日本語 ").foregroundStyle(foreground)
+                Text("café").foregroundStyle(Color(hex: colors.selectionForeground ?? colors.foreground))
+                    .background(Color(hex: colors.selectionBackground ?? colors.foreground).opacity(0.9))
+            }
+        }
+        .font(style.previewFont).lineLimit(1).padding(8).frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(hex: colors.background), in: RoundedRectangle(cornerRadius: 6))
+        .accessibilityHidden(true)
+    }
+}
+
+/// Color wells for every color of one mode. Any change makes that mode Custom.
+private struct TerminalColorEditor: View {
+    @Binding var style: TerminalStyle
+    let dark: Bool
+    private static let ansiNames = ["Black", "Red", "Green", "Yellow", "Blue", "Magenta", "Cyan", "White"]
+    var body: some View {
+        let colors = style.colors(dark: dark)
+        Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 8) {
+            GridRow {
+                well("Background", colors.background) { $0.background = $1 }
+                well("Foreground", colors.foreground) { $0.foreground = $1 }
+            }
+            GridRow {
+                well("Cursor", colors.cursor ?? colors.foreground) { $0.cursor = $1 }
+                well("Cursor Text", colors.cursorText ?? colors.background) { $0.cursorText = $1 }
+            }
+            GridRow {
+                well("Selection", colors.selectionBackground ?? colors.foreground) { $0.selectionBackground = $1 }
+                well("Selected Text", colors.selectionForeground ?? colors.foreground) { $0.selectionForeground = $1 }
+            }
+        }
+        LabeledContent("Normal") { ansiRow(colors, offset: 0) }
+        LabeledContent("Bright") { ansiRow(colors, offset: 8) }
+    }
+    private func well(_ title: String, _ hex: String, _ apply: @escaping (inout TerminalColorTheme, String) -> Void) -> some View {
+        ColorPicker(title, selection: binding(hex) { hex in style.editColors(dark: dark) { apply(&$0, hex) } }, supportsOpacity: false)
+            .accessibilityIdentifier("terminal-colors.\(title.lowercased().replacingOccurrences(of: " ", with: "-"))")
+    }
+    private func ansiRow(_ colors: TerminalColorTheme, offset: Int) -> some View {
+        HStack(spacing: 6) {
+            ForEach(0..<8, id: \.self) { index in
+                ColorPicker(Self.ansiNames[index], selection: binding(colors.palette[offset + index]) { hex in
+                    style.editColors(dark: dark) { $0.palette[offset + index] = hex }
+                }, supportsOpacity: false)
+                .labelsHidden().help("\(offset == 0 ? "" : "Bright ")\(Self.ansiNames[index])")
+                .accessibilityIdentifier("terminal-colors.ansi-\(offset + index)")
+            }
+        }
+    }
+    /// Only a real change reaches `set`, so opening a well does not turn the mode Custom.
+    private func binding(_ hex: String, set: @escaping (String) -> Void) -> Binding<Color> {
+        Binding(get: { Color(hex: hex) }, set: { color in
+            let next = NSColor(color).terminalHex
+            if next != hex.lowercased() { set(next) }
+        })
+    }
+}
+
+private extension TerminalStyle {
+    var previewFont: Font {
+        let size = CGFloat(fontSize)
+        if let fontFamily, let font = NSFont(name: fontFamily, size: size) { return Font(font) }
+        return Font(NSFont(name: "JetBrains Mono", size: size) ?? .monospacedSystemFont(ofSize: size, weight: .regular))
+    }
+}
+
+private extension Color {
+    /// `#rrggbb`; black when malformed.
+    init(hex: String) {
+        let value = UInt32(hex.drop { $0 == "#" }, radix: 16) ?? 0
+        self.init(.sRGB, red: Double(value >> 16 & 0xff) / 255, green: Double(value >> 8 & 0xff) / 255, blue: Double(value & 0xff) / 255)
     }
 }
 

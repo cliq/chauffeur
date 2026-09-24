@@ -26,9 +26,9 @@ struct PendingTerminalTab: Identifiable {
     init(projectID: UUID) { state = WindowState(projectID: projectID) }
     var selectedFolderID: UUID? { state.selectedFolderID }
     var selectedWorktreePath: String? { state.selectedWorktreePath }
-    func controller(for id: UUID, scrollback: Int) -> TerminalController {
+    func controller(for id: UUID, scrollback: Int, style: TerminalStyle) -> TerminalController {
         if let controller = controllers[id] { return controller }
-        let controller = TerminalController(sessionID: id, scrollback: scrollback); controllers[id] = controller; return controller
+        let controller = TerminalController(sessionID: id, scrollback: scrollback, style: style); controllers[id] = controller; return controller
     }
     /// Selects a checkout. A `nil` path shows the repository overview. The
     /// current session stays selected when it already runs in that checkout;
@@ -60,7 +60,7 @@ struct PendingTerminalTab: Identifiable {
         let visible = state.selectedSessionID.flatMap { model.session($0)?.state.isLive == true ? $0 : nil }
         for (id, controller) in controllers where id != visible { controller.detach() }
         guard let visible else { return }
-        let controller = controller(for: visible, scrollback: model.snapshot.settings.scrollbackLines)
+        let controller = controller(for: visible, scrollback: model.snapshot.settings.scrollbackLines, style: model.terminalStyle)
         controller.attach(socketPath: model.socketPath)
         if focusRequest == visible { focusRequest = nil; controller.focus() }
     }
@@ -224,6 +224,10 @@ struct ProjectWindow: View {
                 model.recordRecentProject(projectID)
                 model.recordSessionSelection(layout.state.selectedSessionID)
             }
+            // Color wells report every step of a drag; apply the settled value.
+            .onReceive(model.$terminalStyle.debounce(for: .milliseconds(120), scheduler: RunLoop.main)) { style in
+                for controller in layout.controllers.values { controller.setStyle(style) }
+            }
             .onReceive(NotificationCenter.default.publisher(for: .chauffeurCommand)) { notification in
                 guard layout.window?.isKeyWindow == true, let command = notification.object as? String else { return }
                 switch command {
@@ -231,6 +235,9 @@ struct ProjectWindow: View {
                 case "new-tab": if canLaunch { layout.newTabPresented = true }
                 case "search-sessions": layout.state.sidebarMode = .sessions; layout.state.sidebarVisible = true; searchFocused = true
                 case "find": if let id = layout.state.selectedSessionID { layout.controllers[id]?.find() }
+                case "font-bigger": if let id = layout.state.selectedSessionID { layout.controllers[id]?.adjustFontSize(by: 1) }
+                case "font-smaller": if let id = layout.state.selectedSessionID { layout.controllers[id]?.adjustFontSize(by: -1) }
+                case "font-reset": if let id = layout.state.selectedSessionID { layout.controllers[id]?.resetFontSize() }
                 case "next": cycle(1)
                 case "previous": cycle(-1)
                 case "sidebar-next": navigateSidebar(1)
@@ -562,7 +569,7 @@ struct ProjectWindow: View {
                     } else if let selected = sessions.first(where: { $0.id == selectedID }) {
                         // Per-session identity so a new selection hosts its own
                         // terminal view instead of updating the previous one's.
-                        TerminalPane(session: selected, controller: layout.controller(for: selected.id, scrollback: model.snapshot.settings.scrollbackLines)).frame(minWidth: 240).id(selected.id)
+                        TerminalPane(session: selected, controller: layout.controller(for: selected.id, scrollback: model.snapshot.settings.scrollbackLines, style: model.terminalStyle)).frame(minWidth: 240).id(selected.id)
                     } else {
                         checkoutEmptyState(row, folder: folder, hasFinished: !WorktreeSessions.finished(sessions).isEmpty)
                     }
@@ -572,7 +579,7 @@ struct ProjectWindow: View {
             }
         } else if let selected = model.session(layout.state.selectedSessionID) {
             // The session's folder is no longer registered; the terminal still works.
-            TerminalPane(session: selected, controller: layout.controller(for: selected.id, scrollback: model.snapshot.settings.scrollbackLines)).frame(minWidth: 240).id(selected.id)
+            TerminalPane(session: selected, controller: layout.controller(for: selected.id, scrollback: model.snapshot.settings.scrollbackLines, style: model.terminalStyle)).frame(minWidth: 240).id(selected.id)
         } else {
             VStack(spacing: 16) {
                 ContentUnavailableView("Choose a repository or worktree", systemImage: "arrow.triangle.branch", description: Text("Select a checkout in the sidebar to see its sessions, or launch an agent using this project's agent presets."))

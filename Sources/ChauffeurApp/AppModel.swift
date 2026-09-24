@@ -27,6 +27,10 @@ struct AppSnapshot: Decodable, Sendable {
             applyAppearance()
         }
     }
+    /// The default terminal font and colors; open terminals pick up changes immediately.
+    @Published var terminalStyle: TerminalStyle {
+        didSet { terminalStyle.save(to: preferences) }
+    }
     private let preferences: UserDefaults
     @Published private var recentProjectIDs: [UUID]?
     private static let recentProjectsKey = "recentProjectIDs"
@@ -216,6 +220,7 @@ struct AppSnapshot: Decodable, Sendable {
         self.preferences = preferences
         recentProjectIDs = preferences.stringArray(forKey: Self.recentProjectsKey)?.compactMap(UUID.init(uuidString:))
         appearance = AppAppearance(rawValue: preferences.string(forKey: AppAppearance.preferenceKey) ?? "") ?? .system
+        terminalStyle = TerminalStyle(preferences: preferences)
         var configuredSocket = ProcessInfo.processInfo.environment["CHAUFFEUR_SOCKET"]
         #if DEBUG
         // Exercise the real bundled SMAppService registration with a private

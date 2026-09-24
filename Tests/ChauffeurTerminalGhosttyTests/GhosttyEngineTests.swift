@@ -10,6 +10,8 @@ struct GhosttyEngineTests {
         for appearance in [
             TerminalAppearance(fontSize: 13, scrollbackLines: 10_000, followsSystemColors: true),
             TerminalAppearance(fontName: "Menlo", fontSize: 12.5, scrollbackLines: 1_000, followsSystemColors: false),
+            TerminalAppearance(fontSize: 14, followsSystemColors: true, lightColors: TerminalThemeCatalog.theme(named: "Solarized Light"),
+                               darkColors: TerminalThemeCatalog.theme(named: "Tokyo Night")),
         ] {
             #expect(GhosttyTerminalAdapter(appearance: appearance).configurationDiagnostics == [])
         }
@@ -17,11 +19,11 @@ struct GhosttyEngineTests {
 
     @Test func configurationBudgetsScrollbackInBytesAndClearsDefaultBindings() {
         let rendered = GhosttyConfiguration(TerminalAppearance(fontSize: 13, scrollbackLines: 500, followsSystemColors: false))
-            .rendered(themeFiles: nil)
+            .rendered(dark: false)
         #expect(rendered.contains("scrollback-limit = \(500 * GhosttyConfiguration.bytesPerScrollbackLine)\n"))
         #expect(rendered.contains("keybind = clear\n"))
         #expect(rendered.contains("keybind = alt+left=esc:b\n"))
-        #expect(!rendered.contains("theme ="))
+        #expect(!rendered.contains("background ="))
         #expect(!rendered.contains("font-family"))
     }
 
@@ -33,8 +35,21 @@ struct GhosttyEngineTests {
     @Test func systemColorsProduceThemeFilesForBothAppearances() {
         let pair = GhosttyColorPair.system()
         #expect(pair.light.background != pair.dark.background)
-        #expect(pair.light.themeFile.contains("palette = 15="))
-        #expect(pair.dark.themeFile.hasPrefix("background = #"))
+        #expect(pair.light.configLines.contains { $0.hasPrefix("palette = 15=") })
+        #expect(pair.dark.configLines.first?.hasPrefix("background = #") == true)
+    }
+
+    @Test func themesReplaceSystemColorsPerMode() {
+        let dracula = TerminalThemeCatalog.theme(named: "Dracula")!
+        let colors = GhosttyConfiguration(TerminalAppearance(followsSystemColors: true, darkColors: dracula)).colors
+        #expect(colors?.dark.background == dracula.background)
+        #expect(colors?.dark.configLines.contains("palette = 1=\(dracula.palette[1])") == true)
+        let configuration = GhosttyConfiguration(TerminalAppearance(followsSystemColors: true, darkColors: dracula))
+        #expect(configuration.rendered(dark: true).contains("background = \(dracula.background)\n"))
+        #expect(!configuration.rendered(dark: false).contains("background = \(dracula.background)\n"))
+        #expect(colors?.light == GhosttyPalette.resolved(in: .aqua))
+        #expect(GhosttyConfiguration(TerminalAppearance(followsSystemColors: false)).colors == nil)
+        #expect(GhosttyConfiguration(TerminalAppearance(followsSystemColors: false, lightColors: TerminalThemeCatalog.theme(named: "Nord Light"))).colors != nil)
     }
 
     @Test func semanticKeysMapToMacKeyCodes() {

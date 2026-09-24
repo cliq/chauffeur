@@ -28,6 +28,8 @@ enum TerminalControlState: Equatable { case detached, connecting, connected, con
     @Published private(set) var searchTotal: Int?
     @Published private(set) var searchSelected: Int?
     private let readOnly: Bool
+    private var scrollback: Int
+    private(set) var style: TerminalStyle
     var historyController: TerminalController?
     private var connection: SocketConnection?
     private var reader: Task<Void, Never>?
@@ -49,13 +51,14 @@ enum TerminalControlState: Equatable { case detached, connecting, connected, con
     #endif
     /// Creates the controller around the desktop Ghostty adapter, unless
     /// `adapter` injects another engine (probes, tests).
-    init(sessionID: UUID, scrollback: Int, readOnly: Bool = false, adapter: (any TerminalEngineAdapter)? = nil) {
+    init(sessionID: UUID, scrollback: Int, style: TerminalStyle = .default, readOnly: Bool = false, adapter: (any TerminalEngineAdapter)? = nil) {
         self.sessionID = sessionID
         self.readOnly = readOnly
+        self.scrollback = scrollback
+        self.style = style
         // Default colors follow the system appearance; file drops paste quoted
         // paths through the adapter's input gate and bracketed paste.
-        let appearance = TerminalAppearance(fontSize: 13, scrollbackLines: scrollback, followsSystemColors: true)
-        let engine: any TerminalEngineAdapter = adapter ?? GhosttyTerminalAdapter(appearance: appearance, acceptsFileDrops: !readOnly)
+        let engine: any TerminalEngineAdapter = adapter ?? GhosttyTerminalAdapter(appearance: style.appearance(scrollback: scrollback), acceptsFileDrops: !readOnly)
         self.adapter = engine
         engine.delegate = self
         view.setAccessibilityIdentifier("\(readOnly ? "history" : "terminal")-\(sessionID.uuidString)")
@@ -191,7 +194,7 @@ enum TerminalControlState: Equatable { case detached, connecting, connected, con
         if readOnly { findPresented = true }
         else if historyPresented, let historyController { historyController.find() }
         else {
-            historyController = TerminalController(sessionID: sessionID, scrollback: 10_000, readOnly: true)
+            historyController = TerminalController(sessionID: sessionID, scrollback: 10_000, style: style, readOnly: true)
             historyPresented = true
         }
     }
@@ -200,12 +203,26 @@ enum TerminalControlState: Equatable { case detached, connecting, connected, con
         #if DEBUG
         trace("display history bytes=\(snapshot.history.utf8.count) screen bytes=\(snapshot.screen.utf8.count)")
         #endif
-        adapter.configure(TerminalAppearance(fontSize: 13, scrollbackLines: snapshot.lineLimit + snapshot.rows, followsSystemColors: true))
+        scrollback = snapshot.lineLimit + snapshot.rows
+        adapter.configure(style.appearance(scrollback: scrollback))
         adapter.reset()
         // Replayed, so queries inside the saved output are never answered.
         adapter.replay(Data(snapshot.rendering.utf8))
         if findPresented && !findQuery.isEmpty { adapter.search(findQuery) }
     }
+    /// Applies new default font and colors in place, keeping the screen and
+    /// scrollback; a grid change reaches the process as a resize. A zoomed
+    /// terminal returns to the new default size.
+    func setStyle(_ style: TerminalStyle) {
+        guard style != self.style else { return }
+        self.style = style
+        adapter.resetFontSize()
+        adapter.configure(style.appearance(scrollback: scrollback))
+        historyController?.setStyle(style)
+    }
+    /// Zooms this terminal only; not saved.
+    func adjustFontSize(by steps: Int) { adapter.adjustFontSize(by: steps) }
+    func resetFontSize() { adapter.resetFontSize() }
     /// Searches the read-only history; an empty query clears the highlights.
     func search(_ query: String) {
         findQuery = query

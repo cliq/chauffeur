@@ -40,6 +40,14 @@ import ChauffeurCore
                 Button("Find in Terminal…") { command("find") }.keyboardShortcut("f")
                 Button("Next Attention Item") { command("attention") }.keyboardShortcut("a", modifiers: [.command, .shift])
             }
+            CommandGroup(before: .toolbar) {
+                // Zooms the selected terminal only and is not saved; the
+                // default font is in Settings ▸ Appearance.
+                Button("Bigger") { command("font-bigger") }.keyboardShortcut("+")
+                Button("Smaller") { command("font-smaller") }.keyboardShortcut("-")
+                Button("Actual Size") { command("font-reset") }.keyboardShortcut("0")
+                Divider()
+            }
             CommandGroup(after: .windowArrangement) {
                 Button("Welcome to Chauffeur") { openWindow(id: "welcome") }.keyboardShortcut("0", modifiers: [.command, .shift])
             }

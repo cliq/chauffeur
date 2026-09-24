@@ -37,6 +37,11 @@ public protocol TerminalEngineAdapter: AnyObject {
     func searchNext()
     func searchPrevious()
     func endSearch()
+    /// Zooms this terminal's text by `steps` points (negative shrinks) without changing its
+    /// configured appearance. Not persisted.
+    func adjustFontSize(by steps: Int)
+    /// Returns to the configured font size.
+    func resetFontSize()
     func dispose()
 }
 
@@ -47,6 +52,8 @@ public extension TerminalEngineAdapter {
     func searchNext() {}
     func searchPrevious() {}
     func endSearch() {}
+    func adjustFontSize(by steps: Int) {}
+    func resetFontSize() {}
 }
 
 public struct TerminalCellSize: Equatable, Sendable {

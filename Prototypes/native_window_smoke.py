@@ -85,6 +85,16 @@ with tempfile.TemporaryDirectory(prefix="chauffeur-native-", dir="/tmp") as dire
                 window = {"id": project_id, "selectedSessionID": tabs[0], "selectedFolderID": folder_id, "selectedWorktreePath": str(checkout.resolve()),
                           "sidebarMode": "repositories", "sidebarVisible": True, "wasOpen": True}
             call("saveWindow", {"record": window})
+        def serve_capture():
+            # The in-app probe cannot read Metal-rendered pixels back reliably; it asks for a
+            # real capture of its window instead.
+            request = root / "capture-request.json"
+            if not request.exists():
+                return
+            spec = json.loads(request.read_text())
+            request.unlink()
+            # By window ID, so another window covering it does not matter.
+            subprocess.run(["screencapture", "-x", "-o", f"-l{int(spec['window'])}", str(root / f"capture-{spec['name']}.png")], check=False)
         before = call("snapshot")
         reports = []
         for phase in [1, 2, 3]:
@@ -92,6 +102,7 @@ with tempfile.TemporaryDirectory(prefix="chauffeur-native-", dir="/tmp") as dire
             with open(artifacts / f"app-phase-{phase}.log", "w") as app_log:
                 native = subprocess.Popen([str(app / "Chauffeur"), "-ApplePersistenceIgnoreState", "YES"], env=environment, stdout=app_log, stderr=app_log)
                 def probe_report():
+                    serve_capture()
                     if native.poll() is not None and not (root / f"native-phase-{phase}.json").exists():
                         raise RuntimeError(f"Native app exited {native.returncode}; inspect {artifacts / f'app-phase-{phase}.log'}")
                     return json.loads((root / f"native-phase-{phase}.json").read_text())

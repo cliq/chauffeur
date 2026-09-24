@@ -24,22 +24,14 @@ final class GhosttyRuntime {
     let app: ghostty_app_t
     let configuration: GhosttyConfiguration
     /// Config diagnostics Ghostty reported; empty for a config it accepted in full.
-    let diagnostics: [String]
-    private let config: ghostty_config_t
+    var diagnostics: [String] { config.diagnostics }
+    let config: GhosttyLoadedConfig
     private let handle: GhosttyRuntimeHandle
-    private let files: [URL]
     private var users = 0
 
     private init?(_ configuration: GhosttyConfiguration) {
         Self.initializeLibrary()
-        guard let files = try? Self.writeFiles(for: configuration), let config = ghostty_config_new() else { return nil }
-        ghostty_config_load_file(config, files.config.path)
-        ghostty_config_finalize(config)
-        let diagnostics = Self.diagnostics(of: config)
-        #if DEBUG
-        if !diagnostics.isEmpty { NSLog("Ghostty config diagnostics: %@", diagnostics.joined(separator: " | ")) }
-        #endif
-
+        guard let config = GhosttyLoadedConfig(configuration, dark: Self.isDark(NSApp?.effectiveAppearance)) else { return nil }
         let handle = GhosttyRuntimeHandle()
         var runtime = ghostty_runtime_config_s()
         runtime.userdata = Unmanaged.passUnretained(handle).toOpaque()
@@ -50,17 +42,11 @@ final class GhosttyRuntime {
         runtime.confirm_read_clipboard_cb = ghosttyConfirmReadClipboard
         runtime.write_clipboard_cb = ghosttyWriteClipboard
         runtime.close_surface_cb = ghosttyCloseSurface
-        guard let app = ghostty_app_new(&runtime, config) else {
-            ghostty_config_free(config)
-            files.all.forEach { try? FileManager.default.removeItem(at: $0) }
-            return nil
-        }
+        guard let app = ghostty_app_new(&runtime, config.raw) else { return nil }
         self.app = app
         self.config = config
         self.configuration = configuration
-        self.diagnostics = diagnostics
         self.handle = handle
-        self.files = files.all
         handle.runtime = self
         setColorScheme(for: NSApp?.effectiveAppearance)
         ghostty_app_set_focus(app, NSApp?.isActive ?? true)
@@ -73,12 +59,10 @@ final class GhosttyRuntime {
         guard users <= 0, Self.runtimes[configuration] === self else { return }
         Self.runtimes[configuration] = nil
         handle.runtime = nil
-        let app = app, config = config, files = files, handle = handle
+        let app = app, config = config, handle = handle
         DispatchQueue.main.async {
             ghostty_app_free(app)
-            ghostty_config_free(config)
-            files.forEach { try? FileManager.default.removeItem(at: $0) }
-            withExtendedLifetime(handle) {}
+            withExtendedLifetime((config, handle)) {}
         }
     }
 
@@ -86,12 +70,17 @@ final class GhosttyRuntime {
         ghostty_app_tick(app)
     }
 
+
     func setColorScheme(for appearance: NSAppearance?) {
         ghostty_app_set_color_scheme(app, Self.colorScheme(for: appearance))
     }
 
     static func colorScheme(for appearance: NSAppearance?) -> ghostty_color_scheme_e {
-        appearance?.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua ? GHOSTTY_COLOR_SCHEME_DARK : GHOSTTY_COLOR_SCHEME_LIGHT
+        isDark(appearance) ? GHOSTTY_COLOR_SCHEME_DARK : GHOSTTY_COLOR_SCHEME_LIGHT
+    }
+
+    static func isDark(_ appearance: NSAppearance?) -> Bool {
+        appearance?.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
     }
 
     static func setApplicationActive(_ active: Bool) {
@@ -117,33 +106,48 @@ final class GhosttyRuntime {
             MainActor.assumeIsolated { setApplicationActive(false) }
         }
     }
+}
 
-    /// Generated files live in a per-process temporary directory. Ghostty has no API to load a
-    /// config from memory, and `theme` takes file paths.
-    private static func writeFiles(for configuration: GhosttyConfiguration) throws -> (config: URL, all: [URL]) {
+/// A loaded, finalized Ghostty config and the generated files behind it, freed together.
+final class GhosttyLoadedConfig: @unchecked Sendable {
+    let raw: ghostty_config_t
+    let diagnostics: [String]
+    private let files: [URL]
+
+    let configuration: GhosttyConfiguration
+    let dark: Bool
+
+    init?(_ configuration: GhosttyConfiguration, dark: Bool) {
+        guard let file = try? Self.writeFile(configuration.rendered(dark: dark)), let raw = ghostty_config_new() else { return nil }
+        ghostty_config_load_file(raw, file.path)
+        ghostty_config_finalize(raw)
+        self.raw = raw
+        self.configuration = configuration
+        self.dark = dark
+        files = [file]
+        diagnostics = (0..<ghostty_config_diagnostics_count(raw)).compactMap { index in
+            ghostty_config_get_diagnostic(raw, index).message.map { String(cString: $0) }
+        }
+        #if DEBUG
+        if !diagnostics.isEmpty { NSLog("Ghostty config diagnostics: %@", diagnostics.joined(separator: " | ")) }
+        #endif
+    }
+
+    deinit {
+        ghostty_config_free(raw)
+        files.forEach { try? FileManager.default.removeItem(at: $0) }
+    }
+
+    /// Generated files live in a per-process temporary directory: Ghostty has no API to load a
+    /// config from memory.
+    private static func writeFile(_ contents: String) throws -> URL {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent(Bundle.main.bundleIdentifier ?? "Chauffeur", isDirectory: true)
             .appendingPathComponent("ghostty-\(ProcessInfo.processInfo.processIdentifier)", isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        let id = UUID().uuidString
-        var files: [URL] = []
-        var themes: (light: URL, dark: URL)?
-        if let colors = configuration.colors {
-            let light = directory.appendingPathComponent("\(id)-light"), dark = directory.appendingPathComponent("\(id)-dark")
-            try colors.light.themeFile.write(to: light, atomically: true, encoding: .utf8)
-            try colors.dark.themeFile.write(to: dark, atomically: true, encoding: .utf8)
-            files += [light, dark]
-            themes = (light, dark)
-        }
-        let config = directory.appendingPathComponent("\(id).conf")
-        try configuration.rendered(themeFiles: themes).write(to: config, atomically: true, encoding: .utf8)
-        return (config, files + [config])
-    }
-
-    private static func diagnostics(of config: ghostty_config_t) -> [String] {
-        (0..<ghostty_config_diagnostics_count(config)).compactMap { index in
-            ghostty_config_get_diagnostic(config, index).message.map { String(cString: $0) }
-        }
+        let file = directory.appendingPathComponent("\(UUID().uuidString).conf")
+        try contents.write(to: file, atomically: true, encoding: .utf8)
+        return file
     }
 }
 
@@ -179,6 +183,12 @@ private func ghosttyWakeup(_ userdata: UnsafeMutableRawPointer?) {
 /// delivers it to the surface on the main thread. Returns whether the action was handled; an
 /// unhandled `open_url` would make Ghostty spawn `open` itself.
 private func ghosttyAction(_ app: ghostty_app_t?, _ target: ghostty_target_s, _ action: ghostty_action_s) -> Bool {
+    if target.tag == GHOSTTY_TARGET_APP {
+        // Acknowledged but not answered: `ghostty_app_update_config` would push the app's config
+        // onto every surface, replacing each terminal's own font and colors. Surfaces answer
+        // their own reload requests.
+        return action.tag == GHOSTTY_ACTION_RELOAD_CONFIG
+    }
     guard target.tag == GHOSTTY_TARGET_SURFACE, let surface = target.target.surface,
           let userdata = ghostty_surface_userdata(surface) else { return false }
     let callbacks = Unmanaged<GhosttySurfaceCallbacks>.fromOpaque(userdata).takeUnretainedValue()

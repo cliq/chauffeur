@@ -13,6 +13,8 @@ enum GhosttySurfaceEvent: Sendable, Equatable {
     case searchSelected(Int?)
     case mouseShape(UInt32)
     case clipboardWrite(String)
+    /// Ghostty's conditional state (light/dark) changed; answer with the surface's config.
+    case reloadConfig
 
     /// `nil` for actions a host-managed terminal ignores (splits, tabs, config reloads, ...), which
     /// Ghostty is then told were not handled.
@@ -39,6 +41,8 @@ enum GhosttySurfaceEvent: Sendable, Equatable {
             self = .searchSelected(selected < 0 ? nil : Int(selected))
         case GHOSTTY_ACTION_MOUSE_SHAPE:
             self = .mouseShape(action.action.mouse_shape.rawValue)
+        case GHOSTTY_ACTION_RELOAD_CONFIG:
+            self = .reloadConfig
         default:
             return nil
         }

@@ -128,6 +128,16 @@ public final class GhosttyTerminalAdapter: TerminalEngineAdapter, GhosttySurface
         updateSearch(total: nil, selected: nil)
     }
 
+    /// Ghostty zooms per surface; the grid change reaches the remote process as a resize.
+    public func adjustFontSize(by steps: Int) {
+        guard steps != 0 else { return }
+        view.performBindingAction(steps > 0 ? "increase_font_size:\(steps)" : "decrease_font_size:\(-steps)")
+    }
+
+    public func resetFontSize() {
+        view.performBindingAction("reset_font_size")
+    }
+
     /// Frees the surface and detaches the view. The view stays alive as long as the adapter.
     public func dispose() {
         view.host = nil
@@ -175,7 +185,7 @@ public final class GhosttyTerminalAdapter: TerminalEngineAdapter, GhosttySurface
             updateSearch(total: total, selected: searchSelected)
         case .searchSelected(let selected):
             updateSearch(total: searchTotal, selected: selected.map { $0 + 1 })
-        case .mouseShape:
+        case .mouseShape, .reloadConfig:
             break
         }
     }

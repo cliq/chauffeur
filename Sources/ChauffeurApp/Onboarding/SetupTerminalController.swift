@@ -15,7 +15,7 @@ import ChauffeurTerminalGhostty
     private var cursor: UInt64 = 0
     init(app: AppModel, handle: SetupLoginHandle) {
         self.app = app; self.handle = handle
-        adapter = GhosttyTerminalAdapter(appearance: TerminalAppearance(fontSize: 12, scrollbackLines: 1000, followsSystemColors: true))
+        adapter = GhosttyTerminalAdapter(appearance: app.terminalStyle.appearance(scrollback: 1000))
         adapter.delegate = self
         adapter.setInputEnabled(false)
     }
