@@ -4,12 +4,14 @@ public enum AgentSelection: String, Codable, CaseIterable, Sendable {
     case allBase, custom
 }
 
-/// A global launch definition. Configuration belongs exclusively to a team.
+/// A global launch definition that inherits team configuration unless overridden.
 public struct BaseAgentPreset: Record, Equatable {
     public var id = UUID()
     public var name: String
     public var kind: CLIKind
     public var executable: String
+    /// nil inherits the team directory; a value selects a fixed configuration.
+    public var configurationDirectoryOverride: String?
     public var arguments: [String] = []
     /// Authoritative editable text when present. Legacy records use `arguments`.
     public var rawArguments: String?
@@ -20,6 +22,7 @@ public struct BaseAgentPreset: Record, Equatable {
     }
     public func validate() throws {
         try Validation.name(name)
+        if let configurationDirectoryOverride { try Validation.absolutePath(configurationDirectoryOverride) }
         try Validation.require(kind.isAgent, "Choose an agent")
         try Validation.require(!executable.isEmpty && !executable.contains("\0"), "Select an executable")
         try Validation.require(revision > 0, "Revision must be positive")
@@ -28,6 +31,7 @@ public struct BaseAgentPreset: Record, Equatable {
     public func agent(in team: PresetSet, copy: Bool = false) -> AgentPreset {
         var agent = AgentPreset(setID: team.id, name: name, kind: kind, executable: executable, configurationDirectory: "")
         agent.id = copy ? UUID() : id
+        agent.configurationDirectoryOverride = configurationDirectoryOverride
         agent.arguments = arguments; agent.archived = archived
         agent.rawArguments = rawArguments
         agent.sourceBaseID = id; agent.baseRevision = copy ? nil : revision
@@ -59,7 +63,7 @@ public extension StoreSnapshot {
             : presets.map(\.value).filter { $0.setID == team.id }
         return definitions.filter { $0.kind.isAgent && (includeArchived || !$0.archived) }.map { agent in
             var resolved = agent
-            if team.agentSelection != nil { resolved.configurationDirectory = team.configurationDirectory(for: agent.kind) }
+            if team.agentSelection != nil { resolved.configurationDirectory = agent.configurationDirectoryOverride.map(Paths.canonical) ?? team.configurationDirectory(for: agent.kind) }
             return resolved
         }.sorted(by: Self.agentOrder)
     }

@@ -60,7 +60,9 @@ public struct AgentPreset: Record, Equatable {
     public var name: String
     public var kind: CLIKind
     public var executable: String
-    /// Legacy on-disk field; resolved from the team for new-format definitions.
+    /// Optional fixed configuration, preserved when copying a global preset.
+    public var configurationDirectoryOverride: String?
+    /// Legacy on-disk field; resolved from the override or team for new definitions.
     public var configurationDirectory: String
     public var sourceBaseID: UUID?
     public var baseRevision: Int?
@@ -77,6 +79,7 @@ public struct AgentPreset: Record, Equatable {
         try Validation.name(name)
         try Validation.require(!executable.isEmpty && !executable.contains("\0"), "Select an executable")
         if !configurationDirectory.isEmpty { try Validation.absolutePath(configurationDirectory) }
+        if let configurationDirectoryOverride { try Validation.absolutePath(configurationDirectoryOverride) }
         if rawArguments == nil { try LaunchPolicy.validateArguments(arguments, kind: kind) }
     }
 }

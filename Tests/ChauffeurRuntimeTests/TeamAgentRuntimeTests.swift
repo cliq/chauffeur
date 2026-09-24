@@ -5,6 +5,34 @@ import ChauffeurRemoteProtocol
 @testable import ChauffeurRuntimeKit
 
 struct TeamAgentRuntimeTests {
+    @Test func fixedConfigurationIsUsedForLaunchSkillsAndResume() async throws {
+        let fixture = try await LaunchFixture.make(); defer { fixture.cleanup() }
+        let directory = URL(fileURLWithPath: Paths.canonical(fixture.path("claude-local").path))
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let stored = try #require(await fixture.runtime.store.reload().presetSets.first)
+        var team = stored.value; team.agentSelection = .allBase
+        team.configurationDirectories = ["claude": fixture.path("team-config").path]
+        try await fixture.runtime.store.save(team, expectedVersion: stored.version)
+        var base = BaseAgentPreset(name: "Claude Code Local", kind: .claude, executable: fixture.path("fixture.py").path)
+        base.configurationDirectoryOverride = directory.path
+        _ = try await fixture.runtime.handle(IPCRequest("saveBaseAgentPreset", params: .object(["record": try .from(base)])))
+        let skill = directory.appendingPathComponent("skills/chauffeur")
+        #expect((try? FileManager.default.destinationOfSymbolicLink(atPath: skill.path)) != nil)
+        var request = fixture.request; request.presetID = base.id
+        let session = try await fixture.runtime.launch(request)
+        #expect(session.launch.configurationPath == directory.path)
+        #expect(session.launch.configurationEnvironment?["CLAUDE_CONFIG_DIR"] == directory.path)
+        #expect(session.launch.configurationUsesDefault == false)
+        let statuses = try await fixture.runtime.handle(IPCRequest("skillStatuses", params: .object(["presetID": .string(base.id.uuidString), "teamID": .string(team.id.uuidString)]))).decode([SkillInstallation].self)
+        #expect(!statuses.isEmpty)
+        #expect(statuses.allSatisfy { $0.path.hasPrefix(directory.path + "/") })
+        _ = try await fixture.runtime.handle(IPCRequest("stop", params: .object(["sessionID": .string(session.id.uuidString), "force": .bool(true)])))
+        try await fixture.runtime.reconcile()
+        let resumed = try await fixture.runtime.handle(IPCRequest("resume", params: .object(["sessionID": .string(session.id.uuidString)]))).decode(Session.self)
+        #expect(resumed.launch.configurationPath == directory.path)
+        #expect(resumed.launch.configurationEnvironment?["CLAUDE_CONFIG_DIR"] == directory.path)
+    }
+
     @Test func shellUsesTeamVariablesAfterLoginFilesAndNewShellsUseTeamEdits() async throws {
         let fixture = try await LaunchFixture.make(); defer { fixture.cleanup() }
         try Data("export CODEX_HOME=/wrong\nexport CLAUDE_CONFIG_DIR=/wrong\n".utf8).write(to: fixture.root.appendingPathComponent(".zshrc"))

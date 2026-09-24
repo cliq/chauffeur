@@ -376,8 +376,12 @@ struct PresetEditor: View {
                     .onChange(of: kind) { _, value in if AgentProviders.all.contains(where: { $0.kind.rawValue == executable }) { executable = value.rawValue } }
                 TextField("Name", text: $name, prompt: Text(kind.displayName)).accessibilityIdentifier("preset.name")
                 Text("Optional. Leave blank to name the agent preset “\(kind.displayName)”.").font(.caption).foregroundStyle(.secondary)
-                HStack { TextField("Executable", text: $executable).accessibilityIdentifier("preset.executable"); Button("Choose…") { if let path = FilePanels.executable() { executable = path } }.accessibilityIdentifier("preset.choose-executable") }
-                Text("Configuration directory comes from the team.").font(.caption).foregroundStyle(.secondary)
+                if let directory = preset?.configurationDirectoryOverride {
+                    LabeledContent("Configuration", value: directory).textSelection(.enabled)
+                    Text("Configuration directory comes from the agent preset.").font(.caption).foregroundStyle(.secondary)
+                } else {
+                    Text("Configuration directory comes from the team.").font(.caption).foregroundStyle(.secondary)
+                }
                 if preset != nil { Toggle("Archived", isOn: $archived) }
             }
             PresetLaunchOptionsEditor(rawArguments: $arguments, kind: kind)

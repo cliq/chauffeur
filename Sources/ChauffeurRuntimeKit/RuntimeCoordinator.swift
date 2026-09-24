@@ -460,12 +460,13 @@ public actor RuntimeCoordinator {
             let teamID = params["teamID"].string.flatMap(UUID.init(uuidString:))
                 ?? snapshot.presets.first(where: { $0.value.id == presetID })?.value.setID
             guard let teamID, let team = snapshot.presetSets.first(where: { $0.value.id == teamID })?.value,
-                  let provider = snapshot.agents(teamID: teamID).first(where: { $0.id == presetID })?.kind.provider else {
+                  let preset = snapshot.agents(teamID: teamID).first(where: { $0.id == presetID }),
+                  let provider = preset.kind.provider else {
                 throw ChauffeurError("missing_preset", "Choose an available agent and team")
             }
             await reconcileSkills()
             let installer = try managedSkillInstaller()
-            let directory = SkillInstaller.skillDirectory(for: provider, team: team, home: skillHome)
+            let directory = SkillInstaller.skillDirectory(for: provider, team: team, home: skillHome, preset: preset)
             let statuses = await installer.statuses(directory: directory)
             if request.method == "skillStatuses" { return try .from(statuses) }
             guard let status = statuses.first(where: { $0.name == (params["skillName"].string ?? CoordinationSkill.operationalName) }) else {
@@ -505,8 +506,14 @@ public actor RuntimeCoordinator {
             try await normalizeDefaultTeam(preferring: set.isDefault ? set.id : nil)
             await reconcileSkills()
             return try .from(await store.refresh().presetSets.first { $0.value.id == set.id } ?? saved)
-        case "saveBaseAgentPreset": return try .from(await store.save(params["record"].decode(BaseAgentPreset.self), expectedVersion: params["version"].string))
-        case "savePreset": return try .from(await store.save(params["record"].decode(AgentPreset.self), expectedVersion: params["version"].string))
+        case "saveBaseAgentPreset":
+            let saved = try await store.save(params["record"].decode(BaseAgentPreset.self), expectedVersion: params["version"].string)
+            await reconcileSkills()
+            return try .from(saved)
+        case "savePreset":
+            let saved = try await store.save(params["record"].decode(AgentPreset.self), expectedVersion: params["version"].string)
+            await reconcileSkills()
+            return try .from(saved)
         case "saveProject":
             var project = try params["record"].decode(Project.self)
             // A project created without naming a team gets the default team.
@@ -893,7 +900,11 @@ public actor RuntimeCoordinator {
         var launch = LaunchSnapshot(preset: preset, set: set, executablePath: preset.executable, executableVersion: isShell ? "shell" : "unverified", workingDirectory: workingDirectory, additionalPaths: additionalPaths)
         if set.agentSelection != nil {
             launch.configurationEnvironment = snapshot.configurationEnvironment(in: set)
-            launch.configurationUsesDefault = !isShell && (set.configurationDirectories?[preset.kind.rawValue] ?? "").isEmpty
+            if let provider = preset.kind.provider {
+                launch.configurationEnvironment?.removeValue(forKey: provider.configurationEnvironmentKey)
+                launch.configurationEnvironment?.merge(provider.environment(configurationDirectory: preset.configurationDirectory)) { _, preset in preset }
+            }
+            launch.configurationUsesDefault = !isShell && preset.configurationDirectoryOverride == nil && (set.configurationDirectories?[preset.kind.rawValue] ?? "").isEmpty
         } else if isShell { launch.configurationEnvironment = shellAgentExports(project: project, snapshot: snapshot) }
         var session = Session(projectID: project.id, groupID: request.groupID, title: request.title, launch: launch, folderID: folder.id)
         session.id = sessionID; session.worktreeID = request.worktreeID; session.initialTask = request.task
@@ -1209,8 +1220,10 @@ public actor RuntimeCoordinator {
             let installer = try managedSkillInstaller()
             try await installer.publish()
             guard SkillInstaller.linksAllowed(dataRoot: root.path, defaultDataRoot: Paths.applicationSupport.path, home: skillHome, accountHome: SkillInstaller.accountHome) else { return }
-            let teams = await store.refresh().presetSets.map(\.value)
-            let statuses = await installer.reconcile(directories: SkillInstaller.directories(teams: teams, home: skillHome))
+            let snapshot = await store.refresh()
+            let teams = snapshot.presetSets.map(\.value)
+            let presets = teams.flatMap { snapshot.agents(in: $0) }
+            let statuses = await installer.reconcile(directories: SkillInstaller.directories(teams: teams, home: skillHome, presets: presets))
             for status in statuses where status.state == .conflict || status.state == .unavailable {
                 record(ChauffeurError("skill_unavailable", status.message, path: status.path))
             }

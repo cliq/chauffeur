@@ -55,6 +55,8 @@ struct BaseAgentEditor: View {
     @State private var name = ""
     @State private var kind: CLIKind = .codex
     @State private var executable = "codex"
+    @State private var usesSpecificDirectory = false
+    @State private var configurationDirectory = ""
     @State private var arguments = ""
     @State private var archived = false
     @State private var version: String?
@@ -74,13 +76,30 @@ struct BaseAgentEditor: View {
                     TextField("Executable", text: $executable).accessibilityIdentifier("base-agent.executable")
                     Button("Choose…") { if let path = FilePanels.executable() { executable = path } }
                 }
+                Picker("Configuration", selection: $usesSpecificDirectory) {
+                    Text("Use team configuration").tag(false)
+                    Text("Use a specific directory").tag(true)
+                }.accessibilityIdentifier("base-agent.configuration")
+                if usesSpecificDirectory {
+                    HStack {
+                        TextField("Directory", text: $configurationDirectory)
+                            .accessibilityIdentifier("base-agent.configuration-directory")
+                        Button("Choose…") {
+                            if let path = FilePanels.directory(title: "Choose configuration directory", startingAt: FileManager.default.homeDirectoryForCurrentUser, showsHiddenFiles: true) {
+                                configurationDirectory = path
+                            }
+                        }
+                    }
+                    Text("Uses this directory in every team that includes this preset.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
                 if preset != nil { Toggle("Archived", isOn: $archived) }
             }
             PresetLaunchOptionsEditor(rawArguments: $arguments, kind: kind)
             Text("Launch arguments").font(.headline)
             ArgumentEditor(text: $arguments).frame(height: 84).accessibilityIdentifier("base-agent.arguments")
                 .overlay(RoundedRectangle(cornerRadius: 6).stroke(.separator))
-            Text("Quote values containing spaces. Configuration directories are set on each team.").font(.caption).foregroundStyle(.secondary)
+            Text("Quote values containing spaces.").font(.caption).foregroundStyle(.secondary)
             if let failure { Text(failure).foregroundStyle(.red) }
             HStack {
                 Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
@@ -90,6 +109,8 @@ struct BaseAgentEditor: View {
         }.padding(24).frame(width: 620).onAppear {
             name = preset?.name ?? ""; kind = preset?.kind ?? .codex; executable = preset?.executable ?? "codex"
             arguments = preset.map { $0.rawArguments ?? ArgumentText.format($0.arguments) } ?? ""; archived = preset?.archived ?? false
+            usesSpecificDirectory = preset?.configurationDirectoryOverride != nil
+            configurationDirectory = preset?.configurationDirectoryOverride ?? ""
             version = model.snapshot.store.baseAgentPresets.first { $0.value.id == preset?.id }?.version
         }
     }
@@ -101,8 +122,11 @@ struct BaseAgentEditor: View {
                 var value = preset ?? BaseAgentPreset(name: name, kind: kind, executable: executable)
                 value.name = name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? kind.displayName : name
                 value.kind = kind; value.executable = executable; value.archived = archived
+                value.configurationDirectoryOverride = usesSpecificDirectory
+                    ? (configurationDirectory.trimmingCharacters(in: .whitespacesAndNewlines) as NSString).expandingTildeInPath : nil
                 value.rawArguments = arguments
                 if let parsed = try? ArgumentText.parse(arguments) { value.arguments = parsed }
+                try value.validate()
                 try await model.save("saveBaseAgentPreset", value, version: version)
                 dismiss()
             } catch { failure = error.localizedDescription }

@@ -5,6 +5,38 @@ import Testing
 struct TeamAgentsTests {
     private func temporaryRoot() -> URL { URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("team-agents-\(UUID())").resolvingSymlinksInPath() }
 
+    @Test func presetDirectorySurvivesTeamResolutionAndCustomCopyPersistence() async throws {
+        let root = temporaryRoot(); defer { try? FileManager.default.removeItem(at: root) }
+        let store = try FileStore(root: root)
+        var team = PresetSet(name: "Work", agentSelection: .allBase)
+        team.configurationDirectories = ["claude": "/team/claude"]
+        let savedTeam = try await store.save(team)
+        // Decode the new field to exercise backward-compatible persistence too.
+        let base = BaseAgentPreset(name: "Claude Code Local", kind: .claude, executable: "claude")
+        var object = try #require(JSONSerialization.jsonObject(with: JSONCoding.encode(base)) as? [String: Any])
+        object["configurationDirectoryOverride"] = "/local/claude-local"
+        let local = try JSONCoding.decode(BaseAgentPreset.self, from: JSONSerialization.data(withJSONObject: object))
+        try await store.save(local)
+        var snapshot = await store.reload()
+        #expect(snapshot.agents(in: team).first?.configurationDirectory == "/local/claude-local")
+        team.agentSelection = .custom
+        let custom = try await store.save(team, expectedVersion: savedTeam.version)
+        snapshot = await store.reload()
+        var copy = try #require(snapshot.agents(in: custom.value).first)
+        copy.name = "Renamed local"
+        let stored = try #require(snapshot.presets.first { $0.value.id == copy.id })
+        try await store.save(copy, expectedVersion: stored.version)
+        snapshot = await store.reload()
+        #expect(snapshot.agents(in: custom.value).first?.configurationDirectory == "/local/claude-local")
+    }
+
+    @Test func resolvedAgentDirectoryWinsOverTeamEnvironment() throws {
+        let agent = AgentPreset(setID: UUID(), name: "Local", kind: .claude, executable: "claude", configurationDirectory: "/local/claude-local")
+        let environment = try LaunchPolicy.environment(base: [:], preset: agent, projectID: UUID(), sessionID: UUID(), token: "test", configurationEnvironment: ["CLAUDE_CONFIG_DIR": "/team/claude", "CODEX_HOME": "/team/codex"], allowMissingConfiguration: true)
+        #expect(environment["CLAUDE_CONFIG_DIR"] == "/local/claude-local")
+        #expect(environment["CODEX_HOME"] == "/team/codex")
+    }
+
     @Test func inheritedCatalogUsesEachTeamsDirectoriesAndCustomCopiesStayIndependent() async throws {
         let root = temporaryRoot(); defer { try? FileManager.default.removeItem(at: root) }
         let store = try FileStore(root: root)

@@ -83,10 +83,15 @@ public enum LaunchPolicy {
     public static func environment(base: [String: String], preset: AgentPreset, projectID: UUID, sessionID: UUID, token: String, configurationEnvironment: [String: String]? = nil, allowMissingConfiguration: Bool = false) throws -> [String: String] {
         let directory = try configurationDirectory(preset.configurationDirectory, kind: preset.kind, allowMissing: allowMissingConfiguration)
         var result = sanitizedEnvironment(base: base)
-        result.merge(preset.kind.provider?.environment(configurationDirectory: directory) ?? [:]) { _, profile in profile }
         if let configurationEnvironment {
             let selectors = Set(AgentProviders.all.map(\.configurationEnvironmentKey))
             for (key, value) in configurationEnvironment where selectors.contains(key) { result[key] = value }
+        }
+        // The resolved agent directory takes precedence over the team defaults.
+        // Remove the selector first: some providers express their default as no variable.
+        if let provider = preset.kind.provider {
+            result.removeValue(forKey: provider.configurationEnvironmentKey)
+            result.merge(provider.environment(configurationDirectory: directory)) { _, profile in profile }
         }
         result["CHAUFFEUR_SESSION_ID"] = sessionID.uuidString
         // A deep link other tools can open to reveal this terminal: it launches

@@ -89,10 +89,10 @@ struct ProviderPolicyCharacterizationTests {
         #expect(Set(claude.keys) == ["PATH", "CLAUDE_CONFIG_DIR", "CHAUFFEUR_SESSION_ID", "CHAUFFEUR_SESSION_URL", "CHAUFFEUR_SESSION_TOKEN", "TERM", "COLORTERM"])
         #expect(claude["CLAUDE_CONFIG_DIR"] == Paths.canonical(root.path))
 
-        // Team configuration only contributes the two profile selectors, and wins over the preset's own directory.
+        // Team configuration contributes profile selectors; the resolved agent directory takes precedence.
         let team = ["CODEX_HOME": "/team/codex", "CLAUDE_CONFIG_DIR": "/team/claude", "OTHER": "x"]
         let overridden = try LaunchPolicy.environment(base: base, preset: preset(.claude, raw: "", directory: root.path), projectID: UUID(), sessionID: sessionID, token: "t", configurationEnvironment: team)
-        #expect(overridden["CLAUDE_CONFIG_DIR"] == "/team/claude" && overridden["CODEX_HOME"] == "/team/codex" && overridden["OTHER"] == nil)
+        #expect(overridden["CLAUDE_CONFIG_DIR"] == Paths.canonical(root.path) && overridden["CODEX_HOME"] == "/team/codex" && overridden["OTHER"] == nil)
         let shell = try LaunchPolicy.environment(base: base, preset: preset(.shell, raw: "", directory: root.path), projectID: UUID(), sessionID: sessionID, token: "t", configurationEnvironment: team)
         #expect(Set(shell.keys) == ["PATH", "CODEX_HOME", "CLAUDE_CONFIG_DIR", "CHAUFFEUR_SESSION_ID", "CHAUFFEUR_SESSION_URL", "TERM", "COLORTERM"])
 

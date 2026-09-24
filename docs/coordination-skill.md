@@ -2,7 +2,9 @@
 
 Chauffeur automatically links all three bundled skills when the runtime starts, when
 setup completes, and when a team is created or its configuration directories
-change. **Settings → Agent Presets → Chauffeur Skill…** shows their health,
+change, and when an agent preset is saved. Fixed preset configuration directories
+are included for available agents whose skills live in their configuration directory.
+**Settings → Agent Presets → Chauffeur Skill…** shows their health,
 destinations, versions, and guidance. **Refresh** also repairs missing links.
 The skills update with the app; an existing user-owned skill at the same discovery path is preserved and reported as a conflict.
 

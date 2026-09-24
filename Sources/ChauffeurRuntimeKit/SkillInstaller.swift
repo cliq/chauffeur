@@ -27,15 +27,20 @@ public actor SkillInstaller {
         Paths.canonical(dataRoot) == Paths.canonical(defaultDataRoot) || accountHome.map { Paths.canonical(home) != Paths.canonical($0) } ?? true
     }
     public static var accountHome: String? { getpwuid(getuid()).flatMap { $0.pointee.pw_dir.map { String(cString: $0) } } }
-    public static func directories(teams: [PresetSet], home: String) -> [String] {
-        Set(AgentProviders.all.flatMap { provider in
+    public static func directories(teams: [PresetSet], home: String, presets: [AgentPreset] = []) -> [String] {
+        let overrides = presets.compactMap { preset -> String? in
+            guard !preset.archived, preset.kind.provider?.skillDiscovery == .configurationDirectory else { return nil }
+            return preset.configurationDirectoryOverride
+        }
+        return Set(AgentProviders.all.flatMap { provider in
             provider.skillDiscovery == .sharedAgentsHome ? [sharedAgentsHome(home)]
                 : teams.filter { !$0.archived }.map { $0.configurationDirectory(for: provider.kind, home: home) }
-        }.map(Paths.canonical)).sorted()
+        }.map(Paths.canonical) + overrides.map(Paths.canonical)).sorted()
     }
     /// The directory whose `skills` folder `provider` discovers for `team`.
-    public static func skillDirectory(for provider: any AgentProvider, team: PresetSet, home: String) -> String {
-        provider.skillDiscovery == .sharedAgentsHome ? sharedAgentsHome(home) : team.configurationDirectory(for: provider.kind, home: home)
+    public static func skillDirectory(for provider: any AgentProvider, team: PresetSet, home: String, preset: AgentPreset? = nil) -> String {
+        provider.skillDiscovery == .sharedAgentsHome ? sharedAgentsHome(home)
+            : preset?.configurationDirectoryOverride.map(Paths.canonical) ?? team.configurationDirectory(for: provider.kind, home: home)
     }
     private static func sharedAgentsHome(_ home: String) -> String { URL(fileURLWithPath: home).appendingPathComponent(".agents").path }
 
