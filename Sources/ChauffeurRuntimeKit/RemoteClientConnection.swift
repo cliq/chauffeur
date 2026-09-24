@@ -16,6 +16,8 @@ actor RemoteClientConnection: RemoteConnectionHandle {
     private let dispatcher: any RemoteOperationDispatching
     private var decoder = RemoteFrameDecoder()
     private(set) var deviceID: UUID?
+    /// What the client advertised in its hello; older builds decode fewer session kinds.
+    private var clientCapabilities: [String] = []
     /// sessionID → generation of the attachment this connection controls.
     private var attachments: [UUID: AttachmentGeneration] = [:]
     private var sinks: [AttachmentGeneration: RemoteFrameSink] = [:]
@@ -137,6 +139,7 @@ actor RemoteClientConnection: RemoteConnectionHandle {
             throw RemoteProtocolViolation.unauthorized
         case .success(let info):
             deviceID = hello.deviceID
+            clientCapabilities = hello.capabilities
             handshakeDeadline?.cancel(); handshakeDeadline = nil
             try await send(response: RemoteResponse(id: request.id, result: .hostInfo(info)))
         }
@@ -160,8 +163,13 @@ actor RemoteClientConnection: RemoteConnectionHandle {
         case .listInventory, .getSessionProgress, .previewWorktreeDestination, .launch, .getOperationStatus:
             result = await dispatcher.handle(request.operation, deviceID: deviceID)
         }
+        let capabilities = clientCapabilities
+        let compatible = result.map { value -> RemoteResult in
+            if case .inventory(let inventory) = value { return .inventory(inventory.compatible(withClientCapabilities: capabilities)) }
+            return value
+        }
         let response: RemoteResponse
-        switch result {
+        switch compatible {
         case .success(let value): response = RemoteResponse(id: request.id, result: value)
         case .failure(let error): response = RemoteResponse(id: request.id, error: error)
         }

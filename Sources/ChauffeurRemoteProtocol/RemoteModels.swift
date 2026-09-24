@@ -238,6 +238,23 @@ public struct InventorySnapshot: Codable, Equatable, Sendable {
     }
 }
 
+public extension InventorySnapshot {
+    /// The inventory as a client with these hello capabilities can decode it: without `openSessionKinds`, sessions and
+    /// presets of a kind it doesn't know are sent as `shell`.
+    func compatible(withClientCapabilities capabilities: [String]) -> InventorySnapshot {
+        guard !capabilities.contains(RemoteProtocol.openSessionKinds) else { return self }
+        func legacy(_ kind: RemoteSessionKind) -> RemoteSessionKind { RemoteProtocol.legacySessionKinds.contains(kind) ? kind : .shell }
+        var result = self
+        for index in result.sessions.indices { result.sessions[index].kind = legacy(result.sessions[index].kind) }
+        for project in result.projects.indices {
+            for preset in result.projects[project].presets.indices {
+                result.projects[project].presets[preset].kind = legacy(result.projects[project].presets[preset].kind)
+            }
+        }
+        return result
+    }
+}
+
 // MARK: - Host / pairing
 
 public struct HostInfo: Codable, Equatable, Sendable {

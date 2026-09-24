@@ -12,6 +12,31 @@ struct ModelTests {
         #expect(try RemoteJSON.decode(SessionSummary.self, from: Data(newer.utf8)).kind == .agent)
     }
 
+    @Test func clientsWithoutOpenSessionKindsSeeUnknownKindsAsShell() throws {
+        #expect(RemoteProtocol.capabilities.contains(RemoteProtocol.openSessionKinds))
+        let date = Date(timeIntervalSince1970: 0)
+        func session(_ kind: RemoteSessionKind) -> SessionSummary {
+            SessionSummary(id: UUID(), projectID: UUID(), folderID: UUID(), title: "Task", kind: kind, state: .running, checkoutPath: "/repo", createdAt: date, updatedAt: date)
+        }
+        let presets = [PresetSummary(id: UUID(), name: "OpenCode", kind: .opencode), PresetSummary(id: UUID(), name: "Claude", kind: .claude)]
+        let project = ProjectSummary(id: UUID(), name: "P", archived: false, groups: [], presets: presets, folders: [])
+        let inventory = InventorySnapshot(revision: 3, hostName: "Mac", projects: [project], sessions: [session(.opencode), session(.agent), session(.codex), session(.shell)], generatedAt: date)
+
+        #expect(inventory.compatible(withClientCapabilities: RemoteProtocol.capabilities) == inventory)
+        let legacy = inventory.compatible(withClientCapabilities: ["terminal.binary.v1", "launch.worktree.v1", "inventory.v1", "progress.v1"])
+        #expect(legacy.sessions.map(\.kind) == [.shell, .shell, .codex, .shell])
+        #expect(legacy.projects[0].presets.map(\.kind) == [.shell, .claude])
+        #expect(legacy.revision == 3 && legacy.sessions.map(\.id) == inventory.sessions.map(\.id))
+        // What an old build decodes: its strict enum knows only these kinds.
+        enum StrictKind: String, Decodable { case codex, claude, shell }
+        struct StrictSession: Decodable { var kind: StrictKind }
+        struct StrictPreset: Decodable { var kind: StrictKind }
+        struct StrictProject: Decodable { var presets: [StrictPreset] }
+        struct StrictInventory: Decodable { var projects: [StrictProject]; var sessions: [StrictSession] }
+        #expect(throws: (any Error).self) { try RemoteJSON.decode(StrictInventory.self, from: RemoteJSON.encode(inventory)) }
+        #expect(try RemoteJSON.decode(StrictInventory.self, from: RemoteJSON.encode(legacy)).sessions.count == 4)
+    }
+
     @Test func progressIsOptionalForOlderInventoriesAndRoundTripsSeparately() throws {
         let session = SessionSummary(id: UUID(), projectID: UUID(), folderID: UUID(), title: "Task", kind: .codex, state: .running, checkoutPath: "/repo", createdAt: Date(timeIntervalSince1970: 0), updatedAt: Date(timeIntervalSince1970: 0))
         let legacy = try RemoteJSON.encode(session)

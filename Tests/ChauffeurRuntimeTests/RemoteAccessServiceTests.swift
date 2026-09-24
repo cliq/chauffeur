@@ -10,10 +10,13 @@ actor FakeDispatcher: RemoteOperationDispatching {
     struct Call: Equatable { let kind: String; let deviceID: UUID }
     private(set) var calls: [Call] = []
     private var revision: UInt64 = 1
+    private var inventory: InventorySnapshot?
     func handle(_ operation: RemoteOperation, deviceID: UUID) async -> Result<RemoteResult, RemoteError> {
         calls.append(Call(kind: operation.kind, deviceID: deviceID))
+        if case .listInventory = operation, let inventory { return .success(.inventory(inventory)) }
         return .success(.ack)
     }
+    func setInventory(_ value: InventorySnapshot) { inventory = value }
     func inventoryRevision() async -> UInt64 { revision }
     func setRevision(_ value: UInt64) { revision = value }
 }
@@ -146,14 +149,14 @@ private func pair(_ service: RemoteAccessService, deviceName: String = "Test iPh
     return result
 }
 
-private func hello(_ result: PairingResult, protocolVersion: Int = RemoteProtocol.version) -> RemoteOperation {
-    .hello(HelloRequest(deviceID: result.deviceID, deviceToken: result.deviceToken, clientName: "Tests", clientVersion: "1.0", protocolVersion: protocolVersion))
+private func hello(_ result: PairingResult, protocolVersion: Int = RemoteProtocol.version, capabilities: [String] = []) -> RemoteOperation {
+    .hello(HelloRequest(deviceID: result.deviceID, deviceToken: result.deviceToken, clientName: "Tests", clientVersion: "1.0", protocolVersion: protocolVersion, capabilities: capabilities))
 }
 
-private func connectedClient(_ fixture: Fixture, _ result: PairingResult) async throws -> RemoteTestClient {
+private func connectedClient(_ fixture: Fixture, _ result: PairingResult, capabilities: [String] = []) async throws -> RemoteTestClient {
     let client = RemoteTestClient(port: fixture.port, key: try fixture.key())
     try await client.connect()
-    let response = try await client.request(hello(result))
+    let response = try await client.request(hello(result, capabilities: capabilities))
     guard case .hostInfo? = response.result else { throw RemoteTestClientError.unexpectedResult }
     return client
 }
@@ -320,6 +323,27 @@ struct RemoteAccessServiceTests {
         await dispatcher.setRevision(7)
         #expect(try await client.nextEvent(timeout: 5) == .inventoryChanged(revision: 7))
         client.cancel()
+        await service.shutdown()
+    }
+
+    @Test func inventoryKindsFollowWhatTheClientAdvertisedItDecodes() async throws {
+        let fixture = try await Fixture.make(); defer { fixture.cleanup() }
+        let dispatcher = FakeDispatcher()
+        let date = Date(timeIntervalSince1970: 0)
+        let session = SessionSummary(id: UUID(), projectID: UUID(), folderID: UUID(), title: "OpenCode", kind: .opencode, state: .running, checkoutPath: "/repo", createdAt: date, updatedAt: date)
+        let project = ProjectSummary(id: UUID(), name: "P", archived: false, groups: [], presets: [PresetSummary(id: UUID(), name: "OpenCode", kind: .opencode)], folders: [])
+        await dispatcher.setInventory(InventorySnapshot(revision: 1, hostName: "Mac", projects: [project], sessions: [session], generatedAt: date))
+        let service = fixture.service(dispatcher: dispatcher)
+        _ = try await service.setEnabled(true, port: fixture.port)
+        let result = try await pair(service)
+        func kinds(_ capabilities: [String]) async throws -> [RemoteSessionKind] {
+            let client = try await connectedClient(fixture, result, capabilities: capabilities)
+            defer { client.cancel() }
+            guard case .inventory(let inventory)? = try await client.request(.listInventory(ListInventoryRequest())).result else { throw RemoteTestClientError.unexpectedResult }
+            return inventory.sessions.map(\.kind) + inventory.projects.flatMap { $0.presets.map(\.kind) }
+        }
+        #expect(try await kinds([]) == [.shell, .shell])
+        #expect(try await kinds(RemoteProtocol.capabilities) == [.opencode, .opencode])
         await service.shutdown()
     }
 

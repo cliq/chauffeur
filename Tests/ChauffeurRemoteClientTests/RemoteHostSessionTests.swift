@@ -30,6 +30,15 @@ struct RemoteHostSessionTests {
         return (session, factory)
     }
 
+    @Test func helloAdvertisesThatEverySessionKindDecodes() async throws {
+        let (session, factory) = makeSession()
+        await session.connect()
+        let hello = try #require(factory.hosts.first?.requests(ofKind: "hello").first)
+        guard case .hello(let request) = hello.operation else { Issue.record("Missing hello"); return }
+        #expect(request.capabilities.contains(RemoteProtocol.openSessionKinds))
+        session.disconnect()
+    }
+
     @Test func progressUsesSessionIdentityAndRejectsMismatchedResponses() async throws {
         let (session, factory) = makeSession()
         let id = UUID()
