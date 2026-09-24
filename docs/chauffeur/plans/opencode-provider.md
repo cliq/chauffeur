@@ -100,7 +100,7 @@ runtime publishes it to `<Application Support>/Chauffeur/…/plugins/chauffeur-o
 Each ctl call gets one JSON object on stdin, in the Claude hook shape that `HookPayload.parse` already reads:
 
 ```json
-{"session_id": "ses_…", "hook_event_name": "SessionStart" | "PostToolUse" | "Stop", "source": "startup" | "resume", "stop_hook_active": false}
+{"session_id": "ses_…", "hook_event_name": "SessionStart" | "PostToolUse" | "Stop", "source": "startup" | "resume" | "new", "stop_hook_active": false}
 ```
 
 - `source` is sent only with `SessionStart`.
@@ -112,7 +112,7 @@ Each ctl call gets one JSON object on stdin, in the Claude hook shape that `Hook
 
 | Event | When |
 |---|---|
-| `session-start` | The first root session is seen. `source` is `startup` after `session.created`, and `resume` when the ID is adopted from another root event. |
+| `session-start` | The first root session is seen. `source` is `startup` after `session.created`, and `resume` when the ID is adopted from another root event. Later, `new` when another root session turns busy (`/new`, `/fork`, a session picked in `/sessions`): the runtime moves the session to that conversation, and the plugin drops the previous root's waiter and pending dialogs. |
 | `running` | Busy, or a permission or question is answered. Sent only on transitions. |
 | `needs-attention` | A permission or question has stayed open for 250 ms, or a `session.error` other than `MessageAbortedError`. |
 | `turn-finished` | Nothing continues a turn the Stop hook left open: the `promptAsync` for a blocking Stop or for the waiter's work failed, or the waiter couldn't start or exited with `timeout`, `ended`, an error or no output. Without `waitingForWorkers`, so the runtime marks the session unread and notifies. |

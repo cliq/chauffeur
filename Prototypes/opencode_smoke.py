@@ -22,6 +22,8 @@ Checks:
   the composer rule. Real screens (first turn, idle, draft, busy) are captured and
   classified with the same rule as `OpenCodeProvider.composerReadiness(screen:)`.
 - Resume: stop and resume uses `-s <ses_…>` and keeps the conversation.
+- /new: a new conversation started in the TUI takes over once prompted; mail continues
+  it, and a later resume reopens it rather than the first one.
 - Chauffeur lists its MCP tools to OpenCode without the `chauffeur_` prefix, so
   OpenCode shows (and the mock calls) the names the skills use, e.g. `chauffeur_inbox`.
 - `chauffeur_inbox` waits are capped at 240 s for OpenCode (skip with --quick).
@@ -50,7 +52,7 @@ assert options.opencode and options.claude and tmux, 'Install OpenCode, Claude C
 artifacts = options.artifacts.resolve(); artifacts.mkdir(parents=True, exist_ok=True)
 for old in artifacts.glob('*'):
     if old.is_file(): old.unlink()
-MARKERS = ('ASK', 'QUESTION', 'AUTO', 'BUSY', 'QUICK', 'SEND', 'DELEGATE', 'WORKER', 'FOLLOWUP', 'RESUMED', 'Chauffeur:')
+MARKERS = ('FRESH', 'REOPENED', 'ASK', 'QUESTION', 'AUTO', 'BUSY', 'QUICK', 'SEND', 'DELEGATE', 'WORKER', 'FOLLOWUP', 'RESUMED', 'Chauffeur:')
 HINT = 'Chauffeur: '
 
 def uid(): return str(uuid.uuid4()).upper()
@@ -133,6 +135,10 @@ def oc_decide(body):
         return say('WORKER_DONE')
     if prompt.startswith('FOLLOWUP'):
         return say('FOLLOWUP_DONE')
+    if prompt.startswith('FRESH'):
+        return say('FRESH_DONE ' + ('history-kept' if 'RESUMED one' in conversation(messages) else 'history-lost'))
+    if prompt.startswith('REOPENED'):
+        return say('REOPENED_DONE ' + ('fresh' if 'FRESH one' in conversation(messages) and 'RESUMED one' not in conversation(messages) else 'wrong'))
     if prompt.startswith('RESUMED'):
         return say('RESUMED_DONE ' + ('history-kept' if 'ASK one' in conversation(messages) else 'history-lost'))
     if prompt.startswith('Chauffeur:'):
@@ -488,6 +494,36 @@ try:
         assert current(a)['nativeConversationID'] == original
         return {'arguments': arguments.strip().split(' ', 1)[1], 'nativeConversationID': original}
     check('resume', resume)
+
+    # ---- /new inside the TUI moves the session to the new conversation.
+    def new_conversation():
+        keys(a, '/new'); time.sleep(1.5)
+        assert current(a)['nativeConversationID'] == original, 'nothing moves before the first prompt'
+        keys(a, 'FRESH one')
+        done = wait(lambda: issued_for('opencode', 'text', 'FRESH one'), timeout=40, label='fresh turn')
+        assert done[-1][3].endswith('history-lost'), done[-1][3]
+        fresh = wait(lambda: (lambda n: n if n != original else None)(current(a)['nativeConversationID']), timeout=20, label='new conversation adopted')
+        assert re.fullmatch(r'ses_[A-Za-z0-9]{26}', fresh), fresh
+        wait(lambda: current(a)['state'] == 'turnFinished', timeout=30, label='fresh idle')
+        # Mail during the answer continues the new conversation, not the first one.
+        keys(a, 'QUICK fresh')
+        wait(lambda: turn_requests('QUICK fresh'), timeout=30, label='A answering in the new conversation')
+        keys(x, f'SEND {a["id"]} fresh-mail')
+        wait(lambda: messages('fresh-mail'), timeout=30, label='fresh mail sent')
+        continued = wait(lambda: [r for r in turn_requests('Chauffeur:') if 'QUICK fresh' in conversation(r['messages'])], timeout=40, label='new conversation read its mail')
+        assert 'RESUMED one' not in conversation(continued[-1]['messages']), 'mail went to the first conversation'
+        wait(lambda: current(a)['state'] == 'turnFinished', timeout=30, label='fresh idle after mail')
+        call('stop', {'sessionID': a['id'], 'force': True})
+        wait(lambda: current(a)['state'] in ('exited', 'interrupted', 'failed'), timeout=30, label='A stopped again')
+        call('resume', {'sessionID': a['id']}, timeout=90)
+        arguments = args_of(a)
+        assert f'-s {fresh}' in arguments, arguments
+        ready(a)
+        keys(a, 'REOPENED one')
+        reopened = wait(lambda: issued_for('opencode', 'text', 'REOPENED one'), timeout=40, label='reopened turn')
+        assert reopened[-1][3].endswith('fresh'), reopened[-1][3]
+        return {'first': original, 'new': fresh, 'resumeArguments': arguments.strip().split(' ', 1)[1]}
+    check('newConversation', new_conversation)
 
     # ---- Remote inventory kind.
     def remote_kind():

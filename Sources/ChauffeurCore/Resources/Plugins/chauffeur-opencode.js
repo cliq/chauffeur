@@ -89,6 +89,17 @@ function createChauffeurPlugin({
     enqueue(() => run(["event", "--session", chauffeurSession, "session-start"], payload("SessionStart", { source }), cfg.ctlTimeoutMs));
   }
 
+  // The previous root's turn, dialogs and waiter belong to a conversation the user left.
+  function switchTo(id) {
+    killWaiter();
+    clearPending();
+    s.stopActive = false;
+    s.errored = false;
+    s.idle = false;
+    s.reported = null;
+    adopt(id, "new");
+  }
+
   function startWaiter() {
     if (s.waiter) return;
     let child;
@@ -199,9 +210,11 @@ function createChauffeurPlugin({
       else if (type === "permission.replied" || type === "question.replied" || type === "question.rejected") onReplied(p.requestID);
       return;
     }
-    // The first root session wins (V9): it is the one the TUI opened, and `-s <id>` emits no session.created, so a
-    // resumed root is adopted from its first event. Any later root (another session opened in the TUI) is ignored.
+    // The first root session is the one the TUI opened, and `-s <id>` emits no session.created, so a resumed root is
+    // adopted from its first event. The server can't see which session the TUI shows, so another root (/new, /fork, or
+    // a session picked in /sessions) takes over when it turns busy: the user just prompted there.
     if (!s.root) adopt(sid, "resume");
+    else if (sid !== s.root && type === "session.status" && p.status?.type === "busy") switchTo(sid);
     if (sid !== s.root) return;
     switch (type) {
       case "session.status": if (p.status?.type === "busy") onBusy(); break;

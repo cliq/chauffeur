@@ -353,8 +353,8 @@ public struct OpenCodeProvider: AgentProvider {
         id.hasPrefix("ses_") && id.count == 30 && id.dropFirst(4).allSatisfy { $0.isASCII && ($0.isLetter || $0.isNumber) }
     }
     public func validatesConversationID(_ id: String) -> Bool { Self.isConversationID(id) }
-    /// The plugin reports only the first root session, so nothing moves the session later.
-    public var identityChangingSources: Set<String> { [] }
+    /// The plugin reports `new` when another root session takes over (/new, /fork, /sessions).
+    public var identityChangingSources: Set<String> { ["new"] }
     public var wakeStrategy: CoordinatorWakeStrategy { .plugin }
     /// Plain JSON MCP replies fail after about 300 s (V9).
     public var maxInboxWaitSeconds: Int? { 240 }

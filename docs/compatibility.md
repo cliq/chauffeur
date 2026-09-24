@@ -205,9 +205,13 @@ behaviour and the rejected alternatives.
 - **Evidence:** `Prototypes/opencode_smoke.py` passes against the real runtime, OpenCode 1.18.32 and Claude Code 2.1.281 with
   scripted mock models: plugin loading from a data root with a space, permission and question attention (none under `--auto`),
   mid-turn and turn-end mail, an OpenCode coordinator waking once per result from an OpenCode and a Claude worker, a follow-up
-  through the composer rule, resume with `-s`, and the 240 s inbox cap. `Prototypes/opencode_live_smoke.py` passes with a local
+  through the composer rule, resume with `-s`, `/new` taking the session over (mail and a later resume follow it), and the
+  240 s inbox cap. `Prototypes/opencode_live_smoke.py` passes with a local
   Qwen3 14B (4-bit) served by `mlx_lm.server`: status, the adopted `ses_…` ID, a `chauffeur_discover` call and a bash command.
 - **Tool names:** OpenCode shows MCP tools as `<server>_<tool>`, so Chauffeur lists its tools to OpenCode sessions without the
   `chauffeur_` prefix, and OpenCode shows the names the skills use.
-- **Known limits:** starting a new conversation inside the TUI (`/new`) is not followed; Chauffeur keeps the first conversation
-  ID. OpenCode reads skills from both `~/.claude/skills` and `~/.agents/skills`, so managed skills can appear twice there.
+- **Conversation switches:** OpenCode's server can't see which session the TUI shows, so the plugin follows the root session that
+  last turned busy. `/new`, `/fork` and a session picked in `/sessions` move the Chauffeur session once the user prompts there.
+- **Known limits:** any other root session that turns busy in the same OpenCode server (another attached client, a plugin that
+  creates root sessions) takes the Chauffeur session over too. OpenCode reads skills from both `~/.claude/skills` and
+  `~/.agents/skills`, so managed skills can appear twice there.

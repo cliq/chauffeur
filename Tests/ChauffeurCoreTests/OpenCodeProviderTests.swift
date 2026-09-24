@@ -132,8 +132,9 @@ struct OpenCodeProviderTests {
         let payload = HookPayload.parse(Data(#"{"session_id":"\#(id)","hook_event_name":"SessionStart","source":"startup"}"#.utf8))
         #expect(payload == HookPayload(hookEvent: "SessionStart", source: "startup", conversationID: id))
         #expect(HookPayload.parse(Data(#"{"session_id":"ses_nope"}"#.utf8)).conversationID == nil)
-        // The plugin reports only the first root session.
+        // Only a root that takes over (`new`) moves the session; the first root's `startup` never does.
         #expect(!NativeConversation.adopts(kind: .opencode, hookEvent: "SessionStart", source: "startup"))
+        #expect(NativeConversation.adopts(kind: .opencode, hookEvent: "SessionStart", source: "new"))
         #expect(NativeConversation.adoptsFirst(kind: .opencode, hooksTrusted: true, hookEvent: nil))
     }
 

@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import { ChauffeurOpenCode } from "../../Sources/ChauffeurCore/Resources/Plugins/chauffeur-opencode.js";
 import { harness, createChauffeurPlugin, fakeCtl, fakeClient, env, tick, ROOT, CHILD, created, busy, idle } from "./helpers.mjs";
 
+const OTHER = "ses_0d09000000003otherCCCCCCCC";
+
 const stopReply = (json) => (args) => (args.includes("--report-stop") ? { stdout: JSON.stringify(json) + "\n" } : {});
 
 test("is a no-op without the Chauffeur environment", async () => {
@@ -75,14 +77,73 @@ test("a subagent's open dialog needs attention like the root's own", async () =>
   assert.deepEqual(h.statuses(), ["session-start", "running", "needs-attention", "running"]);
 });
 
-test("another root session is ignored once one is adopted", async () => {
+test("another root session is ignored until it turns busy", async () => {
   const h = await harness({ reply: stopReply({ block: false }) });
   await h.emit(...created(ROOT));
-  await h.emit(...created("ses_other"));
-  await h.emit(...busy("ses_other"));
-  await h.emit(...idle("ses_other"));
+  await h.emit(...created(OTHER));
+  await h.emit("session.updated", { sessionID: OTHER, info: { id: OTHER, title: "t" } });
+  await h.emit(...idle(OTHER));
   assert.deepEqual(h.statuses(), ["session-start"]);
   assert.equal(h.stops().length, 0);
+});
+
+test("a root that turns busy after /new takes over, and the previous root is ignored", async () => {
+  const h = await harness({ reply: stopReply({ block: false }) });
+  await h.emit(...created(ROOT));
+  await h.emit(...busy());
+  await h.emit(...created(OTHER));
+  await h.emit(...busy(OTHER));
+  assert.deepEqual(h.statuses(), ["session-start", "running", "session-start", "running"]);
+  const events = h.ctl.calls.filter((c) => c.args[0] === "event");
+  assert.deepEqual(events[2].payload, { session_id: OTHER, hook_event_name: "SessionStart", source: "new" });
+  assert.deepEqual(events[3].payload, { session_id: OTHER });
+  await h.emit(...idle());
+  assert.equal(h.stops().length, 0, "the previous root's idle is ignored");
+  await h.emit(...idle(OTHER));
+  assert.equal(h.stops()[0].payload.session_id, OTHER);
+  await h.hooks["tool.execute.after"]({ tool: "bash", sessionID: ROOT, callID: "c" }, { output: "x" });
+  assert.equal(h.ctl.calls.filter((c) => c.args[0] === "inbox-hook" && !c.args.includes("--report-stop")).length, 0);
+});
+
+test("switching back to an earlier root adopts it again", async () => {
+  const h = await harness();
+  await h.emit(...created(ROOT));
+  await h.emit(...busy());
+  await h.emit(...busy(OTHER));
+  await h.emit(...busy());
+  const starts = h.ctl.calls.filter((c) => c.args[3] === "session-start").map((c) => c.payload.session_id);
+  assert.deepEqual(starts, [ROOT, OTHER, ROOT]);
+});
+
+test("a child turning busy never takes over", async () => {
+  const h = await harness();
+  await h.emit(...created(ROOT));
+  await h.emit(...busy());
+  await h.emit(...created(CHILD, ROOT));
+  await h.emit(...busy(CHILD));
+  assert.deepEqual(h.statuses(), ["session-start", "running"]);
+});
+
+test("a switch kills the previous root's waiter and clears its attention", async () => {
+  const h = await harness({ reply: (args) => (args.includes("--report-stop") ? { stdout: JSON.stringify({ block: false, waitForWorkers: true }) + "\n" } : args[0] === "wait-for-work" ? { hang: true } : {}) });
+  await h.emit(...created(ROOT));
+  await h.emit(...busy());
+  await h.emit(...idle());
+  const [w] = h.waiters();
+  assert.ok(w);
+  await h.emit(...busy(OTHER));
+  assert.equal(w.killed, "SIGTERM");
+  await tick(20);
+  assert.equal(h.statuses().at(-1), "running", "the killed waiter doesn't end the new root's turn");
+
+  const a = await harness();
+  await a.emit(...created(ROOT));
+  await a.emit(...busy());
+  await a.emit("permission.asked", { id: "per_1", sessionID: ROOT, permission: "bash" });
+  await tick(50);
+  await a.emit(...busy(OTHER));
+  await tick(50);
+  assert.deepEqual(a.statuses(), ["session-start", "running", "needs-attention", "session-start", "running"]);
 });
 
 test("a permission answered within the debounce (--auto) never reports attention", async () => {

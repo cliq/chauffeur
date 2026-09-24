@@ -179,9 +179,12 @@ struct OpenCodeIntegrationTests {
         let conversation = "ses_0123456789abcdefghijABCDEF"
         _ = try await fixture.runtime.handle(IPCRequest("event", params: .object(["token": .string(token), "event": .string("session-start"), "nativeConversationID": .string(conversation), "hookEvent": .string("SessionStart"), "source": .string("startup")])))
         #expect(try await fixture.session().nativeConversationID == conversation)
-        // A later root or child ID never replaces it.
-        _ = try await fixture.runtime.handle(IPCRequest("event", params: .object(["token": .string(token), "event": .string("session-start"), "nativeConversationID": .string("ses_ZZZZZZZZZZZZZZZZZZZZZZZZZZ"), "hookEvent": .string("SessionStart"), "source": .string("startup")])))
+        // Another root's `startup` never replaces it; a root that takes over after /new does.
+        let next = "ses_ZZZZZZZZZZZZZZZZZZZZZZZZZZ"
+        _ = try await fixture.runtime.handle(IPCRequest("event", params: .object(["token": .string(token), "event": .string("session-start"), "nativeConversationID": .string(next), "hookEvent": .string("SessionStart"), "source": .string("startup")])))
         #expect(try await fixture.session().nativeConversationID == conversation)
+        _ = try await fixture.runtime.handle(IPCRequest("event", params: .object(["token": .string(token), "event": .string("session-start"), "nativeConversationID": .string(next), "hookEvent": .string("SessionStart"), "source": .string("new")])))
+        #expect(try await fixture.session().nativeConversationID == next)
 
         let discovered = try await fixture.runtime.callTool(token: token, name: "chauffeur_discover", arguments: .object([:]))
         #expect(discovered["capabilities"]["waitCommand"] == .null && discovered["capabilities"]["resultWake"] == .bool(false)
