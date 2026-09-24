@@ -18,6 +18,7 @@ not a completed real-provider support matrix.
 | Claude Code | 2.1.278 | Same orchestration checks pass in both coordinator and worker roles |
 | Claude Code | 2.1.272 | Three real sessions/two profiles; native account/process configuration, authenticated messages, permission/completion hooks, scoped stop, explicit resume and runtime reconnect pass; both profiles report the same account |
 | Claude Code | 2.1.273 | Basic-terminal launch/resume and checkout recovery pass; native UI input/clipboard/resize/history and normal/forced UI quit preserve the process and draft. Native permission/completion hooks, read-only MCP discovery and normal exit pass; full coordination remains unverified |
+| OpenCode | 1.18.32 | Plugin status, MCP, inbox continuation, coordinator waiting and composer detection verified in the [V9 spike](decisions/V9-opencode-integration.md) with a local MLX model; end-to-end evidence below under [OpenCode](#opencode) |
 
 `Prototypes/native_profile_selection.py` verifies two concurrent native project
 windows per current CLI in the signed Release app. Native `/status` account
@@ -172,3 +173,34 @@ so ghost suggestions do not occupy the composer. Ordinary sessions keep their se
 Worker completion is an attributed MCP result, separate from terminal submission
 or native turn-finished status. Messages do not wake an idle agent; coordinators
 wait for results while their turn remains active.
+
+### OpenCode
+
+OpenCode runs its own TUI in tmux, like the other agents. Each launch adds a configuration layer through `OPENCODE_CONFIG_CONTENT`;
+nothing is written into the user's OpenCode configuration. See [V9](decisions/V9-opencode-integration.md) for the measured
+behaviour and the rejected alternatives.
+
+- **Identification:** a semver `--version` and `opencode serve` / `opencode acp` in `--help`, which OpenCode prints to stderr. No
+  version is pinned.
+- **Configuration:** OpenCode always reads `~/.config/opencode`. A team's OpenCode directory is passed as `OPENCODE_CONFIG_DIR`,
+  which OpenCode loads as an extra layer on top of the global one, not as a separate profile. Setup therefore copies nothing into
+  it.
+- **Models:** models and providers, including local servers, come from the OpenCode configuration. Chauffeur suggests models from
+  `opencode models` and doesn't check that a local server is running; OpenCode reports that error in its TUI.
+- **Environment:** inherited `OPENCODE_*` variables are removed, as are provider credentials such as `OPENAI_API_KEY` and
+  `ANTHROPIC_API_KEY`. A configuration that reads a key with `{env:OPENAI_API_KEY}` doesn't get it under Chauffeur; store the key
+  with `opencode auth login` or in the configuration instead.
+- **Status:** a bundled plugin reports session start, running, attention (permission and question dialogs, including a subagent's,
+  and model errors) and turn end through `chauffeurctl`. Subagent sessions never change the session's status or conversation.
+  Pressing Esc is not an attention state.
+- **Blocked options:** `--pure` (disables plugins, and so status), `--mini`, `--no-replay` and `--replay-limit` (a different UI),
+  and the options Chauffeur manages: `-s`, `-c`, `--fork`, `--prompt`, the server options, subcommands and the project argument.
+- **Additional folders:** granted through `permission.external_directory`, since OpenCode has no `--add-dir`.
+- **Auto-approve:** `--auto` approves anything the configuration doesn't explicitly deny. Delegated workers always get it.
+- **Inbox reminders and waiting:** mail at turn end continues the turn once through the plugin, and mail during a turn is appended
+  to the next tool result. An idle coordinator is woken by the plugin's own `wait-for-work` when a worker reaches a milestone, so
+  it ends its turn while workers run. OpenCode's MCP client drops a call after about 300 s whatever its timeout, so
+  `chauffeur_inbox` waits at most 240 s in OpenCode sessions.
+- **Follow-ups:** the composer is recognized from the prompt box around the cursor, as described in V9.
+- **Known limits:** starting a new conversation inside the TUI (`/new`) is not followed; Chauffeur keeps the first conversation
+  ID. OpenCode reads skills from both `~/.claude/skills` and `~/.agents/skills`, so managed skills can appear twice there.
