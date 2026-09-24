@@ -44,7 +44,19 @@ extension RemoteSessionKind {
         switch self {
         case .codex: "Codex"
         case .claude: "Claude"
+        case .opencode: "OpenCode"
         case .shell: "Shell"
+        case .agent: "Agent"
+        }
+    }
+
+    /// Mirrors each provider's `badgeColorName`; mobile doesn't link ChauffeurCore.
+    var badgeColorName: String? {
+        switch self {
+        case .codex: "blue"
+        case .claude: "orange"
+        case .opencode: "teal"
+        case .shell, .agent: nil
         }
     }
 }

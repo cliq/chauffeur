@@ -6,7 +6,15 @@ import Foundation
 public enum RemoteSessionKind: String, Codable, Sendable, CaseIterable {
     case codex
     case claude
+    case opencode
     case shell
+    /// An agent this build doesn't know, from a newer Mac.
+    case agent
+
+    public init(from decoder: Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        self = RemoteSessionKind(rawValue: raw) ?? .agent
+    }
 }
 
 public enum RemoteSessionState: String, Codable, Sendable, CaseIterable {

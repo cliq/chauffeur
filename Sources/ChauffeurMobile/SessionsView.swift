@@ -245,15 +245,7 @@ struct KindBadge: View {
     let kind: RemoteSessionKind
 
     var body: some View {
-        AgentBadge(label: kind.label, color: color)
-    }
-
-    private var color: Color {
-        switch kind {
-        case .codex: .blue
-        case .claude: .orange
-        case .shell: .gray
-        }
+        AgentBadge(label: kind.label, color: AgentBadge.color(named: kind.badgeColorName))
     }
 }
 

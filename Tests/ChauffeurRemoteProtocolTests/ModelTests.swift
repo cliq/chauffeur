@@ -3,6 +3,15 @@ import Testing
 @testable import ChauffeurRemoteProtocol
 
 struct ModelTests {
+    @Test func unknownSessionKindsDecodeAsAGenericAgent() throws {
+        #expect(try RemoteJSON.decode(RemoteSessionKind.self, from: Data(#""gemini""#.utf8)) == .agent)
+        #expect(try RemoteJSON.decode(RemoteSessionKind.self, from: Data(#""opencode""#.utf8)) == .opencode)
+        #expect(String(decoding: try RemoteJSON.encode(RemoteSessionKind.opencode), as: UTF8.self) == #""opencode""#)
+        let session = SessionSummary(id: UUID(), projectID: UUID(), folderID: UUID(), title: "Task", kind: .claude, state: .running, checkoutPath: "/repo", createdAt: Date(timeIntervalSince1970: 0), updatedAt: Date(timeIntervalSince1970: 0))
+        let newer = String(decoding: try RemoteJSON.encode(session), as: UTF8.self).replacingOccurrences(of: #""claude""#, with: #""gemini""#)
+        #expect(try RemoteJSON.decode(SessionSummary.self, from: Data(newer.utf8)).kind == .agent)
+    }
+
     @Test func progressIsOptionalForOlderInventoriesAndRoundTripsSeparately() throws {
         let session = SessionSummary(id: UUID(), projectID: UUID(), folderID: UUID(), title: "Task", kind: .codex, state: .running, checkoutPath: "/repo", createdAt: Date(timeIntervalSince1970: 0), updatedAt: Date(timeIntervalSince1970: 0))
         let legacy = try RemoteJSON.encode(session)

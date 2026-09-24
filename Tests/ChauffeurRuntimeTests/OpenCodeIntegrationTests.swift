@@ -1,9 +1,15 @@
 import Foundation
 import Testing
 import ChauffeurCore
+import ChauffeurRemoteProtocol
 @testable import ChauffeurRuntimeKit
 
 struct OpenCodeIntegrationTests {
+    @Test func remoteInventoryNamesOpenCodeSessions() {
+        #expect(RemoteInventoryBuilder.kind(.opencode) == .opencode)
+        #expect(CLIKind.allCases.allSatisfy { RemoteInventoryBuilder.kind($0).rawValue == $0.rawValue })
+    }
+
     private static let help = """
     Commands:
       opencode acp                 start ACP (Agent Client Protocol) server

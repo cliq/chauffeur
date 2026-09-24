@@ -120,7 +120,12 @@ public struct RemoteInventoryBuilder {
     }
 
     static func kind(_ kind: CLIKind) -> RemoteSessionKind {
-        RemoteSessionKind(rawValue: kind.rawValue) ?? .shell
+        switch kind {
+        case .codex: .codex
+        case .claude: .claude
+        case .opencode: .opencode
+        case .shell: .shell
+        }
     }
 
     static func availability(_ availability: Availability) -> RemoteAvailability {
