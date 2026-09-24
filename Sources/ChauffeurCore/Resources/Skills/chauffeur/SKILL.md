@@ -1,8 +1,8 @@
 ---
 name: chauffeur
-description: Coordinate with peer sessions through Chauffeur's MCP tools. Use when working in a Chauffeur session to discover peers, exchange task context, check an inbox, delegate authorized work, report a delegated result, or register an implementation progress panel.
+description: Coordinate with peer sessions through Chauffeur's MCP tools. Use when working in a Chauffeur session to discover peers, exchange task context, check an inbox, delegate authorized work, or report a delegated result.
 metadata:
-  version: "1.5.0"
+  version: "1.5.1"
 ---
 
 # Chauffeur coordination
@@ -14,31 +14,6 @@ from `chauffeur_discover`. This file contains no session-specific context.
 If Chauffeur's tools are unavailable, explain that coordination is unavailable
 and continue work that does not require them. Do not infer peers or credentials
 from another session's files.
-
-## Implementation progress panel
-
-Chauffeur auto-installs `implementation-progress` alongside this skill. Use its
-Python CLI to create and update a panel. Each command automatically registers the
-panel with the current session through its local runtime connection, even when
-coordination MCP is disabled. Follow that skill’s registration confirmation or
-warning; no extra MCP registration call is needed for panels it creates.
-
-For an existing panel made by another tool, `chauffeur_register_progress` remains
-available when MCP is enabled:
-
-```json
-{"jsonPath": "/absolute/panel/progress.json", "htmlPath": "/absolute/panel/index.html"}
-```
-
-Paths are absolute paths on the Chauffeur host. Ownership comes from the session
-credential; never supply another session’s ID. JSON is required and HTML is
-optional. Updates are read automatically. Registration is idempotent; new paths
-replace the association. Discovery’s `progress` field reports it after reconnect.
-`chauffeur_unregister_progress` with `{}` removes it without deleting files.
-The next implementation-progress command will register its panel again.
-
-Registration does not change task completion. If registration fails, keep updating
-the standalone panel and report that its Chauffeur connection failed.
 
 ## Messages and inbox
 
