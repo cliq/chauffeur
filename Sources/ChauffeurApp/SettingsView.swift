@@ -47,7 +47,7 @@ struct SettingsView: View {
                                 Text(set.configurationDirectory(for: kind)).font(.caption).textSelection(.enabled)
                             } label: {
                                 VStack(alignment: .leading, spacing: 2) {
-                                    Text(kind == .claude ? "Claude config folder" : kind == .codex ? "Codex config folder" : "\(kind.displayName) config folder")
+                                    Text(kind.configurationFolderLabel)
                                     Text(ShellAgentEnvironment.variableName(for: kind)!).font(.caption.monospaced()).foregroundStyle(.secondary)
                                 }
                             }
@@ -234,8 +234,7 @@ struct PresetSetEditor: View {
     let completion: (UUID) -> Void
     @State private var name = ""
     @State private var selection: AgentSelection = .allBase
-    @State private var claudeDirectory = ""
-    @State private var codexDirectory = ""
+    @State private var directories: [CLIKind: String] = [:]
     @State private var archived = false
     @State private var isDefault = false
     @State private var version: String?
@@ -243,8 +242,10 @@ struct PresetSetEditor: View {
     @State private var saving = false
     @State private var previewing = false
     @State private var newTeamID = UUID()
-    @State private var claudeCopy = SetupAgentPair(kind: .claude, executable: "claude", choice: .existing, destinationPath: "")
-    @State private var codexCopy = SetupAgentPair(kind: .codex, executable: "codex", choice: .existing, destinationPath: "")
+    @State private var copies: [CLIKind: SetupAgentPair] = Dictionary(uniqueKeysWithValues: Self.kinds.map {
+        ($0, SetupAgentPair(kind: $0, executable: $0.rawValue, choice: .existing, destinationPath: ""))
+    })
+    private static let kinds = CLIKind.allCases.filter(\.isAgent)
     private var busy: Bool { saving || previewing }
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
@@ -260,17 +261,15 @@ struct PresetSetEditor: View {
                         Text("Custom").tag(AgentSelection.custom)
                     }.accessibilityIdentifier("team.agent-selection")
                     Text(selection == .allBase ? "Agent preset changes apply automatically to future launches." : "Add independent copies of agent presets and customize them.").font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                    directoryField("Claude config folder", variable: "CLAUDE_CONFIG_DIR", value: $claudeDirectory)
-                    if presetSet == nil {
-                        NewTeamConfigurationView(pair: $claudeCopy, directory: $claudeDirectory,
-                            busy: $previewing, failure: $failure, teamName: name)
+                    ForEach(Self.kinds, id: \.self) { kind in
+                        directoryField(kind, value: Binding(get: { directories[kind] ?? "" }, set: { directories[kind] = $0 }))
+                        if presetSet == nil {
+                            NewTeamConfigurationView(pair: Binding(get: { copies[kind]! }, set: { copies[kind] = $0 }),
+                                directory: Binding(get: { directories[kind] ?? "" }, set: { directories[kind] = $0 }),
+                                busy: $previewing, failure: $failure, teamName: name)
+                        }
                     }
-                    directoryField("Codex config folder", variable: "CODEX_HOME", value: $codexDirectory)
-                    if presetSet == nil {
-                        NewTeamConfigurationView(pair: $codexCopy, directory: $codexDirectory,
-                            busy: $previewing, failure: $failure, teamName: name)
-                    }
-                    Text("Leave a directory blank to use the agent’s normal default. Both values apply to new shell terminals.").font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    Text("Leave a directory blank to use the agent’s normal default. These values also apply to new shell terminals.").font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                     if presetSet != nil {
                         Toggle("Archived", isOn: $archived).disabled(isDefault)
                     }
@@ -290,7 +289,7 @@ struct PresetSetEditor: View {
             }
         }.frame(width: 552, height: presetSet == nil ? 610 : 440, alignment: .leading).padding(24)
             .interactiveDismissDisabled(busy)
-            .onAppear { selection = presetSet?.agentSelection ?? .allBase; claudeDirectory = presetSet?.configurationDirectories?["claude"] ?? ""; codexDirectory = presetSet?.configurationDirectories?["codex"] ?? ""; name = presetSet?.name ?? ""; archived = presetSet?.archived ?? false; isDefault = presetSet?.isDefault ?? model.presetSets.allSatisfy(\.archived); version = model.snapshot.store.presetSets.first { $0.value.id == presetSet?.id }?.version }
+            .onAppear { selection = presetSet?.agentSelection ?? .allBase; directories = Dictionary(uniqueKeysWithValues: Self.kinds.map { ($0, presetSet?.configurationDirectories?[$0.rawValue] ?? "") }); name = presetSet?.name ?? ""; archived = presetSet?.archived ?? false; isDefault = presetSet?.isDefault ?? model.presetSets.allSatisfy(\.archived); version = model.snapshot.store.presetSets.first { $0.value.id == presetSet?.id }?.version }
     }
     private func save() {
         guard !busy else { return }
@@ -299,18 +298,17 @@ struct PresetSetEditor: View {
         if presetSet == nil { value.id = newTeamID }
         value.agentSelection = selection
         // Other agents' directories are kept until this editor shows them.
-        var directories = value.configurationDirectories ?? [:]
-        directories["claude"] = (claudeDirectory as NSString).expandingTildeInPath
-        directories["codex"] = (codexDirectory as NSString).expandingTildeInPath
-        value.configurationDirectories = directories
+        var configured = value.configurationDirectories ?? [:]
+        for (kind, directory) in directories { configured[kind.rawValue] = (directory as NSString).expandingTildeInPath }
+        value.configurationDirectories = configured
         value.name = name; value.archived = archived; value.isDefault = isDefault
         Task {
             defer { saving = false }
             do {
                 if presetSet == nil {
-                    let copies = [claudeCopy, codexCopy].filter { $0.choice == .create }
+                    let created = Self.kinds.compactMap { copies[$0] }.filter { $0.choice == .create }
                     _ = try await model.call("addTeam", .object([
-                        "record": try .from(value), "configurations": try .from(copies)
+                        "record": try .from(value), "configurations": try .from(created)
                     ]))
                     try await model.refresh()
                 } else {
@@ -318,18 +316,21 @@ struct PresetSetEditor: View {
                 }
                 completion(value.id); dismiss()
             } catch {
-                let copyNote = presetSet == nil && [claudeCopy, codexCopy].contains(where: { $0.choice == .create })
+                let copyNote = presetSet == nil && copies.values.contains(where: { $0.choice == .create })
                     ? " Any configuration folders already created are preserved. Retry with the same settings, or use those folders as existing configurations." : ""
                 failure = error.localizedDescription + copyNote
             }
         }
     }
 
-    private func directoryField(_ title: String, variable: String, value: Binding<String>) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
+    private func directoryField(_ kind: CLIKind, value: Binding<String>) -> some View {
+        let title = kind.configurationFolderLabel
+        let variable = ShellAgentEnvironment.variableName(for: kind) ?? ""
+        return VStack(alignment: .leading, spacing: 6) {
             VStack(alignment: .leading, spacing: 2) {
                 Text(title).fontWeight(.medium)
                 Text(variable).font(.caption.monospaced()).foregroundStyle(.secondary)
+                if let note = kind.configurationFolderNote { Text(note).font(.caption).foregroundStyle(.secondary) }
             }
             HStack {
                 TextField(title, text: value).labelsHidden()

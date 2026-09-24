@@ -14,12 +14,12 @@ struct NewTeamConfigurationView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Toggle("Create a new \(pair.kind.displayName) config folder", isOn: Binding(
+            Toggle("Create a new \(pair.kind.displayName) config \(pair.kind == .opencode ? "layer" : "folder")", isOn: Binding(
                 get: { pair.choice == .create },
                 set: { creating in
                     pair.choice = creating ? .create : .existing
                     if creating && directory.isEmpty {
-                        directory = "\(home)/.\(pair.kind.rawValue)-\(Paths.slug(teamName.isEmpty ? "team" : teamName))"
+                        directory = "\(home)/\(pair.kind.defaultHomeFolder)-\(Paths.slug(teamName.isEmpty ? "team" : teamName))"
                     }
                     pair.destinationPath = (directory as NSString).expandingTildeInPath
                     invalidate()
@@ -30,7 +30,9 @@ struct NewTeamConfigurationView: View {
                     ConfigurationCopyOptions(pair: $pair, home: home, preview: preview,
                         invalidate: invalidate, requestPreview: requestPreview)
                 }
-                Text("Settings are copied when you add the team. Source folders stay unchanged; credentials aren't copied. Sign in to new configurations when you first launch an agent.")
+                Text(CopyCategory.supported(for: pair.kind).isEmpty
+                     ? "The folder is created when you add the team."
+                     : "Settings are copied when you add the team. Source folders stay unchanged; credentials aren't copied. Sign in to new configurations when you first launch an agent.")
                     .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
         }

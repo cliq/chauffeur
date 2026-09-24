@@ -28,11 +28,32 @@ struct ConfigurationDiscoveryTests {
         #expect(inventory.homePath == Paths.canonical(home.path))
         #expect(inventory.executables[CLIKind.codex.rawValue] == "codex")
         #expect(try Paths.executable("codex", environment: ["PATH": bin.path]) == Paths.canonical(codex.path))
-        #expect(inventory.missingAgents == [.claude])
+        #expect(inventory.missingAgents == [.claude, .opencode])
         #expect(inventory.configurations.contains { $0.kind == .codex && $0.path == Paths.canonical(currentCodex.path) && $0.isCurrent && $0.available })
         #expect(inventory.configurations.contains { $0.path == Paths.canonical(missingImported.path) && !$0.available })
         #expect(inventory.configurations.contains { $0.path.hasSuffix(".claude-work") })
         #expect(inventory.configurations.contains { $0.path.hasSuffix(".codexwho-client") })
+    }
+
+    @Test func openCodeGlobalFolderAndLayersUnderConfigAreDetected() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("chauffeur-opencode-discovery-\(UUID())")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let home = root.appendingPathComponent("home"), bin = root.appendingPathComponent("bin")
+        let global = home.appendingPathComponent(".config/opencode"), layer = home.appendingPathComponent(".config/opencode-work")
+        for directory in [global, layer, home.appendingPathComponent("opencode-notes"), bin] {
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        }
+        let opencode = bin.appendingPathComponent("opencode")
+        try Data("#!/bin/sh\nexit 0\n".utf8).write(to: opencode)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: opencode.path)
+        // The variable adds a layer; the global folder stays current.
+        let inventory = try ConfigurationDiscovery(home: home, environment: ["PATH": bin.path, "OPENCODE_CONFIG_DIR": layer.path], configuredPaths: [:]).inventory()
+        #expect(inventory.executables[CLIKind.opencode.rawValue] == "opencode")
+        #expect(!inventory.missingAgents.contains(.opencode))
+        let found = inventory.configurations.filter { $0.kind == .opencode }
+        #expect(found.contains { $0.path == Paths.canonical(global.path) && $0.isCurrent && $0.available })
+        #expect(found.contains { $0.path == Paths.canonical(layer.path) && !$0.isCurrent })
+        #expect(!found.contains { $0.path.hasSuffix("opencode-notes") })
     }
 
     @Test func nestedAndEqualDestinationsAreRejected() throws {

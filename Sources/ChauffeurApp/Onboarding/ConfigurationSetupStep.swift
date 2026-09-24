@@ -17,9 +17,9 @@ struct ConfigurationSetupStep: View {
                     GroupBox(pair.kind.displayName) {
                         VStack(alignment: .leading, spacing: 10) {
                             Picker("Configuration", selection: $pair.choice) {
-                                Text("Use my current configuration").tag(ConfigurationChoice.current)
-                                Text("Choose an existing folder").tag(ConfigurationChoice.existing)
-                                Text("Create a separate configuration").tag(ConfigurationChoice.create)
+                                Text(pair.kind == .opencode ? "Use only my global configuration" : "Use my current configuration").tag(ConfigurationChoice.current)
+                                Text(pair.kind == .opencode ? "Add an existing folder as a layer" : "Choose an existing folder").tag(ConfigurationChoice.existing)
+                                Text(pair.kind == .opencode ? "Create a new configuration layer" : "Create a separate configuration").tag(ConfigurationChoice.create)
                             }.accessibilityIdentifier("onboarding.configuration.\(pair.id)")
                                 .disabled(pair.operationID != nil)
                                 .onChange(of: pair.choice) { _, choice in
@@ -50,6 +50,10 @@ struct ConfigurationSetupStep: View {
                                         }
                                     }
                                 }
+                            }
+                            if pair.kind == .opencode {
+                                Text("OpenCode always loads your global configuration (~/.config/opencode). A team folder is an extra configuration layer on top of it, for this team's own providers, agents and plugins.")
+                                    .font(.caption).foregroundStyle(.secondary)
                             }
                             let sharing = setup.draft.teams.filter { other in other.id != team.id && other.agents.contains { $0.kind == pair.kind && Paths.canonical($0.destinationPath) == Paths.canonical(pair.destinationPath) } }.map(\.name)
                             if !sharing.isEmpty {

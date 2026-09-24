@@ -4,6 +4,41 @@ import Testing
 @testable import ChauffeurRuntimeKit
 
 @Suite struct AgentAuthenticationTests {
+    @Test func openCodeIsReadyWhenModelsAreListed() async throws {
+        let runner = FakeAuthenticationRunner([.success(.init(status: 0, output: "opencode/big-pickle\nlocal/qwen3-14b\n", error: ""))])
+        let adapter = OpenCodeAuthentication(runner: runner)
+        let context = fixtureContext(kind: .opencode)
+        let login = try await adapter.loginCommand(context: context)
+        let status = await adapter.status(context: context)
+        let commands = await runner.commands
+        #expect(login.arguments == ["auth", "login"])
+        #expect(login.environment["OPENCODE_CONFIG_DIR"] == "/profiles/work")
+        #expect(commands.map(\.arguments) == [["models"]])
+        #expect(commands.allSatisfy { $0.environment["OPENAI_API_KEY"] == nil })
+        #expect(status.phase == .connected)
+        #expect(status.message?.contains("2 models") == true)
+    }
+
+    @Test func openCodeHostedModelsOnlyAreReadyWithAProvidersNote() async {
+        let runner = FakeAuthenticationRunner([.success(.init(status: 0, output: "opencode/big-pickle\nopencode/grok-code\n", error: ""))])
+        let status = await OpenCodeAuthentication(runner: runner).status(context: fixtureContext(kind: .opencode))
+        #expect(status.phase == .connected)
+        #expect(status.message?.contains("free hosted models") == true)
+        #expect(status.message?.contains("https://opencode.ai/docs/providers/") == true)
+    }
+
+    @Test func openCodeListingFailureIsNotReady() async {
+        let failed = FakeAuthenticationRunner([.success(.init(status: 1, output: "", error: "Error: invalid config\n"))])
+        let status = await OpenCodeAuthentication(runner: failed).status(context: fixtureContext(kind: .opencode))
+        #expect(status.phase == .unableToVerify)
+        #expect(status.message?.contains("invalid config") == true)
+        let empty = FakeAuthenticationRunner([.success(.init(status: 0, output: "", error: ""))])
+        #expect(await OpenCodeAuthentication(runner: empty).status(context: fixtureContext(kind: .opencode)).phase == .signInRequired)
+        let missing = FakeAuthenticationRunner([.failure(ChauffeurError("missing_executable", "missing"))])
+        #expect(await OpenCodeAuthentication(runner: missing).status(context: fixtureContext(kind: .opencode)).phase == .unableToVerify)
+        #expect(await OpenCodeAuthentication(runner: missing).status(context: fixtureContext(kind: .codex)).phase == .unableToVerify)
+    }
+
     @Test func codexUsesIsolatedProfileForLoginAndVerification() async throws {
         let runner = FakeAuthenticationRunner([
             .success(.init(status: 0, output: "Usage: codex login [OPTIONS] [COMMAND]\nCommands:\n  status  Show login status\n", error: "benign help warning")),

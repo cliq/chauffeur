@@ -116,7 +116,7 @@ import ChauffeurCore
         let current = inventory?.configurations.first { $0.kind == kind && $0.isCurrent }?.path
             ?? "\(home)/\(kind.defaultHomeFolder)"
         return SetupAgentPair(kind: kind, executable: executables[kind.rawValue] ?? kind.rawValue,
-            choice: .current, sourcePath: "\(home)/\(kind.defaultHomeFolder)", destinationPath: current)
+            choice: .current, sourcePath: CopyCategory.supported(for: kind).isEmpty ? nil : "\(home)/\(kind.defaultHomeFolder)", destinationPath: current)
     }
 
     func suggestedDestination(kind: CLIKind, name: String) -> String {

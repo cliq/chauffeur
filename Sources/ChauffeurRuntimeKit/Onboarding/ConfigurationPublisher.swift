@@ -26,7 +26,8 @@ public actor ConfigurationPublisher {
         store: FileStore,
         migrations: [CLIKind: any ConfigurationMigration] = [
             .claude: ClaudeConfigurationMigration(),
-            .codex: CodexConfigurationMigration()
+            .codex: CodexConfigurationMigration(),
+            .opencode: OpenCodeConfigurationMigration()
         ],
         interruptionHook: InterruptionHook? = nil
     ) {

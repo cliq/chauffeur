@@ -40,6 +40,23 @@ struct ConfigurationMigrationTests {
         #expect(FileManager.default.isExecutableFile(atPath: stage.appendingPathComponent("plugins/example/run.sh").path))
         #expect(!FileManager.default.fileExists(atPath: stage.appendingPathComponent("plugins/example/credentials.json").path))
     }
+    @Test func openCodeLayersCopyNothingEvenWithASource() throws {
+        let root = try fixture("opencode"); defer { try? FileManager.default.removeItem(at: root) }
+        let source = root.appendingPathComponent("opencode"), stage = root.appendingPathComponent("stage")
+        try FileManager.default.createDirectory(at: source.appendingPathComponent("plugins"), withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: stage, withIntermediateDirectories: true)
+        try Data("{}".utf8).write(to: source.appendingPathComponent("opencode.json"))
+        try Data("export {}".utf8).write(to: source.appendingPathComponent("plugins/a.js"))
+        let pair = SetupAgentPair(kind: .opencode, choice: .create, sourcePath: source.path,
+            destinationPath: root.appendingPathComponent("opencode-work").path, categories: Set(CopyCategory.allCases))
+        let adapter = OpenCodeConfigurationMigration(), preview = try adapter.preview(pair: pair)
+        #expect(preview.entries.isEmpty)
+        #expect(preview.sourcePath == nil)
+        try adapter.write(preview: preview, pair: pair, staging: stage)
+        #expect(try FileManager.default.contentsOfDirectory(atPath: stage.path).isEmpty)
+        var codex = pair; codex.kind = .codex
+        #expect(throws: ConfigurationMigrationError.self) { try adapter.preview(pair: codex) }
+    }
     private func fixture(_ label: String) throws -> URL {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("chauffeur-migration-\(label)-\(UUID())")
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])

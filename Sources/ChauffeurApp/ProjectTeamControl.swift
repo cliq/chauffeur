@@ -19,10 +19,11 @@ struct ProjectTeamControl: View {
                         if team.archived { Text("This team is archived. Choose an active team to launch terminals.").foregroundStyle(.orange) }
                         ForEach(CLIKind.allCases.filter(\.isAgent), id: \.self) { kind in
                             VStack(alignment: .leading, spacing: 3) {
-                                Text(kind == .claude ? "Claude config folder" : kind == .codex ? "Codex config folder" : "\(kind.displayName) config folder").fontWeight(.medium)
+                                Text(kind.configurationFolderLabel).fontWeight(.medium)
                                 Text(ShellAgentEnvironment.variableName(for: kind)!).font(.caption.monospaced()).foregroundStyle(.secondary)
                                 Text(team.configurationDirectory(for: kind)).textSelection(.enabled)
-                                if (team.configurationDirectories?[kind.rawValue] ?? "").isEmpty { Text("Agent default").font(.caption).foregroundStyle(.secondary) }
+                                if (team.configurationDirectories?[kind.rawValue] ?? "").isEmpty { Text(kind == .opencode ? "Global configuration only" : "Agent default").font(.caption).foregroundStyle(.secondary) }
+                                else if let note = kind.configurationFolderNote { Text(note).font(.caption).foregroundStyle(.secondary) }
                                 else if (try? Paths.directory(team.configurationDirectory(for: kind))) == nil {
                                     Text("Directory unavailable. Shells keep this value; agent launches require an accessible directory.").font(.caption).foregroundStyle(.orange)
                                 }

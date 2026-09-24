@@ -203,12 +203,17 @@ public struct OpenCodeIntegration: ProviderIntegration {
     /// Stores `opencode models` for this executable and configuration directory.
     static func refreshModels(executable: String, environment: [String: String], cache: URL) async {
         guard let listed = try? await ProcessRunner.run(executable, ["models"], environment: environment, timeout: 30, outputLimit: 256 * 1024), listed.status == 0 else { return }
-        let models = listed.output.split(whereSeparator: \.isNewline).map { $0.trimmingCharacters(in: .whitespaces) }
-            .filter { $0.contains("/") && !$0.contains(where: \.isWhitespace) }
+        let models = parseModels(listed.output)
         guard !models.isEmpty else { return }
         try? ModelSuggestionCache.store(models, kind: .opencode, executable: executable, configurationDirectory: environment[provider.configurationEnvironmentKey] ?? "", at: cache)
     }
     private static var provider: OpenCodeProvider { OpenCodeProvider() }
+
+    /// `opencode models` prints one `provider/model` per line.
+    static func parseModels(_ output: String) -> [String] {
+        output.split(whereSeparator: \.isNewline).map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { $0.contains("/") && !$0.contains(where: \.isWhitespace) }
+    }
 
     public func publishPlugin(root: URL) throws -> String? {
         let source = try OpenCodePlugin.bundledSource()

@@ -21,7 +21,7 @@ struct SetupSummaryStep: View {
                                 if let email = pair.auth.email, !email.isEmpty {
                                     Text(email).textSelection(.enabled)
                                         .accessibilityIdentifier("onboarding.summaryAccount.\(pair.id)")
-                                } else {
+                                } else if pair.kind != .opencode {
                                     Text("Account identity isn't available from this CLI.")
                                         .font(.caption).foregroundStyle(.secondary)
                                 }

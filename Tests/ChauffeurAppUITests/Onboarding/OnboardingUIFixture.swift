@@ -32,6 +32,8 @@ import ChauffeurCore
             "TMPDIR": temporary.path,
             "PATH": "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin",
             "CHAUFFEUR_CODEX_EXECUTABLE": executable.path,
+            // Keep a Homebrew OpenCode out of the Codex-only fixture.
+            "CHAUFFEUR_OPENCODE_EXECUTABLE": root.appendingPathComponent("missing-opencode").path,
             "SHELL": "/bin/sh",
             "TERM": "xterm-256color"
         ]

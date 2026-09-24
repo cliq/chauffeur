@@ -32,30 +32,35 @@ struct ConfigurationCopyOptions: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Toggle("Start fresh", isOn: Binding(get: { pair.sourcePath == nil }, set: {
-                pair.sourcePath = $0 ? nil : "\(home)/\(pair.kind.defaultHomeFolder)"
-                invalidate()
-            }))
-            if pair.sourcePath != nil {
-                HStack {
-                    TextField("Source folder", text: Binding(get: { pair.sourcePath ?? "" }, set: { pair.sourcePath = $0; invalidate() }))
-                    Button("Choose source…") { if let path = FilePanels.directory(title: "Copy settings from", showsHiddenFiles: true) { pair.sourcePath = path; invalidate() } }
-                }
-                ForEach(CopyCategory.allCases.filter { CopyCategory.supported(for: pair.kind).contains($0) }, id: \.self) { category in
-                    Toggle(category.setupTitle, isOn: Binding(get: { pair.categories.contains(category) }, set: {
-                        if $0 { pair.categories.insert(category) } else { pair.categories.remove(category) }
-                        invalidate()
-                    })).toggleStyle(.checkbox)
-                }
-                if pair.categories.contains(.history) {
-                    Text("Preview to list project folders. Select only the projects to copy.").font(.caption).foregroundStyle(.secondary)
-                    if let preview {
-                        let projects = preview.availableProjects
-                        ForEach(projects, id: \.self) { project in
-                            Toggle(URL(fileURLWithPath: project).lastPathComponent, isOn: Binding(get: { pair.projectPaths.contains(project) }, set: {
-                                if $0 { pair.projectPaths.insert(project) } else { pair.projectPaths.remove(project) }
-                                pair.previewID = nil
-                            })).toggleStyle(.checkbox).font(.caption)
+            if CopyCategory.supported(for: pair.kind).isEmpty {
+                Text("OpenCode loads this folder as an extra configuration layer on top of your global OpenCode configuration, so nothing is copied into it.")
+                    .font(.caption).foregroundStyle(.secondary)
+            } else {
+                Toggle("Start fresh", isOn: Binding(get: { pair.sourcePath == nil }, set: {
+                    pair.sourcePath = $0 ? nil : "\(home)/\(pair.kind.defaultHomeFolder)"
+                    invalidate()
+                }))
+                if pair.sourcePath != nil {
+                    HStack {
+                        TextField("Source folder", text: Binding(get: { pair.sourcePath ?? "" }, set: { pair.sourcePath = $0; invalidate() }))
+                        Button("Choose source…") { if let path = FilePanels.directory(title: "Copy settings from", showsHiddenFiles: true) { pair.sourcePath = path; invalidate() } }
+                    }
+                    ForEach(CopyCategory.allCases.filter { CopyCategory.supported(for: pair.kind).contains($0) }, id: \.self) { category in
+                        Toggle(category.setupTitle, isOn: Binding(get: { pair.categories.contains(category) }, set: {
+                            if $0 { pair.categories.insert(category) } else { pair.categories.remove(category) }
+                            invalidate()
+                        })).toggleStyle(.checkbox)
+                    }
+                    if pair.categories.contains(.history) {
+                        Text("Preview to list project folders. Select only the projects to copy.").font(.caption).foregroundStyle(.secondary)
+                        if let preview {
+                            let projects = preview.availableProjects
+                            ForEach(projects, id: \.self) { project in
+                                Toggle(URL(fileURLWithPath: project).lastPathComponent, isOn: Binding(get: { pair.projectPaths.contains(project) }, set: {
+                                    if $0 { pair.projectPaths.insert(project) } else { pair.projectPaths.remove(project) }
+                                    pair.previewID = nil
+                                })).toggleStyle(.checkbox).font(.caption)
+                            }
                         }
                     }
                 }

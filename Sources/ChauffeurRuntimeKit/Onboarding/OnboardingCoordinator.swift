@@ -19,8 +19,8 @@ public actor OnboardingCoordinator {
 
     public init(store: FileStore, root: URL, environment: [String: String], home: URL? = nil,
                 loginHost: SetupLoginHost = SetupLoginHost(),
-                authentication: [CLIKind: any AgentAuthentication] = [.codex: CodexAuthentication(), .claude: ClaudeAuthentication()],
-                migrations: [CLIKind: any ConfigurationMigration] = [.codex: CodexConfigurationMigration(), .claude: ClaudeConfigurationMigration()]) throws {
+                authentication: [CLIKind: any AgentAuthentication] = [.codex: CodexAuthentication(), .claude: ClaudeAuthentication(), .opencode: OpenCodeAuthentication()],
+                migrations: [CLIKind: any ConfigurationMigration] = [.codex: CodexConfigurationMigration(), .claude: ClaudeConfigurationMigration(), .opencode: OpenCodeConfigurationMigration()]) throws {
         self.store = store; self.environment = environment
         self.home = home ?? URL(fileURLWithPath: environment["HOME"] ?? FileManager.default.homeDirectoryForCurrentUser.path)
         self.workingDirectory = root.appendingPathComponent("onboarding/login")

@@ -66,9 +66,7 @@ struct BaseAgentEditor: View {
             Form {
                 TextField("Name", text: $name, prompt: Text(kind.displayName)).accessibilityIdentifier("base-agent.name")
                 Picker("Agent", selection: $kind) {
-                    Text("Claude Code").tag(CLIKind.claude)
-                    Text("Codex").tag(CLIKind.codex)
-                    Text("OpenCode").tag(CLIKind.opencode)
+                    ForEach(AgentProviders.all, id: \.kind) { Text($0.displayName).tag($0.kind) }
                 }.onChange(of: kind) { _, value in
                     if AgentProviders.all.contains(where: { $0.kind.rawValue == executable }) { executable = value.rawValue }
                 }
@@ -147,7 +145,7 @@ struct AgentKindBadge: View {
     let kind: CLIKind
 
     var body: some View {
-        AgentBadge(label: kind.displayName, color: kind == .claude ? .orange : kind == .codex ? .blue : kind == .opencode ? .teal : .gray)
+        AgentBadge(label: kind.displayName, color: AgentBadge.color(named: kind.provider?.badgeColorName))
     }
 }
 

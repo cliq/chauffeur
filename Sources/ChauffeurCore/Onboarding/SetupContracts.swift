@@ -14,9 +14,8 @@ public enum CopyCategory: String, Codable, CaseIterable, Sendable {
 }
 
 public extension CLIKind {
-    /// Agents first-run setup detects and signs in. OpenCode joins with its
-    /// authentication adapter; until then it is added through agent presets.
-    static let onboardingKinds: [CLIKind] = [.codex, .claude]
+    /// Agents first-run setup detects and signs in.
+    static var onboardingKinds: [CLIKind] { allCases.filter(\.isAgent) }
 }
 
 public enum SetupAuthPhase: String, Codable, Sendable, CaseIterable {

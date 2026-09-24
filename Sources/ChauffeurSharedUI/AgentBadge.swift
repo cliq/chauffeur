@@ -14,3 +14,15 @@ struct AgentBadge: View {
             .foregroundStyle(color)
     }
 }
+
+extension AgentBadge {
+    /// The colour for a provider's `badgeColorName`; gray when unknown.
+    static func color(named name: String?) -> Color {
+        switch name {
+        case "orange": .orange
+        case "blue": .blue
+        case "teal": .teal
+        default: .gray
+        }
+    }
+}
