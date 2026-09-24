@@ -108,6 +108,7 @@ struct ProjectWindow: View {
     @State private var checkingTab = false
     @State private var tabError: String?
     @State private var deletingSession: Session?
+    @State private var clearingFinished: [Session]?
     @State private var renamingSession: Session?
     @State private var renameTitle = ""
     @FocusState private var searchFocused: Bool
@@ -161,6 +162,10 @@ struct ProjectWindow: View {
                     Button("Delete Finished Session", role: .destructive) { if let session = deletingSession { deleteSession(session) }; deletingSession = nil }
                     Button("Cancel", role: .cancel) { deletingSession = nil }
                 } message: { Text("Permanently deletes this session and its saved terminal history.") }
+                .confirmationDialog(clearFinishedTitle, isPresented: clearingFinishedPresented, titleVisibility: .visible) {
+                    Button("Clear Finished Sessions", role: .destructive, action: clearFinished)
+                    Button("Cancel", role: .cancel) { clearingFinished = nil }
+                } message: { Text(clearFinishedMessage) }
                 .alert("Rename Session", isPresented: Binding(get: { renamingSession != nil }, set: { if !$0 { renamingSession = nil } })) {
                     TextField("Title", text: $renameTitle)
                     Button("Rename") { if let session = renamingSession { renameSession(session, to: renameTitle) }; renamingSession = nil }
@@ -316,9 +321,21 @@ struct ProjectWindow: View {
                         ForEach(sessions.filter(\.needsAttention)) { session in sessionRow(session, project: project) }
                     }
                 }
-                Section("Sessions") {
+                Section {
                     if sessions.isEmpty { Text(allSessions.isEmpty ? "No sessions yet" : "No sessions match").font(.caption).foregroundStyle(.secondary) }
                     ForEach(sessions) { session in sessionRow(session, project: project) }
+                } header: {
+                    HStack {
+                        Text("Sessions")
+                        Spacer()
+                        let finished = WorktreeSessions.finished(sessions)
+                        if !finished.isEmpty {
+                            Button("Clear Finished") { clearingFinished = finished }
+                                .buttonStyle(.link).font(.caption).disabled(!model.online)
+                                .help("Delete the \(finished.count) finished session\(finished.count == 1 ? "" : "s") in this list")
+                                .accessibilityIdentifier("sidebar.sessions.clearFinished")
+                        }
+                    }
                 }
             }.listStyle(.sidebar)
         }
@@ -457,7 +474,7 @@ struct ProjectWindow: View {
         Button { selectSession(session.id) } label: {
             VStack(alignment: .leading, spacing: 4) {
                 HStack { Image(systemName: sessionIcon(session)); Text(session.title).lineLimit(1).fontWeight(session.id == layout.state.selectedSessionID ? .semibold : .regular) }
-                Text("\(presetLabel(session)) · \(project.groups.first { $0.id == session.groupID }?.name ?? "Group unavailable")").font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                Text(([repositoryName(session, project: project)].compactMap { $0 } + [presetLabel(session), project.groups.first { $0.id == session.groupID }?.name ?? "Group unavailable"]).joined(separator: " · ")).font(.caption).foregroundStyle(.secondary).lineLimit(1)
                 if let status = session.visibleStatus {
                     Text(status).font(.caption).foregroundStyle(session.needsAttention ? .orange : .secondary)
                 }
@@ -473,6 +490,21 @@ struct ProjectWindow: View {
     private func sessionIcon(_ session: Session) -> String {
         if !session.launch.preset.kind.isAgent { return "apple.terminal" }
         return session.parentID == nil ? "terminal" : "arrow.turn.down.right"
+    }
+    private func repositoryName(_ session: Session, project: Project) -> String? { project.folders.first { $0.id == session.folderID }?.name }
+    private var clearingFinishedPresented: Binding<Bool> { Binding(get: { clearingFinished != nil }, set: { if !$0 { clearingFinished = nil } }) }
+    private var clearFinishedTitle: String {
+        let count = clearingFinished?.count ?? 0
+        return "Clear \(count) finished session\(count == 1 ? "" : "s")?"
+    }
+    private func clearFinished() {
+        clearingFinished?.forEach(deleteSession)
+        clearingFinished = nil
+    }
+    private var clearFinishedMessage: String {
+        let waiting = (clearingFinished ?? []).filter(\.needsAttention).count
+        return "Permanently deletes these sessions and their saved terminal history."
+            + (waiting > 0 ? " \(waiting) of them still need\(waiting == 1 ? "s" : "") your attention." : "")
     }
     private func presetLabel(_ session: Session) -> String { session.launch.preset.kind.isAgent ? session.launch.preset.name : "Shell" }
 
