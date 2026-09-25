@@ -123,9 +123,9 @@ struct ProjectWindow: View {
     init(projectID: UUID) { self.projectID = projectID; _layout = StateObject(wrappedValue: ProjectLayout(projectID: projectID)) }
     private var project: Project? { model.project(projectID) }
     private var allSessions: [Session] { model.sessions(in: projectID) }
-    /// Sessions-mode list, narrowed by the group picker and search field.
+    /// Sessions-mode list, narrowed by the group picker, terminal toggle and filter field.
     private var sessions: [Session] {
-        allSessions.filter { (layout.state.selectedGroupID == nil || $0.groupID == layout.state.selectedGroupID) && (layout.search.isEmpty || $0.title.localizedCaseInsensitiveContains(layout.search) || $0.launch.workingDirectory.localizedCaseInsensitiveContains(layout.search)) }
+        allSessions.filter { (layout.state.selectedGroupID == nil || $0.groupID == layout.state.selectedGroupID) && (layout.state.showsTerminalSessions || $0.launch.preset.kind.isAgent) && (layout.search.isEmpty || $0.title.localizedCaseInsensitiveContains(layout.search) || $0.launch.workingDirectory.localizedCaseInsensitiveContains(layout.search)) }
     }
     private var worktreeRecords: [Worktree] { model.snapshot.store.worktrees.map(\.value) }
     private var selectedFolder: ProjectFolder? { project?.folders.first { $0.id == layout.state.selectedFolderID && $0.registered } }
@@ -330,7 +330,6 @@ struct ProjectWindow: View {
                 Text("All Groups").tag(UUID?.none)
                 ForEach(project.groups.filter { !$0.archived || $0.id == layout.state.selectedGroupID }) { group in Text(group.name).tag(Optional(group.id)) }
             }.padding(.horizontal, 12).padding(.bottom, 8)
-            TextField("Search sessions", text: $layout.search).textFieldStyle(.roundedBorder).padding(.horizontal, 12).padding(.bottom, 8).focused($searchFocused)
             List {
                 if sessions.contains(where: \.needsAttention) {
                     Section("Needs Attention") {
@@ -354,6 +353,13 @@ struct ProjectWindow: View {
                     }
                 }
             }.listStyle(.sidebar)
+            VStack(alignment: .leading, spacing: 8) {
+                TextField("Filter sessions", text: $layout.search).textFieldStyle(.roundedBorder).focused($searchFocused)
+                    .accessibilityIdentifier("sidebar.sessions.filter")
+                Toggle("Show terminal sessions", isOn: $layout.state.showsTerminalSessions).toggleStyle(.checkbox).font(.caption)
+                    .help("Show plain shell sessions alongside agents")
+                    .accessibilityIdentifier("sidebar.sessions.showTerminals")
+            }.padding(.horizontal, 12).padding(.top, 8)
         }
     }
     /// Sessions still running in a checkout. Green means working; the orange

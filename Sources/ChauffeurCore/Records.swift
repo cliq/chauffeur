@@ -285,6 +285,8 @@ public struct WindowState: Record, Equatable {
     public var selectedFolderID: UUID?
     public var selectedWorktreePath: String?
     public var sidebarMode: SidebarMode = .repositories
+    /// Whether the Sessions sidebar lists plain terminal sessions beside agents.
+    public var showsTerminalSessions = true
     /// User ordering of session tabs; each checkout displays its matching subset.
     public var sessionTabOrder: [UUID] = []
     /// Sessions whose tabs the user closed while the session record was kept (finished
@@ -307,6 +309,7 @@ public struct WindowState: Record, Equatable {
         selectedFolderID = try container.decodeIfPresent(UUID.self, forKey: .selectedFolderID)
         selectedWorktreePath = try container.decodeIfPresent(String.self, forKey: .selectedWorktreePath)
         sidebarMode = try container.decodeIfPresent(SidebarMode.self, forKey: .sidebarMode) ?? .repositories
+        showsTerminalSessions = try container.decodeIfPresent(Bool.self, forKey: .showsTerminalSessions) ?? true
         sessionTabOrder = try container.decodeIfPresent([UUID].self, forKey: .sessionTabOrder) ?? []
         closedSessionTabs = try container.decodeIfPresent([UUID].self, forKey: .closedSessionTabs) ?? []
         tabs = try container.decodeIfPresent([UUID].self, forKey: .tabs) ?? []
