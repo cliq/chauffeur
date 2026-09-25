@@ -540,8 +540,15 @@ struct ProjectWindow: View {
             if let folder = selectedFolder {
                 let row = layout.selectedWorktreePath.map { checkout(folder: folder, path: $0, project: project) }
                 VStack(alignment: .trailing, spacing: 3) {
-                    Text(row?.path ?? folder.canonicalPath).font(.system(.caption, design: .monospaced)).lineLimit(1).help(row?.path ?? folder.canonicalPath)
-                    Text(row.map(\.title) ?? "\(folder.name) · all checkouts").font(.caption).foregroundStyle(.secondary)
+                    let path = row?.path ?? folder.canonicalPath
+                    CopyableText(value: path, what: "path") { Text(path).font(.system(.caption, design: .monospaced)).lineLimit(1) }
+                        .accessibilityIdentifier("checkout.header.path")
+                    if let row, !row.branch.isEmpty {
+                        CopyableText(value: row.branch, what: "branch") { Text(row.title).font(.caption).foregroundStyle(.secondary) }
+                            .accessibilityIdentifier("checkout.header.branch")
+                    } else {
+                        Text(row.map(\.title) ?? "\(folder.name) · all checkouts").font(.caption).foregroundStyle(.secondary)
+                    }
                 }
                 let target = row ?? checkout(folder: folder, path: folder.canonicalPath, project: project)
                 HStack(spacing: 8) {
@@ -552,8 +559,12 @@ struct ProjectWindow: View {
                 }.controlSize(.small)
             } else if let session = model.session(layout.state.selectedSessionID) {
                 VStack(alignment: .trailing, spacing: 3) {
-                    Text(session.launch.workingDirectory).font(.system(.caption, design: .monospaced)).lineLimit(1).help(session.launch.workingDirectory)
-                    if let tree = worktreeRecords.first(where: { $0.id == session.worktreeID }) { Text(tree.branch).font(.caption).foregroundStyle(.secondary) }
+                    CopyableText(value: session.launch.workingDirectory, what: "path") { Text(session.launch.workingDirectory).font(.system(.caption, design: .monospaced)).lineLimit(1) }
+                        .accessibilityIdentifier("session.header.path")
+                    if let tree = worktreeRecords.first(where: { $0.id == session.worktreeID }), !tree.branch.isEmpty {
+                        CopyableText(value: tree.branch, what: "branch") { Text(tree.branch).font(.caption).foregroundStyle(.secondary) }
+                            .accessibilityIdentifier("session.header.branch")
+                    }
                 }
             }
         }.padding(12)
