@@ -311,10 +311,12 @@ private struct FakeTerminalScreen: View {
 
 /// Keys the software keyboard lacks. Encodings come from the adapter, never hard-coded here.
 /// Ctrl is a one-shot modifier: tap it, then a letter from the row it reveals.
+/// Shift and Option apply to the next arrow and can be combined.
 struct KeyAccessoryBar: View {
     static let controlLetters: [Character] = ["c", "d", "z", "l", "r", "a", "e", "u", "k"]
 
     let adapter: any TerminalEngineAdapter
+    @State private var arrowModifiers: TerminalArrowModifiers = []
     @State private var controlArmed = false
     @State private var keyboardVisible = false
 
@@ -359,13 +361,17 @@ struct KeyAccessoryBar: View {
                     .tint(controlArmed ? .accentColor : nil)
                     .accessibilityLabel(controlArmed ? "Control, armed" : "Control")
                     .accessibilityIdentifier("key-ctrl")
-                    key("←", label: "Left") { adapter.sendKey(.left) }
+                    arrowModifier("Shift", label: "Shift", modifier: .shift)
+                        .accessibilityIdentifier("key-shift")
+                    arrowModifier("Opt", label: "Option", modifier: .option)
+                        .accessibilityIdentifier("key-option")
+                    key("←", label: "Left") { sendArrow(.left) }
                         .accessibilityIdentifier("key-left")
-                    key("↑", label: "Up") { adapter.sendKey(.up) }
+                    key("↑", label: "Up") { sendArrow(.up) }
                         .accessibilityIdentifier("key-up")
-                    key("↓", label: "Down") { adapter.sendKey(.down) }
+                    key("↓", label: "Down") { sendArrow(.down) }
                         .accessibilityIdentifier("key-down")
-                    key("→", label: "Right") { adapter.sendKey(.right) }
+                    key("→", label: "Right") { sendArrow(.right) }
                         .accessibilityIdentifier("key-right")
                     key("Paste") {
                         if let text = UIPasteboard.general.string {
@@ -401,6 +407,25 @@ struct KeyAccessoryBar: View {
         .background(Color(uiColor: .secondarySystemBackground))
         .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in keyboardVisible = true }
         .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in keyboardVisible = false }
+    }
+
+    private func arrowModifier(_ title: String, label: String, modifier: TerminalArrowModifiers) -> some View {
+        let armed = arrowModifiers.contains(modifier)
+        return key(title, label: armed ? "\(label), armed for next arrow" : label) {
+            if armed {
+                arrowModifiers.remove(modifier)
+            } else {
+                arrowModifiers.insert(modifier)
+            }
+        }
+        .tint(armed ? .accentColor : nil)
+        .accessibilityAddTraits(armed ? .isSelected : [])
+        .accessibilityHint("Applies to the next arrow button. Tap again to cancel.")
+    }
+
+    private func sendArrow(_ direction: TerminalArrowDirection) {
+        adapter.sendKey(.arrow(direction, modifiers: arrowModifiers))
+        arrowModifiers = []
     }
 
     private func key(_ title: String, label: String? = nil, action: @escaping () -> Void) -> some View {

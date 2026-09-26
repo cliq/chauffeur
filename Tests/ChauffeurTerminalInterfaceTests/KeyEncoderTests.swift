@@ -99,4 +99,21 @@ struct KeyEncoderTests {
         expected.append(contentsOf: Array("\u{1b}[201~".utf8))
         #expect(data == expected)
     }
+
+    @Test func modifiedArrowsPreserveModifiersInBothCursorModes() {
+        let directions: [(TerminalArrowDirection, String)] = [(.up, "A"), (.down, "B"), (.right, "C"), (.left, "D")]
+        let combinations: [(TerminalArrowModifiers, Int)] = [(.shift, 2), (.option, 3), ([.shift, .option], 4)]
+        for applicationCursor in [false, true] {
+            let modes = TerminalModes(applicationCursor: applicationCursor)
+            for (direction, suffix) in directions {
+                for (modifiers, parameter) in combinations {
+                    #expect(TerminalKeyEncoder.encode(.arrow(direction, modifiers: modifiers), modes: modes)
+                        == Data("\u{1b}[1;\(parameter)\(suffix)".utf8))
+                }
+                let prefix = applicationCursor ? "\u{1b}O" : "\u{1b}["
+                #expect(TerminalKeyEncoder.encode(.arrow(direction, modifiers: []), modes: modes)
+                    == Data("\(prefix)\(suffix)".utf8))
+            }
+        }
+    }
 }

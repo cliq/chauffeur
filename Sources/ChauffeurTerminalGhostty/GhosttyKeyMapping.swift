@@ -30,6 +30,18 @@ struct GhosttyKeyPress: Equatable {
         case .down: resolved = key(0x7D)
         case .left: resolved = key(0x7B)
         case .right: resolved = key(0x7C)
+        case .arrow(let direction, let modifiers):
+            let keycode: UInt32
+            switch direction {
+            case .up: keycode = 0x7E
+            case .down: keycode = 0x7D
+            case .left: keycode = 0x7B
+            case .right: keycode = 0x7C
+            }
+            var mods = GHOSTTY_MODS_NONE.rawValue
+            if modifiers.contains(.shift) { mods |= GHOSTTY_MODS_SHIFT.rawValue }
+            if modifiers.contains(.option) { mods |= GHOSTTY_MODS_ALT.rawValue }
+            resolved = key(keycode, ghostty_input_mods_e(rawValue: mods))
         case .home: resolved = key(0x73)
         case .end: resolved = key(0x77)
         case .pageUp: resolved = key(0x74)

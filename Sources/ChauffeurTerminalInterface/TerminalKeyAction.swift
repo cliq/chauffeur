@@ -13,6 +13,7 @@ public enum TerminalKeyAction: Equatable, Sendable, Hashable {
     case down
     case left
     case right
+    case arrow(TerminalArrowDirection, modifiers: TerminalArrowModifiers)
     case home
     case end
     case pageUp
@@ -21,6 +22,23 @@ public enum TerminalKeyAction: Equatable, Sendable, Hashable {
     case control(Character)
     /// F1...F12
     case function(Int)
+}
+
+/// Directions and modifiers supported by the software arrow controls.
+public enum TerminalArrowDirection: String, Equatable, Sendable, Hashable {
+    case up = "A"
+    case down = "B"
+    case right = "C"
+    case left = "D"
+}
+
+public struct TerminalArrowModifiers: OptionSet, Sendable, Hashable {
+    public let rawValue: Int
+
+    public init(rawValue: Int) { self.rawValue = rawValue }
+
+    public static let shift = Self(rawValue: 1)
+    public static let option = Self(rawValue: 2)
 }
 
 /// Terminal modes that affect key encoding, for adapters that encode keys themselves with
@@ -70,6 +88,10 @@ public enum TerminalKeyEncoder {
             return cursor("C", modes: modes)
         case .left:
             return cursor("D", modes: modes)
+        case .arrow(let direction, let modifiers):
+            if modifiers.isEmpty { return cursor(direction.rawValue, modes: modes) }
+            let parameter = 1 + (modifiers.contains(.shift) ? 1 : 0) + (modifiers.contains(.option) ? 2 : 0)
+            return csi("1;\(parameter)\(direction.rawValue)")
         case .home:
             return cursor("H", modes: modes)
         case .end:
