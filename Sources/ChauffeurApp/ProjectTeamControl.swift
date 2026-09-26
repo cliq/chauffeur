@@ -36,6 +36,25 @@ struct ProjectTeamControl: View {
                     Button("Change Project Team…") { showing = false; changeTeam() }
                 }.padding(20).frame(width: 380)
             }
-            .sheet(item: $editing) { team in PresetSetEditor(presetSet: team) { _ in editing = nil } }
+            .sheet(item: $editing) { team in ProjectTeamSheet(teamID: team.id) { editing = nil } }
+    }
+}
+
+/// The Teams settings detail for one team, so agents can be added and edited
+/// without leaving the project.
+private struct ProjectTeamSheet: View {
+    @EnvironmentObject private var model: AppModel
+    let teamID: UUID
+    let done: () -> Void
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            if let team = model.presetSets.first(where: { $0.id == teamID }) {
+                TeamDetailView(set: team, showsEditTeam: true)
+            } else {
+                ContentUnavailableView("Team unavailable", systemImage: "person.crop.rectangle.stack")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+            HStack { Spacer(); Button("Done", action: done).keyboardShortcut(.defaultAction) }
+        }.padding(20).frame(width: 640, height: 600)
     }
 }

@@ -7,14 +7,9 @@ struct SettingsView: View {
     @State private var selectedSet: UUID?
     @State private var newSet = false
     @State private var editedSet: PresetSet?
-    @State private var newPreset = false
     @State private var deletingSet: Stored<PresetSet>?
     @State private var confirmingSetDeletion = false
     @State private var deleting = false
-    @State private var editedBase: BaseAgentPreset?
-    @State private var editedPreset: AgentPreset?
-    @State private var skillPreset: AgentPreset?
-    @State private var revealedPresetID: UUID?
     @State private var retention = RetentionSettings()
     var body: some View {
         TabView {
@@ -47,23 +42,7 @@ struct SettingsView: View {
                 }.frame(minWidth: 200, idealWidth: 220, maxWidth: 280, maxHeight: .infinity, alignment: .topLeading)
                 VStack(alignment: .leading, spacing: 14) {
                     if let selectedSet, let set = model.presetSets.first(where: { $0.id == selectedSet }) {
-                        HStack { Text(set.name).font(.title2); Spacer(); Text("Revision \(set.revision)").foregroundStyle(.secondary) }
-                        Text(set.agentSelection == .allBase ? "Uses all agent presets. Changes to agent presets apply to new launches." : "Custom presets are independent copies. Team directories apply to every agent.").font(.callout).foregroundStyle(.secondary)
-                        ForEach(CLIKind.allCases.filter(\.isAgent), id: \.self) { kind in
-                            LabeledContent {
-                                Text(set.configurationDirectory(for: kind)).font(.caption).textSelection(.enabled)
-                            } label: {
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(kind.configurationFolderLabel)
-                                    Text(ShellAgentEnvironment.variableName(for: kind)!).font(.caption.monospaced()).foregroundStyle(.secondary)
-                                }
-                            }
-                        }
-                        AgentPresetList(set: set, revealedPresetID: $revealedPresetID, edit: { agent in
-                            if set.agentSelection == .allBase { editedBase = model.snapshot.store.baseAgentPresets.first { $0.value.id == agent.id }?.value }
-                            else { editedPreset = agent }
-                        }, showSkill: { skillPreset = $0 })
-                        if set.agentSelection != .allBase { Button("Add Agent…") { newPreset = true }.disabled(set.archived) }
+                        TeamDetailView(set: set)
                     } else {
                         ContentUnavailableView("Choose a team", systemImage: "person.crop.rectangle.stack", description: Text("Create teams such as Personal or Client 1, then choose their configuration directories."))
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -122,10 +101,6 @@ struct SettingsView: View {
             }
             .sheet(isPresented: $newSet) { PresetSetEditor { id in selectedSet = id; newSet = false } }
             .sheet(item: $editedSet) { set in PresetSetEditor(presetSet: set) { id in selectedSet = id; editedSet = nil } }
-            .sheet(isPresented: $newPreset) { if let selectedSet { AddBaseAgentView(teamID: selectedSet) { revealedPresetID = $0 } } }
-            .sheet(item: $editedBase) { base in BaseAgentEditor(preset: base) }
-            .sheet(item: $editedPreset) { preset in PresetEditor(setID: preset.setID, preset: preset) { revealedPresetID = $0 } }
-            .sheet(item: $skillPreset) { preset in CoordinationSkillView(preset: preset) }
     }
     /// Flags the team as default; the runtime clears the flag on the previous default.
     private func makeDefault(_ set: PresetSet) {
