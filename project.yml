@@ -42,6 +42,8 @@ targets:
       - package: Chauffeur
         product: ChauffeurCore
       - package: Chauffeur
+        product: ChauffeurRemoteProtocol
+      - package: Chauffeur
         product: ChauffeurTerminalInterface
       - package: Chauffeur
         product: ChauffeurTerminalGhostty

@@ -5,6 +5,49 @@ import ChauffeurRemoteProtocol
 @testable import ChauffeurRuntimeKit
 
 struct RemoteOperationHandlersTests {
+    @Test func keepAwakeOperationsValidateOnHostAndFlowIntoInventory() async throws {
+        let fixture = try await Fixture.make(); defer { fixture.cleanup() }
+        try await fixture.runtime.start()
+        let handlers = fixture.handlers()
+        let deviceID = UUID()
+
+        guard case .success(.keepAwake(let initial)) = await handlers.handle(.getKeepAwake, deviceID: deviceID) else {
+            Issue.record("Missing keep-awake status"); return
+        }
+        #expect(initial.settings == KeepAwakeSettings())
+
+        let invalid = await handlers.handle(.setKeepAwakeSettings(KeepAwakeSettings(automatic: true, waitingMinutes: 0)), deviceID: deviceID)
+        guard case .failure(let invalidError) = invalid else { Issue.record("Invalid settings accepted"); return }
+        #expect(invalidError.code == "invalid_argument")
+
+        let settings = KeepAwakeSettings(automatic: true, waitingMinutes: 45)
+        guard case .success(.keepAwake(let updated)) = await handlers.handle(.setKeepAwakeSettings(settings), deviceID: deviceID) else {
+            Issue.record("Settings were not updated"); return
+        }
+        #expect(updated.settings == settings)
+
+        let now = Date(timeIntervalSince1970: floor(Date().timeIntervalSince1970))
+        let farFuture = KeepAwakeTimerRequest(until: now.addingTimeInterval(86_410))
+        guard case .failure(let timerError) = await handlers.handle(.setKeepAwakeTimer(farFuture), deviceID: deviceID) else {
+            Issue.record("Invalid timer accepted"); return
+        }
+        #expect(timerError.code == "invalid_argument")
+
+        let until = now.addingTimeInterval(3_600)
+        guard case .success(.keepAwake(let timed)) = await handlers.handle(.setKeepAwakeTimer(KeepAwakeTimerRequest(until: until)), deviceID: deviceID) else {
+            Issue.record("Timer was not updated"); return
+        }
+        defer { Task { _ = await handlers.handle(.setKeepAwakeTimer(KeepAwakeTimerRequest(until: nil)), deviceID: deviceID) } }
+        #expect(timed.manualUntil == until)
+        let inventory = try await handlers.inventory()
+        #expect(inventory.keepAwake?.settings == settings)
+        #expect(inventory.keepAwake?.manualUntil == until)
+        guard case .success(.keepAwake(let cancelled)) = await handlers.handle(.setKeepAwakeTimer(KeepAwakeTimerRequest(until: nil)), deviceID: deviceID) else {
+            Issue.record("Timer was not cancelled"); return
+        }
+        #expect(cancelled.manualUntil == nil)
+    }
+
     @Test func remoteBranchPickerListsLocalBranchesAndLaunchReusesSelection() async throws {
         let fixture = try await Fixture.make(realTerminal: true); defer { fixture.cleanup() }
         let created = try await ProcessRunner.run("/usr/bin/git", ["-C", fixture.repo.path, "branch", "available"])

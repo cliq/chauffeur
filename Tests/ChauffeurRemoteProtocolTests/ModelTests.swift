@@ -14,6 +14,7 @@ struct ModelTests {
 
     @Test func clientsWithoutOpenSessionKindsSeeUnknownKindsAsShell() throws {
         #expect(RemoteProtocol.capabilities.contains(RemoteProtocol.openSessionKinds))
+        #expect(RemoteProtocol.capabilities.contains(RemoteProtocol.keepAwake))
         let date = Date(timeIntervalSince1970: 0)
         func session(_ kind: RemoteSessionKind) -> SessionSummary {
             SessionSummary(id: UUID(), projectID: UUID(), folderID: UUID(), title: "Task", kind: kind, state: .running, checkoutPath: "/repo", createdAt: date, updatedAt: date)
@@ -35,6 +36,19 @@ struct ModelTests {
         struct StrictInventory: Decodable { var projects: [StrictProject]; var sessions: [StrictSession] }
         #expect(throws: (any Error).self) { try RemoteJSON.decode(StrictInventory.self, from: RemoteJSON.encode(inventory)) }
         #expect(try RemoteJSON.decode(StrictInventory.self, from: RemoteJSON.encode(legacy)).sessions.count == 4)
+    }
+
+    @Test func inventoryKeepAwakeStatusIsCapabilityGatedAndLegacyDecodingStillWorks() throws {
+        let status = KeepAwakeStatus(settings: KeepAwakeSettings(automatic: true, waitingMinutes: 60), manualUntil: Date(timeIntervalSince1970: 5_000), qualifyingAgents: 3, assertionHeld: true)
+        let inventory = InventorySnapshot(revision: 1, hostName: "Mac", generatedAt: Date(timeIntervalSince1970: 4_000), keepAwake: status)
+
+        #expect(inventory.compatible(withClientCapabilities: RemoteProtocol.capabilities).keepAwake == status)
+        let legacy = inventory.compatible(withClientCapabilities: ["inventory.v1"])
+        #expect(legacy.keepAwake == nil)
+        #expect(!String(decoding: try RemoteJSON.encode(legacy), as: UTF8.self).contains("keepAwake"))
+
+        let oldJSON = Data(#"{"revision":1,"hostName":"Mac","projects":[],"sessions":[],"generatedAt":"1970-01-01T01:06:40Z"}"#.utf8)
+        #expect(try RemoteJSON.decode(InventorySnapshot.self, from: oldJSON).keepAwake == nil)
     }
 
     @Test func progressIsOptionalForOlderInventoriesAndRoundTripsSeparately() throws {

@@ -31,6 +31,14 @@ public actor RemoteOperationHandlers {
         switch operation {
         case .hello, .pair, .attachTerminal, .terminalResize, .detachTerminal:
             return .failure(RemoteError(code: "unsupported_operation", message: "\(operation.kind) is handled by the connection layer"))
+        case .getKeepAwake:
+            return .success(.keepAwake(await runtime.keepAwakeStatus()))
+        case .setKeepAwakeSettings(let settings):
+            do { return .success(.keepAwake(try await runtime.setKeepAwakeSettings(settings))) }
+            catch { return .failure(Self.remoteError(error)) }
+        case .setKeepAwakeTimer(let request):
+            do { return .success(.keepAwake(try await runtime.setKeepAwakeTimer(request))) }
+            catch { return .failure(Self.remoteError(error)) }
         case .listInventory:
             // `sinceRevision` is accepted but the full inventory is always returned for now.
             do { return .success(.inventory(try await inventory())) }

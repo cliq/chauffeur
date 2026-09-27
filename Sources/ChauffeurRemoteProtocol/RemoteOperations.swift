@@ -131,6 +131,9 @@ public enum RemoteOperation: Equatable, Sendable, Codable {
     case attachTerminal(AttachTerminalRequest)
     case terminalResize(TerminalResizeRequest)
     case detachTerminal(DetachTerminalRequest)
+    case getKeepAwake
+    case setKeepAwakeSettings(KeepAwakeSettings)
+    case setKeepAwakeTimer(KeepAwakeTimerRequest)
 
     public var kind: String {
         switch self {
@@ -145,6 +148,9 @@ public enum RemoteOperation: Equatable, Sendable, Codable {
         case .attachTerminal: return "attachTerminal"
         case .terminalResize: return "terminalResize"
         case .detachTerminal: return "detachTerminal"
+        case .getKeepAwake: return "getKeepAwake"
+        case .setKeepAwakeSettings: return "setKeepAwakeSettings"
+        case .setKeepAwakeTimer: return "setKeepAwakeTimer"
         }
     }
 
@@ -174,6 +180,12 @@ public enum RemoteOperation: Equatable, Sendable, Codable {
             self = .terminalResize(try container.decode(TerminalResizeRequest.self, forKey: .payload))
         case "detachTerminal":
             self = .detachTerminal(try container.decode(DetachTerminalRequest.self, forKey: .payload))
+        case "getKeepAwake":
+            self = .getKeepAwake
+        case "setKeepAwakeSettings":
+            self = .setKeepAwakeSettings(try container.decode(KeepAwakeSettings.self, forKey: .payload))
+        case "setKeepAwakeTimer":
+            self = .setKeepAwakeTimer(try container.decode(KeepAwakeTimerRequest.self, forKey: .payload))
         default:
             throw DecodingError.dataCorrupted(
                 DecodingError.Context(
@@ -210,6 +222,12 @@ public enum RemoteOperation: Equatable, Sendable, Codable {
             try container.encode(payload, forKey: .payload)
         case .detachTerminal(let payload):
             try container.encode(payload, forKey: .payload)
+        case .getKeepAwake:
+            break
+        case .setKeepAwakeSettings(let payload):
+            try container.encode(payload, forKey: .payload)
+        case .setKeepAwakeTimer(let payload):
+            try container.encode(payload, forKey: .payload)
         }
     }
 }
@@ -225,6 +243,7 @@ public enum RemoteResult: Equatable, Sendable, Codable {
     case worktreeDestination(WorktreeDestinationPreview)
     case operation(OperationStatus)
     case attachment(AttachmentInfo)
+    case keepAwake(KeepAwakeStatus)
     case ack
 
     public var kind: String {
@@ -237,6 +256,7 @@ public enum RemoteResult: Equatable, Sendable, Codable {
         case .worktreeDestination: return "worktreeDestination"
         case .operation: return "operation"
         case .attachment: return "attachment"
+        case .keepAwake: return "keepAwake"
         case .ack: return "ack"
         }
     }
@@ -261,6 +281,8 @@ public enum RemoteResult: Equatable, Sendable, Codable {
             self = .operation(try container.decode(OperationStatus.self, forKey: .payload))
         case "attachment":
             self = .attachment(try container.decode(AttachmentInfo.self, forKey: .payload))
+        case "keepAwake":
+            self = .keepAwake(try container.decode(KeepAwakeStatus.self, forKey: .payload))
         case "ack":
             self = .ack
         default:
@@ -292,6 +314,8 @@ public enum RemoteResult: Equatable, Sendable, Codable {
         case .operation(let payload):
             try container.encode(payload, forKey: .payload)
         case .attachment(let payload):
+            try container.encode(payload, forKey: .payload)
+        case .keepAwake(let payload):
             try container.encode(payload, forKey: .payload)
         case .ack:
             break

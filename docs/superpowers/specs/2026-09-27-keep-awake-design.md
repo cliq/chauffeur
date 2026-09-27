@@ -77,9 +77,12 @@ effect. Driver failures retain the requested policy for retry and are visible.
 
 Add local IPC methods for reading status, changing automatic settings, starting a
 timer, and cancelling it. Add matching authenticated remote operations and a
-keep-awake capability in the host handshake. Validate all durations on the host;
-reject non-finite, out-of-range, and malformed values. Timed requests carry an
-absolute end time so retrying the same request does not extend it.
+keep-awake capability in the host handshake. Validate settings and timer expiry on the host;
+reject non-finite, more-than-24-hour, and malformed values. Timed requests carry an
+absolute end time so retrying the same request does not extend it. The UI enforces
+the 0.25-hour minimum when starting a timer; the host accepts shorter remaining
+times because an absolute-expiry retry may arrive near expiry. Expired requests
+are no-ops and do not overwrite a newer timer.
 
 Add an optional status field to remote inventory, omitted when a peer lacks the
 capability. Older hosts leave the new controls unavailable; older clients can
@@ -89,8 +92,9 @@ after mutations; each client derives its displayed countdown from the host expir
 
 macOS Settings > General gains a Keep Awake section with the automatic toggle,
 "Stop counting waiting agents after … minutes", status, duration controls, and
-Cancel Timer. iOS gains a Keep Mac Awake control beside the host connection row
-on Sessions, opening a sheet with the same settings, status, and timer controls.
+Cancel Timer. iOS gains a gear button in the host connection row on Sessions,
+opening Settings with the same settings, status, and timer controls. Disconnect
+is the final action in its own section, styled as destructive.
 Both edit the connected Mac's shared policy, not per-device preferences.
 
 Disable remote mutations while disconnected and identify cached status as stale.

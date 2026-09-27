@@ -1,5 +1,6 @@
 import Foundation
 import ChauffeurCore
+import ChauffeurRemoteProtocol
 
 public actor RuntimeCoordinator {
     public let id: UUID
@@ -25,6 +26,8 @@ public actor RuntimeCoordinator {
     private var checkoutClaims = CheckoutClaims()
     private var endpoint: String?
     private var settings = RetentionSettings()
+    private var keepAwake: KeepAwakeManager
+    private var adoptingSessions = false
     private var eventTails: [UUID: Task<Void, Never>] = [:]
     private var workWaits: [UUID: Int] = [:]
     private var resultWakes = Set<UUID>()
@@ -71,6 +74,7 @@ public actor RuntimeCoordinator {
     /// them under the data root, as fixtures and earlier releases do. When it
     /// is set, checkouts under the data root remain managed.
     public init(root: URL, worktreeRoot: URL? = nil, ctlPath: String, environment: [String: String], logs: RuntimeLogStore? = nil, id: UUID = UUID(), identity: RuntimeIdentity? = nil, sessionsApp: URL? = nil) throws {
+        self.keepAwake = KeepAwakeManager(file: root.appendingPathComponent("runtime/keep-awake.json"))
         self.id = id
         self.identity = identity
         self.logs = logs ?? (try? RuntimeLogStore(root: RuntimeLogStore.directory(for: root)))
@@ -85,6 +89,8 @@ public actor RuntimeCoordinator {
         onboarding = try OnboardingCoordinator(store: store, root: root, environment: environment)
     }
     public func start() async throws {
+        adoptingSessions = true
+        defer { adoptingSessions = false }
         logs?.append(RuntimeLogEntry(.runtimeStarting, runtimeID: id))
         try await store.migrateTeamAgents()
         let snapshot = await store.reload()
@@ -114,6 +120,7 @@ public actor RuntimeCoordinator {
             do { let loaded = try JSONCoding.decode(RetentionSettings.self, from: data); try loaded.validate(); settings = loaded }
             catch { record(ChauffeurError("invalid_settings", "Cannot load retention settings", path: root.appendingPathComponent("settings.json").path)) }
         }
+        refreshKeepAwake()
         try await reconcile(startup: true)
         await maintainHistory(applySettings: true)
         for var delegation in try await ledger.allDelegations() where [.reserved, .launching].contains(delegation.state) {
@@ -121,6 +128,23 @@ public actor RuntimeCoordinator {
             else { delegation.state = .interrupted; delegation.error = "Runtime stopped during launch. Inspect the retained worktree and explicitly retry" }
             try await ledger.updateDelegation(delegation)
         }
+    }
+    private func refreshKeepAwake() {
+        keepAwake.update(sessions.values.compactMap(KeepAwakeAgent.init), now: Date(), adopting: adoptingSessions)
+    }
+    public func keepAwakeStatus() -> KeepAwakeStatus {
+        refreshKeepAwake()
+        return keepAwake.status
+    }
+    public func setKeepAwakeSettings(_ settings: KeepAwakeSettings) throws -> KeepAwakeStatus {
+        refreshKeepAwake()
+        try keepAwake.setSettings(settings, now: Date())
+        return keepAwake.status
+    }
+    public func setKeepAwakeTimer(_ request: KeepAwakeTimerRequest) throws -> KeepAwakeStatus {
+        refreshKeepAwake()
+        try keepAwake.setTimer(request, now: Date())
+        return keepAwake.status
     }
     public func setEndpoint(port: Int) {
         endpoint = "http://127.0.0.1:\(port)/mcp"
@@ -132,6 +156,7 @@ public actor RuntimeCoordinator {
     public func snapshot() async throws -> JSONValue {
         let snapshot = await store.refresh()
         var object: [String: JSONValue] = ["store": try .from(snapshot), "sessions": try .from(Array(sessions.values).sorted { $0.createdAt < $1.createdAt }), "messages": try .from(await ledger.allMessages()), "delegations": try .from(await ledger.allDelegations()), "health": health(), "settings": try .from(settings), "notifications": try .from(await notificationStatus()), "snapshotStorage": try .from(snapshotStorage), "errors": try .from(recentErrors), "repositoryInventories": try .from(repositoryInventories)]
+        object["keepAwake"] = try .from(keepAwakeStatus())
         if let remoteAccess { object["remoteAccess"] = try .from(await remoteAccess.status()) }
         return .object(object)
     }
@@ -221,6 +246,7 @@ public actor RuntimeCoordinator {
             logs?.append(entry)
         }
         sessions[session.id] = session
+        refreshKeepAwake()
         let snapshot = await store.current()
         guard snapshot.projects.contains(where: { $0.value.id == session.projectID }) else { return }
         do { try await store.save(session, expectedVersion: snapshot.sessions.first { $0.value.id == session.id }?.version) }
@@ -285,6 +311,8 @@ public actor RuntimeCoordinator {
         catch { record(ChauffeurError("retention_failed", "History cleanup could not finish")) }
     }
     public func reconcile(startup: Bool = false) async throws {
+        refreshKeepAwake()
+        defer { refreshKeepAwake() }
         if let reconciliation { try await reconciliation.value; return }
         let task = Task { try await self.performReconcile(startup: startup) }
         reconciliation = task
@@ -421,6 +449,9 @@ public actor RuntimeCoordinator {
         switch request.method {
         case "hello", "version", "status": return health()
         case "snapshot": return try await snapshot()
+        case "getKeepAwake": return try .from(keepAwakeStatus())
+        case "setKeepAwakeSettings": return try .from(setKeepAwakeSettings(params.decode(KeepAwakeSettings.self)))
+        case "setKeepAwakeTimer": return try .from(setKeepAwakeTimer(params.decode(KeepAwakeTimerRequest.self)))
         case "notificationStatus": return try .from(await notificationStatus())
         case "testNotification":
             let status = try await notificationStatus()
@@ -724,6 +755,7 @@ public actor RuntimeCoordinator {
         try await snapshots.delete(sessionID)
         try await store.delete(session: sessionID)
         sessions.removeValue(forKey: sessionID)
+        refreshKeepAwake()
         snapshotStorage = try await snapshots.status(budgetBytes: settings.snapshotBudgetBytes)
     }
 
@@ -782,6 +814,7 @@ public actor RuntimeCoordinator {
             try? await snapshots.delete(session.id)
             try await store.delete(session: session.id)
             sessions.removeValue(forKey: session.id)
+            refreshKeepAwake()
         }
         for record in records { try await store.delete(worktree: record.value.id) }
         return .object(["path": .string(path), "deletedCheckout": .bool(deletedCheckout), "deletedSessions": .number(Double(affected.count)), "deletedRecords": .number(Double(records.count))])

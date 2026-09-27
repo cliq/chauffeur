@@ -1,5 +1,6 @@
 import SwiftUI
 import ChauffeurCore
+import ChauffeurRemoteProtocol
 import ChauffeurTerminalInterface
 
 struct SettingsView: View {
@@ -18,6 +19,16 @@ struct SettingsView: View {
                 NotificationSettingsSection()
                 GlobalHotkeySettingsSection()
                 TerminalLauncherSettings()
+                KeepAwakeControls(
+                    status: model.snapshot.keepAwake,
+                    availability: model.online
+                        ? (model.snapshot.keepAwake == nil ? .unsupported : .available)
+                        : .disconnected,
+                    pending: model.keepAwakeMutationPending,
+                    mutationError: model.keepAwakeMutationError,
+                    setSettings: { await model.setKeepAwakeSettings($0) },
+                    setTimer: { await model.setKeepAwakeTimer(until: $0) }
+                )
             }.formStyle(.grouped).tabItem { Label("General", systemImage: "gearshape") }
             BaseAgentPresetsView().tabItem { Label("Agent Presets", systemImage: "terminal") }
             HSplitView {

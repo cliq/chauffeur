@@ -224,19 +224,22 @@ public struct InventorySnapshot: Codable, Equatable, Sendable {
     public var projects: [ProjectSummary]
     public var sessions: [SessionSummary]
     public var generatedAt: Date
+    public var keepAwake: KeepAwakeStatus?
 
     public init(
         revision: UInt64,
         hostName: String,
         projects: [ProjectSummary] = [],
         sessions: [SessionSummary] = [],
-        generatedAt: Date
+        generatedAt: Date,
+        keepAwake: KeepAwakeStatus? = nil
     ) {
         self.revision = revision
         self.hostName = hostName
         self.projects = projects
         self.sessions = sessions
         self.generatedAt = generatedAt
+        self.keepAwake = keepAwake
     }
 }
 
@@ -244,15 +247,17 @@ public extension InventorySnapshot {
     /// The inventory as a client with these hello capabilities can decode it: without `openSessionKinds`, sessions and
     /// presets of a kind it doesn't know are sent as `shell`.
     func compatible(withClientCapabilities capabilities: [String]) -> InventorySnapshot {
-        guard !capabilities.contains(RemoteProtocol.openSessionKinds) else { return self }
         func legacy(_ kind: RemoteSessionKind) -> RemoteSessionKind { RemoteProtocol.legacySessionKinds.contains(kind) ? kind : .shell }
         var result = self
-        for index in result.sessions.indices { result.sessions[index].kind = legacy(result.sessions[index].kind) }
-        for project in result.projects.indices {
-            for preset in result.projects[project].presets.indices {
-                result.projects[project].presets[preset].kind = legacy(result.projects[project].presets[preset].kind)
+        if !capabilities.contains(RemoteProtocol.openSessionKinds) {
+            for index in result.sessions.indices { result.sessions[index].kind = legacy(result.sessions[index].kind) }
+            for project in result.projects.indices {
+                for preset in result.projects[project].presets.indices {
+                    result.projects[project].presets[preset].kind = legacy(result.projects[project].presets[preset].kind)
+                }
             }
         }
+        if !capabilities.contains(RemoteProtocol.keepAwake) { result.keepAwake = nil }
         return result
     }
 }

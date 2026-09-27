@@ -5,6 +5,7 @@ import ChauffeurRemoteClient
 /// 02 / All live sessions, grouped by project then checkout.
 struct SessionsView: View {
     var model: MobileAppModel
+    @State private var showingSettings = false
 
     var body: some View {
         List {
@@ -28,10 +29,16 @@ struct SessionsView: View {
                     Text(connectionLabel)
                         .foregroundStyle(.secondary)
                     Spacer()
-                    if model.isConnected {
-                        Button("Disconnect") { model.disconnect() }
-                            .font(.caption)
+                    Button {
+                        showingSettings = true
+                    } label: {
+                        Image(systemName: "gearshape")
+                            .frame(minWidth: 44, minHeight: 44)
+                            .contentShape(Rectangle())
                     }
+                    .buttonStyle(.borderless)
+                    .accessibilityLabel("Settings")
+                    .accessibilityIdentifier("settings.open")
                 }
             }
 
@@ -76,6 +83,40 @@ struct SessionsView: View {
         .refreshable {
             await model.refreshInventory()
         }
+        .sheet(isPresented: $showingSettings) {
+            NavigationStack {
+                Form {
+                    KeepAwakeControls(
+                        status: model.inventory?.keepAwake,
+                        availability: keepAwakeAvailability,
+                        pending: model.keepAwakeMutationPending,
+                        mutationError: model.keepAwakeMutationError,
+                        setSettings: { await model.setKeepAwakeSettings($0) },
+                        setTimer: { await model.setKeepAwakeTimer(until: $0) }
+                    )
+                    Section {
+                        Button("Disconnect", role: .destructive) {
+                            showingSettings = false
+                            model.disconnect()
+                        }
+                        .disabled(!model.isConnected)
+                        .accessibilityIdentifier("settings.disconnect")
+                    }
+                }
+                .navigationTitle("Settings")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Done") { showingSettings = false }
+                    }
+                }
+            }
+        }
+    }
+
+    private var keepAwakeAvailability: KeepAwakeAvailability {
+        guard model.isConnected, !model.inventoryIsStale else { return .disconnected }
+        return model.keepAwakeIsSupported ? .available : .unsupported
     }
 
     private var connectionLabel: String {

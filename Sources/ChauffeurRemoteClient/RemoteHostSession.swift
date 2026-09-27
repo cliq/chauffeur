@@ -97,6 +97,10 @@ public final class RemoteHostSession {
     public private(set) var inventory: InventorySnapshot?
     /// True once the inventory may no longer match the Mac (after any disconnect).
     public private(set) var inventoryIsStale = false
+    public var isKeepAwakeSupported: Bool {
+        guard case .connected(let host) = connectionState else { return false }
+        return host.capabilities.contains(RemoteProtocol.keepAwake)
+    }
 
     @ObservationIgnored private let journal: any PendingOperationJournal
     @ObservationIgnored private let clientName: String
@@ -295,6 +299,16 @@ public final class RemoteHostSession {
         return preview.path
     }
 
+    public func setKeepAwakeSettings(_ settings: KeepAwakeSettings) async throws {
+        let status = try await requestKeepAwake(.setKeepAwakeSettings(settings))
+        updateKeepAwake(status)
+    }
+
+    public func setKeepAwakeTimer(until: Date?) async throws {
+        let status = try await requestKeepAwake(.setKeepAwakeTimer(KeepAwakeTimerRequest(until: until)))
+        updateKeepAwake(status)
+    }
+
     // MARK: Terminals
 
     /// A controller bound to this host's connection. The caller retains it and calls `attach`.
@@ -304,6 +318,23 @@ public final class RemoteHostSession {
     }
 
     // MARK: Private
+
+    private func requestKeepAwake(_ operation: RemoteOperation) async throws -> KeepAwakeStatus {
+        guard case .connected(let host) = connectionState, let connection else { throw RemoteClientError.disconnected }
+        guard host.capabilities.contains(RemoteProtocol.keepAwake) else {
+            throw RemoteClientError.invalidResponse("Update Chauffeur on your Mac to control Keep Awake.")
+        }
+        let result = try await connection.request(operation)
+        guard case .keepAwake(let status) = result else {
+            throw RemoteClientError.invalidResponse("The Mac did not return Keep Awake status.")
+        }
+        return status
+    }
+
+    private func updateKeepAwake(_ status: KeepAwakeStatus) {
+        inventory?.keepAwake = status
+        // A partial status response cannot certify that cached sessions are current.
+    }
 
     private func observe(_ connection: RemoteConnection) async {
         eventsTask?.cancel()

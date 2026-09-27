@@ -12,6 +12,7 @@ public struct RemoteInventoryBuilder {
         var store: StoreSnapshot
         var sessions: [Session]
         var repositoryInventories: [RepositoryInventory]?
+        var keepAwake: KeepAwakeStatus?
     }
 
     public static func build(snapshot: JSONValue, hostName: String, revision: UInt64, isAttached: (UUID) -> Bool) throws -> InventorySnapshot {
@@ -78,7 +79,7 @@ public struct RemoteInventoryBuilder {
         }
         sessions.sort { $0.createdAt < $1.createdAt }
 
-        return InventorySnapshot(revision: revision, hostName: hostName, projects: summaries, sessions: sessions, generatedAt: Date())
+        return InventorySnapshot(revision: revision, hostName: hostName, projects: summaries, sessions: sessions, generatedAt: Date(), keepAwake: view.keepAwake)
     }
 
     /// The main checkout first, then every worktree Git lists (matched to its

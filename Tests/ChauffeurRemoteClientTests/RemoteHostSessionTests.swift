@@ -71,6 +71,59 @@ struct RemoteHostSessionTests {
         await session.connect()
         await #expect(throws: RemoteClientError.self) { try await session.sessionProgress(sessionID: UUID()) }
         #expect(factory.hosts[0].requests(ofKind: "getSessionProgress").isEmpty)
+        #expect(!session.isKeepAwakeSupported)
+        await #expect(throws: RemoteClientError.self) {
+            try await session.setKeepAwakeSettings(KeepAwakeSettings(automatic: true))
+        }
+        #expect(factory.hosts[0].requests(ofKind: "setKeepAwakeSettings").isEmpty)
+        session.disconnect()
+    }
+
+    @Test func keepAwakeMutationDoesNotMarkStaleInventoryFresh() async throws {
+        let (session, factory) = makeSession()
+        await session.connect()
+        defer { session.disconnect() }
+        factory.hosts[0].responder = { request in
+            if case .listInventory = request.operation {
+                return RemoteResponse(id: request.id, error: RemoteError(code: "unavailable", message: "Inventory unavailable"))
+            }
+            return FakeHost.defaultResponse(for: request)
+        }
+        await session.refreshInventory()
+        #expect(session.inventoryIsStale)
+        try await session.setKeepAwakeSettings(.init(automatic: true))
+        #expect(session.inventoryIsStale)
+    }
+
+    @Test func keepAwakeMutationsUseAbsoluteRequestsAndUpdateInventoryStatus() async throws {
+        let (session, factory) = makeSession()
+        let timerEnd = Date(timeIntervalSince1970: 8_000)
+        let settingsStatus = KeepAwakeStatus(settings: KeepAwakeSettings(automatic: true, waitingMinutes: 45), qualifyingAgents: 2, assertionHeld: true)
+        let timerStatus = KeepAwakeStatus(settings: settingsStatus.settings, manualUntil: timerEnd, qualifyingAgents: 2, assertionHeld: true)
+        factory.configure = { host in
+            host.responder = { request in
+                switch request.operation {
+                case .setKeepAwakeSettings(let settings):
+                    #expect(settings == settingsStatus.settings)
+                    return RemoteResponse(id: request.id, result: .keepAwake(settingsStatus))
+                case .setKeepAwakeTimer(let timer):
+                    #expect(timer.until == timerEnd)
+                    return RemoteResponse(id: request.id, result: .keepAwake(timerStatus))
+                default:
+                    return FakeHost.defaultResponse(for: request)
+                }
+            }
+        }
+        await session.connect()
+        #expect(session.isKeepAwakeSupported)
+
+        try await session.setKeepAwakeSettings(settingsStatus.settings)
+        #expect(session.inventory?.keepAwake == settingsStatus)
+        try await session.setKeepAwakeTimer(until: timerEnd)
+        #expect(session.inventory?.keepAwake == timerStatus)
+
+        #expect(factory.hosts[0].requests(ofKind: "setKeepAwakeSettings").count == 1)
+        #expect(factory.hosts[0].requests(ofKind: "setKeepAwakeTimer").count == 1)
         session.disconnect()
     }
 

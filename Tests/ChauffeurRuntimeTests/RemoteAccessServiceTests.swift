@@ -315,11 +315,16 @@ struct RemoteAccessServiceTests {
         let client = try await connectedClient(fixture, result)
         let response = try await client.request(.listInventory(ListInventoryRequest(sinceRevision: 3)))
         #expect(response.result == .ack)
-        #expect(await dispatcher.calls == [.init(kind: "listInventory", deviceID: result.deviceID)])
+        let keepAwake = try await client.request(.getKeepAwake)
+        #expect(keepAwake.result == .ack)
+        #expect(await dispatcher.calls == [
+            .init(kind: "listInventory", deviceID: result.deviceID),
+            .init(kind: "getKeepAwake", deviceID: result.deviceID)
+        ])
         // Pair and hello never reach the dispatcher.
         let pairAttempt = try await client.request(.pair(PairRequest(deviceName: "x", protocolVersion: 1)))
         #expect(pairAttempt.error?.code == "unsupported_operation")
-        #expect(await dispatcher.calls.count == 1)
+        #expect(await dispatcher.calls.count == 2)
         await dispatcher.setRevision(7)
         #expect(try await client.nextEvent(timeout: 5) == .inventoryChanged(revision: 7))
         client.cancel()
@@ -332,7 +337,8 @@ struct RemoteAccessServiceTests {
         let date = Date(timeIntervalSince1970: 0)
         let session = SessionSummary(id: UUID(), projectID: UUID(), folderID: UUID(), title: "OpenCode", kind: .opencode, state: .running, checkoutPath: "/repo", createdAt: date, updatedAt: date)
         let project = ProjectSummary(id: UUID(), name: "P", archived: false, groups: [], presets: [PresetSummary(id: UUID(), name: "OpenCode", kind: .opencode)], folders: [])
-        await dispatcher.setInventory(InventorySnapshot(revision: 1, hostName: "Mac", projects: [project], sessions: [session], generatedAt: date))
+        let keepAwake = KeepAwakeStatus(settings: KeepAwakeSettings(automatic: true), qualifyingAgents: 1, assertionHeld: true)
+        await dispatcher.setInventory(InventorySnapshot(revision: 1, hostName: "Mac", projects: [project], sessions: [session], generatedAt: date, keepAwake: keepAwake))
         let service = fixture.service(dispatcher: dispatcher)
         _ = try await service.setEnabled(true, port: fixture.port)
         let result = try await pair(service)
@@ -344,6 +350,14 @@ struct RemoteAccessServiceTests {
         }
         #expect(try await kinds([]) == [.shell, .shell])
         #expect(try await kinds(RemoteProtocol.capabilities) == [.opencode, .opencode])
+        let legacyClient = try await connectedClient(fixture, result, capabilities: ["inventory.v1"])
+        guard case .inventory(let legacyInventory)? = try await legacyClient.request(.listInventory(ListInventoryRequest())).result else { throw RemoteTestClientError.unexpectedResult }
+        #expect(legacyInventory.keepAwake == nil)
+        legacyClient.cancel()
+        let currentClient = try await connectedClient(fixture, result, capabilities: RemoteProtocol.capabilities)
+        guard case .inventory(let currentInventory)? = try await currentClient.request(.listInventory(ListInventoryRequest())).result else { throw RemoteTestClientError.unexpectedResult }
+        #expect(currentInventory.keepAwake == keepAwake)
+        currentClient.cancel()
         await service.shutdown()
     }
 

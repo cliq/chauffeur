@@ -187,6 +187,12 @@ final class FakeHost: @unchecked Sendable {
         case .getOperationStatus(let query):
             let status = OperationStatus(operationKey: query.operationKey, phase: .completed, sessionID: UUID(), updatedAt: Date())
             return RemoteResponse(id: request.id, result: .operation(status))
+        case .getKeepAwake:
+            return RemoteResponse(id: request.id, result: .keepAwake(KeepAwakeStatus(settings: KeepAwakeSettings(), qualifyingAgents: 0, assertionHeld: false)))
+        case .setKeepAwakeSettings(let settings):
+            return RemoteResponse(id: request.id, result: .keepAwake(KeepAwakeStatus(settings: settings, qualifyingAgents: 0, assertionHeld: false)))
+        case .setKeepAwakeTimer(let timer):
+            return RemoteResponse(id: request.id, result: .keepAwake(KeepAwakeStatus(settings: KeepAwakeSettings(), manualUntil: timer.until, qualifyingAgents: 0, assertionHeld: timer.until != nil)))
         case .attachTerminal(let attach):
             let info = AttachmentInfo(generation: attachmentGeneration, sessionID: attach.sessionID, cols: attach.cols, rows: attach.rows)
             return RemoteResponse(id: request.id, result: .attachment(info))

@@ -4,6 +4,7 @@ import Foundation
 import ServiceManagement
 import UniformTypeIdentifiers
 import ChauffeurCore
+import ChauffeurRemoteProtocol
 
 struct AppSnapshot: Decodable, Sendable {
     var store = StoreSnapshot()
@@ -17,6 +18,7 @@ struct AppSnapshot: Decodable, Sendable {
     var repositoryInventories: [RepositoryInventory]?
     var notifications: NotificationStatus?
     var remoteAccess: RemoteAccessStatus?
+    var keepAwake: KeepAwakeStatus?
     init() {}
 }
 
@@ -188,6 +190,8 @@ struct AppSnapshot: Decodable, Sendable {
     private var serviceDiagnosticError: NSError?
     private(set) var initialServiceStatus: Int?
     @Published var error: String?
+    @Published private(set) var keepAwakeMutationPending = false
+    @Published private(set) var keepAwakeMutationError: String?
     @Published private(set) var stopAllPresented = false
     @Published private(set) var isStoppingAll = false
     @Published var openProjects = Set<UUID>()
@@ -482,6 +486,30 @@ struct AppSnapshot: Decodable, Sendable {
         snapshotReceivedAt = Date()
         online = true
         processPendingRoute()
+    }
+    @discardableResult
+    func setKeepAwakeSettings(_ settings: KeepAwakeSettings) async -> Bool {
+        await mutateKeepAwake("setKeepAwakeSettings", params: (try? .from(settings)) ?? .object([:]))
+    }
+    @discardableResult
+    func setKeepAwakeTimer(until: Date?) async -> Bool {
+        let request = KeepAwakeTimerRequest(until: until)
+        return await mutateKeepAwake("setKeepAwakeTimer", params: (try? .from(request)) ?? .object([:]))
+    }
+    private func mutateKeepAwake(_ method: String, params: JSONValue) async -> Bool {
+        guard !keepAwakeMutationPending else { return false }
+        keepAwakeMutationPending = true
+        keepAwakeMutationError = nil
+        defer { keepAwakeMutationPending = false }
+        do {
+            snapshot.keepAwake = try await call(method, params).decode(KeepAwakeStatus.self)
+            try? await refresh()
+            return true
+        } catch {
+            keepAwakeMutationError = error.localizedDescription
+            try? await refresh()
+            return false
+        }
     }
     private var diagnosticApp: DiagnosticApp {
         DiagnosticApp(version: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String, service: serviceStatus, error: serviceDiagnosticError)

@@ -37,7 +37,10 @@ struct EnvelopeTests {
             .getOperationStatus(OperationStatusRequest(operationKey: UUID())),
             .attachTerminal(AttachTerminalRequest(sessionID: UUID(), cols: 80, rows: 24)),
             .terminalResize(TerminalResizeRequest(generation: 1, cols: 80, rows: 24)),
-            .detachTerminal(DetachTerminalRequest(generation: 1))
+            .detachTerminal(DetachTerminalRequest(generation: 1)),
+            .getKeepAwake,
+            .setKeepAwakeSettings(KeepAwakeSettings(automatic: true, waitingMinutes: 45)),
+            .setKeepAwakeTimer(KeepAwakeTimerRequest(until: Date(timeIntervalSince1970: 9_000)))
         ]
     }
 
@@ -50,6 +53,7 @@ struct EnvelopeTests {
             .worktreeDestination(WorktreeDestinationPreview(path: "/tmp/wt")),
             .operation(operationStatus),
             .attachment(AttachmentInfo(generation: 1, sessionID: UUID(), cols: 80, rows: 24)),
+            .keepAwake(KeepAwakeStatus(settings: KeepAwakeSettings(automatic: true, waitingMinutes: 45), manualUntil: Date(timeIntervalSince1970: 9_000), qualifyingAgents: 2, assertionHeld: true)),
             .ack
         ]
     }
@@ -99,7 +103,8 @@ struct EnvelopeTests {
         remoteOperationCases(),
         [
             "hello", "pair", "listInventory", "listWorktreeBranches", "previewWorktreeDestination", "launch",
-            "getOperationStatus", "attachTerminal", "terminalResize", "detachTerminal"
+            "getOperationStatus", "attachTerminal", "terminalResize", "detachTerminal", "getKeepAwake",
+            "setKeepAwakeSettings", "setKeepAwakeTimer"
         ]
     ))
     func remoteOperationKindStrings(operation: RemoteOperation, expectedKind: String) throws {
@@ -110,7 +115,7 @@ struct EnvelopeTests {
 
     @Test(arguments: zip(
         remoteResultCases(),
-        ["hostInfo", "pairing", "inventory", "worktreeBranches", "worktreeDestination", "operation", "attachment", "ack"]
+        ["hostInfo", "pairing", "inventory", "worktreeBranches", "worktreeDestination", "operation", "attachment", "keepAwake", "ack"]
     ))
     func remoteResultKindStrings(result: RemoteResult, expectedKind: String) throws {
         let data = try RemoteJSON.encode(result)

@@ -76,9 +76,11 @@ import ChauffeurRuntimeKit
             let recordedPort = (try? Data(contentsOf: root.appendingPathComponent("runtime/mcp-port.json"))).flatMap { try? JSONCoding.decode(Int.self, from: $0) }
             let reconcile = Task {
                 while !Task.isCancelled {
-                    do { try await Task.sleep(for: .seconds(1)); try await runtime.reconcile() }
+                    do { try await Task.sleep(for: .seconds(1)) } catch { break }
+                    do { try await runtime.reconcile() }
+                    catch is CancellationError { break }
                     catch let error as ChauffeurError { await runtime.record(error) }
-                    catch { break }
+                    catch { await runtime.record(ChauffeurError("reconcile_failed", "Session reconciliation failed; it will retry.")) }
                 }
             }
             let history = Task {

@@ -69,6 +69,8 @@ final class MobileAppModel {
     private(set) var selectedTab: UUID?
     /// One controller per open tab, created lazily once the session is connected.
     private(set) var terminals: [UUID: RemoteSessionController] = [:]
+    private(set) var keepAwakeMutationPending = false
+    private(set) var keepAwakeMutationError: String?
 
     @ObservationIgnored let credentials: any CredentialStore
     @ObservationIgnored let makeTerminalAdapter: @MainActor () -> any TerminalEngineAdapter
@@ -134,6 +136,56 @@ final class MobileAppModel {
     var hostName: String? {
         if case .connected(let info) = connectionState { return info.hostName }
         return inventory?.hostName ?? savedHost?.name
+    }
+
+    var keepAwakeIsSupported: Bool {
+        if let session { return session.isKeepAwakeSupported }
+        if case .connected(let host) = connectionState {
+            return host.capabilities.contains(RemoteProtocol.keepAwake)
+        }
+        return false
+    }
+
+    @discardableResult
+    func setKeepAwakeSettings(_ settings: KeepAwakeSettings) async -> Bool {
+        guard let session, isConnected, !inventoryIsStale, !keepAwakeMutationPending else { return false }
+        keepAwakeMutationPending = true
+        keepAwakeMutationError = nil
+        defer { keepAwakeMutationPending = false }
+        do {
+            try await session.setKeepAwakeSettings(settings)
+            await session.refreshInventory()
+            return true
+        } catch let error as RemoteClientError {
+            keepAwakeMutationError = error.userMessage
+            await session.refreshInventory()
+            return false
+        } catch {
+            keepAwakeMutationError = error.localizedDescription
+            await session.refreshInventory()
+            return false
+        }
+    }
+
+    @discardableResult
+    func setKeepAwakeTimer(until: Date?) async -> Bool {
+        guard let session, isConnected, !inventoryIsStale, !keepAwakeMutationPending else { return false }
+        keepAwakeMutationPending = true
+        keepAwakeMutationError = nil
+        defer { keepAwakeMutationPending = false }
+        do {
+            try await session.setKeepAwakeTimer(until: until)
+            await session.refreshInventory()
+            return true
+        } catch let error as RemoteClientError {
+            keepAwakeMutationError = error.userMessage
+            await session.refreshInventory()
+            return false
+        } catch {
+            keepAwakeMutationError = error.localizedDescription
+            await session.refreshInventory()
+            return false
+        }
     }
 
     // MARK: - Connection
@@ -583,7 +635,14 @@ final class MobileAppModel {
                     branch: "main", checkoutPath: mainPath, createdAt: now, updatedAt: now
                 )
             ],
-            generatedAt: now
+            generatedAt: now,
+            keepAwake: KeepAwakeStatus(
+                settings: KeepAwakeSettings(automatic: true, waitingMinutes: 30),
+                manualUntil: now.addingTimeInterval(2 * 60 * 60),
+                qualifyingAgents: 2,
+                assertionHeld: true,
+                error: nil
+            )
         )
     }
 }
