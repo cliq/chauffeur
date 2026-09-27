@@ -69,9 +69,9 @@ open: gen
 test: test-plugin
 	swift test
 
-# The bundled OpenCode plugin is plain JavaScript, tested with node's built-in runner.
+# Bundled provider plugins are plain JavaScript, tested with node's built-in runner.
 test-plugin:
-	$(NODE) --test Tests/OpenCodePlugin/*.test.mjs
+	$(NODE) --test Tests/OpenCodePlugin/*.test.mjs Tests/PiPlugin/*.test.mjs
 
 test-ui:
 	$(MAKE) build BUILD_ACTION=build-for-testing

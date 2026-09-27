@@ -28,11 +28,35 @@ struct ConfigurationDiscoveryTests {
         #expect(inventory.homePath == Paths.canonical(home.path))
         #expect(inventory.executables[CLIKind.codex.rawValue] == "codex")
         #expect(try Paths.executable("codex", environment: ["PATH": bin.path]) == Paths.canonical(codex.path))
-        #expect(inventory.missingAgents == [.claude, .opencode, .kimi])
+        #expect(inventory.missingAgents == [.claude, .opencode, .kimi, .pi])
         #expect(inventory.configurations.contains { $0.kind == .codex && $0.path == Paths.canonical(currentCodex.path) && $0.isCurrent && $0.available })
         #expect(inventory.configurations.contains { $0.path == Paths.canonical(missingImported.path) && !$0.available })
         #expect(inventory.configurations.contains { $0.path.hasSuffix(".claude-work") })
         #expect(inventory.configurations.contains { $0.path.hasSuffix(".codexwho-client") })
+    }
+
+    @Test func piCurrentFolderAndManagedProfilesAreDetected() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("chauffeur-pi-discovery-\(UUID())")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let home = root.appendingPathComponent("home"), bin = root.appendingPathComponent("bin")
+        let current = root.appendingPathComponent("profiles/pi current")
+        let managed = home.appendingPathComponent(".pi/agent-work")
+        for directory in [home, bin, current, managed] {
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        }
+        let pi = bin.appendingPathComponent("pi")
+        try Data("#!/bin/sh\nexit 0\n".utf8).write(to: pi)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: pi.path)
+
+        let inventory = try ConfigurationDiscovery(
+            home: home,
+            environment: ["PATH": bin.path, "PI_CODING_AGENT_DIR": current.path],
+            configuredPaths: [:]
+        ).inventory()
+
+        #expect(inventory.executables[CLIKind.pi.rawValue] == "pi")
+        #expect(inventory.configurations.contains { $0.kind == .pi && $0.path == Paths.canonical(current.path) && $0.isCurrent })
+        #expect(inventory.configurations.contains { $0.kind == .pi && $0.path == Paths.canonical(managed.path) && !$0.isCurrent })
     }
 
     @Test func openCodeGlobalFolderAndLayersUnderConfigAreDetected() throws {

@@ -93,7 +93,7 @@ struct SkillInstallerTests {
         var archived = PresetSet(name: "Archived"); archived.archived = true
         archived.configurationDirectories = ["claude": "/tmp/archived-claude"]
         #expect(SkillInstaller.directories(teams: [first, second, PresetSet(name: "Default"), archived], home: "/tmp/home") ==
-            ["/tmp/home/.agents", "/tmp/home/.claude", "/tmp/shared-claude"].map(Paths.canonical).sorted())
+            ["/tmp/home/.agents", "/tmp/home/.claude", "/tmp/home/.pi/agent", "/tmp/shared-claude"].map(Paths.canonical).sorted())
     }
 
     @Test func runtimeInstallsAtStartupAndWhenTeamDirectoryChanges() async throws {

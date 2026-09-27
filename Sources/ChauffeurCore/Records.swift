@@ -6,7 +6,7 @@ public protocol Record: Codable, Identifiable, Sendable where ID == UUID {
 }
 
 public enum CLIKind: String, Codable, CaseIterable, Sendable {
-    case codex, claude, opencode, kimi
+    case codex, claude, opencode, kimi, pi
     /// A plain login shell in a checkout. Never stored in a preset set; the
     /// runtime synthesizes its preset when launching a shell session.
     case shell

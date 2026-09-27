@@ -60,7 +60,7 @@ public enum Paths {
 public enum LaunchPolicy {
     // Start with the login environment, never an environment inherited from a
     // parent agent. Strip provider routing/auth and nested CLI session identity.
-    public static let deniedPrefixes = ["CODEX_", "CLAUDE_", "CLAUDECODE", "OPENCODE_", "KIMI_", "OPENAI_", "ANTHROPIC_", "AZURE_OPENAI_", "CHAUFFEUR_", "AWS_", "GOOGLE_", "VERTEX_", "BEDROCK_"]
+    public static let deniedPrefixes = ["CODEX_", "CLAUDE_", "CLAUDECODE", "OPENCODE_", "KIMI_", "PI_", "OPENAI_", "ANTHROPIC_", "AZURE_OPENAI_", "CHAUFFEUR_", "AWS_", "GOOGLE_", "VERTEX_", "BEDROCK_"]
     public static let deniedNames: Set<String> = ["TMUX", "TMUX_PANE", "OPENCODE", "GOOGLE_APPLICATION_CREDENTIALS", "CLOUD_ML_REGION", "BASH_ENV", "ENV", "ZDOTDIR", "NODE_OPTIONS", "DYLD_INSERT_LIBRARIES", "DYLD_LIBRARY_PATH"]
     /// Removes inherited provider credentials, alternate profile selectors and
     /// nested Chauffeur/session state. Callers add only the explicit profile
@@ -137,6 +137,7 @@ public enum LaunchPolicy {
             let parts = arguments[index].split(separator: "=", maxSplits: 1, omittingEmptySubsequences: false)
             let key = String(parts[0])
             if takesValue.contains(key) {
+                if kind == .pi { try Validation.require(parts.count == 1, "Pi options require a separate value") }
                 if parts.count == 1 {
                     index += 1
                     try Validation.require(index < arguments.count && !arguments[index].hasPrefix("-"), "\(key) requires an explicit value")

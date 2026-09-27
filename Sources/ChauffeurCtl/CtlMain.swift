@@ -20,7 +20,7 @@ import ChauffeurCore
                 chauffeurctl diagnostics [--socket PATH]
                 chauffeurctl request METHOD [JSON | --file PATH] [--socket PATH]
                 chauffeurctl event [--session UUID] EVENT [provider-notify-json]
-                chauffeurctl inbox-hook --provider claude|codex|opencode|kimi [--report-stop] [--report-running]
+                chauffeurctl inbox-hook --provider claude|codex|opencode|kimi|pi [--report-stop] [--report-running]
                 chauffeurctl wait-for-work [--timeout MINUTES] [--no-milestones] [--json]
 
                 request sends structured commands to the per-user service. Native
@@ -92,7 +92,7 @@ import ChauffeurCore
               let token = ProcessInfo.processInfo.environment["CHAUFFEUR_SESSION_TOKEN"],
               let event = payload.hookEvent, InboxHintFormatter.hookEvents.contains(event) else { return }
         guard provider != .kimi || event == "UserPromptSubmit" else { return }
-        if provider == .opencode { await openCodeInboxHook(args, payload: payload, event: event, token: token, socket: socket); return }
+        if provider == .opencode || provider == .pi { await pluginInboxHook(args, provider: provider, payload: payload, event: event, token: token, socket: socket); return }
         var summary: InboxHintSummary?
         // A continuation after a blocked Stop always ends the turn.
         if !(event == "Stop" && payload.stopHookActive) {
@@ -117,11 +117,11 @@ import ChauffeurCore
             _ = try? await RuntimeClient.call(IPCRequest("event", params: .object(params)), socketPath: socket)
         }
     }
-    /// The OpenCode plugin's hook: always one `{"block","text","waitForWorkers"}` line
+    /// OpenCode and Pi's plugin hook: always one `{"block","text","waitForWorkers"}` line
     /// once the runtime answers. A continuation Stop (`stop_hook_active`) claims no
     /// mail but still learns whether the coordinator should wait for its workers.
-    private static func openCodeInboxHook(_ args: [String], payload: HookPayload, event: String, token: String, socket: String) async {
-        var params: [String: JSONValue] = ["token": .string(token), "provider": .string(CLIKind.opencode.rawValue), "event": .string(event)]
+    private static func pluginInboxHook(_ args: [String], provider: CLIKind, payload: HookPayload, event: String, token: String, socket: String) async {
+        var params: [String: JSONValue] = ["token": .string(token), "provider": .string(provider.rawValue), "event": .string(event)]
         if let nativeID = payload.conversationID { params["nativeConversationID"] = .string(nativeID) }
         if event == "Stop" { params[payload.stopHookActive ? "claim" : "newTurn"] = .bool(!payload.stopHookActive) }
         let summary = (try? await RuntimeClient.call(IPCRequest("inboxHint", params: .object(params)), socketPath: socket)).flatMap { try? $0.decode(InboxHintSummary.self) }

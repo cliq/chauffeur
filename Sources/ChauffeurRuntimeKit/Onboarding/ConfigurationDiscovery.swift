@@ -48,8 +48,9 @@ public struct ConfigurationDiscovery: Sendable {
             for path in configuredPaths[kind.rawValue] ?? [] { add(kind: kind, path: path, current: Paths.canonical(path) == Paths.canonical(current)) }
         }
 
-        // OpenCode keeps its folders under `~/.config`.
-        let children = [home, home.appendingPathComponent(".config")].flatMap { parent in
+        // OpenCode layers live under `~/.config`; Pi profiles are siblings of
+        // its default `~/.pi/agent` folder.
+        let children = [home, home.appendingPathComponent(".config"), home.appendingPathComponent(".pi")].flatMap { parent in
             (try? manager.contentsOfDirectory(
                 at: parent,
                 includingPropertiesForKeys: [.isDirectoryKey, .isSymbolicLinkKey],
@@ -58,8 +59,8 @@ public struct ConfigurationDiscovery: Sendable {
         }
         for child in children {
             let name = child.lastPathComponent
-            let underConfig = child.deletingLastPathComponent().lastPathComponent == ".config"
-            guard let kind = candidateKind(name: name, underConfig: underConfig) else { continue }
+            let parentName = child.deletingLastPathComponent().lastPathComponent
+            guard let kind = candidateKind(name: name, parentName: parentName) else { continue }
             let values = try? child.resourceValues(forKeys: [.isDirectoryKey])
             guard values?.isDirectory == true else { continue }
             add(kind: kind, path: child.path, current: Paths.canonical(child.path) == Paths.canonical(effectivePath(for: kind)))
@@ -139,8 +140,9 @@ public struct ConfigurationDiscovery: Sendable {
         return Paths.canonical(environment[variable] ?? fallback)
     }
 
-    private func candidateKind(name: String, underConfig: Bool) -> CLIKind? {
-        if underConfig { return name.hasPrefix("opencode-") ? .opencode : nil }
+    private func candidateKind(name: String, parentName: String) -> CLIKind? {
+        if parentName == ".config" { return name.hasPrefix("opencode-") ? .opencode : nil }
+        if parentName == ".pi" { return name.hasPrefix("agent-") ? .pi : nil }
         if name.hasPrefix(".kimi-code-") { return .kimi }
         if name.hasPrefix(".claude-") || name.hasPrefix(".claudewho-") { return .claude }
         if name.hasPrefix(".codex-") || name.hasPrefix(".codexwho-") { return .codex }

@@ -76,7 +76,7 @@ struct ProviderPolicyCharacterizationTests {
     }
 
     @Test func launchEnvironmentSelectsTheProviderProfile() throws {
-        #expect(LaunchPolicy.deniedPrefixes == ["CODEX_", "CLAUDE_", "CLAUDECODE", "OPENCODE_", "KIMI_", "OPENAI_", "ANTHROPIC_", "AZURE_OPENAI_", "CHAUFFEUR_", "AWS_", "GOOGLE_", "VERTEX_", "BEDROCK_"])
+        #expect(LaunchPolicy.deniedPrefixes == ["CODEX_", "CLAUDE_", "CLAUDECODE", "OPENCODE_", "KIMI_", "PI_", "OPENAI_", "ANTHROPIC_", "AZURE_OPENAI_", "CHAUFFEUR_", "AWS_", "GOOGLE_", "VERTEX_", "BEDROCK_"])
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("chauffeur-env-\(UUID())")
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: root) }
@@ -126,7 +126,7 @@ struct ProviderPolicyCharacterizationTests {
         let team = PresetSet(name: "Fixture")
         #expect(team.configurationDirectory(for: .claude, home: "/Users/me") == "/Users/me/.claude")
         #expect(team.configurationDirectory(for: .codex, home: "/Users/me") == "/Users/me/.codex")
-        #expect(Set(team.configurationEnvironment.keys) == ["CODEX_HOME", "CLAUDE_CONFIG_DIR", "KIMI_CODE_HOME"])
+        #expect(Set(team.configurationEnvironment.keys) == ["CODEX_HOME", "CLAUDE_CONFIG_DIR", "KIMI_CODE_HOME", "PI_CODING_AGENT_DIR"])
     }
 
     @Test func launchOptionSuggestions() {

@@ -21,10 +21,13 @@ struct LoginSetupStep: View {
                         if let email = pair.auth.email { Text(email) }
                         if let org = pair.auth.organization { Text(org).font(.caption) }
                         if let method = pair.auth.method { Text("Authentication: \(method)").font(.caption) }
-                        if pair.auth.phase == .connected && pair.auth.email == nil && pair.kind != .opencode && pair.kind != .kimi { Text("Signed in according to the CLI. Account identity isn't available.").font(.caption).foregroundStyle(.secondary) }
+                        if pair.auth.phase == .connected && pair.auth.email == nil && pair.kind != .opencode && pair.kind != .kimi && pair.kind != .pi { Text("Signed in according to the CLI. Account identity isn't available.").font(.caption).foregroundStyle(.secondary) }
                         if let message = pair.auth.message { Text(message).font(.caption).foregroundStyle(.secondary) }
                         if pair.kind == .opencode {
                             Link("Add local or cloud providers to OpenCode", destination: URL(string: "https://opencode.ai/docs/providers/")!).font(.caption)
+                        }
+                        if pair.kind == .pi {
+                            Text("In the Pi terminal, enter /login and choose a provider.").font(.caption).foregroundStyle(.secondary)
                         }
                         HStack {
                             Button(pair.kind == .opencode ? "Log in to a provider" : pair.auth.phase == .connected ? "Not the right account? Sign in again" : "Sign in") { Task { await setup.signIn(pair.id) } }

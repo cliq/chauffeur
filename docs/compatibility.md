@@ -21,6 +21,7 @@ not a completed real-provider support matrix.
 | Claude Code | 2.1.273 | Basic-terminal launch/resume and checkout recovery pass; native UI input/clipboard/resize/history and normal/forced UI quit preserve the process and draft. Native permission/completion hooks, read-only MCP discovery and normal exit pass; full coordination remains unverified |
 | OpenCode | 1.18.32 | Plugin status, MCP, inbox continuation, coordinator waiting and composer detection verified in the [V9 spike](decisions/V9-opencode-integration.md) with a local MLX model; end-to-end evidence below under [OpenCode](#opencode) |
 | Kimi Code | 2.1.1 | CLI identification, shared-home plugin loading, MCP handshake through the stdio bridge, lifecycle hooks, ordinary CLI use and explicit resume checked with a local mock model. Initial-task trust/composer handling is covered by a terminal fixture. |
+| Pi | 0.87.1 | Extension loading, authenticated tool bridge against a mock MCP server, lifecycle reporting, standard composer and saved-session resume checked with isolated profiles and a local mock model; see [Pi](#pi) |
 
 `Prototypes/native_profile_selection.py` verifies two concurrent native project
 windows per current CLI in the signed Release app. Native `/status` account
@@ -267,3 +268,40 @@ timed out, then all three `ProgressRegistrationTests` passed in isolation.
 Earlier full runs also saw intermittent failures in
 `RemoteAccessServiceTests.pairingExpiresAfterItsTimeoutOrWhenCancelled` and
 `RemoteEndToEndTests.protocolMismatchIsReported`; both passed isolated reruns.
+
+## Pi
+
+Pi 0.87.1 was inspected on 2026-09-27. Coordination requires Pi 0.87.0 or newer
+for the `agent_before_settle` lifecycle boundary. Chauffeur discovers `pi`, seeds a Pi
+preset, and selects each team's agent directory with `PI_CODING_AGENT_DIR`
+(default `~/.pi/agent`). Setup opens interactive Pi; enter `/login` to connect a
+provider. The status check recognizes local `auth.json` credential records;
+it does not resolve credential commands or verify account access, expiry, or
+quota. New profiles can copy instructions, skills, prompts and themes, but not
+credentials, provider settings, extensions or session history.
+
+Coordinated launches load the bundled extension with `--extension`; the user's
+Pi settings and extension registry are not changed. The extension exposes
+Chauffeur tools directly through the authenticated loopback MCP endpoint,
+reports native session IDs and lifecycle status, adds inbox hints after tools,
+allows one inbox continuation, and waits for worker results when appropriate.
+Nested Pi processes cannot take ownership of the parent Chauffeur session.
+Session switches and forks update the native identity. New launches use an
+explicit session UUID; resume selects that recorded UUID.
+
+Pi tools already run without approval prompts. The auto-approve control maps
+to `--approve`, which trusts project-local resources for that invocation;
+the caption describes that distinction. Additional folders are supplied as
+working-directory context because Pi has no filesystem directory-grant flag.
+Model suggestions come from `--list-models`; reasoning maps to `--thinking`.
+Follow-up input is limited to the recognized empty standard editor and footer;
+custom editors, multiline drafts and dialogs fail the readiness check.
+
+Validation used temporary profiles and local mock services. The installed Pi
+successfully loaded the extension, exposed and executed a Chauffeur tool,
+reported startup/running/completion, and resumed with saved tool history. An
+isolated interactive terminal confirmed the standard composer layout. Node
+fixtures exercise lifecycle, inbox continuation, waiting, cancellation,
+request timeouts and nested-process handling. Swift fixtures cover profile
+isolation, launch arguments, discovery, authentication and migration. Real
+provider OAuth and paid-model coordination were not exercised.

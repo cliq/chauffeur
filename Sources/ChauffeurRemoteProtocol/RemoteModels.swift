@@ -8,6 +8,7 @@ public enum RemoteSessionKind: String, Codable, Sendable, CaseIterable {
     case claude
     case opencode
     case kimi
+    case pi
     case shell
     /// An agent this build doesn't know, from a newer Mac.
     case agent

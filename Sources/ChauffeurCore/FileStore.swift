@@ -265,6 +265,14 @@ public actor FileStore {
             try manager.createDirectory(at: marker.deletingLastPathComponent(), withIntermediateDirectories: true)
             try Data("{\"version\":2}".utf8).write(to: marker, options: .atomic)
         }
+        let piMarker = root.appendingPathComponent("migrations/pi-base-preset/complete.json")
+        if !manager.fileExists(atPath: piMarker.path) {
+            if !snapshot.baseAgentPresets.contains(where: { $0.value.kind == .pi }), snapshot.baseAgentPresets.contains(where: { !$0.value.archived }) {
+                try save(BaseAgentPreset(name: "Pi", kind: .pi, executable: "pi"))
+            }
+            try manager.createDirectory(at: piMarker.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try Data("{}".utf8).write(to: piMarker, options: .atomic)
+        }
         let kimiMarker = root.appendingPathComponent("migrations/kimi-base-preset/complete.json")
         if !manager.fileExists(atPath: kimiMarker.path) {
             if !snapshot.baseAgentPresets.contains(where: { $0.value.kind == .kimi }), snapshot.baseAgentPresets.contains(where: { !$0.value.archived }) {

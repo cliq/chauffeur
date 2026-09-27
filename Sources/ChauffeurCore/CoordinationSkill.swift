@@ -122,3 +122,16 @@ public enum OpenCodePlugin {
         return try Data(contentsOf: url)
     }
 }
+
+/// Pi loads this extension only for the coordinated invocation.
+public enum PiPlugin {
+    public static let fileName = "chauffeur-pi.js"
+    public static func bundledSource() throws -> Data {
+        let appBundle = Bundle.main.resourceURL.flatMap { Bundle(url: $0.appendingPathComponent("Chauffeur_ChauffeurCore.bundle")) }
+        guard Bundle.main.bundleURL.pathExtension != "app" || appBundle != nil,
+              let url = (appBundle ?? Bundle.module).url(forResource: "chauffeur-pi", withExtension: "js", subdirectory: "Plugins") else {
+            throw ChauffeurError("plugin_bundle", "The bundled Pi extension is missing. Reinstall Chauffeur")
+        }
+        return try Data(contentsOf: url)
+    }
+}

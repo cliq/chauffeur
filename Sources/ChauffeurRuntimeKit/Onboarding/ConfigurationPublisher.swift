@@ -27,7 +27,8 @@ public actor ConfigurationPublisher {
         migrations: [CLIKind: any ConfigurationMigration] = [
             .claude: ClaudeConfigurationMigration(),
             .codex: CodexConfigurationMigration(),
-            .opencode: OpenCodeConfigurationMigration(), .kimi: KimiConfigurationMigration()
+            .opencode: OpenCodeConfigurationMigration(), .kimi: KimiConfigurationMigration(),
+            .pi: PiConfigurationMigration()
         ],
         interruptionHook: InterruptionHook? = nil
     ) {

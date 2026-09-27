@@ -138,7 +138,7 @@ public extension AgentProvider {
 
 public enum AgentProviders {
     /// In `CLIKind.allCases` order.
-    public static let all: [any AgentProvider] = [CodexProvider(), ClaudeProvider(), OpenCodeProvider(), KimiProvider()]
+    public static let all: [any AgentProvider] = [CodexProvider(), ClaudeProvider(), OpenCodeProvider(), KimiProvider(), PiProvider()]
 }
 
 public extension CLIKind {

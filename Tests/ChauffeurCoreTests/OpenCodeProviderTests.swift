@@ -18,7 +18,7 @@ struct OpenCodeProviderTests {
         #expect(CLIKind(rawValue: "opencode") == .opencode && CLIKind.opencode.provider?.kind == .opencode)
         #expect(CLIKind.opencode.displayName == "OpenCode" && provider.badgeColorName == "teal")
         #expect(provider.installURL.absoluteString == "https://opencode.ai")
-        #expect(AgentProviders.all.map(\.kind) == [.codex, .claude, .opencode, .kimi])
+        #expect(AgentProviders.all.map(\.kind) == [.codex, .claude, .opencode, .kimi, .pi])
         #expect(provider.supportsReasoning == false && provider.preassignsConversationID == false)
         #expect(provider.wakeStrategy == .plugin && provider.maxInboxWaitSeconds == 240)
         #expect(provider.skillDiscovery == .sharedAgentsHome && provider.probesModels)
@@ -241,7 +241,7 @@ struct OpenCodeProviderTests {
         let store = try FileStore(root: fresh)
         try await store.migrateTeamAgents()
         let seeded = await store.reload().baseAgentPresets.map(\.value)
-        #expect(Set(seeded.map(\.kind)) == [.claude, .codex, .opencode, .kimi])
+        #expect(Set(seeded.map(\.kind)) == [.claude, .codex, .opencode, .kimi, .pi])
         #expect(seeded.first { $0.kind == .opencode }.map { ($0.name, $0.executable) } ?? ("", "") == ("OpenCode", "opencode"))
 
         // An install from before OpenCode gains it once, even after the user removes it again.
