@@ -238,6 +238,33 @@ struct RemoteSessionControllerTests {
         #expect(harness.host.inputFrames.isEmpty)
     }
 
+    @Test func keyboardResizeDuringAttachmentReachesHostAfterAttach() async throws {
+        let harness = Harness()
+        try await harness.connect()
+        defer { harness.host.stop() }
+        harness.adapter.cellSize = TerminalCellSize(cols: 80, rows: 40)
+        harness.host.responder = { request in
+            if case .attachTerminal = request.operation { return nil }
+            return FakeHost.defaultResponse(for: request)
+        }
+        let attach = Task { await harness.controller.attach(takeControl: false) }
+        try #require(await eventually { harness.attachRequests().count == 1 })
+        let request = harness.host.requests(ofKind: "attachTerminal")[0]
+        #expect(harness.attachRequests()[0].rows == 40)
+        // Navigation and a keyboard animation can finish while the host is
+        // still attaching. No subsequent layout callback is guaranteed.
+        harness.adapter.simulateResize(cols: 80, rows: 28)
+        harness.adapter.simulateResize(cols: 80, rows: 18)
+        #expect(harness.host.requests(ofKind: "terminalResize").isEmpty)
+        await harness.host.respond(to: request.id, result: .attachment(AttachmentInfo(
+            generation: FakeHost.attachmentGeneration, sessionID: Self.sessionID, cols: 80, rows: 40)))
+        await attach.value
+        try #require(await eventually { harness.host.requests(ofKind: "terminalResize").count == 1 })
+        if case .terminalResize(let resize) = harness.host.requests(ofKind: "terminalResize")[0].operation {
+            #expect(resize == TerminalResizeRequest(generation: FakeHost.attachmentGeneration, cols: 80, rows: 18))
+        } else { Issue.record("Expected the final keyboard-constrained dimensions") }
+    }
+
     @Test func rapidResizesAreCoalescedIntoOneRequest() async throws {
         let harness = try await makeAttached()
 

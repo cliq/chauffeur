@@ -108,6 +108,8 @@ public final class RemoteSessionController: TerminalEngineAdapterDelegate {
 
         await subscribeIfNeeded()
 
+        resizeTask?.cancel()
+        pendingResize = nil
         adapter.setInputEnabled(false)
         adapter.reset()
         generation = nil
@@ -141,6 +143,13 @@ public final class RemoteSessionController: TerminalEngineAdapterDelegate {
             heldWhileAttaching.removeAll()
             for payload in held {
                 handleOutput(payload)
+            }
+            // The keyboard or navigation layout may have changed the surface
+            // while the attach request was in flight. Those callbacks cannot send
+            // a resize before we have a generation; reconcile the final size now.
+            let currentSize = adapter.cellSize
+            if currentSize != size {
+                terminal(adapter, didChangeCellSize: currentSize)
             }
         } catch RemoteClientError.remote(let error) where error.code == "terminal_busy" {
             heldWhileAttaching.removeAll()
