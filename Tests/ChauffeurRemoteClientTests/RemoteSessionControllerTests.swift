@@ -71,6 +71,43 @@ struct RemoteSessionControllerTests {
         #expect(harness.controller.state == .attached(generation: FakeHost.attachmentGeneration))
     }
 
+    @Test func returningToPreviouslyAttachedTabsRestoresTheirOutputRoute() async throws {
+        let harness = Harness()
+        try await harness.connect()
+        defer { harness.host.stop() }
+        let secondAdapter = FakeTerminalEngineAdapter()
+        let second = RemoteSessionController(sessionID: UUID(), connection: harness.connection, adapter: secondAdapter)
+        let controllers = [harness.controller, second]
+        let adapters = [harness.adapter, secondAdapter]
+        harness.host.responder = { request in
+            if case .attachTerminal = request.operation { return nil }
+            return FakeHost.defaultResponse(for: request)
+        }
+
+        for visit in 0..<5 {
+            let selected = visit % 2, other = 1 - selected
+            if visit > 0 { await controllers[other].detach() }
+            let otherScreen = adapters[other].screenText
+            let controller = controllers[selected]
+            let attach = Task { await controller.attach(takeControl: false) }
+            try #require(await eventually { harness.attachRequests().count == visit + 1 })
+            let request = harness.host.requests(ofKind: "attachTerminal")[visit]
+            let generation = UInt64(100 + visit)
+            let screen = "Terminal \(selected), visit \(visit)"
+            // A redraw may precede its attach response; it must reach the returning
+            // controller's buffer, not whichever tab subscribed most recently.
+            await harness.host.pushOutput(generation: generation, sequence: 0, screen)
+            await harness.host.respond(to: request.id, result: .attachment(AttachmentInfo(
+                generation: generation, sessionID: controller.sessionID, cols: 80, rows: 24)))
+            await attach.value
+            #expect(controller.state == .attached(generation: generation))
+            try #require(await eventually { adapters[selected].screenText == screen })
+            await harness.host.pushOutput(generation: generation, sequence: 1, " live")
+            try #require(await eventually { adapters[selected].screenText == screen + " live" })
+            #expect(adapters[other].screenText == otherScreen)
+        }
+    }
+
     @Test func staleGenerationFramesAreDropped() async throws {
         let harness = try await makeAttached()
 

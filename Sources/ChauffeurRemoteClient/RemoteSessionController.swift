@@ -115,6 +115,14 @@ public final class RemoteSessionController: TerminalEngineAdapterDelegate {
         heldWhileAttaching.removeAll()
         state = .attaching
 
+        // Tabs retain their controllers, but the shared connection routes output
+        // to only one of them. Reclaim it on every attachment, before the host can
+        // send a redraw; event/state subscriptions below only need installing once.
+        let continuation = outputContinuation
+        await connection.setTerminalOutputHandler { payload in
+            continuation.yield(payload)
+        }
+
         let size = adapter.cellSize
         let request = AttachTerminalRequest(sessionID: sessionID, takeControl: takeControl, cols: size.cols, rows: size.rows)
         do {
@@ -234,10 +242,6 @@ public final class RemoteSessionController: TerminalEngineAdapterDelegate {
             }
         }
 
-        let continuation = outputContinuation
-        await connection.setTerminalOutputHandler { payload in
-            continuation.yield(payload)
-        }
     }
 
     private func handleEvent(_ event: RemoteEvent) {
