@@ -177,6 +177,8 @@ final class FakeHost: @unchecked Sendable {
             return RemoteResponse(id: request.id, error: RemoteError(code: "progress_unavailable", message: "No progress panel"))
         case .listInventory:
             return RemoteResponse(id: request.id, result: .inventory(inventory()))
+        case .listWorktreeBranches:
+            return RemoteResponse(id: request.id, result: .worktreeBranches([WorktreeBranchOption(name: "feature", checkoutPath: nil, isCheckedOut: false)]))
         case .previewWorktreeDestination(let preview):
             return RemoteResponse(id: request.id, result: .worktreeDestination(WorktreeDestinationPreview(path: "/tmp/worktrees/\(preview.branch)")))
         case .launch(let launch):

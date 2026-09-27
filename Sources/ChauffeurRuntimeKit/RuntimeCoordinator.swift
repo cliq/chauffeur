@@ -828,7 +828,7 @@ public actor RuntimeCoordinator {
         }
         guard let project = snapshot.projects.first(where: { $0.value.id == request.projectID && !$0.value.archived })?.value,
               let folder = project.folders.first(where: { $0.id == request.folderID && $0.registered }) else { throw ChauffeurError("missing_folder", "Select an available folder in an active project") }
-        var worktree = try await worktrees.create(projectID: project.id, folder: folder, branch: request.branch, baseRef: request.baseRef)
+        var worktree = try await worktrees.create(projectID: project.id, folder: folder, branch: request.branch, baseRef: request.baseRef, reuseExistingBranch: request.reuseExistingBranch == true)
         if let key = request.retryKey { worktree.id = key; worktree.creationRequestFingerprint = fingerprint }
         do { return try await saveWorktree(worktree) }
         catch { throw ChauffeurError("worktree_registration", "The worktree was created but its record could not be saved. Refresh Git Inventory and register the retained checkout", path: worktree.path) }

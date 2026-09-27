@@ -4,6 +4,23 @@ import ChauffeurCore
 @testable import ChauffeurRuntimeKit
 
 struct WorktreeCreationTests {
+    @Test func existingBranchRequestsRoundTripAndRetryWithoutRecreating() async throws {
+        let fixture = try await Fixture.make(); defer { fixture.cleanup() }
+        let branch = try await ProcessRunner.run("/usr/bin/git", ["-C", fixture.repo.path, "branch", "existing"])
+        try #require(branch.status == 0)
+        var request = fixture.request
+        request.branch = "existing"
+        request.reuseExistingBranch = true
+        let decoded = try JSONCoding.decode(WorktreeCreationRequest.self, from: JSONCoding.encode(request))
+        let first = try await fixture.runtime.createWorktree(decoded)
+        let retry = try await fixture.runtime.createWorktree(decoded)
+        #expect(first.value.id == retry.value.id)
+        #expect(first.value.branch == "existing")
+        #expect(try await fixture.runtime.worktrees.inventory(at: fixture.repo.path).count == 2)
+        request.reuseExistingBranch = nil
+        await #expect(throws: ChauffeurError.self) { try await fixture.runtime.createWorktree(request) }
+    }
+
     @Test func refPickerOperationsResolveRegisteredRepositoriesOnly() async throws {
         let fixture = try await Fixture.make(); defer { fixture.cleanup() }
         let params: JSONValue = .object(["projectID": .string(fixture.project.id.uuidString), "folderID": .string(fixture.project.folders[0].id.uuidString)])

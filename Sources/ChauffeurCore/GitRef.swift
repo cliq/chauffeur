@@ -42,7 +42,7 @@ public struct GitRef: Codable, Equatable, Identifiable, Sendable {
             let name = ref.name.lowercased()
             return name == query ? 0 : name.hasPrefix(query) ? 1 : 2
         }
-        return refs.filter { $0.name.lowercased().contains(query) }.sorted {
+        return refs.filter { query.isEmpty || $0.name.lowercased().contains(query) }.sorted {
             if rank($0) != rank($1) { return rank($0) < rank($1) }
             if $0.lastCommitDate != $1.lastCommitDate { return ($0.lastCommitDate ?? .distantPast) > ($1.lastCommitDate ?? .distantPast) }
             return $0.fullName < $1.fullName

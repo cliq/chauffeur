@@ -44,6 +44,21 @@ public actor RemoteOperationHandlers {
                 let panel = try await Task.detached(priority: .utility) { try RemoteProgressReader.panel(session: session) }.value
                 return .success(.sessionProgress(panel))
             } catch { return .failure(Self.remoteError(error)) }
+        case .listWorktreeBranches(let request):
+            do {
+                let params: JSONValue = .object(["projectID": .string(request.projectID.uuidString), "folderID": .string(request.folderID.uuidString)])
+                let refs = try await runtime.handle(IPCRequest("listGitRefs", params: params)).decode(GitRefSnapshot.self)
+                let store = await runtime.store.current()
+                guard let folder = store.projects.first(where: { $0.value.id == request.projectID && !$0.value.archived })?.value.folders.first(where: { $0.id == request.folderID && $0.registered }) else {
+                    throw ChauffeurError("missing_folder", "Select an available repository")
+                }
+                let checkouts = try await runtime.worktrees.inventory(at: folder.canonicalPath)
+                let options: [WorktreeBranchOption] = refs.refs.filter { $0.kind == .local }.map { ref -> WorktreeBranchOption in
+                    let path = checkouts.first { $0.branch == ref.name }?.path
+                    return WorktreeBranchOption(name: ref.name, checkoutPath: path, isCheckedOut: path != nil || ref.isCheckedOutInWorktree || ref.isHEAD)
+                }.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+                return .success(.worktreeBranches(options))
+            } catch { return .failure(Self.remoteError(error)) }
         case .previewWorktreeDestination(let request):
             do {
                 let params: JSONValue = .object([
@@ -141,7 +156,7 @@ public actor RemoteOperationHandlers {
         var branch = spec.worktreeID.flatMap { id in snapshot.worktrees.first { $0.value.id == id }?.value.branch } ?? ""
         do {
             if let newWorktree = request.newWorktree {
-                let creation = WorktreeCreationRequest(projectID: project.id, folderID: folder.id, branch: newWorktree.branch, baseRef: newWorktree.baseRef, retryKey: context.worktreeKey)
+                let creation = WorktreeCreationRequest(projectID: project.id, folderID: folder.id, branch: newWorktree.branch, baseRef: newWorktree.baseRef, retryKey: context.worktreeKey, reuseExistingBranch: newWorktree.reuseExistingBranch == true)
                 let created = try await runtime.createWorktree(creation).value
                 guard created.registered, created.availability == .available else {
                     throw ChauffeurError("worktree_unavailable", "The worktree for this launch was removed. Start a new launch.", path: created.path)

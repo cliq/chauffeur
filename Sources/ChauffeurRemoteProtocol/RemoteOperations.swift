@@ -45,6 +45,24 @@ public struct ListInventoryRequest: Codable, Equatable, Sendable {
     }
 }
 
+public struct ListWorktreeBranchesRequest: Codable, Equatable, Sendable {
+    public var projectID: UUID
+    public var folderID: UUID
+    public init(projectID: UUID, folderID: UUID) {
+        self.projectID = projectID; self.folderID = folderID
+    }
+}
+
+public struct WorktreeBranchOption: Codable, Equatable, Sendable, Identifiable {
+    public var name: String
+    public var checkoutPath: String?
+    public var isCheckedOut: Bool
+    public var id: String { name }
+    public init(name: String, checkoutPath: String?, isCheckedOut: Bool) {
+        self.name = name; self.checkoutPath = checkoutPath; self.isCheckedOut = isCheckedOut
+    }
+}
+
 public struct PreviewWorktreeRequest: Codable, Equatable, Sendable {
     public var projectID: UUID
     public var folderID: UUID
@@ -106,6 +124,7 @@ public enum RemoteOperation: Equatable, Sendable, Codable {
     case pair(PairRequest)
     case listInventory(ListInventoryRequest)
     case getSessionProgress(SessionProgressRequest)
+    case listWorktreeBranches(ListWorktreeBranchesRequest)
     case previewWorktreeDestination(PreviewWorktreeRequest)
     case launch(LaunchOperationRequest)
     case getOperationStatus(OperationStatusRequest)
@@ -119,6 +138,7 @@ public enum RemoteOperation: Equatable, Sendable, Codable {
         case .pair: return "pair"
         case .listInventory: return "listInventory"
         case .getSessionProgress: return "getSessionProgress"
+        case .listWorktreeBranches: return "listWorktreeBranches"
         case .previewWorktreeDestination: return "previewWorktreeDestination"
         case .launch: return "launch"
         case .getOperationStatus: return "getOperationStatus"
@@ -140,6 +160,8 @@ public enum RemoteOperation: Equatable, Sendable, Codable {
             self = .getSessionProgress(try container.decode(SessionProgressRequest.self, forKey: .payload))
         case "listInventory":
             self = .listInventory(try container.decode(ListInventoryRequest.self, forKey: .payload))
+        case "listWorktreeBranches":
+            self = .listWorktreeBranches(try container.decode(ListWorktreeBranchesRequest.self, forKey: .payload))
         case "previewWorktreeDestination":
             self = .previewWorktreeDestination(try container.decode(PreviewWorktreeRequest.self, forKey: .payload))
         case "launch":
@@ -174,6 +196,8 @@ public enum RemoteOperation: Equatable, Sendable, Codable {
             try container.encode(payload, forKey: .payload)
         case .listInventory(let payload):
             try container.encode(payload, forKey: .payload)
+        case .listWorktreeBranches(let payload):
+            try container.encode(payload, forKey: .payload)
         case .previewWorktreeDestination(let payload):
             try container.encode(payload, forKey: .payload)
         case .launch(let payload):
@@ -197,6 +221,7 @@ public enum RemoteResult: Equatable, Sendable, Codable {
     case pairing(PairingResult)
     case inventory(InventorySnapshot)
     case sessionProgress(SessionProgressPanel)
+    case worktreeBranches([WorktreeBranchOption])
     case worktreeDestination(WorktreeDestinationPreview)
     case operation(OperationStatus)
     case attachment(AttachmentInfo)
@@ -208,6 +233,7 @@ public enum RemoteResult: Equatable, Sendable, Codable {
         case .pairing: return "pairing"
         case .inventory: return "inventory"
         case .sessionProgress: return "sessionProgress"
+        case .worktreeBranches: return "worktreeBranches"
         case .worktreeDestination: return "worktreeDestination"
         case .operation: return "operation"
         case .attachment: return "attachment"
@@ -227,6 +253,8 @@ public enum RemoteResult: Equatable, Sendable, Codable {
             self = .sessionProgress(try container.decode(SessionProgressPanel.self, forKey: .payload))
         case "inventory":
             self = .inventory(try container.decode(InventorySnapshot.self, forKey: .payload))
+        case "worktreeBranches":
+            self = .worktreeBranches(try container.decode([WorktreeBranchOption].self, forKey: .payload))
         case "worktreeDestination":
             self = .worktreeDestination(try container.decode(WorktreeDestinationPreview.self, forKey: .payload))
         case "operation":
@@ -256,6 +284,8 @@ public enum RemoteResult: Equatable, Sendable, Codable {
         case .sessionProgress(let payload):
             try container.encode(payload, forKey: .payload)
         case .inventory(let payload):
+            try container.encode(payload, forKey: .payload)
+        case .worktreeBranches(let payload):
             try container.encode(payload, forKey: .payload)
         case .worktreeDestination(let payload):
             try container.encode(payload, forKey: .payload)

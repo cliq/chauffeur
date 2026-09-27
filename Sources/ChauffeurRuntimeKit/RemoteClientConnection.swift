@@ -160,7 +160,7 @@ actor RemoteClientConnection: RemoteConnectionHandle {
             result = await self.resize(resize)
         case .detachTerminal(let detach):
             result = await self.detach(detach)
-        case .listInventory, .getSessionProgress, .previewWorktreeDestination, .launch, .getOperationStatus:
+        case .listInventory, .listWorktreeBranches, .getSessionProgress, .previewWorktreeDestination, .launch, .getOperationStatus:
             result = await dispatcher.handle(request.operation, deviceID: deviceID)
         }
         let capabilities = clientCapabilities

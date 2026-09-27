@@ -31,6 +31,7 @@ struct EnvelopeTests {
             .hello(HelloRequest(deviceID: UUID(), deviceToken: "tok", clientName: "iPhone", clientVersion: "1.0", protocolVersion: 1)),
             .pair(PairRequest(deviceName: "iPhone", protocolVersion: 1)),
             .listInventory(ListInventoryRequest(sinceRevision: 5)),
+            .listWorktreeBranches(ListWorktreeBranchesRequest(projectID: UUID(), folderID: UUID())),
             .previewWorktreeDestination(PreviewWorktreeRequest(projectID: UUID(), folderID: UUID(), branch: "feature/x")),
             .launch(LaunchOperationRequest(operationKey: UUID(), fingerprint: "abc", launch: launchSpec)),
             .getOperationStatus(OperationStatusRequest(operationKey: UUID())),
@@ -45,6 +46,7 @@ struct EnvelopeTests {
             .hostInfo(HostInfo(hostID: UUID(), hostName: "Mac", runtimeVersion: "1.0", build: "100", protocolVersion: 1)),
             .pairing(PairingResult(remoteAccessKey: Data([1, 2, 3]), deviceID: UUID(), deviceToken: "tok", mainPort: 4000, hostID: UUID(), hostName: "Mac")),
             .inventory(InventorySnapshot(revision: 1, hostName: "Mac", generatedAt: Date(timeIntervalSince1970: 4_000))),
+            .worktreeBranches([WorktreeBranchOption(name: "main", checkoutPath: "/repo", isCheckedOut: true)]),
             .worktreeDestination(WorktreeDestinationPreview(path: "/tmp/wt")),
             .operation(operationStatus),
             .attachment(AttachmentInfo(generation: 1, sessionID: UUID(), cols: 80, rows: 24)),
@@ -96,7 +98,7 @@ struct EnvelopeTests {
     @Test(arguments: zip(
         remoteOperationCases(),
         [
-            "hello", "pair", "listInventory", "previewWorktreeDestination", "launch",
+            "hello", "pair", "listInventory", "listWorktreeBranches", "previewWorktreeDestination", "launch",
             "getOperationStatus", "attachTerminal", "terminalResize", "detachTerminal"
         ]
     ))
@@ -108,7 +110,7 @@ struct EnvelopeTests {
 
     @Test(arguments: zip(
         remoteResultCases(),
-        ["hostInfo", "pairing", "inventory", "worktreeDestination", "operation", "attachment", "ack"]
+        ["hostInfo", "pairing", "inventory", "worktreeBranches", "worktreeDestination", "operation", "attachment", "ack"]
     ))
     func remoteResultKindStrings(result: RemoteResult, expectedKind: String) throws {
         let data = try RemoteJSON.encode(result)

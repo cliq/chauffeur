@@ -21,7 +21,8 @@ struct SessionLaunchView: View {
     @State private var folderID: UUID?
     @State private var checkout = Checkout.repository
     @State private var branchOverride: String?
-    @FocusState private var branchFocused: Bool
+    @State private var reuseExistingBranch = false
+    @State private var existingBranch = ""
     @State private var baseRef = "HEAD"
     private struct DestinationRequest: Equatable {
         let folderID: UUID
@@ -55,11 +56,12 @@ struct SessionLaunchView: View {
     }
     private var preset: AgentPreset? { presets.first { $0.id == presetID } }
     private var folder: ProjectFolder? { currentProject.folders.first { $0.id == folderID && $0.registered } }
-    private var branch: String { branchOverride ?? WorktreeBranchName.suggested(from: title) }
+    private var branch: String { reuseExistingBranch ? existingBranch : branchOverride ?? WorktreeBranchName.suggested(from: title) }
     private var branchBinding: Binding<String> {
         Binding(get: { branch }, set: { value in
             // TextField also writes its displayed value when focus changes.
             // Committing a suggestion must not turn it into a manual override.
+            if reuseExistingBranch { existingBranch = value; return }
             guard value != branch else { return }
             branchOverride = value.isEmpty ? nil : value
         })
@@ -107,10 +109,14 @@ struct SessionLaunchView: View {
                     sessionFields
                     checkoutFields
                     if !primaryPath.isEmpty {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(checkout == .newWorktree ? "Worktree destination" : "Working directory").font(.caption).foregroundStyle(.secondary)
-                            Text(primaryPath).font(.system(.caption, design: .monospaced)).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
-                                .accessibilityIdentifier("session.destination")
+                        if checkout == .newWorktree {
+                            WorktreeDestinationLabel(path: primaryPath)
+                        } else {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("Working directory").font(.caption).foregroundStyle(.secondary)
+                                Text(primaryPath).font(.system(.caption, design: .monospaced)).textSelection(.enabled)
+                                    .accessibilityIdentifier("session.destination")
+                            }
                         }
                     }
                     if checkout == .newWorktree {
@@ -122,7 +128,7 @@ struct SessionLaunchView: View {
                         } else if destinationRequest != nil && previewedRequest != destinationRequest {
                             HStack { ProgressView().controlSize(.small); Text("Checking worktree destination…").font(.caption).foregroundStyle(.secondary) }
                         } else if branch.isEmpty {
-                            Text("Enter a title or branch name to preview the worktree folder.").font(.caption).foregroundStyle(.secondary)
+                            Text(reuseExistingBranch ? "Choose an existing branch to preview the worktree folder." : "Enter a title or branch name to preview the worktree folder.").font(.caption).foregroundStyle(.secondary)
                         }
                     }
                     if let created = operation.createdWorktree, worktreeID == created.id {
@@ -248,6 +254,7 @@ struct SessionLaunchView: View {
                     guard selected != folderID else { return }
                     folderID = selected
                     baseRef = "HEAD"
+                    existingBranch = ""
                     checkout = startsInNewWorktree ? .newWorktree : .repository
                     shared = false
                 })) {
@@ -261,22 +268,9 @@ struct SessionLaunchView: View {
                     Text("New worktree…").tag(Checkout.newWorktree)
                 }.onChange(of: checkout) { _, value in
                     shared = false
-                    if value != .newWorktree { branchFocused = false }
                 }
                 if checkout == .newWorktree {
-                    HStack(spacing: 8) {
-                        TextField("New branch", text: branchBinding).autocorrectionDisabled().accessibilityIdentifier("session.branch")
-                            .focused($branchFocused)
-                            .task {
-                                await Task.yield()
-                                guard !Task.isCancelled else { return }
-                                branchFocused = true
-                            }
-                        Text("from").foregroundStyle(.secondary)
-                        if let folderID {
-                            RefPicker(projectID: project.id, folderID: folderID, selection: $baseRef)
-                        }
-                    }
+                    WorktreeBranchFields(projectID: project.id, folderID: folderID, reuseExistingBranch: $reuseExistingBranch, branch: branchBinding, baseRef: $baseRef)
                 }
             }
             if checkout == .newWorktree { Text("Creates a separate checkout for this repository, then starts your agent there.").font(.caption).foregroundStyle(.secondary) }
@@ -303,7 +297,7 @@ struct SessionLaunchView: View {
         }
         guard let groupID, let presetID, let folderID else { return }
         let request = LaunchRequest(projectID: project.id, groupID: groupID, presetID: presetID, folderID: folderID, title: title.isEmpty ? "\(preset?.name ?? "Agent") · \(folder?.name ?? "Session")" : title, worktreeID: worktreeID, additionalFolderIDs: additional.filter { $0 != folderID }.sorted { $0.uuidString < $1.uuidString }, task: task.isEmpty ? nil : task, allowSharedCheckout: shared, coordinationEnabled: coordination, modelOverride: modelOverride, reasoningOverride: reasoningOverride, autoApproveOverride: autoApproveOverride)
-        let creation = checkout == .newWorktree ? WorktreeCreationRequest(projectID: project.id, folderID: folderID, branch: branch, baseRef: baseRef) : nil
+        let creation = checkout == .newWorktree ? WorktreeCreationRequest(projectID: project.id, folderID: folderID, branch: branch, baseRef: baseRef, reuseExistingBranch: reuseExistingBranch) : nil
         Task {
             finish(await operation.launch(request, creating: creation, retry: false, model: model))
         }

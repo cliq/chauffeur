@@ -178,6 +178,31 @@ struct WorktreeGitStatusTests {
         try #require(result.status == 0, "Git fixture failed: \(result.error)")
     }
 
+    @Test func reuseExistingBranchPreservesItsTipAndRejectsConflicts() async throws {
+        let root = URL(fileURLWithPath: "/tmp/chauffeur-reuse-\(UUID())").resolvingSymlinksInPath()
+        let repo = root.appendingPathComponent("repo")
+        try FileManager.default.createDirectory(at: repo, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try await Self.git(repo, ["init", "-b", "main"])
+        try await Self.git(repo, ["commit", "--allow-empty", "-m", "Initial"])
+        try await Self.git(repo, ["checkout", "-b", "feature"])
+        try await Self.git(repo, ["commit", "--allow-empty", "-m", "Feature"])
+        try await Self.git(repo, ["checkout", "main"])
+        let manager = WorktreeManager(root: root.appendingPathComponent("managed"))
+        let folder = ProjectFolder(path: repo.path)
+        let tree = try await manager.create(projectID: UUID(), folder: folder, branch: "feature", baseRef: "HEAD", reuseExistingBranch: true)
+        #expect(tree.branch == "feature")
+        #expect(tree.baseBranch == nil)
+        let result = try await ProcessRunner.run("/usr/bin/git", ["-C", tree.path, "log", "-1", "--format=%s"])
+        #expect(result.output.trimmingCharacters(in: .whitespacesAndNewlines) == "Feature")
+        await #expect(throws: Error.self) {
+            try await manager.create(projectID: UUID(), folder: folder, branch: "feature", baseRef: "HEAD", reuseExistingBranch: true)
+        }
+        await #expect(throws: Error.self) {
+            try await manager.create(projectID: UUID(), folder: folder, branch: "missing", baseRef: "HEAD", reuseExistingBranch: true)
+        }
+    }
+
     @Test func createdWorktreesRememberTheirStartingBranch() async throws {
         let root = URL(fileURLWithPath: "/tmp/chauffeur-base-branch-\(UUID())").resolvingSymlinksInPath()
         let repo = root.appendingPathComponent("repo")

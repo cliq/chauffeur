@@ -3,6 +3,14 @@ import Testing
 @testable import ChauffeurCore
 
 struct GitRefTests {
+    @Test func emptyFilterShowsEveryBranchIncludingCheckedOutBranches() {
+        let refs = [
+            GitRef(kind: .local, fullName: "refs/heads/main", sha: "abc", isCheckedOutInWorktree: true),
+            GitRef(kind: .local, fullName: "refs/heads/feature", sha: "def")
+        ]
+        #expect(Set(GitRef.filtered(refs, query: "").map(\.name)) == ["main", "feature"])
+    }
+
     @Test func filteringRanksExactThenPrefixThenSubstringAndUsesRecencyForTies() {
         let names = ["z/task", "task-extra", "task", "a/task"]
         let refs = names.enumerated().map { index, name in

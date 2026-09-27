@@ -5,6 +5,33 @@ import ChauffeurRemoteProtocol
 @testable import ChauffeurRuntimeKit
 
 struct RemoteOperationHandlersTests {
+    @Test func remoteBranchPickerListsLocalBranchesAndLaunchReusesSelection() async throws {
+        let fixture = try await Fixture.make(realTerminal: true); defer { fixture.cleanup() }
+        let created = try await ProcessRunner.run("/usr/bin/git", ["-C", fixture.repo.path, "branch", "available"])
+        try #require(created.status == 0)
+        try await fixture.runtime.start()
+        let handlers = fixture.handlers()
+        let query = ListWorktreeBranchesRequest(projectID: fixture.project.id, folderID: fixture.folder.id)
+        guard case .success(.worktreeBranches(let branches)) = await handlers.handle(.listWorktreeBranches(query), deviceID: UUID()) else {
+            Issue.record("Missing branch list"); return
+        }
+        #expect(branches.first { $0.name == "main" }?.checkoutPath == Paths.canonical(fixture.repo.path))
+        #expect(branches.first { $0.name == "available" }?.isCheckedOut == false)
+        let spec = WorktreeCreationSpec(branch: "available", baseRef: "HEAD", reuseExistingBranch: true)
+        let request = fixture.request(key: UUID(), newWorktree: spec, launch: LaunchSpec(projectID: fixture.project.id, folderID: fixture.folder.id))
+        let result = await handlers.launch(request, deviceID: UUID())
+        #expect(result.phase == .completed)
+        #expect(await fixture.runtime.store.reload().worktrees.first?.value.branch == "available")
+        if let id = result.sessionID {
+            _ = try await fixture.runtime.handle(IPCRequest("stop", params: .object(["sessionID": .string(id.uuidString), "force": .bool(true)])))
+        }
+        let invalid = ListWorktreeBranchesRequest(projectID: fixture.project.id, folderID: UUID())
+        guard case .failure(let error) = await handlers.handle(.listWorktreeBranches(invalid), deviceID: UUID()) else {
+            Issue.record("Unknown folder was accepted"); return
+        }
+        #expect(error.code == "missing_folder")
+    }
+
     @Test func inventoryAndProgressRequestsFollowRegisteredFiles() async throws {
         let fixture = try await Fixture.make()
         defer { try? FileManager.default.removeItem(at: fixture.root) }

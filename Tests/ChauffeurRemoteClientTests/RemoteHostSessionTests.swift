@@ -212,6 +212,13 @@ struct RemoteHostSessionTests {
         #expect(session.inventory == nil)
     }
 
+    @Test func worktreeBranchesReturnsTheMacsOptions() async throws {
+        let (session, _) = makeSession()
+        await session.connect()
+        let branches = try await session.worktreeBranches(projectID: UUID(), folderID: UUID())
+        #expect(branches == [WorktreeBranchOption(name: "feature", checkoutPath: nil, isCheckedOut: false)])
+    }
+
     @Test func previewWorktreeReturnsThePath() async throws {
         let (session, _) = makeSession()
         await session.connect()

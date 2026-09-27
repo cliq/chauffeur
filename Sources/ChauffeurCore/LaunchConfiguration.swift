@@ -79,12 +79,14 @@ public enum WorktreeBranchName {
 }
 
 public struct WorktreeCreationRequest: Codable, Equatable, Sendable {
+    public var reuseExistingBranch: Bool?
     public var projectID: UUID
     public var folderID: UUID
     public var branch: String
     public var baseRef: String
     public var retryKey: UUID?
-    public init(projectID: UUID, folderID: UUID, branch: String, baseRef: String, retryKey: UUID? = UUID()) {
+    public init(projectID: UUID, folderID: UUID, branch: String, baseRef: String, retryKey: UUID? = UUID(), reuseExistingBranch: Bool = false) {
+        self.reuseExistingBranch = reuseExistingBranch ? true : nil
         self.projectID = projectID; self.folderID = folderID
         self.branch = branch; self.baseRef = baseRef; self.retryKey = retryKey
     }

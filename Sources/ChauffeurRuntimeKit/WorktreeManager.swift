@@ -207,17 +207,21 @@ public actor WorktreeManager {
         try Validation.require(!branch.isEmpty && !branch.hasPrefix("-") && !branch.contains("\0"), "Branch is required and cannot begin with '-' or contain NUL")
         _ = try await git(repository, ["check-ref-format", "--branch", branch])
     }
-    public func create(projectID: UUID, folder: ProjectFolder, branch: String, baseRef: String) async throws -> Worktree {
+    public func create(projectID: UUID, folder: ProjectFolder, branch: String, baseRef: String, reuseExistingBranch: Bool = false) async throws -> Worktree {
         let repository = try Paths.directory(folder.canonicalPath)
         try Validation.require(!baseRef.isEmpty && !baseRef.hasPrefix("-") && !baseRef.contains("\0"), "Base ref is required and cannot begin with '-' or contain NUL")
         try await validateBranch(branch, repository: repository)
-        let baseCommit = try await git(repository, ["rev-parse", "--verify", "\(baseRef)^{commit}"]).trimmingCharacters(in: .whitespacesAndNewlines)
-        let baseBranchName = (try? await branchName(of: baseRef, repository: repository)) ?? nil
+        let startRef = reuseExistingBranch ? "refs/heads/\(branch)" : baseRef
+        if reuseExistingBranch, let occupied = try await inventory(at: repository).first(where: { $0.branch == branch }) {
+            throw ChauffeurError("branch_in_use", "This branch is already checked out at \(occupied.path). Select that checkout instead.", path: occupied.path)
+        }
+        let baseCommit = try await git(repository, ["rev-parse", "--verify", "\(startRef)^{commit}"]).trimmingCharacters(in: .whitespacesAndNewlines)
+        let baseBranchName = reuseExistingBranch ? nil : (try? await branchName(of: baseRef, repository: repository)) ?? nil
         let repoID = try await repositoryID(at: repository)
         let destination = destination(repositoryID: repoID, branch: branch)
         reservations.insert(destination.path); defer { reservations.remove(destination.path) }
         try FileManager.default.createDirectory(at: destination.deletingLastPathComponent(), withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
-        _ = try await git(repository, ["worktree", "add", "-b", branch, "--", destination.path, baseCommit], timeout: 600)  // checkout filters (LFS) may download
+        _ = try await git(repository, ["worktree", "add"] + (reuseExistingBranch ? ["--", destination.path, branch] : ["-b", branch, "--", destination.path, baseCommit]), timeout: 600)  // checkout filters (LFS) may download
         var result = Worktree(projectID: projectID, folderID: folder.id, repositoryID: repoID, path: Paths.canonical(destination.path), repositoryPath: repository, branch: branch, baseCommit: baseCommit, managed: true)
         result.baseBranch = baseBranchName
         result.gitIdentity = try? await identity(at: result.path)

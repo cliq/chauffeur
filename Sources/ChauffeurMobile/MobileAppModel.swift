@@ -367,6 +367,11 @@ final class MobileAppModel {
 
     // MARK: - Launch
 
+    func worktreeBranches(projectID: UUID, folderID: UUID) async throws -> [WorktreeBranchOption] {
+        guard let session else { throw RemoteClientError.disconnected }
+        return try await session.worktreeBranches(projectID: projectID, folderID: folderID)
+    }
+
     func previewWorktree(projectID: UUID, folderID: UUID, branch: String) async throws -> String {
         guard let session else { throw RemoteClientError.disconnected }
         return try await session.previewWorktree(projectID: projectID, folderID: folderID, branch: branch)

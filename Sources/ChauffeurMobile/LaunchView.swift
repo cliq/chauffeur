@@ -34,6 +34,9 @@ struct LaunchView: View {
     @State private var title = ""
     @State private var initialTask = ""
     @State private var branch = ""
+    @State private var existingBranch = ""
+    @State private var reuseExistingBranch = false
+    private var selectedBranch: String { reuseExistingBranch ? existingBranch : branch }
     @State private var suggestedBranch = ""
     @State private var baseRef = "HEAD"
     @State private var groupID: UUID?
@@ -72,7 +75,7 @@ struct LaunchView: View {
     private var canLaunch: Bool {
         guard model.isConnected, !isLaunching else { return false }
         if kind == .agent, presetID == nil { return false }
-        if isNewWorktree, trimmed(branch).isEmpty || trimmed(baseRef).isEmpty { return false }
+        if isNewWorktree, trimmed(selectedBranch).isEmpty || (!reuseExistingBranch && trimmed(baseRef).isEmpty) { return false }
         return true
     }
 
@@ -132,14 +135,23 @@ struct LaunchView: View {
 
             if isNewWorktree {
                 Section {
-                    TextField("Branch", text: $branch)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                        .accessibilityIdentifier("launch-branch")
-                    TextField("Base ref", text: $baseRef)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                        .accessibilityIdentifier("launch-base-ref")
+                    Picker("Branch", selection: $reuseExistingBranch) {
+                        Text("New branch").tag(false)
+                        Text("Existing branch").tag(true)
+                    }
+                    .accessibilityIdentifier("launch-branch-mode")
+                    if reuseExistingBranch {
+                        WorktreeBranchPicker(model: model, projectID: location.projectID, folderID: location.folderID, selection: $existingBranch)
+                    } else {
+                        TextField("New branch", text: $branch)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                            .accessibilityIdentifier("launch-branch")
+                        TextField("Base ref", text: $baseRef)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                            .accessibilityIdentifier("launch-base-ref")
+                    }
                     LabeledContent("Destination") {
                         if let destinationError {
                             Text(destinationError)
@@ -148,8 +160,8 @@ struct LaunchView: View {
                             Text(destination)
                                 .font(.caption.monospaced())
                                 .multilineTextAlignment(.trailing)
-                        } else if trimmed(branch).isEmpty {
-                            Text("Enter a branch")
+                        } else if trimmed(selectedBranch).isEmpty {
+                            Text(reuseExistingBranch ? "Choose a branch" : "Enter a branch")
                         } else {
                             ProgressView()
                         }
@@ -239,7 +251,7 @@ struct LaunchView: View {
             }
             suggestedBranch = slug
         }
-        .task(id: trimmed(branch)) {
+        .task(id: trimmed(selectedBranch)) {
             await previewDestination()
         }
     }
@@ -261,7 +273,7 @@ struct LaunchView: View {
 
     /// Debounced 300 ms so typing a branch does not send a request per keystroke.
     private func previewDestination() async {
-        let branch = trimmed(branch)
+        let branch = trimmed(selectedBranch)
         destination = nil
         destinationError = nil
         guard isNewWorktree, !branch.isEmpty else { return }
@@ -294,7 +306,7 @@ struct LaunchView: View {
             newWorktree = nil
         case .newWorktree:
             worktreeID = nil
-            newWorktree = WorktreeCreationSpec(branch: trimmed(branch), baseRef: trimmed(baseRef))
+            newWorktree = WorktreeCreationSpec(branch: trimmed(selectedBranch), baseRef: reuseExistingBranch ? "HEAD" : trimmed(baseRef), reuseExistingBranch: reuseExistingBranch)
         }
         let spec = LaunchSpec(
             projectID: location.projectID,

@@ -273,6 +273,18 @@ public final class RemoteHostSession {
         return panel
     }
 
+    public func worktreeBranches(projectID: UUID, folderID: UUID) async throws -> [WorktreeBranchOption] {
+        guard case .connected(let host) = connectionState, let connection else { throw RemoteClientError.disconnected }
+        guard host.capabilities.contains("worktree.branches.v1") else {
+            throw RemoteClientError.invalidResponse("Update Chauffeur on your Mac to choose an existing branch.")
+        }
+        let result = try await connection.request(.listWorktreeBranches(ListWorktreeBranchesRequest(projectID: projectID, folderID: folderID)))
+        guard case .worktreeBranches(let branches) = result else {
+            throw RemoteClientError.invalidResponse("The Mac did not return a branch list.")
+        }
+        return branches
+    }
+
     public func previewWorktree(projectID: UUID, folderID: UUID, branch: String) async throws -> String {
         guard let connection else { throw RemoteClientError.disconnected }
         let request = PreviewWorktreeRequest(projectID: projectID, folderID: folderID, branch: branch)

@@ -311,10 +311,12 @@ public struct PairingResult: Codable, Equatable, Sendable {
 // MARK: - Launch / worktree operations
 
 public struct WorktreeCreationSpec: Codable, Equatable, Sendable {
+    public var reuseExistingBranch: Bool?
     public var branch: String
     public var baseRef: String
 
-    public init(branch: String, baseRef: String) {
+    public init(branch: String, baseRef: String, reuseExistingBranch: Bool = false) {
+        self.reuseExistingBranch = reuseExistingBranch ? true : nil
         self.branch = branch
         self.baseRef = baseRef
     }

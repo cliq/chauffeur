@@ -7,7 +7,13 @@ struct WorktreesView: View {
     let project: Project
     let worktreeCreated: (Worktree) -> Void
     @State private var folderID: UUID?
-    @State private var branch = ""
+    @State private var newBranch = ""
+    @State private var existingBranch = ""
+    @State private var reuseExistingBranch = false
+    private var branch: String { reuseExistingBranch ? existingBranch : newBranch }
+    private var branchBinding: Binding<String> {
+        Binding(get: { branch }, set: { if reuseExistingBranch { existingBranch = $0 } else { newBranch = $0 } })
+    }
     @State private var baseRef = "HEAD"
     @State private var destination = ""
     @State private var busy = false
@@ -91,8 +97,10 @@ struct WorktreesView: View {
                 .overlay(RoundedRectangle(cornerRadius: 6).stroke(.quaternary))
             GroupBox("Create Worktree") {
                 VStack(alignment: .leading, spacing: 10) {
-                    HStack { TextField("New branch name", text: $branch).accessibilityIdentifier("worktrees.branch"); TextField("Base ref", text: $baseRef).frame(width: 180).accessibilityIdentifier("worktrees.base") }.disabled(busy)
-                    if !destination.isEmpty { Text(destination).font(.system(.caption, design: .monospaced)).textSelection(.enabled).accessibilityIdentifier("worktrees.destination") }
+                    Form {
+                        WorktreeBranchFields(projectID: project.id, folderID: folderID, reuseExistingBranch: $reuseExistingBranch, branch: branchBinding, baseRef: $baseRef, accessibilityPrefix: "worktrees")
+                    }.disabled(busy)
+                    if !destination.isEmpty { WorktreeDestinationLabel(path: destination, accessibilityIdentifier: "worktrees.destination") }
                     HStack { Text("Created checkouts remain reusable if an agent launch fails.").font(.caption).foregroundStyle(.secondary); Spacer(); Button("Create Worktree") { create() }.disabled(busy || folderID == nil || branch.isEmpty || baseRef.isEmpty).accessibilityIdentifier("worktrees.create") }
                 }.padding(8)
             }
@@ -106,7 +114,7 @@ struct WorktreesView: View {
             Text("Deleting a worktree removes its checkout and finished session history. Stop live sessions first. You will be warned before local changes are discarded. Branches with no unique commits are also deleted.").font(.caption).foregroundStyle(.secondary)
         }.padding(24).frame(width: 760).interactiveDismissDisabled(busy)
             .onAppear { refresh() }
-            .onChange(of: folderID) { _, _ in refresh() }
+            .onChange(of: folderID) { _, _ in existingBranch = ""; baseRef = "HEAD"; refresh() }
             .task(id: "\(folderID?.uuidString ?? ""):\(branch)") {
                 destination = ""
                 guard let folderID, !branch.isEmpty else { return }
@@ -135,14 +143,14 @@ struct WorktreesView: View {
     }
     private func create() {
         guard !busy, let folderID else { return }
-        if creation?.folderID != folderID || creation?.branch != branch || creation?.baseRef != baseRef {
-            creation = WorktreeCreationRequest(projectID: project.id, folderID: folderID, branch: branch, baseRef: baseRef)
+        if creation?.folderID != folderID || creation?.branch != branch || creation?.baseRef != baseRef || (creation?.reuseExistingBranch == true) != reuseExistingBranch {
+            creation = WorktreeCreationRequest(projectID: project.id, folderID: folderID, branch: branch, baseRef: baseRef, reuseExistingBranch: reuseExistingBranch)
         }
         guard let request = creation else { return }
         run {
             let created = try await model.call("createWorktree", .from(request)).decode(Stored<Worktree>.self).value
             worktreeCreated(created)
-            creation = nil; branch = ""
+            creation = nil; newBranch = ""; existingBranch = ""
             _ = try await model.call("refreshWorktrees")
         }
     }
