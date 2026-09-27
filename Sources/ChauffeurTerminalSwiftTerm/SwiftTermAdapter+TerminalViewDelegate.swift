@@ -9,7 +9,7 @@ import ChauffeurTerminalInterface
 /// conformance lets the main-actor adapter satisfy it, matching how the desktop app conforms.
 extension SwiftTermAdapter: @preconcurrency TerminalViewDelegate {
     public func send(source: TerminalView, data: ArraySlice<UInt8>) {
-        emit(Data(data))
+        emitTyped(Data(data))
     }
 
     public func sizeChanged(source: TerminalView, newCols: Int, newRows: Int) {

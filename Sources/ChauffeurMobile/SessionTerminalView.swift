@@ -310,7 +310,8 @@ private struct FakeTerminalScreen: View {
 }
 
 /// Keys the software keyboard lacks. Encodings come from the adapter, never hard-coded here.
-/// Ctrl is a one-shot modifier: tap it, then a letter from the row it reveals.
+/// Ctrl is a one-shot modifier: tap it, then type any key on the keyboard (Ctrl+/ included) or pick a
+/// shortcut from the row it reveals.
 /// Shift and Option apply to the next arrow and can be combined.
 struct KeyAccessoryBar: View {
     static let controlLetters: [Character] = ["c", "d", "z", "l", "r", "a", "e", "u", "k"]
@@ -318,6 +319,8 @@ struct KeyAccessoryBar: View {
     let adapter: any TerminalEngineAdapter
     @State private var arrowModifiers: TerminalArrowModifiers = []
     @State private var controlArmed = false
+    /// The adapter holding the armed Ctrl, so switching tabs disarms the one that was armed.
+    @State private var armedAdapter: (any TerminalEngineAdapter)?
     @State private var keyboardVisible = false
 
     var body: some View {
@@ -331,7 +334,7 @@ struct KeyAccessoryBar: View {
                         ForEach(Self.controlLetters, id: \.self) { letter in
                             key(String(letter).uppercased(), label: "Control \(letter)") {
                                 adapter.sendKey(.control(letter))
-                                controlArmed = false
+                                setControlArmed(false)
                             }
                             .accessibilityIdentifier("key-ctrl-\(letter)")
                         }
@@ -350,7 +353,7 @@ struct KeyAccessoryBar: View {
                     key("Tab") { adapter.sendKey(.tab) }
                         .accessibilityIdentifier("key-tab")
                     Button {
-                        controlArmed.toggle()
+                        setControlArmed(!controlArmed)
                     } label: {
                         Text("Ctrl")
                             .font(.system(.subheadline, design: .monospaced))
@@ -405,8 +408,21 @@ struct KeyAccessoryBar: View {
             }
         }
         .background(Color(uiColor: .secondarySystemBackground))
+        .onDisappear { setControlArmed(false) }
+        .onChange(of: ObjectIdentifier(adapter)) { _, _ in setControlArmed(false) }
         .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in keyboardVisible = true }
         .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in keyboardVisible = false }
+    }
+
+    /// While armed, the adapter applies Ctrl to the next typed key and reports back so the bar disarms.
+    private func setControlArmed(_ armed: Bool) {
+        controlArmed = armed
+        armedAdapter?.disarmControl()
+        armedAdapter = armed ? adapter : nil
+        armedAdapter?.armControl {
+            controlArmed = false
+            armedAdapter = nil
+        }
     }
 
     private func arrowModifier(_ title: String, label: String, modifier: TerminalArrowModifiers) -> some View {

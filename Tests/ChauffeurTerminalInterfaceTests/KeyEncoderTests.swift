@@ -66,6 +66,22 @@ struct KeyEncoderTests {
         #expect(TerminalKeyEncoder.encode(.control("?"), modes: normal) == Data([0x7f]))
     }
 
+    @Test func controlDigitAndSlashAliases() {
+        #expect(TerminalKeyEncoder.encode(.control("/"), modes: normal) == Data([0x1f]))
+        #expect(TerminalKeyEncoder.encode(.control("2"), modes: normal) == Data([0x00]))
+        #expect(TerminalKeyEncoder.encode(.control("3"), modes: normal) == Data([0x1b]))
+        #expect(TerminalKeyEncoder.encode(.control("7"), modes: normal) == Data([0x1f]))
+        #expect(TerminalKeyEncoder.encode(.control("8"), modes: normal) == Data([0x7f]))
+    }
+
+    @Test func applyingControlToTypedInput() {
+        #expect(TerminalKeyEncoder.applyingControl(to: Data("c".utf8)) == Data([0x03]))
+        #expect(TerminalKeyEncoder.applyingControl(to: Data("/".utf8)) == Data([0x1f]))
+        #expect(TerminalKeyEncoder.applyingControl(to: Data("\r".utf8)) == Data("\r".utf8))
+        #expect(TerminalKeyEncoder.applyingControl(to: Data("é".utf8)) == Data("é".utf8))
+        #expect(TerminalKeyEncoder.applyingControl(to: Data("ab".utf8)) == Data("ab".utf8))
+    }
+
     @Test func unencodableControlReturnsEmpty() {
         #expect(TerminalKeyEncoder.encode(.control("1"), modes: normal).isEmpty)
         #expect(TerminalKeyEncoder.encode(.control("!"), modes: normal).isEmpty)

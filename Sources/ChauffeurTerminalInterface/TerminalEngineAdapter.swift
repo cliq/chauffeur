@@ -23,6 +23,10 @@ public protocol TerminalEngineAdapter: AnyObject {
     /// Encodes the key the way the engine's live modes require (application cursor keys, keyboard
     /// protocols), then routes it like typed input.
     func sendKey(_ action: TerminalKeyAction)
+    /// One-shot Ctrl for the software keyboard: the next character typed into the engine is sent as
+    /// its control code, then `onConsumed` runs. Engines without support leave typing untouched.
+    func armControl(onConsumed: @escaping @MainActor () -> Void)
+    func disarmControl()
     /// Sends text as a paste: bracketed when the remote program asked for it, gated like typing.
     func paste(_ text: String)
     /// When `false`, generated input is DROPPED (never queued) — the app must not replay keystrokes.
@@ -47,6 +51,8 @@ public protocol TerminalEngineAdapter: AnyObject {
 
 public extension TerminalEngineAdapter {
     func replay(_ bytes: Data) { feed(bytes) }
+    func armControl(onConsumed: @escaping @MainActor () -> Void) {}
+    func disarmControl() {}
     func screenText(includingScrollback: Bool) -> String? { nil }
     func search(_ query: String) {}
     func searchNext() {}

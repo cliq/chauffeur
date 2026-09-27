@@ -21,6 +21,7 @@ public final class FakeTerminalEngineAdapter: TerminalEngineAdapter {
     public private(set) var focusCount = 0
 
     private var view: PlatformView?
+    private var controlConsumed: (@MainActor () -> Void)?
 
     public init() {}
 
@@ -50,6 +51,14 @@ public final class FakeTerminalEngineAdapter: TerminalEngineAdapter {
     public func sendKey(_ action: TerminalKeyAction) {
         sentKeys.append(action)
         emitInput(TerminalKeyEncoder.encode(action, modes: modes))
+    }
+
+    public func armControl(onConsumed: @escaping @MainActor () -> Void) {
+        controlConsumed = onConsumed
+    }
+
+    public func disarmControl() {
+        controlConsumed = nil
     }
 
     public func paste(_ text: String) {
@@ -83,7 +92,13 @@ public final class FakeTerminalEngineAdapter: TerminalEngineAdapter {
     // MARK: - Test drivers
 
     public func simulateTypedInput(_ data: Data) {
-        emitInput(data)
+        guard let consumed = controlConsumed else {
+            emitInput(data)
+            return
+        }
+        controlConsumed = nil
+        emitInput(TerminalKeyEncoder.applyingControl(to: data))
+        consumed()
     }
 
     public func simulateResize(cols: Int, rows: Int) {

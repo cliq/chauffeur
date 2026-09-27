@@ -124,21 +124,30 @@ public enum TerminalKeyEncoder {
         return Data(normalized.utf8)
     }
 
+    /// Applies a one-shot Ctrl to typed input: a single character with a control code becomes
+    /// that code, and anything else (Return, emoji, multi-character input) passes through unchanged.
+    public static func applyingControl(to typed: Data) -> Data {
+        guard let text = String(data: typed, encoding: .utf8), text.count == 1,
+              let character = text.first, let byte = controlByte(for: character) else { return typed }
+        return Data([byte])
+    }
+
+    /// xterm's control codes, including the digit and `/` aliases (Ctrl+2 is NUL, Ctrl+/ is 0x1f).
     public static func controlByte(for character: Character) -> UInt8? {
         switch character {
-        case "@", " ":
+        case "@", " ", "2":
             return 0x00
-        case "[":
+        case "[", "3":
             return 0x1b
-        case "\\":
+        case "\\", "4":
             return 0x1c
-        case "]":
+        case "]", "5":
             return 0x1d
-        case "^":
+        case "^", "6":
             return 0x1e
-        case "_":
+        case "_", "/", "7":
             return 0x1f
-        case "?":
+        case "?", "8":
             return 0x7f
         default:
             guard let ascii = character.asciiValue else { return nil }

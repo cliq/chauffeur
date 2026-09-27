@@ -88,6 +88,9 @@ public final class SwiftTermAdapter: NSObject, TerminalEngineAdapter {
 
     public private(set) var isInputEnabled = true
 
+    /// Set while the key bar's Ctrl is armed; cleared by the next typed input.
+    private var controlConsumed: (@MainActor () -> Void)?
+
     /// Creates and owns a platform `TerminalView`.
     ///
     /// On iOS this also turns off autocorrection and smart punctuation, keeps the default
@@ -145,6 +148,14 @@ public final class SwiftTermAdapter: NSObject, TerminalEngineAdapter {
         emit(TerminalKeyEncoder.encode(action, modes: modes))
     }
 
+    public func armControl(onConsumed: @escaping @MainActor () -> Void) {
+        controlConsumed = onConsumed
+    }
+
+    public func disarmControl() {
+        controlConsumed = nil
+    }
+
     public func paste(_ text: String) {
         emit(TerminalKeyEncoder.encodePaste(text, modes: modes))
     }
@@ -177,6 +188,17 @@ public final class SwiftTermAdapter: NSObject, TerminalEngineAdapter {
     }
 
     // MARK: Input routing
+
+    /// Typed input from the engine, with an armed Ctrl applied to it.
+    func emitTyped(_ data: Data) {
+        guard let consumed = controlConsumed else {
+            emit(data)
+            return
+        }
+        controlConsumed = nil
+        emit(TerminalKeyEncoder.applyingControl(to: data))
+        consumed()
+    }
 
     /// The single exit for generated input. Gated by `isInputEnabled`; never fed back into the
     /// view because local echo is the remote process's job.
