@@ -141,6 +141,7 @@ public struct ConfigurationDiscovery: Sendable {
 
     private func candidateKind(name: String, underConfig: Bool) -> CLIKind? {
         if underConfig { return name.hasPrefix("opencode-") ? .opencode : nil }
+        if name.hasPrefix(".kimi-code-") { return .kimi }
         if name.hasPrefix(".claude-") || name.hasPrefix(".claudewho-") { return .claude }
         if name.hasPrefix(".codex-") || name.hasPrefix(".codexwho-") { return .codex }
         return nil

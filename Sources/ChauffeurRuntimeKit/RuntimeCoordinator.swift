@@ -15,6 +15,7 @@ public actor RuntimeCoordinator {
     private var sessions: [UUID: Session] = [:]
     private var launching = Set<UUID>()
     private var launchTasks: [UUID: Task<Session, Error>] = [:]
+    private var initialTaskDeliveries: [UUID: Task<Void, Never>] = [:]
     private var stopRequests = Set<UUID>()
     private var stopGenerations: [UUID: UInt64] = [:]
     private var stopping = Set<UUID>()
@@ -569,6 +570,7 @@ public actor RuntimeCoordinator {
             if closing && keepHistory { _ = try? await captureHistory(sessionID) }
             stopGenerations[sessionID, default: 0] += 1
             stopping.insert(sessionID)
+            initialTaskDeliveries.removeValue(forKey: sessionID)?.cancel()
             let launch = launchTasks[sessionID]
             launch?.cancel()
             try await ledger.revoke(sessionID: sessionID)
@@ -837,6 +839,8 @@ public actor RuntimeCoordinator {
         guard !stoppingAllSessions else { throw ChauffeurError("stop_pending", "All sessions are already being stopped") }
         stoppingAllSessions = true
         defer { stoppingAllSessions = false }
+        for task in initialTaskDeliveries.values { task.cancel() }
+        initialTaskDeliveries.removeAll()
         let pending = Array(launchTasks.values)
         for task in pending { task.cancel() }
         for task in pending { _ = await task.result }
@@ -997,6 +1001,7 @@ public actor RuntimeCoordinator {
             session.inboxReminders = preparation?.inboxReminders
             let native = try CLIAdapter.launch(session: session, endpoint: endpoint ?? "", ctlPath: ctlPath, integrationDirectory: integration, coordination: coordination, resume: false, preparation: preparation ?? LaunchPreparation(), pluginPath: coordination ? try publishPlugin(preset.kind) : nil)
             environment.merge(native.environment) { _, provider in provider }
+            if preset.kind == .kimi && coordination { environment["CHAUFFEUR_KIMI_TOKEN"] = token }
             try await persist(session)
             try Task.checkCancellation()
             if preset.kind == .shell {
@@ -1006,6 +1011,10 @@ public actor RuntimeCoordinator {
             try Task.checkCancellation()
             session.processID = pane.processID; session.terminalIdentity = pane.paneID; session.state = .activityUnknown
             try await persist(session)
+            if preset.kind == .kimi, let task = session.initialTask, !task.isEmpty {
+                let launched = session
+                initialTaskDeliveries[session.id] = Task { await self.deliverKimiInitialTask(session: launched, prompt: task) }
+            }
             try Task.checkCancellation()
             if child == nil && !isShell {
                 do { try await store.rememberPreset(preset.id, projectID: project.id, setID: set.id) }
@@ -1018,6 +1027,47 @@ public actor RuntimeCoordinator {
             throw try await finishFailedStartup(session, error: error)
         }
     }
+    /// Kimi's --prompt is noninteractive. Return the launched terminal to the
+    /// UI first, so the user can answer workspace trust before task delivery.
+    private func deliverKimiInitialTask(session: Session, prompt: String) async {
+        defer { initialTaskDeliveries.removeValue(forKey: session.id) }
+        let generation = stopGenerations[session.id, default: 0]
+        let deadline = ContinuousClock.now + .seconds(60)
+        func current() throws -> Session {
+            guard !Task.isCancelled, !stoppingAllSessions, !stopRequests.contains(session.id),
+                  stopGenerations[session.id, default: 0] == generation,
+                  let value = sessions[session.id], value.state.isLive,
+                  value.processID == session.processID, value.terminalIdentity == session.terminalIdentity else { throw CancellationError() }
+            return value
+        }
+        do {
+            try TmuxHost.validateFollowUpPrompt(prompt)
+            while ContinuousClock.now < deadline {
+                var candidate = try current()
+                guard [.starting, .activityUnknown].contains(candidate.state) else {
+                    throw ChauffeurError("initial_task_pending", "Kimi received input before the initial task was delivered. The initial task remains in the session record")
+                }
+                candidate.state = .turnFinished // readiness still checks the actual empty composer
+                do { try await terminals.validateFollowUp(session: candidate) }
+                catch let error as ChauffeurError where ["follow_up_unavailable", "follow_up_input_pending"].contains(error.code) {
+                    try await Task.sleep(for: .milliseconds(250)); continue
+                }
+                let fresh = try current()
+                guard [.starting, .activityUnknown].contains(fresh.state) else { continue }
+                try await terminals.submitFollowUp(session: candidate, prompt: prompt)
+                return
+            }
+            throw ChauffeurError("initial_task_pending", "Kimi's initial task was not submitted. Complete workspace trust or clear the composer, then submit the saved initial task")
+        } catch is CancellationError { return }
+        catch {
+            guard var live = try? current() else { return }
+            live.error = (error as? ChauffeurError)?.message ?? "Kimi's initial task could not be submitted"
+            live.failureCode = "initial_task_pending"
+            live.state = .needsAttention; live.unread = true
+            try? await persist(live, notification: .input)
+        }
+    }
+
     private func resume(_ sessionID: UUID) async throws -> Session {
         let generation = stopGenerations[sessionID, default: 0]
         try await reconcile()
@@ -1068,6 +1118,7 @@ public actor RuntimeCoordinator {
             session.inboxReminders = preparation?.inboxReminders
             let native = try CLIAdapter.launch(session: session, endpoint: endpoint ?? "", ctlPath: ctlPath, integrationDirectory: integration, coordination: coordination, resume: true, preparation: preparation ?? LaunchPreparation(), pluginPath: coordination ? try publishPlugin(session.launch.preset.kind) : nil)
             environment.merge(native.environment) { _, provider in provider }
+            if session.launch.preset.kind == .kimi && coordination { environment["CHAUFFEUR_KIMI_TOKEN"] = token }
             let pane = try await terminals.spawn(session: session, payload: ExecPayload(executable: session.launch.executablePath, arguments: native.arguments, environment: environment, directory: session.launch.workingDirectory), scrollback: settings.scrollbackLines)
             try Task.checkCancellation()
             session.processID = pane.processID; session.terminalIdentity = pane.paneID; session.state = .activityUnknown

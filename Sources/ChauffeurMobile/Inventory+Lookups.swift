@@ -45,6 +45,7 @@ extension RemoteSessionKind {
         case .codex: "Codex"
         case .claude: "Claude"
         case .opencode: "OpenCode"
+        case .kimi: "Kimi Code"
         case .shell: "Shell"
         case .agent: "Agent"
         }
@@ -56,6 +57,7 @@ extension RemoteSessionKind {
         case .codex: "blue"
         case .claude: "orange"
         case .opencode: "teal"
+        case .kimi: "purple"
         case .shell, .agent: nil
         }
     }

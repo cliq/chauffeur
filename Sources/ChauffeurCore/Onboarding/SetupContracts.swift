@@ -8,6 +8,7 @@ public enum CopyCategory: String, Codable, CaseIterable, Sendable {
         case .claude: Set(allCases)
         case .codex: [.preferences, .instructions, .reusable, .plugins, .connections]
         // `OPENCODE_CONFIG_DIR` layers over the global directory: copying would load it twice (V9).
+        case .kimi: [.instructions, .reusable]
         case .opencode, .shell: []
         }
     }

@@ -265,6 +265,14 @@ public actor FileStore {
             try manager.createDirectory(at: marker.deletingLastPathComponent(), withIntermediateDirectories: true)
             try Data("{\"version\":2}".utf8).write(to: marker, options: .atomic)
         }
+        let kimiMarker = root.appendingPathComponent("migrations/kimi-base-preset/complete.json")
+        if !manager.fileExists(atPath: kimiMarker.path) {
+            if !snapshot.baseAgentPresets.contains(where: { $0.value.kind == .kimi }), snapshot.baseAgentPresets.contains(where: { !$0.value.archived }) {
+                try save(BaseAgentPreset(name: "Kimi Code", kind: .kimi, executable: "kimi"))
+            }
+            try manager.createDirectory(at: kimiMarker.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try Data("{}".utf8).write(to: kimiMarker, options: .atomic)
+        }
         // Existing catalogs gain OpenCode once. One the user emptied stays empty.
         let openCodeMarker = root.appendingPathComponent("migrations/opencode-base-preset/complete.json")
         if !manager.fileExists(atPath: openCodeMarker.path) {

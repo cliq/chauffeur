@@ -22,6 +22,7 @@ extension AgentBadge {
         case "orange": .orange
         case "blue": .blue
         case "teal": .teal
+        case "purple": .purple
         default: .gray
         }
     }

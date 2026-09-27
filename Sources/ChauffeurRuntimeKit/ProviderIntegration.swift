@@ -66,7 +66,7 @@ public extension ProviderIntegration {
 }
 
 public enum ProviderIntegrations {
-    public static let all: [any ProviderIntegration] = [CodexIntegration(), ClaudeIntegration(), OpenCodeIntegration()]
+    public static let all: [any ProviderIntegration] = [CodexIntegration(), ClaudeIntegration(), OpenCodeIntegration(), KimiIntegration()]
 }
 
 public extension CLIKind {

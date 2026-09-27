@@ -20,6 +20,7 @@ not a completed real-provider support matrix.
 | Claude Code | 2.1.272 | Three real sessions/two profiles; native account/process configuration, authenticated messages, permission/completion hooks, scoped stop, explicit resume and runtime reconnect pass; both profiles report the same account |
 | Claude Code | 2.1.273 | Basic-terminal launch/resume and checkout recovery pass; native UI input/clipboard/resize/history and normal/forced UI quit preserve the process and draft. Native permission/completion hooks, read-only MCP discovery and normal exit pass; full coordination remains unverified |
 | OpenCode | 1.18.32 | Plugin status, MCP, inbox continuation, coordinator waiting and composer detection verified in the [V9 spike](decisions/V9-opencode-integration.md) with a local MLX model; end-to-end evidence below under [OpenCode](#opencode) |
+| Kimi Code | 2.1.1 | CLI identification, shared-home plugin loading, MCP handshake through the stdio bridge, lifecycle hooks, ordinary CLI use and explicit resume checked with a local mock model. Initial-task trust/composer handling is covered by a terminal fixture. |
 
 `Prototypes/native_profile_selection.py` verifies two concurrent native project
 windows per current CLI in the signed Release app. Native `/status` account
@@ -43,8 +44,9 @@ automated tests. Real browser OAuth completion with separate provider accounts
 has not been exercised for this wizard.
 
 Setup uses `codex login` / `codex login status` and
-`claude auth login` / `claude auth status --json`. Unsupported status output is
-reported as Unable to verify, never inferred from credential-file presence.
+`claude auth login` / `claude auth status --json`. For these providers, unsupported
+status output is reported as Unable to verify, never inferred from credential-file
+presence. Kimi's local credential check is described below.
 This authentication check is independent of the coordination capability matrix
 below and does not send a model prompt.
 
@@ -216,3 +218,52 @@ behaviour and the rejected alternatives.
 - **Known limits:** any other root session that turns busy in the same OpenCode server (another attached client, a plugin that
   creates root sessions) takes the Chauffeur session over too. OpenCode reads skills from both `~/.claude/skills` and
   `~/.agents/skills`, so managed skills can appear twice there.
+
+
+## Kimi Code
+
+Kimi Code uses the `kimi` executable and shares `~/.kimi-code` across teams by
+default. A team configuration folder or preset override selects another home
+with `KIMI_CODE_HOME`; it does not require another executable. The integration
+targets the current TypeScript CLI (2.x), not the older Python `kimi-cli`.
+
+Chauffeur registers a `chauffeur` plugin in the selected home's
+`plugins/installed.json`, preserving other registrations. Its hooks are active
+only with a Chauffeur launch token. Its MCP helper exposes no tools in ordinary
+Kimi launches; coordinated launches forward requests to the launching runtime
+using credentials held only in the process environment. An existing disabled or
+conflicting plugin is preserved and reported as a launch error.
+
+Kimi's `--prompt` runs noninteractively. Chauffeur instead opens the interactive
+terminal and waits for its empty composer before submitting an initial task.
+Workspace trust must be answered in the terminal. If input is not ready within
+60 seconds, the terminal remains open and shows an attention error; the initial
+task remains in the session record. `--auto` is the full auto-approval option;
+`--yolo` still asks for some actions.
+
+Only `UserPromptSubmit` injects inbox reminders. Tool hooks report activity and
+`Stop` reports completion without blocking: Kimi skips subsequent Stop hooks
+after a hook continuation. Worker results wake idle coordinators through
+Chauffeur's existing composer checks. Other peer messages remain available via
+`chauffeur_inbox` and are announced at the next prompt.
+
+Setup runs `kimi login`. Kimi has no authentication-status command, so setup
+reports locally stored login credentials or configured provider API keys, with
+an explicit note that account access and quota were not tested. New homes can
+copy instructions and reusable skills/agents; provider configuration and
+credentials are not copied. Model suggestions come from `kimi provider list
+--json` for the selected home. Kimi also discovers Chauffeur's shared
+`~/.agents/skills` installation.
+
+Native checks used isolated temporary homes and a loopback mock model/MCP
+server. Real-account OAuth, paid model execution, and a real-model multi-agent
+workflow were not exercised. See the [Kimi CLI reference](https://www.kimi.com/code/docs/en/kimi-code-cli/reference/kimi-command)
+and [hook contract](https://www.kimi.com/code/docs/en/kimi-code-cli/customization/hooks.html).
+
+Validation for this integration: all Kimi tests and 38 plugin tests passed;
+macOS and iOS Simulator builds passed with signing disabled. The final full
+Swift run passed 558 of 559 tests: `ProgressRegistrationTests.bundledScriptRegistersAndUpdatesWithoutCoordinationMCP`
+timed out, then all three `ProgressRegistrationTests` passed in isolation.
+Earlier full runs also saw intermittent failures in
+`RemoteAccessServiceTests.pairingExpiresAfterItsTimeoutOrWhenCancelled` and
+`RemoteEndToEndTests.protocolMismatchIsReported`; both passed isolated reruns.

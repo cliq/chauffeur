@@ -124,6 +124,7 @@ public struct RemoteInventoryBuilder {
         case .codex: .codex
         case .claude: .claude
         case .opencode: .opencode
+        case .kimi: .kimi
         case .shell: .shell
         }
     }

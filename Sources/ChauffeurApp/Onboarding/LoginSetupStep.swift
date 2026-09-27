@@ -21,7 +21,7 @@ struct LoginSetupStep: View {
                         if let email = pair.auth.email { Text(email) }
                         if let org = pair.auth.organization { Text(org).font(.caption) }
                         if let method = pair.auth.method { Text("Authentication: \(method)").font(.caption) }
-                        if pair.auth.phase == .connected && pair.auth.email == nil && pair.kind != .opencode { Text("Signed in according to the CLI. Account identity isn't available.").font(.caption).foregroundStyle(.secondary) }
+                        if pair.auth.phase == .connected && pair.auth.email == nil && pair.kind != .opencode && pair.kind != .kimi { Text("Signed in according to the CLI. Account identity isn't available.").font(.caption).foregroundStyle(.secondary) }
                         if let message = pair.auth.message { Text(message).font(.caption).foregroundStyle(.secondary) }
                         if pair.kind == .opencode {
                             Link("Add local or cloud providers to OpenCode", destination: URL(string: "https://opencode.ai/docs/providers/")!).font(.caption)

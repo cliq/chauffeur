@@ -7,6 +7,7 @@ import ChauffeurCore
         do {
             var args = Array(CommandLine.arguments.dropFirst())
             let command = args.isEmpty ? "help" : args.removeFirst()
+            if command == "kimi-mcp" { await KimiMCP.run(); return }
             if command == "internal-exec" { try execPayload(args); return }
             var socket = ProcessInfo.processInfo.environment["CHAUFFEUR_SOCKET"] ?? Paths.applicationSupport.appendingPathComponent("runtime/runtime.sock").path
             if let index = args.firstIndex(of: "--socket"), args.indices.contains(index + 1) { socket = args[index + 1]; args.removeSubrange(index...index+1) }
@@ -19,7 +20,7 @@ import ChauffeurCore
                 chauffeurctl diagnostics [--socket PATH]
                 chauffeurctl request METHOD [JSON | --file PATH] [--socket PATH]
                 chauffeurctl event [--session UUID] EVENT [provider-notify-json]
-                chauffeurctl inbox-hook --provider claude|codex|opencode [--report-stop] [--report-running]
+                chauffeurctl inbox-hook --provider claude|codex|opencode|kimi [--report-stop] [--report-running]
                 chauffeurctl wait-for-work [--timeout MINUTES] [--no-milestones] [--json]
 
                 request sends structured commands to the per-user service. Native
@@ -90,6 +91,7 @@ import ChauffeurCore
               let provider = CLIKind(rawValue: args[index + 1]), provider.isAgent,
               let token = ProcessInfo.processInfo.environment["CHAUFFEUR_SESSION_TOKEN"],
               let event = payload.hookEvent, InboxHintFormatter.hookEvents.contains(event) else { return }
+        guard provider != .kimi || event == "UserPromptSubmit" else { return }
         if provider == .opencode { await openCodeInboxHook(args, payload: payload, event: event, token: token, socket: socket); return }
         var summary: InboxHintSummary?
         // A continuation after a blocked Stop always ends the turn.
@@ -99,7 +101,7 @@ import ChauffeurCore
             if let turnID = payload.turnID { params["turnID"] = .string(turnID) }
             if let toolUseID = payload.toolUseID { params["toolUseID"] = .string(toolUseID) }
             summary = (try? await RuntimeClient.call(IPCRequest("inboxHint", params: .object(params)), socketPath: socket)).flatMap { try? $0.decode(InboxHintSummary.self) }
-            if let summary, let output = InboxHintFormatter.output(event: event, summary: summary) { FileHandle.standardOutput.write(output) }
+            if let summary, let output = (provider == .kimi ? InboxHintFormatter.kimiOutput(event: event, summary: summary) : InboxHintFormatter.output(event: event, summary: summary)) { FileHandle.standardOutput.write(output) }
         }
         if event == "Stop", args.contains("--report-stop"), summary?.block != true {
             var params: [String: JSONValue] = ["token": .string(token), "event": .string("turn-finished"), "hookEvent": .string(event)]
