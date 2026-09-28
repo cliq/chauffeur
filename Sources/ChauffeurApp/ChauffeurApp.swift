@@ -8,7 +8,7 @@ import ChauffeurCore
     @Environment(\.openWindow) private var openWindow
     var body: some Scene {
         Window("Welcome to \(AppBuild.current.displayName)", id: "welcome") {
-            WelcomeView().modifier(AppWindowSetup()).environmentObject(model)
+            WelcomeView().background(ActiveSpaceWindow()).modifier(AppWindowSetup()).environmentObject(model)
         }
         .defaultSize(width: 820, height: 500)
         .windowResizability(.contentMinSize)
