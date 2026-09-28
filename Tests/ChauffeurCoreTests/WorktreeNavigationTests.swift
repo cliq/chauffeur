@@ -35,11 +35,23 @@ struct WorktreeNavigationTests {
     @Test func olderWindowRecordsDefaultToUnsortedTabs() throws {
         var value = try JSONCoding.decode(JSONValue.self, from: JSONCoding.encode(WindowState(projectID: UUID())))
         if case .object(var fields) = value {
-            fields.removeValue(forKey: "sessionTabOrder"); fields.removeValue(forKey: "closedSessionTabs"); value = .object(fields)
+            fields.removeValue(forKey: "sessionTabOrder"); fields.removeValue(forKey: "closedSessionTabs"); fields.removeValue(forKey: "hiddenWorktreePaths"); value = .object(fields)
         }
         let restored = try value.decode(WindowState.self)
         #expect(restored.sessionTabOrder.isEmpty)
         #expect(restored.closedSessionTabs.isEmpty)
+        #expect(restored.hiddenWorktreePaths.isEmpty)
+    }
+
+    @Test func hiddenWorktreesSurviveARestart() throws {
+        var state = WindowState(projectID: UUID())
+        state.hiddenWorktreePaths = ["/tmp/worktrees/parked"]
+        let restored = try JSONCoding.decode(WindowState.self, from: JSONCoding.encode(state))
+        #expect(restored.hiddenWorktreePaths == ["/tmp/worktrees/parked"])
+        state.hiddenWorktreePaths = ["/tmp/worktrees/parked", "/tmp/worktrees/parked"]
+        #expect(throws: (any Error).self) { try state.validate() }
+        state.hiddenWorktreePaths = ["relative/path"]
+        #expect(throws: (any Error).self) { try state.validate() }
     }
 
     @Test func closedTabsSurviveARestart() throws {

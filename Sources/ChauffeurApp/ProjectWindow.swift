@@ -94,6 +94,7 @@ struct ProjectWindow: View {
     }
     @State private var worktreeSheet: WorktreeSheet?
     @State private var collapsedRepositories = Set<UUID>()
+    @State private var hiddenSectionExpanded = false
     private enum SidebarRowID: Hashable {
         case repository(UUID)
         case worktree(UUID, String)
@@ -284,6 +285,27 @@ struct ProjectWindow: View {
         let path = worktreeRecords.first { $0.id == session.worktreeID }?.path ?? session.launch.workingDirectory
         return (folder.id, path)
     }
+    /// Worktrees the user hid. The main checkout always stays under its repository.
+    private func isHidden(_ row: CheckoutRow) -> Bool { !row.isMain && isHidden(path: row.path) }
+    private func isHidden(path: String) -> Bool { layout.state.hiddenWorktreePaths.contains(Paths.canonical(path)) }
+    private func setHidden(_ row: CheckoutRow, _ hidden: Bool) {
+        let path = Paths.canonical(row.path)
+        layout.state.hiddenWorktreePaths.removeAll { $0 == path }
+        if hidden { layout.state.hiddenWorktreePaths.append(path) }
+        if hidden, layout.selectedWorktreePath.map({ Paths.canonical($0) == path }) == true { hiddenSectionExpanded = true }
+    }
+    /// Hidden checkouts across the project's repositories, in repository order.
+    private func hiddenCheckouts(_ project: Project) -> [(folder: ProjectFolder, row: CheckoutRow)] {
+        guard !layout.state.hiddenWorktreePaths.isEmpty else { return [] }
+        return project.folders.filter(\.registered).flatMap { folder in
+            readiness(for: folder).isPending ? [] : checkouts(for: folder, project: project).filter(isHidden).map { (folder: folder, row: $0) }
+        }
+    }
+    /// Keeps a checkout's row on screen: its repository expands, or the Hidden section for a hidden worktree.
+    private func expandSidebar(folderID: UUID, path: String?) {
+        collapsedRepositories.remove(folderID)
+        if let path, isHidden(path: path) { hiddenSectionExpanded = true }
+    }
     private func attentionCount(in folder: ProjectFolder) -> Int { WorktreeSessions.attentionCount(allSessions.filter { $0.folderID == folder.id }) }
     private var canLaunch: Bool { model.online && project?.archived == false }
     private func canLaunch(in checkout: CheckoutRow) -> Bool { canLaunch && checkout.availability == .available }
@@ -313,6 +335,14 @@ struct ProjectWindow: View {
                     Button("Add Folder…", systemImage: "folder.badge.plus") {
                         if let path = FilePanels.directory() { let version = model.projectVersion(project.id); var changed = project; changed.addFolder(ProjectFolder(path: path)); model.perform { try await model.saveProject(changed, version: version) } }
                     }.buttonStyle(.plain)
+                }
+                let hidden = hiddenCheckouts(project)
+                if !hidden.isEmpty {
+                    Section("Hidden", isExpanded: $hiddenSectionExpanded) {
+                        ForEach(hidden, id: \.row.id) { entry in
+                            checkoutRow(entry.row, folder: entry.folder, project: project, showsRepository: project.folders.filter(\.registered).count > 1)
+                        }
+                    }.accessibilityIdentifier("sidebar.hidden")
                 }
             }.listStyle(.sidebar)
                 .task(id: sidebarReveal?.id) {
@@ -387,7 +417,7 @@ struct ProjectWindow: View {
             if readiness.isPending {
                 inventoryPendingRow(folder)
             } else {
-                ForEach(rows) { row in checkoutRow(row, folder: folder, project: project) }
+                ForEach(rows.filter { !isHidden($0) }) { row in checkoutRow(row, folder: folder, project: project) }
                 inventoryStatusRow(readiness, folder: folder)
             }
             Button("New Worktree & Session…", systemImage: "plus") { showLaunch(folderID: folder.id, newWorktree: true) }
@@ -435,7 +465,7 @@ struct ProjectWindow: View {
             EmptyView()
         }
     }
-    private func checkoutRow(_ row: CheckoutRow, folder: ProjectFolder, project: Project) -> some View {
+    private func checkoutRow(_ row: CheckoutRow, folder: ProjectFolder, project: Project, showsRepository: Bool = false) -> some View {
         let sessions = sessions(in: folder, path: row.path)
         let live = WorktreeSessions.live(sessions).count
         let selected = layout.selectedFolderID == folder.id && layout.selectedWorktreePath.map { Paths.canonical($0) == Paths.canonical(row.path) } == true
@@ -453,7 +483,7 @@ struct ProjectWindow: View {
                             }
                         }
                         HStack(spacing: 4) {
-                            Text(row.isMain ? "Main checkout" : URL(fileURLWithPath: row.path).lastPathComponent).lineLimit(1)
+                            Text((showsRepository ? "\(folder.name) · " : "") + (row.isMain ? "Main checkout" : URL(fileURLWithPath: row.path).lastPathComponent)).lineLimit(1)
                             if let unmerged = row.unmergedDescription {
                                 Text("·")
                                 HStack(spacing: 3) { UnmergedCommitsGlyph(); Text("\(row.unmergedCount)") }
@@ -488,6 +518,8 @@ struct ProjectWindow: View {
         Button("Reveal in Finder") { FilePanels.reveal(row.path) }.disabled(row.availability != .available)
         if !row.isMain {
             Divider()
+            if isHidden(row) { Button("Show Worktree") { setHidden(row, false) } }
+            else { Button("Hide Worktree") { setHidden(row, true) }.help("Move to the Hidden section until you work on it again") }
             Button("Delete Worktree…", role: .destructive) { prepareDeletion(row) }
                 .disabled(!model.online || !row.liveSessions.isEmpty)
                 .help(row.liveSessions.isEmpty ? "" : "Stop its live sessions first")
@@ -835,7 +867,7 @@ struct ProjectWindow: View {
 
     private func selectCheckout(folderID: UUID, path: String?) {
         guard let project, let folder = project.folders.first(where: { $0.id == folderID && $0.registered }) else { return }
-        collapsedRepositories.remove(folderID)
+        expandSidebar(folderID: folderID, path: path)
         layout.selectCheckout(folderID: folderID, path: path, sessions: path.map { openSessions(in: folder, path: $0) } ?? [])
         if let id = layout.state.selectedSessionID { markRead(id) }
     }
@@ -845,7 +877,7 @@ struct ProjectWindow: View {
         layout.selectSession(id, folderID: location.folderID, path: location.path)
         if layout.state.sidebarMode == .sessions, let group = layout.state.selectedGroupID, group != session.groupID { layout.state.selectedGroupID = nil }
         if let folderID = location.folderID {
-            collapsedRepositories.remove(folderID)
+            expandSidebar(folderID: folderID, path: location.path)
             sidebarReveal = SidebarReveal(row: location.path.map { .worktree(folderID, $0) } ?? .repository(folderID))
         }
         markRead(id)
@@ -945,6 +977,7 @@ struct ProjectWindow: View {
         let discardChanges = deletionPreview.hasChanges
         model.perform {
             _ = try await model.call("deleteWorktree", .object(["projectID": .string(project.id.uuidString), "folderID": .string(row.folderID.uuidString), "path": .string(row.path), "discardChanges": .bool(discardChanges)]))
+            setHidden(row, false)
             if layout.selectedWorktreePath.map({ Paths.canonical($0) == Paths.canonical(row.path) }) == true {
                 layout.selectCheckout(folderID: row.folderID, path: nil, sessions: [])
             }
@@ -959,13 +992,16 @@ struct ProjectWindow: View {
         selectSession(ordered[((current + offset) % ordered.count + ordered.count) % ordered.count].id)
     }
     /// The sidebar rows ⌘↑/⌘↓ moves through in Repositories mode: every
-    /// registered repository followed by its checkouts, collapsed ones aside.
+    /// registered repository followed by its checkouts, collapsed ones aside,
+    /// then the Hidden section's worktrees when it is expanded.
     private func sidebarRows(_ project: Project) -> [(folderID: UUID, path: String?)] {
-        project.folders.filter(\.registered).flatMap { folder -> [(folderID: UUID, path: String?)] in
+        let repositories = project.folders.filter(\.registered).flatMap { folder -> [(folderID: UUID, path: String?)] in
             let repository = [(folderID: folder.id, path: String?.none)]
             guard !collapsedRepositories.contains(folder.id) else { return repository }
-            return repository + checkouts(for: folder, project: project).map { (folderID: folder.id, path: String?($0.path)) }
+            return repository + checkouts(for: folder, project: project).filter { !isHidden($0) }.map { (folderID: folder.id, path: String?($0.path)) }
         }
+        guard hiddenSectionExpanded else { return repositories }
+        return repositories + hiddenCheckouts(project).map { (folderID: $0.folder.id, path: String?($0.row.path)) }
     }
     /// Moves the sidebar selection without leaving the terminal: the selected
     /// checkout or session changes and its terminal takes the keyboard.
