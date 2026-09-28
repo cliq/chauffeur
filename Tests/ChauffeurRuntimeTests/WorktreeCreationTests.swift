@@ -108,7 +108,7 @@ struct WorktreeCreationTests {
         try #require(trees.count == 1)
         let updated = trees[0].value
         #expect(updated.id == legacy.id && updated.path == legacy.path && updated.baseCommit == legacy.baseCommit && updated.managed)
-        #expect(updated.repositoryID == stored.value.repositoryID && updated.repositoryIdentityVersion == 1)
+        #expect(updated.repositoryID == stored.value.repositoryID && updated.repositoryIdentityVersion == CheckoutIdentity.currentVersion)
         #expect(updated.repositoryPath == Paths.canonical(moved.path) && updated.availability == .available)
         let reopened = try fixture.reopen(); try await reopened.start()
         #expect(await reopened.store.current().worktrees.first?.value == updated)
@@ -133,7 +133,7 @@ struct WorktreeCreationTests {
         await fixture.runtime.reconcileWorktrees()
         let upgraded = try #require(await fixture.runtime.store.current().worktrees.first?.value)
         #expect(upgraded.id == stored.value.id && upgraded.repositoryID == stored.value.repositoryID && upgraded.gitIdentity == stored.value.gitIdentity)
-        #expect(upgraded.repositoryIdentityVersion == 1 && upgraded.availability == .available)
+        #expect(upgraded.repositoryIdentityVersion == CheckoutIdentity.currentVersion && upgraded.availability == .available)
         // Once migrated, a repository identity cannot be changed or downgraded.
         var changed = upgraded; changed.repositoryID = UUID()
         await #expect(throws: ChauffeurError.self) { try await fixture.runtime.store.save(changed) }
@@ -141,6 +141,67 @@ struct WorktreeCreationTests {
         await #expect(throws: ChauffeurError.self) { try await fixture.runtime.store.save(changed) }
         var unknown = legacy; unknown.repositoryPath = fixture.root.appendingPathComponent("unknown").path; unknown.path += "-unknown"
         #expect(await fixture.runtime.worktrees.reconciled(unknown, inventory: fixture.runtime.worktrees.observe(at: fixture.repo.path)).availability != .available)
+    }
+
+    /// Version 1 identities hashed the volume's device number, which macOS
+    /// reassigns across restarts. Such records re-link once by path.
+    @Test(arguments: [false, true]) func deviceBoundRecordsRelinkByPathOnceAndKeepReplacementProtection(registerFirst: Bool) async throws {
+        let fixture = try await Fixture.make(); defer { fixture.cleanup() }
+        let stored = try await fixture.runtime.createWorktree(fixture.request)
+        var stale = stored.value
+        stale.repositoryIdentityVersion = 1; stale.repositoryID = UUID(); stale.gitIdentity = UUID(); stale.availability = .inaccessible
+        try JSONCoding.encode(stale).write(to: URL(fileURLWithPath: stored.path), options: .atomic)
+        _ = await fixture.runtime.store.reload()
+        if registerFirst {
+            let registered = try await fixture.runtime.handle(IPCRequest("registerWorktree", params: .object([
+                "projectID": .string(fixture.project.id.uuidString), "folderID": .string(fixture.project.folders[0].id.uuidString), "path": .string(stale.path)
+            ]))).decode(Stored<Worktree>.self)
+            #expect(registered.value.id == stale.id)
+        }
+        await fixture.runtime.reconcileWorktrees()
+        let relinked = try #require(await fixture.runtime.store.current().worktrees.first?.value)
+        #expect(relinked.id == stale.id && relinked.availability == .available && relinked.repositoryIdentityVersion == CheckoutIdentity.currentVersion)
+        #expect(relinked.repositoryID == stored.value.repositoryID && relinked.gitIdentity == stored.value.gitIdentity)
+        // After the upgrade, a checkout recreated at the same path is not the same record.
+        for args in [["worktree", "remove", relinked.path], ["worktree", "add", "-b", "replacement", relinked.path, "main"]] {
+            try #require(try await ProcessRunner.run("/usr/bin/git", ["-C", fixture.repo.path] + args).status == 0)
+        }
+        #expect(await fixture.runtime.worktrees.reconciled(relinked, inventory: fixture.runtime.worktrees.observe(at: fixture.repo.path)).availability == .missing)
+    }
+
+    @Test func deviceBoundRecordWhosePathIsGoneIsMissingAndStaysUnmigrated() async throws {
+        let fixture = try await Fixture.make(); defer { fixture.cleanup() }
+        var stale = try await fixture.runtime.createWorktree(fixture.request).value
+        stale.repositoryIdentityVersion = 1; stale.repositoryID = UUID(); stale.gitIdentity = UUID(); stale.path += "-gone"
+        let updated = await fixture.runtime.worktrees.reconciled(stale, inventory: fixture.runtime.worktrees.observe(at: fixture.repo.path))
+        #expect(updated.availability == .missing && updated.repositoryIdentityVersion == 1 && updated.repositoryID == stale.repositoryID)
+    }
+
+    @Test func sessionsWithDeviceBoundIdentitiesRebindByPathOnStartup() async throws {
+        let fixture = try await Fixture.make(); defer { fixture.cleanup() }
+        var settings = RetentionSettings(); settings.keepFinishedSessions = true
+        _ = try await fixture.runtime.handle(IPCRequest("saveSettings", params: .from(settings)))
+        let set = PresetSet(name: "Worktree fixture")
+        func session(at path: String) -> Session {
+            var launch = LaunchSnapshot(preset: fixture.preset, set: set, executablePath: "/bin/cat", executableVersion: "fixture", workingDirectory: path, additionalPaths: [])
+            let stale = CheckoutIdentity(path: path, directoryIdentity: UUID(), gitIdentity: UUID())
+            launch.checkoutIdentities = [stale]; launch.gitWorktreeIdentities = [stale.gitIdentity!]
+            var value = Session(projectID: fixture.project.id, groupID: fixture.project.groups[0].id, title: "Fixture", launch: launch, folderID: fixture.project.folders[0].id)
+            value.state = .exited
+            return value
+        }
+        let present = session(at: Paths.canonical(fixture.repo.path)), gone = session(at: fixture.root.appendingPathComponent("gone").path)
+        try await fixture.runtime.store.save(present); try await fixture.runtime.store.save(gone)
+        await #expect(throws: ChauffeurError.self) { try await fixture.runtime.worktrees.validateResume(present.launch) }
+        let reopened = try fixture.reopen(); try await reopened.start()
+        let sessions = await reopened.store.current().sessions.map(\.value)
+        let migrated = try #require(sessions.first { $0.id == present.id }).launch
+        let current = try await reopened.worktrees.checkoutIdentity(at: fixture.repo.path)
+        #expect(migrated.checkoutIdentityVersion == CheckoutIdentity.currentVersion && migrated.checkoutIdentities == [current])
+        #expect(migrated.gitWorktreeIdentities == [try #require(current.gitIdentity)])
+        try await reopened.worktrees.validateResume(migrated)
+        let unmigrated = try #require(sessions.first { $0.id == gone.id }).launch
+        #expect(unmigrated.checkoutIdentityVersion == nil && unmigrated.checkoutIdentities == gone.launch.checkoutIdentities)
     }
 
     @Test func retriesShareOneCheckoutAcrossConcurrentCallsAndRuntimeRestart() async throws {

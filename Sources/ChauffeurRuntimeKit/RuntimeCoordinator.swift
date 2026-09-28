@@ -121,6 +121,9 @@ public actor RuntimeCoordinator {
             catch { record(ChauffeurError("invalid_settings", "Cannot load retention settings", path: root.appendingPathComponent("settings.json").path)) }
         }
         refreshKeepAwake()
+        for session in sessions.values where (session.launch.checkoutIdentityVersion ?? 0) < CheckoutIdentity.currentVersion {
+            _ = await relinkCheckoutIdentities(session)
+        }
         try await reconcile(startup: true)
         await maintainHistory(applySettings: true)
         for var delegation in try await ledger.allDelegations() where [.reserved, .launching].contains(delegation.state) {
@@ -128,6 +131,24 @@ public actor RuntimeCoordinator {
             else { delegation.state = .interrupted; delegation.error = "Runtime stopped during launch. Inspect the retained worktree and explicitly retry" }
             try await ledger.updateDelegation(delegation)
         }
+    }
+    /// Identities recorded before `CheckoutIdentity.currentVersion` cannot match
+    /// again, so a session binds once to the checkouts at its recorded paths.
+    /// A path that is missing keeps the old identities; resume reports it.
+    private func relinkCheckoutIdentities(_ recorded: Session) async -> Session {
+        var session = recorded, checkouts: [CheckoutIdentity] = []
+        do {
+            for path in [session.launch.workingDirectory] + session.launch.additionalPaths {
+                checkouts.append(try await worktrees.checkoutIdentity(at: path))
+            }
+        } catch { return recorded }
+        session.launch.checkoutIdentities = checkouts
+        session.launch.gitWorktreeIdentities = checkouts.compactMap(\.gitIdentity)
+        session.launch.checkoutIdentityVersion = CheckoutIdentity.currentVersion
+        do { try await persist(session) }
+        catch let error as ChauffeurError { record(error); return recorded }
+        catch { return recorded }
+        return session
     }
     private func refreshKeepAwake() {
         keepAwake.update(sessions.values.compactMap(KeepAwakeAgent.init), now: Date(), adopting: adoptingSessions)
@@ -203,9 +224,10 @@ public actor RuntimeCoordinator {
         for stored in records {
             let observed = repositories[stored.value.repositoryID]
                 ?? observations.first { observation in
-                    stored.value.repositoryIdentityVersion == nil && observation.status == .available
-                        && (observation.legacyRepositoryID == stored.value.repositoryID
-                            || stored.value.gitIdentity.map { identity in observation.entries.contains { $0.gitIdentity == identity } } == true)
+                    let version = stored.value.repositoryIdentityVersion
+                    guard observation.status == .available, (version ?? 0) < CheckoutIdentity.currentVersion else { return false }
+                    return observation.entries.contains { $0.path == stored.value.path }
+                        || (version == nil && observation.legacyRepositoryID == stored.value.repositoryID)
                 }
                 ?? observations.first { $0.sourcePath == stored.value.repositoryPath }
                 ?? RepositoryInventory(sourcePath: stored.value.repositoryPath, status: .failed)
@@ -830,8 +852,9 @@ public actor RuntimeCoordinator {
         if var existing = snapshot.worktrees.first(where: {
             let record = $0.value
             let sameCheckout = record.gitIdentity != nil && record.gitIdentity == entry.gitIdentity
-            let sameRepository = record.repositoryID == repositoryID || (record.repositoryIdentityVersion == nil && (sameCheckout || record.repositoryID == observation.legacyRepositoryID))
-            return record.projectID == key.projectID && record.folderID == key.folderID && sameRepository && (sameCheckout || (record.gitIdentity == nil && record.path == key.path))
+            let relinksByPath = (record.repositoryIdentityVersion ?? 0) < CheckoutIdentity.currentVersion && record.path == key.path
+            let sameRepository = record.repositoryID == repositoryID || relinksByPath || (record.repositoryIdentityVersion == nil && (sameCheckout || record.repositoryID == observation.legacyRepositoryID))
+            return record.projectID == key.projectID && record.folderID == key.folderID && sameRepository && (sameCheckout || relinksByPath || (record.gitIdentity == nil && record.path == key.path))
         }) {
             existing.value = await worktrees.reconciled(existing.value, inventory: observation)
             existing.value.registered = true
@@ -993,13 +1016,17 @@ public actor RuntimeCoordinator {
             try checkoutClaims.setGitIdentities(sessionID, identities: identities, primary: primaryIdentity)
             session.launch.gitWorktreeIdentities = identities
             session.launch.checkoutIdentities = checkouts
+            session.launch.checkoutIdentityVersion = CheckoutIdentity.currentVersion
             if let selectedWorktree {
                 let repositoryID = try await worktrees.repositoryID(at: session.launch.workingDirectory)
                 let identity = try await worktrees.identity(at: session.launch.workingDirectory)
                 let legacyID = selectedWorktree.repositoryIdentityVersion == nil ? try await worktrees.legacyRepositoryID(at: session.launch.workingDirectory) : nil
                 let sameRepository = repositoryID == selectedWorktree.repositoryID || (selectedWorktree.repositoryIdentityVersion == nil && (selectedWorktree.repositoryID == legacyID || identity == selectedWorktree.gitIdentity))
+                // A record not yet re-linked by the worktree scan still names its checkout by path.
+                let relinksByPath = (selectedWorktree.repositoryIdentityVersion ?? 0) < CheckoutIdentity.currentVersion
+                    && Paths.canonical(selectedWorktree.path) == session.launch.workingDirectory
                 try Task.checkCancellation()
-                guard sameRepository, selectedWorktree.gitIdentity == nil || identity == selectedWorktree.gitIdentity else {
+                guard relinksByPath || (sameRepository && (selectedWorktree.gitIdentity == nil || identity == selectedWorktree.gitIdentity)) else {
                     throw ChauffeurError("worktree_unavailable", "The selected checkout was replaced. Refresh the Git inventory and select its current record", path: session.launch.workingDirectory)
                 }
             }
@@ -1117,6 +1144,7 @@ public actor RuntimeCoordinator {
     }
     private func performResume(_ recorded: Session) async throws -> Session {
         var session = recorded
+        if (session.launch.checkoutIdentityVersion ?? 0) < CheckoutIdentity.currentVersion { session = await relinkCheckoutIdentities(session) }
         let sessionID = session.id
         try Task.checkCancellation()
         try checkoutClaims.beginLaunch(sessionID, paths: [session.launch.workingDirectory] + session.launch.additionalPaths, worktreeID: session.worktreeID)

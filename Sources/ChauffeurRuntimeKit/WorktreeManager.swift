@@ -50,7 +50,8 @@ public actor WorktreeManager {
         guard stat(directory, &info) == 0, info.st_mode & S_IFMT == S_IFDIR else { throw ChauffeurError("worktree_unavailable", "Directory identity is unavailable", path: directory) }
         // The administrative directory survives `git worktree move`. Its inode
         // also distinguishes a removed/recreated worktree with the same name.
-        return Self.identifier("\(info.st_dev):\(info.st_ino):\(info.st_birthtimespec.tv_sec):\(info.st_birthtimespec.tv_nsec)")
+        // The device number is left out: macOS reassigns it across restarts.
+        return Self.identifier("\(info.st_ino):\(info.st_birthtimespec.tv_sec):\(info.st_birthtimespec.tv_nsec)")
     }
     private static func hasGitMetadata(above path: String) -> Bool {
         var directory = URL(fileURLWithPath: path), initial = stat()
@@ -166,12 +167,18 @@ public actor WorktreeManager {
         var result = worktree
         let knownCheckout = worktree.gitIdentity.map { identity in inventory.entries.contains { $0.gitIdentity == identity && $0.availability == .available } } ?? false
         let legacyMatch = worktree.repositoryIdentityVersion == nil && (knownCheckout || inventory.legacyRepositoryID == worktree.repositoryID)
-        guard inventory.status == .available, inventory.repositoryID == worktree.repositoryID || legacyMatch else {
+        // Identities older than the current version cannot match again, so the
+        // record re-links once to the checkout Git reports at its path.
+        let relinksByPath = (worktree.repositoryIdentityVersion ?? 0) < CheckoutIdentity.currentVersion
+        let pathMatch = relinksByPath && (inventory.entries.contains { $0.path == worktree.path }
+            || inventory.sourcePath == worktree.repositoryPath || inventory.sourcePaths?.contains(worktree.repositoryPath) == true)
+        guard inventory.status == .available, inventory.repositoryID == worktree.repositoryID || legacyMatch || pathMatch else {
             result.availability = inventory.status == .missing ? .missing : .inaccessible
             return result
         }
         let entry: GitWorktree?
-        if let identity = worktree.gitIdentity {
+        if relinksByPath { entry = inventory.entries.first { $0.path == worktree.path } }
+        else if let identity = worktree.gitIdentity {
             entry = inventory.entries.first { $0.gitIdentity == identity }
                 ?? inventory.entries.first { $0.path == worktree.path && $0.gitIdentity == nil }
         } else { entry = inventory.entries.first { $0.path == worktree.path } }
@@ -180,8 +187,8 @@ public actor WorktreeManager {
         result.repositoryPath = inventory.sourcePath
         result.gitIdentity = entry.gitIdentity ?? result.gitIdentity
         result.availability = entry.availability ?? .available
-        if legacyMatch, result.availability == .available, let repositoryID = inventory.repositoryID, entry.gitIdentity != nil {
-            result.repositoryID = repositoryID; result.repositoryIdentityVersion = 1
+        if relinksByPath, result.availability == .available, let repositoryID = inventory.repositoryID, entry.gitIdentity != nil {
+            result.repositoryID = repositoryID; result.repositoryIdentityVersion = CheckoutIdentity.currentVersion
         }
         // Moving a checkout out of managed storage transfers its cleanup to the
         // user. Registering/moving it back does not silently regain ownership.

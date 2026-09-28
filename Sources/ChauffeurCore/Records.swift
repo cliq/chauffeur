@@ -155,6 +155,9 @@ public enum SessionState: String, Codable, CaseIterable, Sendable {
 }
 
 public struct CheckoutIdentity: Codable, Equatable, Sendable {
+    /// Version 2 identities hash a directory's inode and birth time. Earlier ones
+    /// also hashed the volume's device number, which macOS reassigns across restarts.
+    public static let currentVersion = 2
     public var path: String
     public var directoryIdentity: UUID
     public var gitIdentity: UUID?
@@ -181,6 +184,8 @@ public struct LaunchSnapshot: Codable, Equatable, Sendable {
     public var executionPolicy: WorkerExecutionPolicy?
     public var gitWorktreeIdentities: [UUID]?
     public var checkoutIdentities: [CheckoutIdentity]?
+    /// Missing in snapshots whose identities predate `CheckoutIdentity.currentVersion`.
+    public var checkoutIdentityVersion: Int?
     public var launchedAt = Date()
     public init(preset: AgentPreset, set: PresetSet, executablePath: String, executableVersion: String, workingDirectory: String, additionalPaths: [String]) {
         self.teamID = set.id
@@ -253,6 +258,7 @@ public struct Worktree: Record, Equatable {
     public var folderID: UUID
     public var repositoryID: UUID
     // Missing in records whose repository ID was derived from its old path.
+    // Version 1 identities hashed the volume's device number; see `CheckoutIdentity`.
     public var repositoryIdentityVersion: Int?
     public var path: String
     public var repositoryPath: String
@@ -268,7 +274,7 @@ public struct Worktree: Record, Equatable {
     public var registered = true
     public init(projectID: UUID, folderID: UUID, repositoryID: UUID, path: String, repositoryPath: String, branch: String, baseCommit: String, managed: Bool) {
         self.projectID = projectID; self.folderID = folderID; self.repositoryID = repositoryID
-        self.repositoryIdentityVersion = 1
+        self.repositoryIdentityVersion = CheckoutIdentity.currentVersion
         self.path = path; self.repositoryPath = repositoryPath; self.branch = branch; self.baseCommit = baseCommit; self.managed = managed
     }
     public func validate() throws { try Validation.absolutePath(path); try Validation.absolutePath(repositoryPath) }
