@@ -23,7 +23,7 @@ public struct GitWorktree: Codable, Equatable, Sendable, Identifiable {
     }
 }
 
-public struct RepositoryInventory: Codable, Sendable {
+public struct RepositoryInventory: Codable, Equatable, Sendable {
     public enum Status: String, Codable, Sendable { case available, notRepository, missing, inaccessible, failed }
     public var sourcePath: String
     public var sourcePaths: [String]?

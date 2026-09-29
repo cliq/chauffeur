@@ -73,8 +73,18 @@ struct PendingTerminalTab: Identifiable {
     }
 }
 
+/// Observes the whole app model but hands the window content only its
+/// project's model, so the content redraws only when that project changes.
 struct ProjectWindow: View {
     @EnvironmentObject private var model: AppModel
+    let projectID: UUID
+    var body: some View { ProjectWindowContent(model: model, projectModel: model.projectModel(projectID)).equatable() }
+}
+
+private struct ProjectWindowContent: View, Equatable {
+    /// Unobserved: read for actions only. Displayed state comes from `projectModel`.
+    let model: AppModel
+    @ObservedObject var projectModel: ProjectModel
     @Environment(\.openWindow) private var openWindow
     @Environment(\.dismissWindow) private var dismissWindow
     @StateObject private var layout: ProjectLayout
@@ -121,14 +131,20 @@ struct ProjectWindow: View {
     @State private var renamingSession: Session?
     @State private var renameTitle = ""
     @FocusState private var searchFocused: Bool
-    init(projectID: UUID) { self.projectID = projectID; _layout = StateObject(wrappedValue: ProjectLayout(projectID: projectID)) }
-    private var project: Project? { model.project(projectID) }
-    private var allSessions: [Session] { model.sessions(in: projectID) }
+    init(model: AppModel, projectModel: ProjectModel) {
+        self.model = model; self.projectModel = projectModel; projectID = projectModel.id
+        _layout = StateObject(wrappedValue: ProjectLayout(projectID: projectModel.id))
+    }
+    nonisolated static func == (lhs: Self, rhs: Self) -> Bool { lhs.model === rhs.model && lhs.projectModel === rhs.projectModel }
+    private var project: Project? { projectModel.slice.project }
+    private var allSessions: [Session] { projectModel.slice.sessions }
+    private var online: Bool { projectModel.slice.online }
+    private func projectSession(_ id: UUID?) -> Session? { projectModel.slice.sessions.first { $0.id == id } }
     /// Sessions-mode list, narrowed by the group picker, terminal toggle and filter field.
     private var sessions: [Session] {
         allSessions.filter { (layout.state.selectedGroupID == nil || $0.groupID == layout.state.selectedGroupID) && (layout.state.showsTerminalSessions || $0.launch.preset.kind.isAgent) && (layout.search.isEmpty || $0.title.localizedCaseInsensitiveContains(layout.search) || $0.launch.workingDirectory.localizedCaseInsensitiveContains(layout.search)) }
     }
-    private var worktreeRecords: [Worktree] { model.snapshot.store.worktrees.map(\.value) }
+    private var worktreeRecords: [Worktree] { projectModel.slice.worktrees }
     private var selectedFolder: ProjectFolder? { project?.folders.first { $0.id == layout.state.selectedFolderID && $0.registered } }
     var body: some View {
         Group {
@@ -137,12 +153,12 @@ struct ProjectWindow: View {
                     sidebar(project)
                 } detail: {
                     VStack(spacing: 0) {
-                        if !model.online { ServiceHealthView().padding(10).background(.orange.opacity(0.12)); Divider() }
+                        if !online { ServiceHealthView().padding(10).background(.orange.opacity(0.12)); Divider() }
                         header(project)
                         Divider()
                         HSplitView {
                             detailArea(project)
-                            if layout.detailsVisible, let session = model.session(layout.state.selectedSessionID) { SessionSidebarView(session: session, project: project).frame(minWidth: 300, idealWidth: 340, maxWidth: 460) }
+                            if layout.detailsVisible, let session = projectSession(layout.state.selectedSessionID) { SessionSidebarView(session: session, project: project).frame(minWidth: 300, idealWidth: 340, maxWidth: 460) }
                         }
                     }
                 }
@@ -150,8 +166,8 @@ struct ProjectWindow: View {
                 .toolbar {
                     ToolbarItemGroup {
                         ProjectTeamControl(project: project) { editingProject = true }
-                        Button { showLaunch() } label: { Label("New Session", systemImage: "plus") }.disabled(!model.online || project.archived)
-                        Button { layout.detailsVisible.toggle() } label: { Label("Session Details", systemImage: "sidebar.right") }.disabled(model.session(layout.state.selectedSessionID) == nil)
+                        Button { showLaunch() } label: { Label("New Session", systemImage: "plus") }.disabled(!online || project.archived)
+                        Button { layout.detailsVisible.toggle() } label: { Label("Session Details", systemImage: "sidebar.right") }.disabled(projectSession(layout.state.selectedSessionID) == nil)
                         Menu {
                             Button("Project Settings…") { editingProject = true }
                             Button("Manage Groups…") { editingGroups = true }
@@ -188,7 +204,7 @@ struct ProjectWindow: View {
                 } message: { Text(closeMessage(closingTab)) }
             } else {
                 VStack(spacing: 20) {
-                    ContentUnavailableView(model.online ? "Project unavailable" : "Connecting…", systemImage: "folder.badge.questionmark", description: Text("Restore the project directory or choose another project. Existing agents remain in the background service."))
+                    ContentUnavailableView(online ? "Project unavailable" : "Connecting…", systemImage: "folder.badge.questionmark", description: Text("Restore the project directory or choose another project. Existing agents remain in the background service."))
                     ServiceHealthView(); Button("Open Projects") { openWindow(id: "welcome") }
                 }.padding(24)
             }
@@ -209,18 +225,18 @@ struct ProjectWindow: View {
                 layout.loaded = false
             }))
             .onAppear { restore(); consumeSessionRoute(); consumeProjectRoute() }
-            .onChange(of: model.pendingSessionRoute) { _, _ in consumeSessionRoute() }
-            .onChange(of: model.pendingProjectRoute) { _, _ in consumeProjectRoute() }
-            .onChange(of: model.online) { _, online in if online { restore(); layout.synchronizeTerminals(model: model) } }
+            .onChange(of: projectModel.slice.pendingSessionRoute) { _, _ in consumeSessionRoute() }
+            .onChange(of: projectModel.slice.pendingProjectRoute) { _, _ in consumeProjectRoute() }
+            .onChange(of: online) { _, online in if online { restore(); layout.synchronizeTerminals(model: model) } }
             .onChange(of: layout.state) { _, _ in
                 guard layout.loaded else { return }
                 saveLayout(); layout.synchronizeTerminals(model: model)
                 if layout.window?.isKeyWindow == true { model.recordSessionSelection(layout.state.selectedSessionID) }
             }
-            .onChange(of: model.snapshot.store.worktrees.map(\.value.id)) { _, ids in
+            .onChange(of: projectModel.slice.worktrees.map(\.id)) { _, ids in
                 if let pendingWorktree, ids.contains(pendingWorktree.id) { self.pendingWorktree = nil }
             }
-            .onChange(of: model.snapshot.sessions) { previous, _ in
+            .onChange(of: projectModel.slice.sessions) { previous, _ in
                 if layout.loaded {
                     reconcileSelection(previousSessions: previous)
                     layout.synchronizeTerminals(model: model)
@@ -259,25 +275,26 @@ struct ProjectWindow: View {
     // MARK: Checkouts
 
     private func inventory(for folder: ProjectFolder) -> RepositoryInventory? {
-        model.snapshot.repositoryInventories?.observation(for: folder.canonicalPath)
+        projectModel.slice.inventories?.observation(for: folder.canonicalPath)
     }
     /// Whether the folder's checkouts are known yet. A folder that has not been
     /// scanned shows as loading rather than as an empty repository; offline, a
     /// missing observation cannot resolve, so it is reported as a failure.
     private func readiness(for folder: ProjectFolder) -> InventoryReadiness {
-        let readiness = InventoryReadiness.of(folderPath: folder.canonicalPath, inventories: model.snapshot.repositoryInventories)
-        return readiness.isPending && !model.online ? .failed("Git inventory is unavailable while the background service is offline") : readiness
+        let readiness = InventoryReadiness.of(folderPath: folder.canonicalPath, inventories: projectModel.slice.inventories)
+        return readiness.isPending && !online ? .failed("Git inventory is unavailable while the background service is offline") : readiness
     }
     private func refreshInventory() { model.perform { _ = try await model.call("refreshWorktrees") } }
     private func checkouts(for folder: ProjectFolder, project: Project) -> [CheckoutRow] {
-        CheckoutRows.rows(folder: folder, project: project, records: worktreeRecords, inventory: inventory(for: folder), sessions: allSessions, pending: pendingWorktree)
+        guard let pendingWorktree else { return projectModel.checkouts(for: folder, project: project, inventory: inventory(for: folder)) }
+        return CheckoutRows.rows(folder: folder, project: project, records: worktreeRecords, inventory: inventory(for: folder), sessions: allSessions, pending: pendingWorktree, canonicalize: projectModel.canonical)
     }
     private func checkout(folder: ProjectFolder, path: String, project: Project) -> CheckoutRow {
-        checkouts(for: folder, project: project).first { Paths.canonical($0.path) == Paths.canonical(path) }
+        checkouts(for: folder, project: project).first { projectModel.canonical($0.path) == projectModel.canonical(path) }
             ?? CheckoutRow(folderID: folder.id, path: path, branch: "", availability: .missing, worktreeID: nil, isMain: false, managed: false, sessions: sessions(in: folder, path: path))
     }
     private func sessions(in folder: ProjectFolder, path: String) -> [Session] {
-        WorktreeSessions.sessions(allSessions, folder: folder, path: path, worktrees: worktreeRecords)
+        WorktreeSessions.sessions(allSessions, folder: folder, path: path, worktrees: worktreeRecords, canonicalize: projectModel.canonical)
     }
     /// The checkout a session runs in: its worktree record path, else its working directory.
     private func checkout(of session: Session) -> (folderID: UUID?, path: String?) {
@@ -287,12 +304,12 @@ struct ProjectWindow: View {
     }
     /// Worktrees the user hid. The main checkout always stays under its repository.
     private func isHidden(_ row: CheckoutRow) -> Bool { !row.isMain && isHidden(path: row.path) }
-    private func isHidden(path: String) -> Bool { layout.state.hiddenWorktreePaths.contains(Paths.canonical(path)) }
+    private func isHidden(path: String) -> Bool { layout.state.hiddenWorktreePaths.contains(projectModel.canonical(path)) }
     private func setHidden(_ row: CheckoutRow, _ hidden: Bool) {
-        let path = Paths.canonical(row.path)
+        let path = projectModel.canonical(row.path)
         layout.state.hiddenWorktreePaths.removeAll { $0 == path }
         if hidden { layout.state.hiddenWorktreePaths.append(path) }
-        if hidden, layout.selectedWorktreePath.map({ Paths.canonical($0) == path }) == true { hiddenSectionExpanded = true }
+        if hidden, layout.selectedWorktreePath.map({ projectModel.canonical($0) == path }) == true { hiddenSectionExpanded = true }
     }
     /// Hidden checkouts across the project's repositories, in repository order.
     private func hiddenCheckouts(_ project: Project) -> [(folder: ProjectFolder, row: CheckoutRow)] {
@@ -307,7 +324,7 @@ struct ProjectWindow: View {
         if let path, isHidden(path: path) { hiddenSectionExpanded = true }
     }
     private func attentionCount(in folder: ProjectFolder) -> Int { WorktreeSessions.attentionCount(allSessions.filter { $0.folderID == folder.id }) }
-    private var canLaunch: Bool { model.online && project?.archived == false }
+    private var canLaunch: Bool { online && project?.archived == false }
     private func canLaunch(in checkout: CheckoutRow) -> Bool { canLaunch && checkout.availability == .available }
 
     // MARK: Sidebar
@@ -376,7 +393,7 @@ struct ProjectWindow: View {
                         let finished = WorktreeSessions.finished(sessions)
                         if !finished.isEmpty {
                             Button("Clear Finished") { clearingFinished = finished }
-                                .buttonStyle(.link).font(.caption).disabled(!model.online)
+                                .buttonStyle(.link).font(.caption).disabled(!online)
                                 .help("Delete the \(finished.count) finished session\(finished.count == 1 ? "" : "s") in this list")
                                 .accessibilityIdentifier("sidebar.sessions.clearFinished")
                         }
@@ -456,7 +473,7 @@ struct ProjectWindow: View {
             VStack(alignment: .leading, spacing: 4) {
                 Label(message, systemImage: "exclamationmark.triangle").font(.caption).foregroundStyle(.secondary).lineLimit(3)
                 Button("Retry Git Inventory", systemImage: "arrow.clockwise") { refreshInventory() }
-                    .buttonStyle(.plain).font(.caption).disabled(!model.online)
+                    .buttonStyle(.plain).font(.caption).disabled(!online)
                     .accessibilityIdentifier("repository.retry-inventory.\(folder.id)")
             }.padding(.horizontal, 6).padding(.vertical, 4)
         case .notRepository:
@@ -468,7 +485,7 @@ struct ProjectWindow: View {
     private func checkoutRow(_ row: CheckoutRow, folder: ProjectFolder, project: Project, showsRepository: Bool = false) -> some View {
         let sessions = sessions(in: folder, path: row.path)
         let live = WorktreeSessions.live(sessions).count
-        let selected = layout.selectedFolderID == folder.id && layout.selectedWorktreePath.map { Paths.canonical($0) == Paths.canonical(row.path) } == true
+        let selected = layout.selectedFolderID == folder.id && layout.selectedWorktreePath.map { projectModel.canonical($0) == projectModel.canonical(row.path) } == true
         return Button { selectCheckout(folderID: folder.id, path: row.path) } label: {
             Label {
                 HStack(alignment: .top) {
@@ -513,7 +530,7 @@ struct ProjectWindow: View {
         Button("Launch Agent…") { launchAgent(in: row, folder: folder) }.disabled(!canLaunch(in: row))
         Button("Open Shell") { openShell(in: row, folder: folder) }.disabled(!canLaunch(in: row))
         Divider()
-        Button("Recent Conversations…") { recentConversationsRow = row }.disabled(!model.online)
+        Button("Recent Conversations…") { recentConversationsRow = row }.disabled(!online)
         Button("Manage Worktrees…") { showWorktrees(folderID: folder.id) }
         Button("Reveal in Finder") { FilePanels.reveal(row.path) }.disabled(row.availability != .available)
         if !row.isMain {
@@ -521,7 +538,7 @@ struct ProjectWindow: View {
             if isHidden(row) { Button("Show Worktree") { setHidden(row, false) } }
             else { Button("Hide Worktree") { setHidden(row, true) }.help("Move to the Hidden section until you work on it again") }
             Button("Delete Worktree…", role: .destructive) { prepareDeletion(row) }
-                .disabled(!model.online || !row.liveSessions.isEmpty)
+                .disabled(!online || !row.liveSessions.isEmpty)
                 .help(row.liveSessions.isEmpty ? "" : "Stop its live sessions first")
         }
     }
@@ -537,9 +554,9 @@ struct ProjectWindow: View {
         }.buttonStyle(.plain).help("\(session.title)\n\(session.launch.workingDirectory)\n\(session.launch.configurationPath)")
             .contextMenu {
                 Button("Session Details") { selectSession(session.id); layout.detailsVisible = true }
-                Button("Rename…") { beginRename(session) }.disabled(!model.online)
+                Button("Rename…") { beginRename(session) }.disabled(!online)
                 if session.state.isLive { Button("Stop Session…") { selectSession(session.id); layout.detailsVisible = true } }
-                else { Button("Delete Finished Session…", role: .destructive) { deletingSession = session }.disabled(!model.online) }
+                else { Button("Delete Finished Session…", role: .destructive) { deletingSession = session }.disabled(!online) }
             }
     }
     private func sessionIcon(_ session: Session) -> String {
@@ -589,7 +606,7 @@ struct ProjectWindow: View {
                     Button("Open Shell") { openShell(in: target, folder: folder) }
                         .disabled(!canLaunch(in: target)).accessibilityIdentifier("checkout.shell")
                 }.controlSize(.small)
-            } else if let session = model.session(layout.state.selectedSessionID) {
+            } else if let session = projectSession(layout.state.selectedSessionID) {
                 VStack(alignment: .trailing, spacing: 3) {
                     CopyableText(value: session.launch.workingDirectory, what: "path") { Text(session.launch.workingDirectory).font(.system(.caption, design: .monospaced)).lineLimit(1) }
                         .accessibilityIdentifier("session.header.path")
@@ -611,7 +628,7 @@ struct ProjectWindow: View {
                 let selectedID = selectedPending?.id ?? WorktreeSessions.selection(in: sessions, selectedID: layout.state.selectedSessionID)
                 VStack(spacing: 0) {
                     if !sessions.isEmpty || !pending.isEmpty {
-                        SessionStrip(pendingTabs: pending, selectPending: { layout.state.selectedSessionID = $0 }, sessions: sessions, project: project, keepFinishedSessions: model.snapshot.settings.keepFinishedSessions, close: { requestCloseTab($0) }, move: { source, target in
+                        SessionStrip(pendingTabs: pending, selectPending: { layout.state.selectedSessionID = $0 }, sessions: sessions, project: project, keepFinishedSessions: projectModel.slice.keepFinishedSessions, close: { requestCloseTab($0) }, move: { source, target in
                             layout.state.sessionTabOrder = WorktreeSessions.movingTab(source, to: target, displayed: sessions.map(\.id), savedOrder: layout.state.sessionTabOrder)
                         }, delete: { deletingSession = $0 }, rename: { beginRename($0) }, selectedID: selectedID, select: { selectSession($0.id) }, details: { selectSession($0.id); layout.detailsVisible = true }, revealPath: { FilePanels.reveal($0.launch.workingDirectory) })
                         Divider()
@@ -633,7 +650,7 @@ struct ProjectWindow: View {
             } else {
                 repositoryOverview(folder, project: project)
             }
-        } else if let selected = model.session(layout.state.selectedSessionID) {
+        } else if let selected = projectSession(layout.state.selectedSessionID) {
             // The session's folder is no longer registered; the terminal still works.
             TerminalPane(session: selected, controller: layout.controller(for: selected.id, scrollback: model.snapshot.settings.scrollbackLines, style: model.terminalStyle)).frame(minWidth: 240).id(selected.id)
         } else {
@@ -649,12 +666,12 @@ struct ProjectWindow: View {
                                    description: Text(row.finished ? "The checkout no longer exists. Its finished sessions stay available above until you delete the worktree." : "Launch an agent or open a shell in \(row.title)."))
             HStack(spacing: 12) {
                 if row.finished {
-                    Button("Delete Worktree…", role: .destructive) { prepareDeletion(row) }.disabled(!model.online || !row.liveSessions.isEmpty)
+                    Button("Delete Worktree…", role: .destructive) { prepareDeletion(row) }.disabled(!online || !row.liveSessions.isEmpty)
                 } else {
                     Button("Launch Agent…") { launchAgent(in: row, folder: folder) }.buttonStyle(.borderedProminent).disabled(!canLaunch(in: row)).accessibilityIdentifier("checkout.empty.launch")
                     Button("Open Shell") { openShell(in: row, folder: folder) }.disabled(!canLaunch(in: row)).accessibilityIdentifier("checkout.empty.shell")
                 }
-                Button("Recent Conversations…") { recentConversationsRow = row }.disabled(!model.online).accessibilityIdentifier("checkout.empty.recentConversations")
+                Button("Recent Conversations…") { recentConversationsRow = row }.disabled(!online).accessibilityIdentifier("checkout.empty.recentConversations")
             }
         }.frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -682,7 +699,7 @@ struct ProjectWindow: View {
                 HStack {
                     Label(message, systemImage: "exclamationmark.triangle").foregroundStyle(.secondary)
                     Spacer()
-                    Button("Retry Git Inventory") { refreshInventory() }.disabled(!model.online)
+                    Button("Retry Git Inventory") { refreshInventory() }.disabled(!online)
                 }.padding(.horizontal, 20).padding(.bottom, 8)
             }
             List(rows) { row in
@@ -717,14 +734,14 @@ struct ProjectWindow: View {
     private func reconcileSelection(previousSessions: [Session] = []) {
         guard !layout.pendingTabs.contains(where: { $0.id == layout.state.selectedSessionID }) else { return }
         guard let folder = selectedFolder, let path = layout.selectedWorktreePath else { return }
-        let previous = WorktreeSessions.sessions(previousSessions, folder: folder, path: path, worktrees: worktreeRecords)
+        let previous = WorktreeSessions.sessions(previousSessions, folder: folder, path: path, worktrees: worktreeRecords, canonicalize: projectModel.canonical)
         let next = WorktreeSessions.selection(in: openSessions(in: folder, path: path), selectedID: layout.state.selectedSessionID, previousOrder: previous.map(\.id))
         guard next != layout.state.selectedSessionID else { return }
         if let next { selectSession(next) } else { layout.state.selectedSessionID = nil }
     }
     private var openTabs: [Session] {
         if let folder = selectedFolder, let path = layout.selectedWorktreePath { return openSessions(in: folder, path: path) }
-        return model.session(layout.state.selectedSessionID).map { [$0] } ?? []
+        return projectSession(layout.state.selectedSessionID).map { [$0] } ?? []
     }
     /// Closing a tab stops its session, so confirm before ending work in
     /// progress. A shell waiting at its own prompt closes without asking.
@@ -746,7 +763,7 @@ struct ProjectWindow: View {
         requestCloseTab(closing)
     }
     private func requestCloseTab(_ closing: Session) {
-        guard closingTab == nil, !checkingTab, model.online else { return }
+        guard closingTab == nil, !checkingTab, online else { return }
         guard closing.state.isLive else { closeTab(closing); return }
         guard !closing.launch.preset.kind.isAgent else { closingTab = TabClosure(session: closing, command: nil); return }
         checkingTab = true
@@ -763,7 +780,7 @@ struct ProjectWindow: View {
         finishTab(session, method: "deleteSession")
     }
     private func finishTab(_ session: Session, method: String) {
-        guard !checkingTab, model.online else { return }
+        guard !checkingTab, online else { return }
         let tabs = openTabs
         let wasSelected = layout.state.selectedSessionID == session.id
         model.forgetSessionSelection(session.id)
@@ -793,7 +810,7 @@ struct ProjectWindow: View {
 
     private func closeMessage(_ closing: TabClosure?) -> String {
         let running = closing?.command.map { "“\($0)” is running in this terminal." } ?? "This session is still running."
-        return running + ((model.snapshot.settings.keepFinishedSessions || closing?.session.historyProtected == true)
+        return running + ((projectModel.slice.keepFinishedSessions || closing?.session.historyProtected == true)
             ? " Closing the tab stops it and keeps its history in Finished."
             : " Closing the tab stops it and permanently deletes its saved history.")
     }
@@ -872,7 +889,7 @@ struct ProjectWindow: View {
         if let id = layout.state.selectedSessionID { markRead(id) }
     }
     private func selectSession(_ id: UUID) {
-        guard let session = model.session(id), session.projectID == projectID else { return }
+        guard let session = projectSession(id), session.projectID == projectID else { return }
         let location = checkout(of: session)
         layout.selectSession(id, folderID: location.folderID, path: location.path)
         if layout.state.sidebarMode == .sessions, let group = layout.state.selectedGroupID, group != session.groupID { layout.state.selectedGroupID = nil }
@@ -892,7 +909,7 @@ struct ProjectWindow: View {
         model.perform { _ = try await model.call("renameSession", .object(["sessionID": .string(session.id.uuidString), "title": .string(title)])) }
     }
     private func markRead(_ id: UUID) {
-        guard model.session(id)?.unread == true else { return }
+        guard projectSession(id)?.unread == true else { return }
         model.perform { _ = try await model.call("markRead", .object(["sessionID": .string(id.uuidString)])) }
     }
     private func revealCreatedWorktree(_ tree: Worktree) {
@@ -978,7 +995,7 @@ struct ProjectWindow: View {
         model.perform {
             _ = try await model.call("deleteWorktree", .object(["projectID": .string(project.id.uuidString), "folderID": .string(row.folderID.uuidString), "path": .string(row.path), "discardChanges": .bool(discardChanges)]))
             setHidden(row, false)
-            if layout.selectedWorktreePath.map({ Paths.canonical($0) == Paths.canonical(row.path) }) == true {
+            if layout.selectedWorktreePath.map({ projectModel.canonical($0) == projectModel.canonical(row.path) }) == true {
                 layout.selectCheckout(folderID: row.folderID, path: nil, sessions: [])
             }
         }
@@ -1017,8 +1034,8 @@ struct ProjectWindow: View {
         }
         let rows = sidebarRows(project)
         guard !rows.isEmpty else { return }
-        let selected = layout.selectedWorktreePath.map { Paths.canonical($0) }
-        let current = rows.firstIndex { $0.folderID == layout.selectedFolderID && $0.path.map { Paths.canonical($0) } == selected } ?? -offset.signum()
+        let selected = layout.selectedWorktreePath.map { projectModel.canonical($0) }
+        let current = rows.firstIndex { $0.folderID == layout.selectedFolderID && $0.path.map { projectModel.canonical($0) } == selected } ?? -offset.signum()
         let row = rows[((current + offset) % rows.count + rows.count) % rows.count]
         selectCheckout(folderID: row.folderID, path: row.path)
         sidebarReveal = SidebarReveal(row: row.path.map { .worktree(row.folderID, $0) } ?? .repository(row.folderID))
@@ -1033,7 +1050,7 @@ struct ProjectWindow: View {
     // MARK: Lifecycle
 
     private func restore() {
-        guard model.online, !layout.loaded, let project else { return }
+        guard online, !layout.loaded, let project else { return }
         layout.loaded = true
         #if DEBUG
         NativeProbe.layouts[projectID] = layout
@@ -1046,16 +1063,16 @@ struct ProjectWindow: View {
         if let saved = model.snapshot.store.windows.first(where: { $0.value.id == projectID })?.value {
             layout.state = saved
             // Forget closed tabs of deleted sessions, once the session list is known.
-            layout.closedSessionIDs = Set(model.online ? saved.closedSessionTabs.filter { model.session($0) != nil } : saved.closedSessionTabs)
+            layout.closedSessionIDs = Set(online ? saved.closedSessionTabs.filter { projectSession($0) != nil } : saved.closedSessionTabs)
         }
         model.beginWindowEditing(projectID)
         // Tabs and split panes are gone; a legacy record keeps its selected session.
         layout.state.tabs = []; layout.state.splitSessionID = nil
-        if let id = layout.state.selectedSessionID, model.session(id)?.projectID != projectID { layout.state.selectedSessionID = nil }
+        if let id = layout.state.selectedSessionID, projectSession(id)?.projectID != projectID { layout.state.selectedSessionID = nil }
         if let folderID = layout.state.selectedFolderID, !project.folders.contains(where: { $0.id == folderID && $0.registered }) {
             layout.state.selectedFolderID = nil; layout.state.selectedWorktreePath = nil
         }
-        if layout.state.selectedFolderID == nil, let session = model.session(layout.state.selectedSessionID) {
+        if layout.state.selectedFolderID == nil, let session = projectSession(layout.state.selectedSessionID) {
             let location = checkout(of: session)
             layout.state.selectedFolderID = location.folderID; layout.state.selectedWorktreePath = location.path
         }
@@ -1067,15 +1084,15 @@ struct ProjectWindow: View {
         consumeProjectRoute()
     }
     private func consumeProjectRoute() {
-        guard layout.loaded, model.online, let navigation = model.pendingProjectRoute,
+        guard layout.loaded, online, let navigation = model.pendingProjectRoute,
               navigation.match.projectID == projectID else { return }
         layout.state.sidebarMode = .repositories
         layout.state.sidebarVisible = true
         // A folder route names a checkout: the matched worktree, else the main
         // checkout. Its current session stays selected when it runs there.
         if let project, let folder = project.folders.first(where: { $0.id == navigation.match.folderID && $0.registered }) {
-            let requested = Paths.canonical(navigation.match.path)
-            let path = checkouts(for: folder, project: project).first { Paths.canonical($0.path) == requested }?.path ?? folder.canonicalPath
+            let requested = projectModel.canonical(navigation.match.path)
+            let path = checkouts(for: folder, project: project).first { projectModel.canonical($0.path) == requested }?.path ?? folder.canonicalPath
             selectCheckout(folderID: folder.id, path: path)
             sidebarReveal = SidebarReveal(row: .worktree(folder.id, path))
         }
@@ -1085,9 +1102,9 @@ struct ProjectWindow: View {
         NSApp.activate(ignoringOtherApps: true)
     }
     private func consumeSessionRoute() {
-        guard layout.loaded, model.online, let navigation = model.pendingSessionRoute,
+        guard layout.loaded, online, let navigation = model.pendingSessionRoute,
               navigation.route.projectID == projectID,
-              let session = model.session(navigation.route.sessionID), session.projectID == projectID else { return }
+              let session = projectSession(navigation.route.sessionID), session.projectID == projectID else { return }
         layout.search = ""
         layout.state.sidebarVisible = true
         selectSession(session.id)

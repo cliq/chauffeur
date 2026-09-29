@@ -56,8 +56,8 @@ struct AppSnapshot: Decodable, Sendable {
     struct FolderSelection: Identifiable { let id = UUID(); let path: String; let matches: [ProjectFolderMatch] }
     struct ProjectCreation: Identifiable { let id = UUID(); var folderPath: String? = nil; var teamID: UUID? = nil }
     @Published var projectCreation: ProjectCreation?
-    @Published var pendingSessionRoute: Navigation?
-    @Published var pendingProjectRoute: ProjectNavigation?
+    @Published var pendingSessionRoute: Navigation? { didSet { refreshProjectModels() } }
+    @Published var pendingProjectRoute: ProjectNavigation? { didSet { refreshProjectModels() } }
     @Published var folderSelection: FolderSelection?
     @Published private(set) var welcomePresentationID = UUID()
     private var pendingWelcomeRoute = false
@@ -159,8 +159,32 @@ struct AppSnapshot: Decodable, Sendable {
         processPendingRoute()
     }
     var didRestoreWorkspace = false
-    @Published var snapshot = AppSnapshot()
-    @Published var online = false
+    @Published var snapshot = AppSnapshot() { didSet { refreshProjectModels() } }
+    @Published var online = false { didSet { refreshProjectModels() } }
+    /// Models of open project windows; each publishes only its own project's changes.
+    /// Held weakly: a closed window's view releases its model.
+    private var projectModels: [UUID: WeakProjectModel] = [:]
+    private struct WeakProjectModel { weak var value: ProjectModel? }
+    func projectModel(_ id: UUID) -> ProjectModel {
+        if let known = projectModels[id]?.value { return known }
+        let created = ProjectModel(id: id, slice: projectSlice(id)); projectModels[id] = WeakProjectModel(value: created); return created
+    }
+    private func refreshProjectModels() {
+        projectModels = projectModels.filter { $0.value.value != nil }
+        for (id, reference) in projectModels { reference.value?.update(projectSlice(id)) }
+    }
+    private func projectSlice(_ id: UUID) -> ProjectModel.Slice {
+        let project = snapshot.store.projects.first { $0.value.id == id }?.value
+        let inventories = snapshot.repositoryInventories.map { all in
+            (project?.folders ?? []).compactMap { all.observation(for: $0.canonicalPath) }.map { observation in
+                var observation = observation; observation.observedAt = .distantPast; return observation
+            }
+        }
+        return ProjectModel.Slice(project: project, sessions: sessions(in: id), worktrees: snapshot.store.worktrees.map(\.value).filter { $0.projectID == id },
+            inventories: inventories, online: online, keepFinishedSessions: snapshot.settings.keepFinishedSessions,
+            pendingSessionRoute: pendingSessionRoute.flatMap { $0.route.projectID == id ? $0 : nil },
+            pendingProjectRoute: pendingProjectRoute.flatMap { $0.match.projectID == id ? $0 : nil })
+    }
     @Published private(set) var isConnecting = true
     private var connectionTimeout: Task<Void, Never>?
 

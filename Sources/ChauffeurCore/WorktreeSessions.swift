@@ -6,9 +6,10 @@ public enum WorktreeSessions {
     /// Sessions running in `path` for `folder`. The main checkout is the folder
     /// path itself. Worktree records are matched by ID first; sessions launched
     /// before a worktree record existed fall back to their working directory.
-    public static func sessions(_ sessions: [Session], folder: ProjectFolder, path: String, worktrees: [Worktree]) -> [Session] {
-        let canonical = Paths.canonical(path)
-        let worktreeIDs = Set(worktrees.filter { $0.folderID == folder.id && Paths.canonical($0.path) == canonical }.map(\.id))
+    /// Callers listing many checkouts pass a memoized `canonicalize`, since it resolves paths on disk.
+    public static func sessions(_ sessions: [Session], folder: ProjectFolder, path: String, worktrees: [Worktree], canonicalize: (String) -> String = Paths.canonical) -> [Session] {
+        let canonical = canonicalize(path)
+        let worktreeIDs = Set(worktrees.filter { $0.folderID == folder.id && canonicalize($0.path) == canonical }.map(\.id))
         return sessions.filter { session in
             guard session.folderID == folder.id else { return false }
             if let id = session.worktreeID {
@@ -16,7 +17,7 @@ public enum WorktreeSessions {
                 // Its worktree record still exists elsewhere: not this checkout.
                 if worktrees.contains(where: { $0.id == id }) { return false }
             }
-            return Paths.canonical(session.launch.workingDirectory) == canonical
+            return canonicalize(session.launch.workingDirectory) == canonical
         }.sorted(by: order)
     }
     /// Saved tabs precede newly opened tabs, which retain their existing order.

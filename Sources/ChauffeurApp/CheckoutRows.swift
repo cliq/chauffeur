@@ -49,12 +49,18 @@ enum CheckoutRows {
     /// Every worktree Git lists for the folder, plus records whose checkout is
     /// gone but still referenced by sessions. Git entries whose directory is
     /// gone appear only when sessions refer to them.
-    static func rows(folder: ProjectFolder, project: Project, records: [Worktree], inventory: RepositoryInventory?, sessions: [Session], pending: Worktree? = nil) -> [CheckoutRow] {
+    static func rows(folder: ProjectFolder, project: Project, records: [Worktree], inventory: RepositoryInventory?, sessions: [Session], pending: Worktree? = nil, canonicalize: (String) -> String = Paths.canonical) -> [CheckoutRow] {
         var records = records.filter { $0.projectID == project.id && $0.folderID == folder.id }
         if let pending, pending.folderID == folder.id, !records.contains(where: { $0.id == pending.id }) { records.append(pending) }
         let entries = inventory?.entries ?? []
         let allSessions = sessions
-        func history(at path: String) -> [Session] { WorktreeSessions.sessions(allSessions, folder: folder, path: path, worktrees: records) }
+        // Every row compares each session's directory; resolve each path on disk once.
+        var resolved: [String: String] = [:]
+        func canonical(_ path: String) -> String {
+            if let known = resolved[path] { return known }
+            let value = canonicalize(path); resolved[path] = value; return value
+        }
+        func history(at path: String) -> [Session] { WorktreeSessions.sessions(allSessions, folder: folder, path: path, worktrees: records, canonicalize: canonical) }
         let mainEntry = entries.first { $0.path == folder.canonicalPath }
         var main = CheckoutRow(folderID: folder.id, path: folder.canonicalPath, branch: mainEntry?.branch ?? "", availability: folder.availability, worktreeID: nil, isMain: true, managed: false, sessions: history(at: folder.canonicalPath))
         main.applyStatus(from: mainEntry)
