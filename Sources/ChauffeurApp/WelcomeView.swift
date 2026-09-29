@@ -66,6 +66,7 @@ struct WelcomeView: View {
                                     .accessibilityLabel("Clear project search")
                             }
                         }.padding(8).background(.quaternary, in: RoundedRectangle(cornerRadius: 6)).padding(.horizontal)
+                        ScrollViewReader { proxy in
                         List(selection: $selectedProject) {
                             ForEach(projects) { project in
                                 let sessions = model.sessions(in: project.id)
@@ -100,6 +101,10 @@ struct WelcomeView: View {
                             if let id = ids.first { open(id) }
                         }
                         .onSubmit { if let selectedProject { open(selectedProject) } }
+                        // A new filter starts from its first match, not wherever the old list was scrolled.
+                        .onChange(of: projectSearch) { _, _ in scrollToTop(proxy) }
+                        .onChange(of: showArchived) { _, _ in scrollToTop(proxy) }
+                        }
                         HStack { Spacer(); Button("Open Project") { if let selectedProject { open(selectedProject) } }.disabled(selectedProject == nil).keyboardShortcut(.defaultAction) }.padding()
                     }
                 }
@@ -171,6 +176,10 @@ struct WelcomeView: View {
         }
         resumeSetup = !stored.value.completed
         if autoPresent, model.presetSets.isEmpty, model.projects.isEmpty, !stored.value.dismissed, !stored.value.completed, !model.hasPendingNavigation { showingSetup = true }
+    }
+    private func scrollToTop(_ proxy: ScrollViewProxy) {
+        guard let first = projects.first?.id else { return }
+        proxy.scrollTo(first, anchor: .top)
     }
     private func moveProjectSelection(_ offset: Int) {
         let ids = projects.map(\.id)
