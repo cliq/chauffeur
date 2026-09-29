@@ -182,12 +182,12 @@ struct AgentPresetList: View {
                 AgentKindBadge(kind: preset.kind)
                 if preset.archived { Text("Archived").font(.caption) }
                 Spacer()
+                Button("Chauffeur Skill…") { showSkill(preset) }.accessibilityIdentifier("preset-skill-\(preset.id.uuidString)")
                 Button(set.agentSelection == .allBase ? "Edit Agent Preset…" : "Edit…") { edit(preset) }.accessibilityIdentifier("preset.edit-\(preset.id.uuidString)")
             }
-            Text(preset.configurationDirectory).font(.caption).textSelection(.enabled)
-            Button("Chauffeur Skill…") { showSkill(preset) }.accessibilityIdentifier("preset-skill-\(preset.id.uuidString)")
+            Text(preset.configurationDirectory).font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle).textSelection(.enabled)
         }
-        .padding(.horizontal, 12).padding(.vertical, 10).frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 12).padding(.vertical, 8).frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityElement(children: .contain).accessibilityIdentifier("preset.row-\(preset.id.uuidString)")
     }
     /// The saved preset is in the snapshot before the editor closes; wait for

@@ -22,14 +22,14 @@ struct TeamDetailView: View {
                 if showsEditTeam { Button("Edit Team…") { editedSet = set }.disabled(!model.online).accessibilityIdentifier("team-detail.edit") }
             }
             Text(set.agentSelection == .allBase ? "Uses all agent presets. Changes to agent presets apply to new launches." : "Custom presets are independent copies. Team directories apply to every agent.").font(.callout).foregroundStyle(.secondary)
-            ForEach(CLIKind.allCases.filter(\.isAgent), id: \.self) { kind in
-                LabeledContent {
-                    Text(set.configurationDirectory(for: kind)).font(.caption).textSelection(.enabled)
-                } label: {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(kind.configurationFolderLabel)
-                        Text(ShellAgentEnvironment.variableName(for: kind)!).font(.caption.monospaced()).foregroundStyle(.secondary)
+            Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 12, verticalSpacing: 4) {
+                ForEach(CLIKind.allCases.filter(\.isAgent), id: \.self) { kind in
+                    let variable = ShellAgentEnvironment.variableName(for: kind)!
+                    GridRow {
+                        Text(kind.configurationFolderLabel).foregroundStyle(.secondary).gridColumnAlignment(.trailing)
+                        Text(set.configurationDirectory(for: kind)).font(.caption).lineLimit(1).truncationMode(.middle).textSelection(.enabled)
                     }
+                    .help("\(variable)=\(set.configurationDirectory(for: kind))")
                 }
             }
             AgentPresetList(set: set, revealedPresetID: $revealedPresetID, edit: { agent in
