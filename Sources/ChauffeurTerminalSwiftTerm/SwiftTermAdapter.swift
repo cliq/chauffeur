@@ -91,6 +91,9 @@ public final class SwiftTermAdapter: NSObject, TerminalEngineAdapter {
     /// Set while the key bar's Ctrl is armed; cleared by the next typed input.
     private var controlConsumed: (@MainActor () -> Void)?
 
+    /// SwiftTerm delivers synchronous protocol replies through the same callback as typed input.
+    private var isFeedingOutput = false
+
     /// Creates and owns a platform `TerminalView`.
     ///
     /// On iOS this also turns off autocorrection and smart punctuation, keeps the default
@@ -133,6 +136,9 @@ public final class SwiftTermAdapter: NSObject, TerminalEngineAdapter {
 
     public func feed(_ bytes: Data) {
         guard !bytes.isEmpty else { return }
+        let wasFeedingOutput = isFeedingOutput
+        isFeedingOutput = true
+        defer { isFeedingOutput = wasFeedingOutput }
         view.feed(byteArray: ArraySlice([UInt8](bytes)))
     }
 
@@ -140,7 +146,7 @@ public final class SwiftTermAdapter: NSObject, TerminalEngineAdapter {
     /// the visible screen; SwiftTerm exposes `clearScrollback()` for the history. The screen
     /// content itself comes back with the redraw tmux sends after a fresh attachment.
     public func reset() {
-        view.feed(text: "\u{1b}c")
+        feed(Data("\u{1b}c".utf8))
         view.clearScrollback()
     }
 
@@ -191,6 +197,11 @@ public final class SwiftTermAdapter: NSObject, TerminalEngineAdapter {
 
     /// Typed input from the engine, with an armed Ctrl applied to it.
     func emitTyped(_ data: Data) {
+        // Cursor/device queries during a redraw must neither consume Ctrl nor modify replies.
+        guard !isFeedingOutput else {
+            emit(data)
+            return
+        }
         guard let consumed = controlConsumed else {
             emit(data)
             return
