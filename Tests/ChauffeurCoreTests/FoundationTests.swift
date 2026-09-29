@@ -26,6 +26,20 @@ struct FoundationTests {
         #expect(discovered.errors.isEmpty)
         #expect(RepositoryDiscovery.scan(parent: root.path, isCancelled: { true }).cancelled)
     }
+    @Test func discoveryTreeNestsRepositoriesUnderTheirEnclosingRepository() throws {
+        let root = try temporaryDirectory(); defer { try? FileManager.default.removeItem(at: root) }
+        for path in ["app", "app/api", "app/thirdparty/vendor/lib", "app/thirdparty/vendor/lib/deep", "application", "tools"] {
+            try FileManager.default.createDirectory(at: root.appendingPathComponent("\(path)/.git"), withIntermediateDirectories: true)
+        }
+        let tree = RepositoryDiscovery.tree(RepositoryDiscovery.scan(parent: root.path).folders)
+        #expect(tree.map(\.folder.name) == ["app", "application", "tools"])
+        #expect(tree.allSatisfy { $0.relativePath == nil })
+        let app = try #require(tree.first)
+        #expect(app.children.map(\.relativePath) == ["api", "thirdparty/vendor/lib"])
+        #expect(app.children.last?.children.map(\.relativePath) == ["deep"])
+        #expect(app.descendantCount == 3)
+        #expect(tree[1].children.isEmpty)
+    }
     @Test func filteringIsPerChildAndMissingConfigFails() throws {
         let root = try temporaryDirectory(); defer { try? FileManager.default.removeItem(at: root) }
         let preset = AgentPreset(setID: UUID(), name: "A", kind: .codex, executable: "/bin/cat", configurationDirectory: root.path)

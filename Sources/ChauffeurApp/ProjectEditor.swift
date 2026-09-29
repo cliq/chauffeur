@@ -13,7 +13,9 @@ struct ProjectEditor: View {
     @State private var folders: [ProjectFolder] = []
     @State private var discoveryFolder: String?
     @State private var candidates: [ProjectFolder] = []
+    @State private var candidateTree: [RepositoryDiscovery.Node] = []
     @State private var selected = Set<UUID>()
+    @State private var expanded = Set<UUID>()
     @State private var discoveryErrors: [ChauffeurError] = []
     @State private var discoveryTask: Task<RepositoryDiscovery.Result, Never>?
     @State private var discovering = false
@@ -36,7 +38,7 @@ struct ProjectEditor: View {
                 Button("Choose Parent Folder…") { chooseParent() }.disabled(discovering)
                 Button("Add Folder…") { if let path = FilePanels.directory() { add(ProjectFolder(path: path)) } }
                 if project == nil {
-                    Button("Start Empty") { folders = []; candidates = []; selected = []; discoveryFolder = nil; discoveryErrors = [] }
+                    Button("Start Empty") { folders = []; setCandidates([]); discoveryFolder = nil; discoveryErrors = [] }
                         .disabled(discovering)
                 }
             }
@@ -46,11 +48,11 @@ struct ProjectEditor: View {
             folderList
             if !candidates.isEmpty {
                 HStack {
-                    Text("\(selected.count) of \(candidates.count) selected").font(.caption).foregroundStyle(.secondary)
+                    Text("\(selected.count) selected").font(.caption).foregroundStyle(.secondary)
                     Spacer()
                     Button("Add Selected Repositories") {
                         for candidate in candidates where selected.contains(candidate.id) { add(candidate) }
-                        candidates = []; selected = []
+                        setCandidates([])
                     }.disabled(selected.isEmpty)
                 }
             }
@@ -65,7 +67,18 @@ struct ProjectEditor: View {
     private var registeredFolders: [ProjectFolder] { folders.filter(\.registered) }
     private var folderListHeight: CGFloat {
         let sections = (candidates.isEmpty ? 0 : 1) + (registeredFolders.isEmpty ? 0 : 1)
-        return min(300, max(120, CGFloat(candidates.count + registeredFolders.count) * 62 + CGFloat(sections) * 32))
+        return min(300, max(120, CGFloat(visibleCandidates.count + registeredFolders.count) * 62 + CGFloat(sections) * 32))
+    }
+    /// Top-level repositories, plus the nested repositories of expanded rows.
+    private var visibleCandidates: [(node: RepositoryDiscovery.Node, depth: Int)] {
+        func rows(_ nodes: [RepositoryDiscovery.Node], depth: Int) -> [(node: RepositoryDiscovery.Node, depth: Int)] {
+            nodes.flatMap { node in [(node, depth)] + (expanded.contains(node.id) ? rows(node.children, depth: depth + 1) : []) }
+        }
+        return rows(candidateTree, depth: 0)
+    }
+    private var candidateHeading: String {
+        let nested = candidates.count - candidateTree.count
+        return nested == 0 ? "Repositories found" : "Repositories found (\(nested) nested)"
     }
     private var folderList: some View {
         ScrollView {
@@ -79,11 +92,9 @@ struct ProjectEditor: View {
                     }.frame(maxWidth: .infinity).padding(20)
                 }
                 if !candidates.isEmpty {
-                    folderHeading("Repositories found", count: candidates.count)
-                    ForEach(candidates) { candidate in
-                        Toggle(isOn: Binding(get: { selected.contains(candidate.id) }, set: { if $0 { selected.insert(candidate.id) } else { selected.remove(candidate.id) } })) {
-                            folderLabel(candidate)
-                        }.toggleStyle(.checkbox).padding(10).accessibilityIdentifier("project.candidate-\(candidate.name)")
+                    folderHeading(candidateHeading, count: candidateTree.count)
+                    ForEach(visibleCandidates, id: \.node.id) { row in
+                        candidateRow(row.node, depth: row.depth)
                         Divider().padding(.leading, 10)
                     }
                 }
@@ -114,6 +125,39 @@ struct ProjectEditor: View {
             .clipShape(RoundedRectangle(cornerRadius: 6))
             .overlay(RoundedRectangle(cornerRadius: 6).stroke(.quaternary))
     }
+    private func candidateRow(_ node: RepositoryDiscovery.Node, depth: Int) -> some View {
+        let candidate = node.folder
+        return HStack(spacing: 4) {
+            if node.children.isEmpty { Color.clear.frame(width: 16, height: 16) }
+            else {
+                Button {
+                    if expanded.contains(node.id) { expanded.remove(node.id) } else { expanded.insert(node.id) }
+                } label: {
+                    Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                        .rotationEffect(.degrees(expanded.contains(node.id) ? 90 : 0))
+                        .frame(width: 16, height: 16).contentShape(Rectangle())
+                }.buttonStyle(.plain)
+                    .help(expanded.contains(node.id) ? "Hide nested repositories" : "Show \(node.descendantCount) nested repositories")
+                    .accessibilityLabel(expanded.contains(node.id) ? "Collapse \(candidate.name)" : "Expand \(candidate.name)")
+                    .accessibilityIdentifier("project.candidate-disclosure-\(candidate.name)")
+            }
+            Toggle(isOn: Binding(get: { selected.contains(candidate.id) }, set: { if $0 { selected.insert(candidate.id) } else { selected.remove(candidate.id) } })) {
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(spacing: 6) {
+                        Text(candidate.name).lineLimit(1)
+                        if !node.children.isEmpty && !expanded.contains(node.id) {
+                            Text("\(node.descendantCount) nested").font(.caption).foregroundStyle(.secondary)
+                        }
+                    }
+                    Text(node.relativePath ?? candidate.selectedPath).font(.caption).foregroundStyle(.secondary)
+                        .lineLimit(1).truncationMode(.middle).help(candidate.selectedPath)
+                }.frame(maxWidth: .infinity, alignment: .leading)
+            }.toggleStyle(.checkbox).accessibilityIdentifier("project.candidate-\(candidate.name)")
+        }.padding(10).padding(.leading, CGFloat(depth) * 20)
+    }
+    private func setCandidates(_ folders: [ProjectFolder]) {
+        candidates = folders; candidateTree = RepositoryDiscovery.tree(folders); selected = []; expanded = []
+    }
     private func folderHeading(_ title: String, count: Int) -> some View {
         HStack { Text(title).fontWeight(.medium); Spacer(); Text("\(count)").monospacedDigit().foregroundStyle(.secondary) }
             .font(.caption).padding(.horizontal, 10).padding(.vertical, 8)
@@ -132,10 +176,10 @@ struct ProjectEditor: View {
     }
     private func chooseParent() {
         guard let path = FilePanels.directory(title: "Choose a parent folder to find repositories") else { return }
-        discoveryFolder = path; discovering = true; candidates = []; selected = []; discoveryErrors = []
+        discoveryFolder = path; discovering = true; setCandidates([]); discoveryErrors = []
         let scan = Task.detached { RepositoryDiscovery.scan(parent: path, isCancelled: { Task<Never, Never>.isCancelled }) }
         discoveryTask = scan
-        Task { let result = await scan.value; discovering = false; discoveryTask = nil; candidates = result.folders; discoveryErrors = result.errors }
+        Task { let result = await scan.value; discovering = false; discoveryTask = nil; setCandidates(result.folders); discoveryErrors = result.errors }
     }
     private func save() {
         guard let setID else { return }

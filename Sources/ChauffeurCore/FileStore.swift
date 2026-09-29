@@ -574,4 +574,27 @@ public enum RepositoryDiscovery {
         result.folders.sort { $0.canonicalPath < $1.canonicalPath }
         return result
     }
+    public struct Node: Identifiable, Sendable {
+        public var folder: ProjectFolder
+        /// Path relative to the enclosing repository; nil for top-level repositories.
+        public var relativePath: String?
+        public var children: [Node] = []
+        public var id: UUID { folder.id }
+        public var descendantCount: Int { children.reduce(children.count) { $0 + $1.descendantCount } }
+    }
+    /// Groups repositories under their nearest enclosing repository, such as submodules
+    /// and vendored checkouts, so only top-level repositories appear at the root.
+    public static func tree(_ folders: [ProjectFolder]) -> [Node] {
+        func contains(_ ancestor: String, _ path: String) -> Bool { path.hasPrefix(ancestor == "/" ? "/" : ancestor + "/") }
+        func insert(_ node: Node, into nodes: inout [Node]) {
+            if let index = nodes.lastIndex(where: { contains($0.folder.canonicalPath, node.folder.canonicalPath) }) {
+                var child = node
+                child.relativePath = String(node.folder.canonicalPath.dropFirst(nodes[index].folder.canonicalPath.count)).trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+                insert(child, into: &nodes[index].children)
+            } else { nodes.append(node) }
+        }
+        var roots: [Node] = []
+        for folder in folders.sorted(by: { $0.canonicalPath < $1.canonicalPath }) { insert(Node(folder: folder), into: &roots) }
+        return roots
+    }
 }
