@@ -1272,8 +1272,9 @@ struct WindowObserver: NSViewRepresentable {
     func makeNSView(context: Context) -> NSView { NSView() }
     func updateNSView(_ view: NSView, context: Context) {
         context.coordinator.parent = self
+        guard !context.coordinator.closed else { return }
         DispatchQueue.main.async {
-            guard let window = view.window else { return }
+            guard !context.coordinator.closed, let window = view.window else { return }
             self.layout.window = window
             if context.coordinator.observedWindow !== window {
                 window.identifier = NSUserInterfaceItemIdentifier("project-\(self.projectID.uuidString)")
@@ -1294,6 +1295,8 @@ struct WindowObserver: NSViewRepresentable {
         }
         var observers: [AnyCancellable] = []
         var appliedFrame = false
+        /// Set once the window closes; the coordinator then leaves it alone.
+        var closed = false
         weak var observedWindow: NSWindow?
         init(parent: WindowObserver) { self.parent = parent }
         func observe(_ window: NSWindow) {
@@ -1319,7 +1322,16 @@ struct WindowObserver: NSViewRepresentable {
                     self.parent.didChangeFrame()
                 })
             }
-            observers.append(NotificationCenter.default.publisher(for: NSWindow.willCloseNotification, object: window).sink { [weak self] _ in self?.parent.didClose() })
+            observers.append(NotificationCenter.default.publisher(for: NSWindow.willCloseNotification, object: window).sink { [weak self] _ in
+                guard let self else { return }
+                // Each publisher holds its window strongly, and this coordinator lives
+                // in that window's view hierarchy: cancel them, or the closed window
+                // and its content stay alive and keep redrawing on every model change.
+                // `closed` keeps later updates from observing the window again.
+                self.closed = true
+                self.parent.didClose()
+                self.observers.removeAll(); self.stopMonitoringKeys()
+            })
         }
         func restoreFrame(_ window: NSWindow) {
             // SwiftUI applies its default size before first showing the window.
