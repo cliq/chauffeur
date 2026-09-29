@@ -109,7 +109,7 @@ struct WorktreesView: View {
             if let observation {
                 if let error = observation.error { Text(error.errorDescription ?? "Git inventory unavailable").foregroundStyle(.red).font(.caption) }
                 else if observation.status == .notRepository { Text("This folder is not a Git repository.").font(.caption).foregroundStyle(.secondary) }
-                else { Text("Git inventory checked \(observation.observedAt, style: .relative) ago. Refreshes while the background service is running.").font(.caption).foregroundStyle(.secondary) }
+                else { Text("Git inventory refreshes every few seconds while the background service is running.").font(.caption).foregroundStyle(.secondary) }
             }
             Text("Deleting a worktree removes its checkout and finished session history. Stop live sessions first. You will be warned before local changes are discarded. Branches with no unique commits are also deleted.").font(.caption).foregroundStyle(.secondary)
         }.padding(24).frame(width: 760).interactiveDismissDisabled(busy)

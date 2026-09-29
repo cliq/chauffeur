@@ -177,7 +177,7 @@ struct AppSnapshot: Decodable, Sendable {
     }
     private func finishConnecting() {
         connectionTimeout?.cancel(); connectionTimeout = nil
-        isConnecting = false
+        if isConnecting { isConnecting = false }
     }
     @Published var serviceMessage = "Connecting to background service…"
     @Published private(set) var serviceRegistrationError: String?
@@ -187,6 +187,26 @@ struct AppSnapshot: Decodable, Sendable {
     var canStopService: Bool { !usesCustomSocket && !isRestartingService && !isStoppingService && !isServiceStopped && (online || service.status == .enabled || service.status == .requiresApproval) }
     @Published private(set) var isExportingDiagnostics = false
     private(set) var snapshotReceivedAt: Date?
+    /// Identifies the applied snapshot by its significant content. Cleared on
+    /// reconnect and after local edits to `snapshot`, so the next push applies.
+    private var snapshotKey: String?
+    private struct SnapshotUpdate: Sendable {
+        let key: String
+        /// `nil` when the content matches the applied snapshot.
+        let snapshot: AppSnapshot?
+    }
+    /// Runs off the main actor; a snapshot identical to the applied one is not decoded.
+    private nonisolated static func decode(_ result: JSONValue, unlessKey current: String?) async throws -> SnapshotUpdate {
+        try await Task.detached {
+            let key = try SnapshotChange.key(result)
+            return SnapshotUpdate(key: key, snapshot: key == current ? nil : try result.decode(AppSnapshot.self))
+        }.value
+    }
+    /// Publishes only a changed snapshot: every window observing the model redraws on each assignment.
+    private func apply(_ update: SnapshotUpdate) {
+        if let received = update.snapshot { snapshot = received; snapshotKey = update.key }
+        snapshotReceivedAt = Date()
+    }
     private var serviceDiagnosticError: NSError?
     private(set) var initialServiceStatus: Int?
     @Published var error: String?
@@ -265,6 +285,7 @@ struct AppSnapshot: Decodable, Sendable {
                 do {
                     let socket = try SocketConnection(path: socketPath)
                     connection = socket
+                    snapshotKey = nil
                     defer { socket.close() }
                     try await socket.sendAsync(IPCRequest("subscribe"))
                     while !Task.isCancelled {
@@ -272,9 +293,9 @@ struct AppSnapshot: Decodable, Sendable {
                         guard response.version == WireProtocol.major else { throw ChauffeurError("protocol_mismatch", "App and service versions differ. Restart the background service") }
                         if let failure = response.error { throw failure }
                         guard let result = response.result else { continue }
-                        let received = try await Task.detached { try result.decode(AppSnapshot.self) }.value
+                        let update = try await Self.decode(result, unlessKey: snapshotKey)
                         guard generation == connectionGeneration, !isRestartingService, !isStoppingService, !isServiceStopped else { break }
-                        if !usesCustomSocket {
+                        if let received = update.snapshot, !usesCustomSocket {
                             guard let expected = expectedRuntimeIdentity else {
                                 throw ChauffeurError("runtime_identity_unavailable", "Cannot verify the bundled runtime. Rebuild or reinstall Chauffeur")
                             }
@@ -290,15 +311,17 @@ struct AppSnapshot: Decodable, Sendable {
                             }
                             if let fingerprint = runtimeBuildFingerprint { preferences.set(fingerprint, forKey: "registeredRuntimeBuild") }
                         }
-                        snapshot = received
-                        snapshotReceivedAt = Date()
+                        apply(update)
                         finishConnecting()
-                        online = true; serviceMessage = "\(usesCustomSocket ? "Custom" : AppBuild.current.rawValue) service running\(usesCustomSocket ? "" : " · verified") · \(snapshot.sessions.filter { $0.state.isLive }.count) live sessions"
+                        let message = "\(usesCustomSocket ? "Custom" : AppBuild.current.rawValue) service running\(usesCustomSocket ? "" : " · verified") · \(snapshot.sessions.filter { $0.state.isLive }.count) live sessions"
+                        if !online { online = true }
+                        if serviceMessage != message { serviceMessage = message }
                         processPendingRoute()
                     }
                 } catch {
                     guard generation == connectionGeneration else { continue }
-                    online = false
+                    snapshotKey = nil
+                    if online { online = false }
                     if !usesCustomSocket && service.status == .requiresApproval {
                         finishConnecting()
                         serviceMessage = "Allow Chauffeur in System Settings → Login Items & Extensions"
@@ -480,11 +503,10 @@ struct AppSnapshot: Decodable, Sendable {
     func refresh() async throws {
         let generation = connectionGeneration
         let result = try await call("snapshot")
-        let received = try await Task.detached { try result.decode(AppSnapshot.self) }.value
+        let update = try await Self.decode(result, unlessKey: snapshotKey)
         guard generation == connectionGeneration, !isRestartingService, !isStoppingService, !isServiceStopped else { return }
-        snapshot = received
-        snapshotReceivedAt = Date()
-        online = true
+        apply(update)
+        if !online { online = true }
         processPendingRoute()
     }
     @discardableResult
@@ -502,7 +524,7 @@ struct AppSnapshot: Decodable, Sendable {
         keepAwakeMutationError = nil
         defer { keepAwakeMutationPending = false }
         do {
-            snapshot.keepAwake = try await call(method, params).decode(KeepAwakeStatus.self)
+            snapshot.keepAwake = try await call(method, params).decode(KeepAwakeStatus.self); snapshotKey = nil
             try? await refresh()
             return true
         } catch {
@@ -600,7 +622,7 @@ struct AppSnapshot: Decodable, Sendable {
                     let response = try await call("saveWindow", .object(["record": try .from(value), "version": windowVersions[id].map(JSONValue.string) ?? .null]))
                     let stored = try response.decode(Stored<WindowState>.self)
                     windowVersions[id] = stored.version
-                    snapshot.store.windows.removeAll { $0.value.id == id }; snapshot.store.windows.append(stored)
+                    snapshot.store.windows.removeAll { $0.value.id == id }; snapshot.store.windows.append(stored); snapshotKey = nil
                 } catch {
                     if (error as? ChauffeurError)?.code == "service_unavailable" {
                         // No connection was opened, so the write was never sent.

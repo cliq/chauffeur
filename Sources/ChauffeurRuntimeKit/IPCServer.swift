@@ -48,7 +48,7 @@ public final class IPCServer: @unchecked Sendable {
                     var heartbeat = ContinuousClock.now
                     while !Task.isCancelled {
                         let snapshot = try await runtime.snapshot()
-                        let hash = JSONCoding.digest(try JSONCoding.encode(snapshot))
+                        let hash = try SnapshotChange.key(snapshot)
                         if hash != last || ContinuousClock.now - heartbeat >= .seconds(5) {
                             try await connection.sendAsync(IPCResponse(id: request.id, result: snapshot)); last = hash; heartbeat = .now
                         }
