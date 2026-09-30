@@ -63,6 +63,25 @@ struct WorktreeCreationTests {
         } catch let error as ChauffeurError { #expect(error.code == "missing_worktree") }
     }
 
+    @Test func createdWorktreeIsListedBeforeItsSetupFinishes() async throws {
+        let fixture = try await Fixture.make(setupScript: #"while [ ! -f "$MAIN_REPO/../release-setup" ]; do sleep 0.05; done"#)
+        defer { fixture.cleanup() }
+        // The app only offers creation once a scan has listed the repository.
+        await fixture.runtime.reconcileWorktrees()
+        let creation = Task { try await fixture.runtime.createWorktree(fixture.request) }
+        defer { creation.cancel() }
+        var listed: GitWorktree?
+        for _ in 0..<100 where listed == nil {
+            let inventories = try await fixture.runtime.snapshot()["repositoryInventories"].decode([RepositoryInventory].self)
+            listed = inventories.observation(for: Paths.canonical(fixture.repo.path))?.entries.first { $0.branch == "task/fixture" }
+            if listed == nil { try await Task.sleep(for: .milliseconds(20)) }
+        }
+        let entry = try #require(listed)
+        #expect(entry.availability == .available && entry.hasUncommittedChanges == false)
+        FileManager.default.createFile(atPath: fixture.root.appendingPathComponent("release-setup").path, contents: nil)
+        #expect(try await creation.value.value.path == entry.path)
+    }
+
     @Test func foldersWithoutSetupScriptDecodeFromEarlierRecords() throws {
         let encoded = try JSONCoding.encode(ProjectFolder(path: "/tmp/example"))
         var object = try #require(JSONSerialization.jsonObject(with: encoded) as? [String: Any])

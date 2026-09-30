@@ -82,6 +82,9 @@ shell (`$SHELL -l -c`) before any agent starts, with the new checkout as its
 working directory. `$WORKTREE` holds the new checkout's path and `$MAIN_REPO` the
 main checkout's path, for example `cp "$MAIN_REPO/.env" .env`.
 
+The new worktree appears in the sidebar as soon as Git creates it, while its
+setup script is still running.
+
 A script that exits with a non-zero status, or runs longer than 10 minutes,
 stops the launch. The checkout and its record are kept, and the error shows the
 end of the script's output. Retrying the same creation returns the kept checkout

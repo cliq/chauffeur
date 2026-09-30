@@ -38,6 +38,8 @@ public actor RuntimeCoordinator {
     private let logs: RuntimeLogStore?
     private var metadataErrors: [ChauffeurError] = []
     private var repositoryInventories: [RepositoryInventory] = []
+    /// Checkouts Chauffeur created that a finished scan has not observed yet.
+    private var createdCheckouts: [(repositoryID: UUID, entry: GitWorktree)] = []
     private var worktreeScan: Task<Void, Never>?
     private var worktreeRecordWrites = Set<UUID>()
     private var worktreeCreations: [UUID: (String, Task<Stored<Worktree>, Error>)] = [:]
@@ -197,6 +199,8 @@ public actor RuntimeCoordinator {
         }
     }
     private func scanWorktrees() async {
+        // Checkouts created before this scan began are in Git's list by now.
+        let observedCreations = Set(createdCheckouts.map(\.entry.path))
         let snapshot = await store.refresh()
         let records = snapshot.worktrees.filter { $0.value.registered }
         var seenSources = Set<String>()
@@ -247,7 +251,28 @@ public actor RuntimeCoordinator {
             catch let error as ChauffeurError { record(error) }
             catch { record(ChauffeurError("worktree_unavailable", "Worktree reconciliation could not save a record")) }
         }
-        repositoryInventories = observations
+        createdCheckouts.removeAll { observedCreations.contains($0.entry.path) }
+        repositoryInventories = Self.including(createdCheckouts, in: observations)
+    }
+    /// Lists a checkout Chauffeur just created without waiting for the next
+    /// scan of every repository, so it appears in the sidebar at once.
+    private func listCreatedCheckout(_ worktree: Worktree) {
+        var entry = GitWorktree(path: worktree.path, commit: worktree.baseCommit, branch: worktree.branch, locked: false, prunable: false)
+        entry.gitIdentity = worktree.gitIdentity; entry.availability = .available; entry.hasUncommittedChanges = false
+        entry.baseBranch = worktree.baseBranch; entry.unmergedCommits = worktree.baseBranch == nil ? nil : 0
+        createdCheckouts.removeAll { $0.entry.path == entry.path }
+        createdCheckouts.append((worktree.repositoryID, entry))
+        // The periodic scan fills in its real status and drops this placeholder.
+        repositoryInventories = Self.including(createdCheckouts, in: repositoryInventories)
+    }
+    static func including(_ created: [(repositoryID: UUID, entry: GitWorktree)], in observations: [RepositoryInventory]) -> [RepositoryInventory] {
+        var result = observations
+        for (repositoryID, entry) in created {
+            guard let index = result.firstIndex(where: { $0.status == .available && $0.repositoryID == repositoryID }),
+                  !result[index].entries.contains(where: { $0.path == entry.path }) else { continue }
+            result[index].entries.append(entry)
+        }
+        return result
     }
     @discardableResult private func saveWorktree(_ value: Worktree, expectedVersion: String? = nil, finishingRemoval: Bool = false) async throws -> Stored<Worktree> {
         guard !worktreeRecordWrites.contains(value.id), finishingRemoval || !checkoutClaims.isRemoving(path: value.path, worktreeID: value.id) else {
@@ -893,6 +918,7 @@ public actor RuntimeCoordinator {
         guard let project = snapshot.projects.first(where: { $0.value.id == request.projectID && !$0.value.archived })?.value,
               let folder = project.folders.first(where: { $0.id == request.folderID && $0.registered }) else { throw ChauffeurError("missing_folder", "Select an available folder in an active project") }
         var worktree = try await worktrees.create(projectID: project.id, folder: folder, branch: request.branch, baseRef: request.baseRef, reuseExistingBranch: request.reuseExistingBranch == true)
+        listCreatedCheckout(worktree)
         if let key = request.retryKey { worktree.id = key; worktree.creationRequestFingerprint = fingerprint }
         let saved: Stored<Worktree>
         do { saved = try await saveWorktree(worktree) }
@@ -1683,6 +1709,7 @@ public actor RuntimeCoordinator {
                 delegation.state = .launching; try await ledger.updateDelegation(delegation)
                 if !delegation.shareCheckout {
                     let worktree = try await worktrees.create(projectID: project.id, folder: folder, branch: "chauffeur/\(String(delegation.id.uuidString.prefix(12)).lowercased())", baseRef: "HEAD")
+                    listCreatedCheckout(worktree)
                     try await saveWorktree(worktree); delegation.worktreeID = worktree.id
                     try await ledger.updateDelegation(delegation)
                     try await runWorktreeSetup(folder, at: worktree.path)
