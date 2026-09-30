@@ -23,6 +23,21 @@ public final class UserDefaultsOperationJournal: PendingOperationJournal, @unche
         self.key = key
     }
 
+    /// One journal per paired Mac: another Mac would report these keys as unknown and drop them.
+    public static func forHost(_ hostID: UUID, defaults: UserDefaults = .standard) -> UserDefaultsOperationJournal {
+        UserDefaultsOperationJournal(defaults: defaults, key: "chauffeur.remote.pendingOperations.\(hostID.uuidString)")
+    }
+
+    /// Moves keys recorded by builds that paired one Mac into that Mac's journal.
+    public static func migrateSharedJournal(to hostID: UUID, defaults: UserDefaults = .standard) {
+        let shared = UserDefaultsOperationJournal(defaults: defaults)
+        let target = forHost(hostID, defaults: defaults)
+        for key in shared.pendingKeys() {
+            target.record(key)
+            shared.remove(key)
+        }
+    }
+
     public func pendingKeys() -> [UUID] {
         lock.withLock { readKeys() }
     }

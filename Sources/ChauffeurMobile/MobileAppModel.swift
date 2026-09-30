@@ -91,7 +91,7 @@ final class MobileAppModel {
         self.journal = journal
         self.makeTerminalAdapter = makeTerminalAdapter
         do {
-            savedHost = try credentials.load()
+            savedHost = try credentials.loadAll().first
         } catch CredentialStoreError.keychain(let status) {
             connectError = "The keychain is unavailable (status \(String(status))). Pairing will work but may not be remembered."
         } catch {
@@ -245,10 +245,11 @@ final class MobileAppModel {
         session?.disconnect()
         tearDownTerminals()
         session = nil
+        let forgotten = savedHost
         savedHost = nil
         path = []
         do {
-            try credentials.clear()
+            if let forgotten { try credentials.remove(hostID: forgotten.hostID) }
             connectError = nil
         } catch {
             connectError = "The saved Mac could not be removed: \(error)"
@@ -517,7 +518,7 @@ final class MobileAppModel {
     static func preview(connected: Bool = true) -> MobileAppModel {
         let host = fixtureHost()
         let model = MobileAppModel(
-            credentials: InMemoryCredentialStore(host: host),
+            credentials: InMemoryCredentialStore(hosts: [host]),
             journal: InMemoryOperationJournal(),
             makeTerminalAdapter: { FakeTerminalEngineAdapter() }
         )
