@@ -45,9 +45,17 @@ struct CheckoutEnvironmentTests {
         export CODEX_HOME='/codex'
         export MAIN_REPO='/repo'
         export WORKTREE='/repo-task'
-        # zsh: cd ~main or cd ~worktree
+
+        # $MAIN_REPO is the repository's main checkout.
+        # $WORKTREE is the checkout this terminal opened in.
+        # In zsh, jump to them with cd ~main or cd ~worktree.
         """)
-        #expect(ShellStartup.preamble(exports: [:], checkout: checkout, namedDirectories: [:]) == "export MAIN_REPO='/repo'\nexport WORKTREE='/repo-task'")
+        #expect(ShellStartup.preamble(exports: [:], checkout: ["WORKTREE": "/repo-task"], namedDirectories: [:]) == """
+        export WORKTREE='/repo-task'
+
+        # $WORKTREE is the checkout this terminal opened in.
+        """)
+        #expect(ShellStartup.preamble(exports: ["CODEX_HOME": "/codex"], checkout: [:], namedDirectories: [:]) == "export CODEX_HOME='/codex'")
         #expect(ShellStartup.preamble(exports: [:], checkout: [:], namedDirectories: [:]) == nil)
     }
 }

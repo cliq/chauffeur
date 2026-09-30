@@ -10,10 +10,14 @@ enum ShellStartup {
     /// The dimmed help at the top of a new shell: the team's exports, then the
     /// checkout variables, then any named directories zsh defines for them.
     static func preamble(exports: [String: String], checkout: [String: String], namedDirectories: [String: String]) -> String? {
+        var help: [String] = []
+        if checkout["MAIN_REPO"] != nil { help.append("# $MAIN_REPO is the repository's main checkout.") }
+        if checkout["WORKTREE"] != nil { help.append("# $WORKTREE is the checkout this terminal opened in.") }
         let names = namedDirectories.keys.sorted().map { "~" + $0 }
-        let lines = [ShellAgentEnvironment.exportCommand(exports), ShellAgentEnvironment.exportCommand(checkout),
-                     names.isEmpty ? nil : "# zsh: cd " + names.joined(separator: " or cd ")].compactMap { $0 }
-        return lines.isEmpty ? nil : lines.joined(separator: "\n")
+        if !names.isEmpty { help.append("# In zsh, jump to them with cd " + names.joined(separator: " or cd ") + ".") }
+        let sections = [ShellAgentEnvironment.exportCommand(exports), ShellAgentEnvironment.exportCommand(checkout)].compactMap { $0 }.joined(separator: "\n")
+        let blocks = [sections, help.joined(separator: "\n")].filter { !$0.isEmpty }
+        return blocks.isEmpty ? nil : blocks.joined(separator: "\n\n")
     }
     static func environment(executable: String, environment: [String: String], exports: [String: String], namedDirectories: [String: String] = [:], directory: URL) throws -> [String: String] {
         guard isZsh(executable), !exports.isEmpty || !namedDirectories.isEmpty else { return environment }
