@@ -30,11 +30,14 @@ import ChauffeurCore
             request = proposed; creation = newCreation
         }
         guard var request else { return nil }
-        failure = nil; progress = creation == nil ? "Launching…" : "Creating worktree…"
+        failure = nil; progress = creation.map { creation in
+            let folder = model.project(creation.projectID)?.folders.first { $0.id == creation.folderID }
+            return folder?.hasWorktreeSetupScript == true ? "Creating worktree and running its setup script…" : "Creating worktree…"
+        } ?? "Launching…"
         defer { progress = nil }
         do {
             if let creation {
-                let worktree = try await model.call("createWorktree", .from(creation)).decode(Stored<Worktree>.self).value
+                let worktree = try await model.call("createWorktree", .from(creation), responseTimeout: AppModel.worktreeSetupResponseTimeout).decode(Stored<Worktree>.self).value
                 guard worktree.registered, worktree.availability == .available else { throw ChauffeurError("worktree_unavailable", "This worktree is no longer registered or available. Choose another checkout") }
                 createdWorktree = worktree
                 request.worktreeID = worktree.id; request.allowSharedCheckout = false

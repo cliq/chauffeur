@@ -21,6 +21,56 @@ struct WorktreeCreationTests {
         await #expect(throws: ChauffeurError.self) { try await fixture.runtime.createWorktree(request) }
     }
 
+    @Test func setupScriptRunsInsideEachNewWorktree() async throws {
+        let fixture = try await Fixture.make(setupScript: #"printf '%s\n%s\n%s\n' "$PWD" "$WORKTREE" "$MAIN_REPO" > .setup-marker"#)
+        defer { fixture.cleanup() }
+        let created = try await fixture.runtime.createWorktree(fixture.request).value
+        let marker = try String(contentsOfFile: created.path + "/.setup-marker", encoding: .utf8)
+        #expect(marker == [created.path, created.path, Paths.canonical(fixture.repo.path)].map { $0 + "\n" }.joined())
+        #expect(!FileManager.default.fileExists(atPath: fixture.repo.path + "/.setup-marker"))
+    }
+
+    @Test func failedSetupKeepsTheRecordedWorktreeAndCanBeRerun() async throws {
+        let fixture = try await Fixture.make(setupScript: #"echo run >> "$MAIN_REPO/../setup-runs"; [ -f ready ] || { echo "missing ready file" >&2; exit 3; }"#)
+        defer { fixture.cleanup() }
+        var request = fixture.request
+        request.retryKey = UUID()
+        do {
+            _ = try await fixture.runtime.createWorktree(request)
+            Issue.record("A failing setup script should fail creation")
+        } catch let error as ChauffeurError {
+            #expect(error.code == "worktree_setup_failed")
+            #expect(error.message.contains("status 3") && error.message.contains("missing ready file"))
+            #expect(error.path?.hasSuffix("task-fixture") == true)
+        }
+        let recorded = try #require(await fixture.runtime.store.current().worktrees.first?.value)
+        #expect(recorded.id == request.retryKey)
+        // A retry returns the retained checkout without running setup again.
+        #expect(try await fixture.runtime.createWorktree(request).value.id == recorded.id)
+        let runs = fixture.root.appendingPathComponent("setup-runs")
+        #expect(try String(contentsOf: runs, encoding: .utf8) == "run\n")
+        func rerun(_ path: String) async throws {
+            _ = try await fixture.runtime.handle(IPCRequest("runWorktreeSetup", params: .object([
+                "projectID": .string(fixture.project.id.uuidString), "folderID": .string(fixture.project.folders[0].id.uuidString), "path": .string(path)
+            ])))
+        }
+        FileManager.default.createFile(atPath: recorded.path + "/ready", contents: nil)
+        try await rerun(recorded.path)
+        #expect(try String(contentsOf: runs, encoding: .utf8) == "run\nrun\n")
+        do {
+            try await rerun(fixture.repo.path)
+            Issue.record("The main checkout is not a worktree to set up")
+        } catch let error as ChauffeurError { #expect(error.code == "missing_worktree") }
+    }
+
+    @Test func foldersWithoutSetupScriptDecodeFromEarlierRecords() throws {
+        let encoded = try JSONCoding.encode(ProjectFolder(path: "/tmp/example"))
+        var object = try #require(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+        object.removeValue(forKey: "worktreeSetupScript")
+        let folder = try JSONCoding.decode(ProjectFolder.self, from: JSONSerialization.data(withJSONObject: object))
+        #expect(folder.worktreeSetupScript == nil && !folder.hasWorktreeSetupScript)
+    }
+
     @Test func refPickerOperationsResolveRegisteredRepositoriesOnly() async throws {
         let fixture = try await Fixture.make(); defer { fixture.cleanup() }
         let params: JSONValue = .object(["projectID": .string(fixture.project.id.uuidString), "folderID": .string(fixture.project.folders[0].id.uuidString)])
@@ -336,7 +386,7 @@ private struct Fixture {
     let preset: AgentPreset
     let request: WorktreeCreationRequest
     var repo: URL { root.appendingPathComponent("repo 日本語") }
-    static func make() async throws -> Self {
+    static func make(setupScript: String? = nil) async throws -> Self {
         let root = URL(fileURLWithPath: "/tmp/chauffeur-create-\(UUID())").resolvingSymlinksInPath()
         let repo = root.appendingPathComponent("repo 日本語")
         try FileManager.default.createDirectory(at: repo, withIntermediateDirectories: true)
@@ -348,7 +398,9 @@ private struct Fixture {
         let set = PresetSet(name: "Worktree fixture")
         let preset = AgentPreset(setID: set.id, name: "Unavailable agent", kind: .claude, executable: root.appendingPathComponent("missing-cli").path, configurationDirectory: root.path)
         var project = Project(name: "Worktree fixture", presetSetID: set.id)
-        project.addFolder(ProjectFolder(path: repo.path))
+        var folder = ProjectFolder(path: repo.path)
+        folder.worktreeSetupScript = setupScript
+        project.addFolder(folder)
         try await runtime.store.save(set); try await runtime.store.save(preset); try await runtime.store.save(project)
         try await runtime.start()
         return Self(root: root, runtime: runtime, project: project, preset: preset, request: WorktreeCreationRequest(projectID: project.id, folderID: project.folders[0].id, branch: "task/fixture", baseRef: "HEAD"))

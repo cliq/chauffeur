@@ -102,7 +102,11 @@ private struct ProjectWindowContent: View, Equatable {
         let id = UUID()
         let folderID: UUID?
     }
+    private struct FolderSheet: Identifiable { let id: UUID }
     @State private var worktreeSheet: WorktreeSheet?
+    @State private var settingsSheet: FolderSheet?
+    /// Checkouts whose setup script is running after Run Setup Script.
+    @State private var runningSetup = Set<String>()
     @State private var collapsedRepositories = Set<UUID>()
     @State private var hiddenSectionExpanded = false
     private enum SidebarRowID: Hashable {
@@ -180,6 +184,7 @@ private struct ProjectWindowContent: View, Equatable {
                 .sheet(isPresented: $editingProject) { ProjectEditor(project: project) { _ in editingProject = false } }
                 .sheet(isPresented: $editingGroups) { GroupsEditor(project: project) }
                 .sheet(item: $worktreeSheet) { selection in WorktreesView(project: project, initialFolderID: selection.folderID, worktreeCreated: revealCreatedWorktree) }
+                .sheet(item: $settingsSheet) { selection in RepositorySettingsView(projectID: project.id, folderID: selection.id) }
                 .sheet(item: $recentConversationsRow) { row in RecentConversationsSheet(row: row) }
                 .sheet(item: $deletingCheckout) { row in
                     WorktreeDeletionSheet(row: row, preview: deletionPreview, confirm: { deleteWorktree(row); deletingCheckout = nil }, cancel: { deletingCheckout = nil })
@@ -470,6 +475,7 @@ private struct ProjectWindowContent: View, Equatable {
                         .disabled(!canLaunch || folder.availability != .available || readiness.isPending)
                     Divider()
                     Button("Manage Worktrees…") { showWorktrees(folderID: folder.id) }.disabled(readiness.isPending)
+                    Button("Repository Settings…") { settingsSheet = FolderSheet(id: folder.id) }
                     Button("Relink / Edit Folder…") { editingProject = true }
                     Button("Reveal in Finder") { FilePanels.reveal(folder.selectedPath) }
                 }
@@ -535,6 +541,9 @@ private struct ProjectWindowContent: View, Equatable {
                 .accessibilityAddTraits(selected ? .isSelected : [])
                 .accessibilityValue(selected ? "Selected worktree" : "")
             HStack(spacing: 4) {
+                if runningSetup.contains(row.path) {
+                    ProgressView().controlSize(.mini).help("Running the setup script").accessibilityLabel("Running the setup script")
+                }
                 terminalIndicator(terminals)
                 liveBadge(live)
                 badge(WorktreeSessions.attentionCount(sessions))
@@ -556,6 +565,10 @@ private struct ProjectWindowContent: View, Equatable {
         Button("Reveal in Finder") { FilePanels.reveal(row.path) }.disabled(row.availability != .available)
         if !row.isMain {
             Divider()
+            if folder.hasWorktreeSetupScript {
+                Button("Run Setup Script") { runSetup(in: row, folder: folder) }
+                    .disabled(!online || row.availability != .available || runningSetup.contains(row.path))
+            }
             if isHidden(row) { Button("Show Worktree") { setHidden(row, false) } }
             else { Button("Hide Worktree") { setHidden(row, true) }.help("Move to the Hidden section until you work on it again") }
             Button("Delete Worktree…", role: .destructive) { prepareDeletion(row) }
@@ -706,6 +719,7 @@ private struct ProjectWindowContent: View, Equatable {
                     Text(folder.canonicalPath).font(.system(.caption, design: .monospaced)).foregroundStyle(.secondary).textSelection(.enabled)
                 }
                 Spacer()
+                Button("Repository Settings…") { settingsSheet = FolderSheet(id: folder.id) }.accessibilityIdentifier("overview.settings.\(folder.id)")
                 Button("Manage Worktrees…") { showWorktrees(folderID: folder.id) }.disabled(readiness.isPending)
                 Button("New Worktree & Session…") { showLaunch(folderID: folder.id, newWorktree: true) }.disabled(!canLaunch || folder.availability != .available || readiness.isPending)
             }.padding(20)
@@ -944,6 +958,13 @@ private struct ProjectWindowContent: View, Equatable {
     }
     private func showWorktrees(folderID: UUID?) {
         worktreeSheet = WorktreeSheet(folderID: folderID)
+    }
+    private func runSetup(in row: CheckoutRow, folder: ProjectFolder) {
+        guard let project, runningSetup.insert(row.path).inserted else { return }
+        model.perform {
+            defer { runningSetup.remove(row.path) }
+            _ = try await model.call("runWorktreeSetup", .object(["projectID": .string(project.id.uuidString), "folderID": .string(folder.id.uuidString), "path": .string(row.path)]), responseTimeout: AppModel.worktreeSetupResponseTimeout)
+        }
     }
     private func showLaunch(folderID: UUID? = nil, worktreeID: UUID? = nil, newWorktree: Bool = false) {
         if folderID == nil, !newWorktree, let folder = selectedFolder, let project {

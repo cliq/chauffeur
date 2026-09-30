@@ -69,6 +69,27 @@ keeps its retry ID until success or a change to the requested repository, branch
 or base ref. Concurrent registration requests for the same checkout return one
 record.
 
+## Preparing new worktrees
+
+A new checkout only has the files Git tracks. To add the rest, such as keys,
+`.env` files, or generated sources, choose **Repository Settings…** from a
+repository's context menu or its overview header. Then enter a **Worktree Setup
+Script**. The setup script belongs to that project folder. Chauffeur runs it once
+for every worktree it creates there: from Manage Worktrees, New Worktree & Session
+(on the Mac or the iOS remote), and delegated workers. It does not run for
+checkouts created elsewhere and then registered. The script runs in your login
+shell (`$SHELL -l -c`) before any agent starts, with the new checkout as its
+working directory. `$WORKTREE` holds the new checkout's path and `$MAIN_REPO` the
+main checkout's path, for example `cp "$MAIN_REPO/.env" .env`.
+
+A script that exits with a non-zero status, or runs longer than 10 minutes,
+stops the launch. The checkout and its record are kept, and the error shows the
+end of the script's output. Retrying the same creation returns the kept checkout
+without running the script again. Fix the script, then choose **Run Setup
+Script** from the worktree's context menu to run it again in that checkout. The
+same action works for any linked worktree of the repository, but not for its
+main checkout.
+
 ## Create a worktree and start an agent
 
 Expand a repository in the sidebar and choose **New Worktree & Session…**, or

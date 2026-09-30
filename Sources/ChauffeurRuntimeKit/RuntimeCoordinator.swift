@@ -698,6 +698,14 @@ public actor RuntimeCoordinator {
             return try .from(await pending.value)
         case "createWorktree":
             return try .from(await createWorktree(params.decode(WorktreeCreationRequest.self)))
+        case "runWorktreeSetup":
+            let snapshot = await store.reload(), projectID = try params.uuid("projectID"), folderID = try params.uuid("folderID")
+            let path = Paths.canonical(try params.requiredString("path"))
+            guard let folder = snapshot.projects.first(where: { $0.value.id == projectID })?.value.folders.first(where: { $0.id == folderID && $0.registered }) else { throw ChauffeurError("missing_folder", "Select a registered repository") }
+            let entries = try await worktrees.inventory(at: folder.canonicalPath)
+            guard let entry = entries.dropFirst().first(where: { $0.path == path }), entry.availability == .available else { throw ChauffeurError("missing_worktree", "Path is not an available worktree of this repository", path: path) }
+            try await runWorktreeSetup(folder, at: entry.path)
+            return .object([:])
         case "removeWorktree":
             let snapshot = await store.current(), worktreeID = try params.uuid("worktreeID")
             guard var stored = snapshot.worktrees.first(where: { $0.value.id == worktreeID }) else { throw ChauffeurError("missing_worktree", "Worktree not found") }
@@ -886,8 +894,33 @@ public actor RuntimeCoordinator {
               let folder = project.folders.first(where: { $0.id == request.folderID && $0.registered }) else { throw ChauffeurError("missing_folder", "Select an available folder in an active project") }
         var worktree = try await worktrees.create(projectID: project.id, folder: folder, branch: request.branch, baseRef: request.baseRef, reuseExistingBranch: request.reuseExistingBranch == true)
         if let key = request.retryKey { worktree.id = key; worktree.creationRequestFingerprint = fingerprint }
-        do { return try await saveWorktree(worktree) }
+        let saved: Stored<Worktree>
+        do { saved = try await saveWorktree(worktree) }
         catch { throw ChauffeurError("worktree_registration", "The worktree was created but its record could not be saved. Refresh Git Inventory and register the retained checkout", path: worktree.path) }
+        // Setup runs once, after the record exists: a retry returns the saved
+        // checkout without repeating it, and a failure keeps the checkout.
+        try await runWorktreeSetup(folder, at: saved.value.path)
+        return saved
+    }
+    /// Longest a folder's setup script may run in a new worktree.
+    static let worktreeSetupTimeout: TimeInterval = 600
+    /// Runs the folder's setup script in the user's login shell with the
+    /// checkout as its working directory and `$WORKTREE`/`$MAIN_REPO` set.
+    func runWorktreeSetup(_ folder: ProjectFolder, at path: String) async throws {
+        guard folder.hasWorktreeSetupScript, let script = folder.worktreeSetupScript else { return }
+        let shell = baseEnvironment["SHELL"].flatMap { $0.hasPrefix("/") ? $0 : nil } ?? "/bin/zsh"
+        var environment = baseEnvironment
+        for name in ["MAIN_REPO", "WORKTREE"] { environment.removeValue(forKey: name) }
+        environment.merge(await checkoutEnvironment(path)) { _, new in new }
+        let result: CommandResult
+        do { result = try await ProcessRunner.run(shell, ["-l", "-c", script], directory: path, environment: environment, timeout: Self.worktreeSetupTimeout, keepOutputTail: true) }
+        catch let error as ChauffeurError where error.code == "command_timeout" {
+            throw ChauffeurError("worktree_setup_failed", "The worktree was created, but its setup script did not finish within \(Int(Self.worktreeSetupTimeout / 60)) minutes. Fix the script in Repository Settings, then choose Run Setup Script on the worktree", path: path)
+        }
+        guard result.status != 0 else { return }
+        let log = [result.error, result.output].map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.first { !$0.isEmpty }
+        let tail = log.map { "\n" + String($0.suffix(1500)) } ?? ""
+        throw ChauffeurError("worktree_setup_failed", "The worktree was created, but its setup script exited with status \(result.status). Fix the script in Repository Settings, then choose Run Setup Script on the worktree.\(tail)", path: path)
     }
     /// Stops the runtime's complete terminal inventory, including finished panes.
     /// Block new launches while cancelling startup and removing terminals.
@@ -1652,6 +1685,7 @@ public actor RuntimeCoordinator {
                     let worktree = try await worktrees.create(projectID: project.id, folder: folder, branch: "chauffeur/\(String(delegation.id.uuidString.prefix(12)).lowercased())", baseRef: "HEAD")
                     try await saveWorktree(worktree); delegation.worktreeID = worktree.id
                     try await ledger.updateDelegation(delegation)
+                    try await runWorktreeSetup(folder, at: worktree.path)
                 }
                 _ = try await ledger.authenticate(token)
                 var request = LaunchRequest(projectID: caller.scope.projectID, groupID: caller.scope.groupID, presetID: delegation.presetID, folderID: delegation.folderID, title: String(delegation.task.prefix(100)), worktreeID: delegation.worktreeID, task: delegation.task, allowSharedCheckout: delegation.shareCheckout, coordinationEnabled: true, retryKey: delegation.childID)

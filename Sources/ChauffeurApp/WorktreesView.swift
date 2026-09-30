@@ -148,7 +148,7 @@ struct WorktreesView: View {
         }
         guard let request = creation else { return }
         run {
-            let created = try await model.call("createWorktree", .from(request)).decode(Stored<Worktree>.self).value
+            let created = try await model.call("createWorktree", .from(request), responseTimeout: AppModel.worktreeSetupResponseTimeout).decode(Stored<Worktree>.self).value
             worktreeCreated(created)
             creation = nil; newBranch = ""; existingBranch = ""
             _ = try await model.call("refreshWorktrees")

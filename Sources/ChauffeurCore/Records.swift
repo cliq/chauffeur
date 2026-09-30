@@ -92,6 +92,10 @@ public struct ProjectFolder: Codable, Identifiable, Equatable, Sendable {
     public var availability: Availability = .available
     public var repositoryID: UUID?
     public var registered = true
+    /// Shell commands run in each worktree Chauffeur creates for this folder,
+    /// before an agent starts there (copying keys, generating files, …).
+    public var worktreeSetupScript: String?
+    public var hasWorktreeSetupScript: Bool { worktreeSetupScript?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false }
     public init(path: String, name: String? = nil) {
         self.selectedPath = path; self.canonicalPath = Paths.canonical(path)
         self.name = name ?? URL(fileURLWithPath: path).lastPathComponent

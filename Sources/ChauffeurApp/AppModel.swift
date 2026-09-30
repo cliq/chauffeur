@@ -514,9 +514,11 @@ struct AppSnapshot: Decodable, Sendable {
         }.value
     }
     func openServiceSettings() { SMAppService.openSystemSettingsLoginItems() }
-    func call(_ method: String, _ params: JSONValue = .object([:])) async throws -> JSONValue {
-        try await RuntimeClient.call(IPCRequest(method, params: params), socketPath: socketPath)
+    func call(_ method: String, _ params: JSONValue = .object([:]), responseTimeout: Int = 30) async throws -> JSONValue {
+        try await RuntimeClient.call(IPCRequest(method, params: params), socketPath: socketPath, responseTimeout: responseTimeout)
     }
+    /// Creating a worktree waits for Git's checkout and the folder's setup script.
+    static let worktreeSetupResponseTimeout = 1_260
     /// Whether a session's terminal is waiting at its own prompt. An
     /// unreachable service counts as active so closing still asks first.
     func terminalActivity(_ sessionID: UUID) async -> TerminalActivity {
