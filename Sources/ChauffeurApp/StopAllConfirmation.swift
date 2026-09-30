@@ -62,17 +62,18 @@ import SwiftUI
         alert.addButton(withTitle: "Cancel").keyEquivalent = "\u{1b}"
         present()
     }
-    /// Agents are the sessions worth keeping; open shells are called out apart
-    /// because they also survive the quit and are easy to forget.
+    /// A short list readable at a glance. Open shells get their own line because
+    /// they also survive the quit and are easy to forget.
     static func appQuitMessage(agentCount: Int, terminalCount: Int) -> String {
-        let terminals = "\(terminalCount) open terminal\(terminalCount == 1 ? "" : "s")"
-        let sessions = agentCount > 0
-            ? "\(agentCount) active session\(agentCount == 1 ? "" : "s") will keep running."
-            : "No agent sessions are running, but \(terminals) will keep running."
-        let leftover = agentCount > 0 && terminalCount > 0
-            ? " \(terminals) will also stay open in the background; close \(terminalCount == 1 ? "it" : "them") first if you no longer need \(terminalCount == 1 ? "it" : "them")."
-            : agentCount == 0 ? " Close \(terminalCount == 1 ? "it" : "them") first if you no longer need \(terminalCount == 1 ? "it" : "them")." : ""
-        return sessions + leftover + " The background service and menu bar icon will stay available so you can reopen your sessions."
+        var lines = ["These will keep running in the background:"]
+        if agentCount > 0 { lines.append("• \(agentCount) agent session\(agentCount == 1 ? "" : "s")") }
+        if terminalCount > 0 {
+            let pronoun = terminalCount == 1 ? "it" : "them"
+            lines.append("• \(terminalCount) open terminal\(terminalCount == 1 ? "" : "s") — close \(pronoun) first if you don’t need \(pronoun)")
+        }
+        lines.append("")
+        lines.append("The background service and menu bar icon stay available so you can reopen your sessions.")
+        return lines.joined(separator: "\n")
     }
     func showServiceQuit(hasRunningSessions: Bool, completion: @escaping (Choice) -> Void) {
         self.completion = completion
