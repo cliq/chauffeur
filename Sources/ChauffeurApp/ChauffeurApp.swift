@@ -161,7 +161,8 @@ import ChauffeurCore
             guard !active.isEmpty else { await finishQuitting(sender); return }
             let prompt = QuitConfirmation()
             quitConfirmation = prompt
-            prompt.showAppQuit(sessionCount: active.count) { [weak self] choice in
+            let agents = active.filter(\.launch.preset.kind.isAgent).count
+            prompt.showAppQuit(agentCount: agents, terminalCount: active.count - agents) { [weak self] choice in
                 guard let self else { return }
                 self.quitConfirmation = nil
                 switch choice {

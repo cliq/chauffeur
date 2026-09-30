@@ -52,15 +52,27 @@ import SwiftUI
     private var completion: ((Choice) -> Void)?
     private var choices: [Choice] = [.keepRunning, .cancel, .forceQuit]
 
-    func showAppQuit(sessionCount: Int, completion: @escaping (Choice) -> Void) {
+    func showAppQuit(agentCount: Int, terminalCount: Int, completion: @escaping (Choice) -> Void) {
         self.completion = completion
         choices = [.keepRunning, .review, .cancel]
         alert.messageText = "Quit Chauffeur?"
-        alert.informativeText = "\(sessionCount) active session\(sessionCount == 1 ? "" : "s") will keep running. The background service and menu bar icon will stay available so you can reopen your sessions."
+        alert.informativeText = Self.appQuitMessage(agentCount: agentCount, terminalCount: terminalCount)
         alert.addButton(withTitle: "Quit and Keep All Terminals Running")
         alert.addButton(withTitle: "Review Sessions")
         alert.addButton(withTitle: "Cancel").keyEquivalent = "\u{1b}"
         present()
+    }
+    /// Agents are the sessions worth keeping; open shells are called out apart
+    /// because they also survive the quit and are easy to forget.
+    static func appQuitMessage(agentCount: Int, terminalCount: Int) -> String {
+        let terminals = "\(terminalCount) open terminal\(terminalCount == 1 ? "" : "s")"
+        let sessions = agentCount > 0
+            ? "\(agentCount) active session\(agentCount == 1 ? "" : "s") will keep running."
+            : "No agent sessions are running, but \(terminals) will keep running."
+        let leftover = agentCount > 0 && terminalCount > 0
+            ? " \(terminals) will also stay open in the background; close \(terminalCount == 1 ? "it" : "them") first if you no longer need \(terminalCount == 1 ? "it" : "them")."
+            : agentCount == 0 ? " Close \(terminalCount == 1 ? "it" : "them") first if you no longer need \(terminalCount == 1 ? "it" : "them")." : ""
+        return sessions + leftover + " The background service and menu bar icon will stay available so you can reopen your sessions."
     }
     func showServiceQuit(hasRunningSessions: Bool, completion: @escaping (Choice) -> Void) {
         self.completion = completion

@@ -409,15 +409,30 @@ private struct ProjectWindowContent: View, Equatable {
             }.padding(.horizontal, 12).padding(.top, 8)
         }
     }
-    /// Sessions still running in a checkout. Green means working; the orange
+    /// Agents still running in a checkout. Green means working; the orange
     /// attention badge beside it means waiting on the user.
     @ViewBuilder private func liveBadge(_ count: Int) -> some View {
         if count > 0 {
             Text("\(count)").font(.caption2).fontWeight(.semibold).foregroundStyle(.green)
                 .padding(.horizontal, 6).padding(.vertical, 1).background(.green.opacity(0.18), in: Capsule())
-                .help("\(count) live session\(count == 1 ? "" : "s")")
-                .accessibilityLabel("\(count) live sessions")
+                .help("\(count) live agent session\(count == 1 ? "" : "s")")
+                .accessibilityLabel("\(count) live agent sessions")
         }
+    }
+    /// Open plain shells get a quiet glyph without a count so they never read as agent work.
+    @ViewBuilder private func terminalIndicator(_ count: Int) -> some View {
+        if count > 0 {
+            Image(systemName: "apple.terminal").font(.caption2).foregroundStyle(.secondary)
+                .help("\(count) open terminal\(count == 1 ? "" : "s")")
+                .accessibilityLabel("\(count) open terminals")
+        }
+    }
+    private func checkoutSummary(_ sessions: [Session], agents: Int, terminals: Int) -> String {
+        var parts: [String] = []
+        if agents > 0 { parts.append("\(agents) live") }
+        if terminals > 0 { parts.append("\(terminals) terminal\(terminals == 1 ? "" : "s")") }
+        if !parts.isEmpty { return parts.joined(separator: " · ") }
+        return sessions.isEmpty ? "No sessions" : "\(sessions.count) finished"
     }
     @ViewBuilder private func badge(_ count: Int) -> some View {
         if count > 0 {
@@ -484,7 +499,8 @@ private struct ProjectWindowContent: View, Equatable {
     }
     private func checkoutRow(_ row: CheckoutRow, folder: ProjectFolder, project: Project, showsRepository: Bool = false) -> some View {
         let sessions = sessions(in: folder, path: row.path)
-        let live = WorktreeSessions.live(sessions).count
+        let live = WorktreeSessions.liveAgents(sessions).count
+        let terminals = WorktreeSessions.liveTerminals(sessions).count
         let selected = layout.selectedFolderID == folder.id && layout.selectedWorktreePath.map { projectModel.canonical($0) == projectModel.canonical(row.path) } == true
         return Button { selectCheckout(folderID: folder.id, path: row.path) } label: {
             Label {
@@ -511,6 +527,7 @@ private struct ProjectWindowContent: View, Equatable {
                         if let status = row.statusLabel { Text(status).font(.caption).foregroundStyle(.secondary) }
                     }
                     Spacer(minLength: 4)
+                    terminalIndicator(terminals)
                     liveBadge(live)
                     badge(WorktreeSessions.attentionCount(sessions))
                 }
@@ -704,7 +721,8 @@ private struct ProjectWindowContent: View, Equatable {
             }
             List(rows) { row in
                 let sessions = sessions(in: folder, path: row.path)
-                let live = WorktreeSessions.live(sessions).count
+                let live = WorktreeSessions.liveAgents(sessions).count
+                let terminals = WorktreeSessions.liveTerminals(sessions).count
                 HStack(alignment: .center, spacing: 12) {
                     Image(systemName: row.isMain ? "house" : "arrow.triangle.branch").foregroundStyle(.secondary)
                     VStack(alignment: .leading, spacing: 2) {
@@ -713,7 +731,7 @@ private struct ProjectWindowContent: View, Equatable {
                         if let status = row.statusLabel { Text(status).font(.caption).foregroundStyle(.secondary) }
                     }
                     Spacer()
-                    Text(live == 0 ? (sessions.isEmpty ? "No sessions" : "\(sessions.count) finished") : "\(live) live").font(.caption).foregroundStyle(.secondary)
+                    Text(checkoutSummary(sessions, agents: live, terminals: terminals)).font(.caption).foregroundStyle(.secondary)
                     badge(WorktreeSessions.attentionCount(sessions))
                     Button("Open") { selectCheckout(folderID: folder.id, path: row.path) }.controlSize(.small)
                 }.padding(.vertical, 4)

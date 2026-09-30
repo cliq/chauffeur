@@ -65,8 +65,7 @@ import ChauffeurCore
             menu.addItem(withTitle: "No active sessions", action: nil, keyEquivalent: "").isEnabled = false
         }
         for entry in entries {
-            let count = entry.sessionCount
-            let item = menu.addItem(withTitle: "\(entry.name) — \(count) active \(count == 1 ? "session" : "sessions")", action: #selector(openProject(_:)), keyEquivalent: "")
+            let item = menu.addItem(withTitle: "\(entry.name) — \(Self.summary(entry))", action: #selector(openProject(_:)), keyEquivalent: "")
             item.target = self
             item.representedObject = entry.route.url
         }
@@ -78,6 +77,13 @@ import ChauffeurCore
         let quit = menu.addItem(withTitle: "Quit Chauffeur...", action: #selector(quitApp), keyEquivalent: "")
         quit.target = self
         quit.toolTip = "Quit the app and background service."
+    }
+
+    /// Only agents count as active sessions; a project with nothing but shells says so instead.
+    static func summary(_ entry: ActiveProject) -> String {
+        let agents = entry.agentCount, terminals = entry.terminalCount
+        if agents > 0 { return "\(agents) active \(agents == 1 ? "session" : "sessions")" }
+        return "\(terminals) open \(terminals == 1 ? "terminal" : "terminals")"
     }
 
     @objc private func openProject(_ sender: NSMenuItem) {

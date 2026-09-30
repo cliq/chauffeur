@@ -3,9 +3,9 @@ import Testing
 @testable import ChauffeurCore
 
 struct ActiveProjectTests {
-    private func session(_ project: Project, state: SessionState = .running, age: TimeInterval = 0) -> Session {
+    private func session(_ project: Project, state: SessionState = .running, age: TimeInterval = 0, kind: CLIKind = .codex) -> Session {
         let set = PresetSet(name: "Set")
-        let preset = AgentPreset(setID: set.id, name: "Agent", kind: .codex, executable: "/bin/cat", configurationDirectory: "/tmp")
+        let preset = AgentPreset(setID: set.id, name: "Agent", kind: kind, executable: "/bin/cat", configurationDirectory: "/tmp")
         var session = Session(projectID: project.id, groupID: project.groups[0].id, title: "Session",
             launch: LaunchSnapshot(preset: preset, set: set, executablePath: "/bin/cat", executableVersion: "1", workingDirectory: "/tmp", additionalPaths: []), folderID: UUID())
         session.state = state
@@ -24,7 +24,8 @@ struct ActiveProjectTests {
         let entries = ActiveProject.entries(projects: [beta, ended, empty, alpha],
             sessions: live + finished + [session(beta), session(orphan)], windows: [])
         #expect(entries.map(\.name) == ["Alpha", "Beta"])
-        #expect(entries.map(\.sessionCount) == [5, 1])
+        #expect(entries.map(\.agentCount) == [5, 1])
+        #expect(entries.map(\.terminalCount) == [0, 0])
         #expect(entries[0].route.projectID == alpha.id)
         #expect(live.contains { $0.id == entries[0].route.sessionID })
         #expect(ActiveProject.entries(projects: [empty], sessions: [], windows: []).isEmpty)
@@ -41,6 +42,20 @@ struct ActiveProjectTests {
         selected.state = .exited
         let fallback = ActiveProject.entries(projects: [project], sessions: [selected, older], windows: [window])
         #expect(fallback.first?.route.sessionID == older.id)
-        #expect(fallback.first?.sessionCount == 1)
+        #expect(fallback.first?.agentCount == 1)
+    }
+
+    @Test func countsTerminalsApartAndOpensAnAgentByDefault() {
+        let project = Project(name: "Project", presetSetID: UUID())
+        let shell = session(project, age: 1, kind: .shell)
+        let agent = session(project, age: 2)
+        let mixed = ActiveProject.entries(projects: [project], sessions: [shell, agent], windows: [])
+        #expect(mixed.first?.agentCount == 1)
+        #expect(mixed.first?.terminalCount == 1)
+        #expect(mixed.first?.route.sessionID == agent.id)
+        let shellsOnly = ActiveProject.entries(projects: [project], sessions: [shell], windows: [])
+        #expect(shellsOnly.first?.agentCount == 0)
+        #expect(shellsOnly.first?.terminalCount == 1)
+        #expect(shellsOnly.first?.route.sessionID == shell.id)
     }
 }

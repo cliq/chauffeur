@@ -58,6 +58,9 @@ public enum WorktreeSessions {
         return candidates.first?.id
     }
     public static func live(_ sessions: [Session]) -> [Session] { sessions.filter(\.state.isLive) }
+    /// Live sessions split into agents and plain shells; checkout badges count only agents.
+    public static func liveAgents(_ sessions: [Session]) -> [Session] { live(sessions).filter(\.launch.preset.kind.isAgent) }
+    public static func liveTerminals(_ sessions: [Session]) -> [Session] { live(sessions).filter { !$0.launch.preset.kind.isAgent } }
     public static func finished(_ sessions: [Session]) -> [Session] { sessions.filter { !$0.state.isLive } }
     /// Sessions a checkout badge counts: only live work still needs attention,
     /// so a checkout left with finished sessions carries no badge.
