@@ -56,7 +56,8 @@ struct RootView: View {
 #Preview("First launch") {
     RootView(model: MobileAppModel(
         credentials: InMemoryCredentialStore(),
-        journal: InMemoryOperationJournal(),
+        makeJournal: { _ in InMemoryOperationJournal() },
+        defaults: nil,
         makeTerminalAdapter: MobileAppModel.defaultTerminalAdapterFactory(arguments: ["--fake-terminal"])
     ))
 }

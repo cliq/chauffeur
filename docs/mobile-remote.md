@@ -14,8 +14,8 @@ installations, credentials, and processes all remain on the Mac. The phone
 never runs a CLI or holds a checkout of its own.
 
 The phone and Mac must be on the same local network. There is no internet
-connectivity, relay, cloud account, or support for pairing with more than one
-Mac at a time.
+connectivity, relay, or cloud account. The phone can pair with several Macs and
+connects to one at a time.
 
 This is a proof of concept, not a finished feature. Final visual design, an
 optimized iPad layout, App Store distribution, project/preset editing,
@@ -91,15 +91,23 @@ On the phone, enter the Mac's address — either its IPv4 address or its
 Automatic discovery (Bonjour) is not used in the POC; address and port entry
 are manual.
 
+Paired Macs are listed on the connect screen. Tap one to connect to it; the
+phone closes the previous Mac's connection and terminal tabs first, and
+remembers the choice for the next launch. **Pair Another Mac…** adds one more;
+pairing a Mac that is already listed replaces its entry. Swipe a Mac to forget
+it on the phone; the Mac keeps its device record until you revoke it there.
+
 What each side stores:
 
 - The Mac keeps `<data root>/runtime/remote-access.json`, mode 0600 inside the
   0700 `runtime/` directory. It holds the raw pre-shared access key and, per
   device, a SHA-256 hash of that device's bearer token — never the token
   itself.
-- The phone keeps its device ID, device token, and the Mac's access key in the
-  Keychain, under a bundle-suffixed service name so Debug and Release builds
-  don't share credentials.
+- The phone keeps each paired Mac's device ID, device token, and access key in
+  one Keychain item, under a bundle-suffixed service name so Debug and Release
+  builds don't share credentials. A Mac saved by an earlier single-Mac build is
+  read from its old item and moved on the next save. Pending launches are
+  tracked per Mac.
 
 **Revoke** removes one device's record, closes its live connections, and
 detaches its terminals, without affecting the access key or other devices.

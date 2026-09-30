@@ -2,12 +2,13 @@ import SwiftUI
 import ChauffeurRemoteProtocol
 import ChauffeurRemoteClient
 
-/// 01 / Connect to Mac. A saved host reconnects directly; otherwise enter the address and pair.
+/// 01 / Connect to Mac. Paired Macs are listed to choose from; a new one pairs with a code.
 struct ConnectView: View {
     @Bindable var model: MobileAppModel
     @State private var host = ""
     @State private var portText = String(MobileAppModel.defaultPort)
     @State private var showPairing = false
+    @State private var pairingAnother = false
 
     private var port: Int {
         Int(portText.trimmingCharacters(in: .whitespaces)) ?? MobileAppModel.defaultPort
@@ -16,6 +17,8 @@ struct ConnectView: View {
     private var canPair: Bool {
         !host.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !model.isPairing
     }
+
+    private var showsPairingFields: Bool { model.savedHosts.isEmpty || pairingAnother }
 
     var body: some View {
         Form {
@@ -29,25 +32,19 @@ struct ConnectView: View {
                 .padding(.vertical, 4)
             }
 
-            if let saved = model.savedHost {
-                Section("Saved Mac") {
-                    HStack {
-                        Image(systemName: "desktopcomputer")
-                            .font(.title2)
-                            .foregroundStyle(.tint)
-                        VStack(alignment: .leading) {
-                            Text(saved.name).font(.headline)
-                            Text("\(saved.host):\(saved.port)")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
+            if !model.savedHosts.isEmpty {
+                Section {
+                    ForEach(model.savedHosts) { saved in
+                        SavedHostRow(model: model, saved: saved)
                     }
-                    Button("Forget this Mac", role: .destructive) {
-                        model.forget()
-                    }
-                    .accessibilityIdentifier("connect-forget")
+                } header: {
+                    Text("Paired Macs")
+                } footer: {
+                    Text("Tap a Mac to connect. Swipe to forget it.")
                 }
-            } else {
+            }
+
+            if showsPairingFields {
                 Section {
                     TextField("Mac address (e.g. leos-mac.local)", text: $host)
                         .textInputAutocapitalization(.never)
@@ -58,7 +55,7 @@ struct ConnectView: View {
                         .keyboardType(.numberPad)
                         .accessibilityIdentifier("connect-port")
                 } header: {
-                    Text("Mac address")
+                    Text(model.savedHosts.isEmpty ? "Mac address" : "Pair another Mac")
                 } footer: {
                     Text("Enable Remote Access in the Mac's Settings, then pair with the code it shows. Pairing uses port \(String(port + 1)).")
                 }
@@ -80,22 +77,7 @@ struct ConnectView: View {
             }
 
             Section {
-                if model.savedHost != nil {
-                    Button {
-                        Task { await model.connect() }
-                    } label: {
-                        HStack {
-                            if model.isConnecting {
-                                ProgressView()
-                            }
-                            Text(model.isConnecting ? "Connecting…" : "Connect")
-                        }
-                        .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(model.isConnecting)
-                    .accessibilityIdentifier("connect-button")
-                } else {
+                if showsPairingFields {
                     Button {
                         showPairing = true
                     } label: {
@@ -110,6 +92,30 @@ struct ConnectView: View {
                     .buttonStyle(.borderedProminent)
                     .disabled(!canPair)
                     .accessibilityIdentifier("connect-pair")
+                    if pairingAnother {
+                        Button("Cancel") { pairingAnother = false }
+                            .frame(maxWidth: .infinity)
+                    }
+                } else {
+                    if let saved = model.savedHost {
+                        Button {
+                            Task { await model.connect() }
+                        } label: {
+                            HStack {
+                                if model.isConnecting {
+                                    ProgressView()
+                                }
+                                Text(model.isConnecting ? "Connecting…" : "Connect to \(saved.name)")
+                            }
+                            .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(model.isConnecting)
+                        .accessibilityIdentifier("connect-button")
+                    }
+                    Button("Pair Another Mac…") { pairingAnother = true }
+                        .frame(maxWidth: .infinity)
+                        .accessibilityIdentifier("connect-pair-another")
                 }
             }
             .listRowBackground(Color.clear)
@@ -117,7 +123,10 @@ struct ConnectView: View {
         .navigationTitle("Chauffeur")
         .sheet(isPresented: $showPairing) {
             PairingSheet { code in
-                Task { await model.pair(host: host, port: port, code: code) }
+                Task {
+                    await model.pair(host: host, port: port, code: code)
+                    if model.connectError == nil { pairingAnother = false; host = "" }
+                }
             }
         }
     }
@@ -127,6 +136,55 @@ struct ConnectView: View {
         if model.connectError == mismatch { return true }
         if case .unavailable(let message) = model.connectionState, message == mismatch { return true }
         return false
+    }
+}
+
+/// One paired Mac. The selected Mac shows its connection; tapping any Mac connects to it.
+private struct SavedHostRow: View {
+    @Bindable var model: MobileAppModel
+    let saved: SavedHost
+
+    private var isSelected: Bool { saved.hostID == model.selectedHostID }
+
+    var body: some View {
+        Button {
+            if isSelected, model.isConnected {
+                model.path = [.sessions]
+            } else {
+                Task { await model.connect(to: saved.hostID) }
+            }
+        } label: {
+            HStack {
+                Image(systemName: "desktopcomputer")
+                    .font(.title2)
+                    .foregroundStyle(.tint)
+                VStack(alignment: .leading) {
+                    Text(saved.name).font(.headline)
+                    Text("\(saved.host):\(String(saved.port))")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                if isSelected {
+                    switch model.connectionState {
+                    case .connecting: ProgressView()
+                    case .connected: Image(systemName: "circle.fill").font(.caption).foregroundStyle(.green).accessibilityLabel("Connected")
+                    default: Image(systemName: "checkmark").foregroundStyle(.tint).accessibilityLabel("Selected")
+                    }
+                }
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(model.isConnecting)
+        .swipeActions {
+            Button("Forget", role: .destructive) { model.forget(saved.hostID) }
+                .accessibilityIdentifier("connect-forget")
+        }
+        .contextMenu {
+            Button("Forget This Mac", systemImage: "trash", role: .destructive) { model.forget(saved.hostID) }
+        }
+        .accessibilityIdentifier("saved-host.\(saved.name)")
     }
 }
 
@@ -236,7 +294,8 @@ struct PairingSheet: View {
     NavigationStack {
         ConnectView(model: MobileAppModel(
             credentials: InMemoryCredentialStore(),
-            journal: InMemoryOperationJournal(),
+            makeJournal: { _ in InMemoryOperationJournal() },
+            defaults: nil,
             makeTerminalAdapter: MobileAppModel.defaultTerminalAdapterFactory(arguments: ["--fake-terminal"])
         ))
     }

@@ -36,8 +36,9 @@ enum LaunchOutcome {
     case failed(message: String, worktreeCreated: Bool)
 }
 
-/// The app coordinator: one saved Mac, its `RemoteHostSession`, the navigation path, and the
-/// terminal tabs open on this phone. Views read connection state and inventory through here.
+/// The app coordinator: the paired Macs, the `RemoteHostSession` for the selected one, the
+/// navigation path, and the terminal tabs open on this phone. Views read connection state and
+/// inventory through here.
 @MainActor
 @Observable
 final class MobileAppModel {
@@ -58,7 +59,11 @@ final class MobileAppModel {
         #endif
     }()
 
-    private(set) var savedHost: SavedHost?
+    /// Every paired Mac, in pairing order.
+    private(set) var savedHosts: [SavedHost] = []
+    /// The Mac this phone connects to, remembered across launches.
+    private(set) var selectedHostID: UUID?
+    var savedHost: SavedHost? { savedHosts.first { $0.hostID == selectedHostID } }
     private(set) var session: RemoteHostSession?
     /// Pairing and credential errors; connection errors come from `session.connectionState`.
     var connectError: String?
@@ -74,7 +79,10 @@ final class MobileAppModel {
 
     @ObservationIgnored let credentials: any CredentialStore
     @ObservationIgnored let makeTerminalAdapter: @MainActor () -> any TerminalEngineAdapter
-    @ObservationIgnored private let journal: any PendingOperationJournal
+    @ObservationIgnored private let makeJournal: (UUID) -> any PendingOperationJournal
+    /// Where the selected Mac is remembered; `nil` keeps it for this model only.
+    @ObservationIgnored private let defaults: UserDefaults?
+    private static let selectedHostKey = "chauffeur.remote.selectedHostID"
     @ObservationIgnored private var adapters: [UUID: any TerminalEngineAdapter] = [:]
     @ObservationIgnored private var previewInventory: InventorySnapshot?
     @ObservationIgnored private var previewConnectionState: HostConnectionState?
@@ -84,14 +92,20 @@ final class MobileAppModel {
             primary: KeychainCredentialStore(service: MobileAppModel.keychainService),
             fallback: FileCredentialStore()
         ),
-        journal: any PendingOperationJournal = UserDefaultsOperationJournal(),
+        makeJournal: @escaping (UUID) -> any PendingOperationJournal = { UserDefaultsOperationJournal.forHost($0) },
+        defaults: UserDefaults? = .standard,
         makeTerminalAdapter: @escaping @MainActor () -> any TerminalEngineAdapter
     ) {
         self.credentials = credentials
-        self.journal = journal
+        self.makeJournal = makeJournal
+        self.defaults = defaults
         self.makeTerminalAdapter = makeTerminalAdapter
         do {
-            savedHost = try credentials.loadAll().first
+            savedHosts = try credentials.loadAll()
+            let remembered = defaults?.string(forKey: Self.selectedHostKey).flatMap(UUID.init(uuidString:))
+            selectedHostID = savedHosts.contains { $0.hostID == remembered } ? remembered : savedHosts.first?.hostID
+            // Earlier builds paired one Mac and journaled its pending launches without a host.
+            if let defaults, savedHosts.count == 1 { UserDefaultsOperationJournal.migrateSharedJournal(to: savedHosts[0].hostID, defaults: defaults) }
         } catch CredentialStoreError.keychain(let status) {
             connectError = "The keychain is unavailable (status \(String(status))). Pairing will work but may not be remembered."
         } catch {
@@ -190,7 +204,7 @@ final class MobileAppModel {
 
     // MARK: - Connection
 
-    /// Connects to the saved Mac. `RemoteHostSession.connect()` reconciles pending launches and
+    /// Connects to the selected Mac. `RemoteHostSession.connect()` reconciles pending launches and
     /// refreshes the inventory before returning.
     func connect() async {
         guard let savedHost else {
@@ -198,7 +212,8 @@ final class MobileAppModel {
             return
         }
         connectError = nil
-        let session = self.session ?? RemoteHostSession(host: savedHost, journal: journal)
+        if let session, session.savedHost.hostID != savedHost.hostID { replaceSession() }
+        let session = self.session ?? RemoteHostSession(host: savedHost, journal: makeJournal(savedHost.hostID))
         self.session = session
         let wasConnected = isConnected
         await session.connect()
@@ -231,7 +246,10 @@ final class MobileAppModel {
                 deviceName: UIDevice.current.name
             )
             try credentials.save(paired)
-            replaceHost(with: paired)
+            savedHosts = try credentials.loadAll()
+            // A re-paired Mac keeps its ID but has a new device token.
+            replaceSession()
+            select(paired.hostID)
             await connect()
         } catch let error as RemoteClientError {
             connectError = error.userMessage
@@ -240,16 +258,33 @@ final class MobileAppModel {
         }
     }
 
-    /// Removes the saved Mac and its credentials; the Mac keeps its own device record.
-    func forget() {
-        session?.disconnect()
-        tearDownTerminals()
-        session = nil
-        let forgotten = savedHost
-        savedHost = nil
+    /// Chooses the Mac to connect to, closing the connection and tabs of the previous one.
+    func select(_ hostID: UUID) {
+        guard hostID != selectedHostID, savedHosts.contains(where: { $0.hostID == hostID }) else { return }
+        replaceSession()
         path = []
+        connectError = nil
+        selectedHostID = hostID
+        defaults?.set(hostID.uuidString, forKey: Self.selectedHostKey)
+    }
+
+    /// Selects a paired Mac and connects to it.
+    func connect(to hostID: UUID) async {
+        select(hostID)
+        await connect()
+    }
+
+    /// Removes a paired Mac and its credentials; the Mac keeps its own device record.
+    func forget(_ hostID: UUID) {
+        if hostID == selectedHostID {
+            replaceSession()
+            path = []
+            selectedHostID = nil
+            defaults?.removeObject(forKey: Self.selectedHostKey)
+        }
         do {
-            if let forgotten { try credentials.remove(hostID: forgotten.hostID) }
+            try credentials.remove(hostID: hostID)
+            savedHosts.removeAll { $0.hostID == hostID }
             connectError = nil
         } catch {
             connectError = "The saved Mac could not be removed: \(error)"
@@ -488,11 +523,10 @@ final class MobileAppModel {
 
     // MARK: - Private
 
-    private func replaceHost(with host: SavedHost) {
+    private func replaceSession() {
         session?.disconnect()
         tearDownTerminals()
         session = nil
-        savedHost = host
     }
 
     private func tearDownTerminals() {
@@ -519,7 +553,8 @@ final class MobileAppModel {
         let host = fixtureHost()
         let model = MobileAppModel(
             credentials: InMemoryCredentialStore(hosts: [host]),
-            journal: InMemoryOperationJournal(),
+            makeJournal: { _ in InMemoryOperationJournal() },
+            defaults: nil,
             makeTerminalAdapter: { FakeTerminalEngineAdapter() }
         )
         model.previewInventory = fixtureInventory(hostName: host.name)
