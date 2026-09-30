@@ -37,6 +37,7 @@ import ChauffeurCore
         defer { progress = nil }
         do {
             if let creation {
+                model.watchSetupRun(creation.retryKey)
                 let worktree = try await model.call("createWorktree", .from(creation), responseTimeout: AppModel.worktreeSetupResponseTimeout).decode(Stored<Worktree>.self).value
                 guard worktree.registered, worktree.availability == .available else { throw ChauffeurError("worktree_unavailable", "This worktree is no longer registered or available. Choose another checkout") }
                 createdWorktree = worktree

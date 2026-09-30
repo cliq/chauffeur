@@ -83,11 +83,15 @@ working directory. `$WORKTREE` holds the new checkout's path and `$MAIN_REPO` th
 main checkout's path, for example `cp "$MAIN_REPO/.env" .env`.
 
 The new worktree appears in the sidebar as soon as Git creates it, while its
-setup script is still running.
+setup script is still running. When you create a worktree or choose **Run Setup
+Script** in the app, a small floating window follows the script's output. It
+closes itself shortly after the script succeeds. Worktrees that agents create
+run the script without the window.
 
 A script that exits with a non-zero status, or runs longer than 10 minutes,
-stops the launch. The checkout and its record are kept, and the error shows the
-end of the script's output. Retrying the same creation returns the kept checkout
+stops the launch. The checkout and its record are kept, the window stays open
+with the full output until you dismiss it, and the error shows the end of the
+output. Retrying the same creation returns the kept checkout
 without running the script again. Fix the script, then choose **Run Setup
 Script** from the worktree's context menu to run it again in that checkout. The
 same action works for any linked worktree of the repository, but not for its

@@ -45,6 +45,10 @@ struct WorktreeCreationTests {
         }
         let recorded = try #require(await fixture.runtime.store.current().worktrees.first?.value)
         #expect(recorded.id == request.retryKey)
+        // The app follows the run by the creation's retry key.
+        let run = try #require(await fixture.runtime.snapshot()["worktreeSetups"].decode([WorktreeSetupRun].self).first { $0.id == request.retryKey })
+        #expect(run.status == .failed && run.path == recorded.path && run.message?.contains("status 3") == true)
+        #expect(try String(contentsOfFile: run.logPath, encoding: .utf8).contains("missing ready file"))
         // A retry returns the retained checkout without running setup again.
         #expect(try await fixture.runtime.createWorktree(request).value.id == recorded.id)
         let runs = fixture.root.appendingPathComponent("setup-runs")
@@ -78,6 +82,8 @@ struct WorktreeCreationTests {
         }
         let entry = try #require(listed)
         #expect(entry.availability == .available && entry.hasUncommittedChanges == false)
+        let runs = try await fixture.runtime.snapshot()["worktreeSetups"].decode([WorktreeSetupRun].self)
+        #expect(runs.map(\.status) == [.running] && runs.first?.path == entry.path)
         FileManager.default.createFile(atPath: fixture.root.appendingPathComponent("release-setup").path, contents: nil)
         #expect(try await creation.value.value.path == entry.path)
     }

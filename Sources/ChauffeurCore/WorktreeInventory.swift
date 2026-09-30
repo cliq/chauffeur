@@ -153,3 +153,20 @@ public struct WorktreeDeletionPreview: Codable, Equatable, Sendable {
         return items
     }
 }
+
+/// One run of a folder's setup script in a worktree. The runtime keeps recent
+/// runs in its snapshot; `logPath` holds the script's combined output so far.
+public struct WorktreeSetupRun: Codable, Equatable, Sendable, Identifiable {
+    public enum Status: String, Codable, Sendable { case running, succeeded, failed }
+    public var id: UUID
+    public var path: String
+    public var logPath: String
+    public var status: Status
+    public var startedAt: Date
+    public var finishedAt: Date?
+    /// Why a failed run failed, including the end of its output.
+    public var message: String?
+    public init(id: UUID, path: String, logPath: String, status: Status = .running, startedAt: Date = Date()) {
+        self.id = id; self.path = path; self.logPath = logPath; self.status = status; self.startedAt = startedAt
+    }
+}

@@ -38,6 +38,9 @@ public actor RuntimeCoordinator {
     private let logs: RuntimeLogStore?
     private var metadataErrors: [ChauffeurError] = []
     private var repositoryInventories: [RepositoryInventory] = []
+    /// Recent setup script runs, shown by the app while they run or after they fail.
+    private var worktreeSetups: [UUID: WorktreeSetupRun] = [:]
+    private var setupLogDirectory: URL { root.appendingPathComponent("runtime/worktree-setup") }
     /// Checkouts Chauffeur created that a finished scan has not observed yet.
     private var createdCheckouts: [(repositoryID: UUID, entry: GitWorktree)] = []
     private var worktreeScan: Task<Void, Never>?
@@ -178,7 +181,7 @@ public actor RuntimeCoordinator {
     }
     public func snapshot() async throws -> JSONValue {
         let snapshot = await store.refresh()
-        var object: [String: JSONValue] = ["store": try .from(snapshot), "sessions": try .from(Array(sessions.values).sorted { $0.createdAt < $1.createdAt }), "messages": try .from(await ledger.allMessages()), "delegations": try .from(await ledger.allDelegations()), "health": health(), "settings": try .from(settings), "notifications": try .from(await notificationStatus()), "snapshotStorage": try .from(snapshotStorage), "errors": try .from(recentErrors), "repositoryInventories": try .from(repositoryInventories)]
+        var object: [String: JSONValue] = ["store": try .from(snapshot), "sessions": try .from(Array(sessions.values).sorted { $0.createdAt < $1.createdAt }), "messages": try .from(await ledger.allMessages()), "delegations": try .from(await ledger.allDelegations()), "health": health(), "settings": try .from(settings), "notifications": try .from(await notificationStatus()), "snapshotStorage": try .from(snapshotStorage), "errors": try .from(recentErrors), "repositoryInventories": try .from(repositoryInventories), "worktreeSetups": try .from(worktreeSetups.values.sorted { $0.startedAt < $1.startedAt })]
         object["keepAwake"] = try .from(keepAwakeStatus())
         if let remoteAccess { object["remoteAccess"] = try .from(await remoteAccess.status()) }
         return .object(object)
@@ -729,7 +732,7 @@ public actor RuntimeCoordinator {
             guard let folder = snapshot.projects.first(where: { $0.value.id == projectID })?.value.folders.first(where: { $0.id == folderID && $0.registered }) else { throw ChauffeurError("missing_folder", "Select a registered repository") }
             let entries = try await worktrees.inventory(at: folder.canonicalPath)
             guard let entry = entries.dropFirst().first(where: { $0.path == path }), entry.availability == .available else { throw ChauffeurError("missing_worktree", "Path is not an available worktree of this repository", path: path) }
-            try await runWorktreeSetup(folder, at: entry.path)
+            try await runWorktreeSetup(folder, at: entry.path, runID: try optionalUUID(params, "runID") ?? UUID())
             return .object([:])
         case "removeWorktree":
             let snapshot = await store.current(), worktreeID = try params.uuid("worktreeID")
@@ -953,28 +956,55 @@ public actor RuntimeCoordinator {
         catch { throw ChauffeurError("worktree_registration", "The worktree was created but its record could not be saved. Refresh Git Inventory and register the retained checkout", path: worktree.path) }
         // Setup runs once, after the record exists: a retry returns the saved
         // checkout without repeating it, and a failure keeps the checkout.
-        try await runWorktreeSetup(folder, at: saved.value.path)
+        try await runWorktreeSetup(folder, at: saved.value.path, runID: saved.value.id)
         return saved
     }
     /// Longest a folder's setup script may run in a new worktree.
     static let worktreeSetupTimeout: TimeInterval = 600
     /// Runs the folder's setup script in the user's login shell with the
     /// checkout as its working directory and `$WORKTREE`/`$MAIN_REPO` set.
-    func runWorktreeSetup(_ folder: ProjectFolder, at path: String) async throws {
+    /// Its output goes to a log the app follows while `runID` is running.
+    func runWorktreeSetup(_ folder: ProjectFolder, at path: String, runID: UUID) async throws {
         guard folder.hasWorktreeSetupScript, let script = folder.worktreeSetupScript else { return }
         let shell = baseEnvironment["SHELL"].flatMap { $0.hasPrefix("/") ? $0 : nil } ?? "/bin/zsh"
         var environment = baseEnvironment
         for name in ["MAIN_REPO", "WORKTREE"] { environment.removeValue(forKey: name) }
         environment.merge(await checkoutEnvironment(path)) { _, new in new }
-        let result: CommandResult
-        do { result = try await ProcessRunner.run(shell, ["-l", "-c", script], directory: path, environment: environment, timeout: Self.worktreeSetupTimeout, keepOutputTail: true) }
-        catch let error as ChauffeurError where error.code == "command_timeout" {
-            throw ChauffeurError("worktree_setup_failed", "The worktree was created, but its setup script did not finish within \(Int(Self.worktreeSetupTimeout / 60)) minutes. Fix the script in Repository Settings, then choose Run Setup Script on the worktree", path: path)
+        pruneSetupRuns()
+        try FileManager.default.createDirectory(at: setupLogDirectory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        let log = setupLogDirectory.appendingPathComponent("\(runID.uuidString).log")
+        // Scripts may print copied secrets; only the user can read the log.
+        guard FileManager.default.createFile(atPath: log.path, contents: nil, attributes: [.posixPermissions: 0o600]) else {
+            throw ChauffeurError("worktree_setup_failed", "The setup script's log could not be created", path: log.path)
         }
-        guard result.status != 0 else { return }
-        let log = [result.error, result.output].map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.first { !$0.isEmpty }
-        let tail = log.map { "\n" + String($0.suffix(1500)) } ?? ""
-        throw ChauffeurError("worktree_setup_failed", "The worktree was created, but its setup script exited with status \(result.status). Fix the script in Repository Settings, then choose Run Setup Script on the worktree.\(tail)", path: path)
+        worktreeSetups[runID] = WorktreeSetupRun(id: runID, path: path, logPath: log.path)
+        let message: String
+        do {
+            // The shell writes straight to the log so the app can follow it live.
+            let result = try await ProcessRunner.run("/bin/sh", ["-c", #"exec "$0" -l -c "$1" >"$2" 2>&1"#, shell, script, log.path],
+                                                     directory: path, environment: environment, timeout: Self.worktreeSetupTimeout)
+            if result.status == 0 { finishSetupRun(runID, .succeeded); return }
+            let output = (try? String(contentsOf: log, encoding: .utf8))?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            message = "The worktree was created, but its setup script exited with status \(result.status). Fix the script in Repository Settings, then choose Run Setup Script on the worktree." + (output.isEmpty ? "" : "\n" + String(output.suffix(1500)))
+        } catch let error as ChauffeurError where error.code == "command_timeout" {
+            message = "The worktree was created, but its setup script did not finish within \(Int(Self.worktreeSetupTimeout / 60)) minutes. Fix the script in Repository Settings, then choose Run Setup Script on the worktree"
+        } catch {
+            finishSetupRun(runID, .failed, message: "The setup script could not run: \(error.localizedDescription)")
+            throw error
+        }
+        finishSetupRun(runID, .failed, message: message)
+        throw ChauffeurError("worktree_setup_failed", message, path: path)
+    }
+    private func finishSetupRun(_ id: UUID, _ status: WorktreeSetupRun.Status, message: String? = nil) {
+        worktreeSetups[id]?.status = status; worktreeSetups[id]?.finishedAt = Date(); worktreeSetups[id]?.message = message
+    }
+    /// Keeps finished runs for ten minutes, long enough for the app to show them.
+    private func pruneSetupRuns() {
+        let cutoff = Date().addingTimeInterval(-600)
+        for run in worktreeSetups.values where (run.finishedAt ?? .distantFuture) < cutoff {
+            worktreeSetups.removeValue(forKey: run.id)
+            try? FileManager.default.removeItem(atPath: run.logPath)
+        }
     }
     /// Stops the runtime's complete terminal inventory, including finished panes.
     /// Block new launches while cancelling startup and removing terminals.
@@ -1742,7 +1772,7 @@ public actor RuntimeCoordinator {
                     listCreatedCheckout(worktree)
                     try await saveWorktree(worktree); delegation.worktreeID = worktree.id
                     try await ledger.updateDelegation(delegation)
-                    try await runWorktreeSetup(folder, at: worktree.path)
+                    try await runWorktreeSetup(folder, at: worktree.path, runID: worktree.id)
                 }
                 _ = try await ledger.authenticate(token)
                 var request = LaunchRequest(projectID: caller.scope.projectID, groupID: caller.scope.groupID, presetID: delegation.presetID, folderID: delegation.folderID, title: String(delegation.task.prefix(100)), worktreeID: delegation.worktreeID, task: delegation.task, allowSharedCheckout: delegation.shareCheckout, coordinationEnabled: true, retryKey: delegation.childID)

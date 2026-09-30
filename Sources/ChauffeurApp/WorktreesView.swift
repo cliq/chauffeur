@@ -147,6 +147,7 @@ struct WorktreesView: View {
             creation = WorktreeCreationRequest(projectID: project.id, folderID: folderID, branch: branch, baseRef: baseRef, reuseExistingBranch: reuseExistingBranch)
         }
         guard let request = creation else { return }
+        model.watchSetupRun(request.retryKey)
         run {
             let created = try await model.call("createWorktree", .from(request), responseTimeout: AppModel.worktreeSetupResponseTimeout).decode(Stored<Worktree>.self).value
             worktreeCreated(created)

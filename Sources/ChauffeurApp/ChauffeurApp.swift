@@ -61,6 +61,10 @@ import ChauffeurCore
         Settings { SettingsView().modifier(AppWindowSetup()).environmentObject(model) }
             .defaultSize(width: 830, height: 550)
             .windowResizability(.contentMinSize)
+        WindowGroup("Setup Script", id: "worktree-setup", for: UUID.self) { $runID in
+            if let runID { WorktreeSetupWindow(runID: runID).tint(Color("AccentColor")).environmentObject(model) }
+        }
+        .windowResizability(.contentSize).windowLevel(.floating).restorationBehavior(.disabled).defaultLaunchBehavior(.suppressed)
         Window("Chauffeur Help", id: "help") {
             VStack(alignment: .leading, spacing: 18) {
                 Text("Your agents keep running").font(.title)
@@ -197,6 +201,7 @@ struct AppWindowSetup: ViewModifier {
     func body(content: Content) -> some View {
         content.tint(Color("AccentColor")).accentColor(Color("AccentColor")).onAppear {
             model.openProjectWindow = { id in openWindow(id: "project", value: id) }
+            model.openSetupWindow = { id in openWindow(id: "worktree-setup", value: id) }
             model.openWelcomeWindow = { openWindow(id: "welcome") }
             model.processPendingRoute()
         }

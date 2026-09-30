@@ -16,6 +16,7 @@ struct AppSnapshot: Decodable, Sendable {
     var snapshotStorage = SnapshotStorageStatus(budgetBytes: RetentionSettings().snapshotBudgetBytes)
     var errors: [ChauffeurError] = []
     var repositoryInventories: [RepositoryInventory]?
+    var worktreeSetups: [WorktreeSetupRun]?
     var notifications: NotificationStatus?
     var remoteAccess: RemoteAccessStatus?
     var keepAwake: KeepAwakeStatus?
@@ -65,6 +66,16 @@ struct AppSnapshot: Decodable, Sendable {
     private(set) var skipAutomaticWindowRestore = false
     var hasPendingNavigation: Bool { pendingWelcomeRoute || pendingSessionRoute != nil || pendingProjectRoute != nil || pendingFolderRoute != nil || folderSelection != nil || projectCreation != nil }
     var openProjectWindow: ((UUID) -> Void)?
+    var openSetupWindow: ((UUID) -> Void)?
+    /// Setup runs this app started; each opens its progress window when the runtime reports it.
+    private var watchedSetupRuns = Set<UUID>()
+    func watchSetupRun(_ id: UUID?) {
+        guard let id else { return }
+        watchedSetupRuns.insert(id); openWatchedSetupRuns()
+    }
+    private func openWatchedSetupRuns() {
+        for run in snapshot.worktreeSetups ?? [] where watchedSetupRuns.remove(run.id) != nil { openSetupWindow?(run.id) }
+    }
     var openWelcomeWindow: (() -> Void)?
     private var openedRouteID: UUID?
     func openSessionURL(_ url: URL) {
@@ -228,7 +239,7 @@ struct AppSnapshot: Decodable, Sendable {
     }
     /// Publishes only a changed snapshot: every window observing the model redraws on each assignment.
     private func apply(_ update: SnapshotUpdate) {
-        if let received = update.snapshot { snapshot = received; snapshotKey = update.key }
+        if let received = update.snapshot { snapshot = received; snapshotKey = update.key; openWatchedSetupRuns() }
         snapshotReceivedAt = Date()
     }
     private var serviceDiagnosticError: NSError?

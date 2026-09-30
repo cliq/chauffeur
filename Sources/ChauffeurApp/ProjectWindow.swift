@@ -961,9 +961,11 @@ private struct ProjectWindowContent: View, Equatable {
     }
     private func runSetup(in row: CheckoutRow, folder: ProjectFolder) {
         guard let project, runningSetup.insert(row.path).inserted else { return }
+        let runID = UUID()
+        model.watchSetupRun(runID)
         model.perform {
             defer { runningSetup.remove(row.path) }
-            _ = try await model.call("runWorktreeSetup", .object(["projectID": .string(project.id.uuidString), "folderID": .string(folder.id.uuidString), "path": .string(row.path)]), responseTimeout: AppModel.worktreeSetupResponseTimeout)
+            _ = try await model.call("runWorktreeSetup", .object(["projectID": .string(project.id.uuidString), "folderID": .string(folder.id.uuidString), "path": .string(row.path), "runID": .string(runID.uuidString)]), responseTimeout: AppModel.worktreeSetupResponseTimeout)
         }
     }
     private func showLaunch(folderID: UUID? = nil, worktreeID: UUID? = nil, newWorktree: Bool = false) {
