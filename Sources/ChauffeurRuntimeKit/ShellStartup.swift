@@ -4,13 +4,24 @@ import ChauffeurCore
 /// Keep team selection after zsh's login files, which commonly export a personal
 /// CODEX_HOME. Source the user's files normally; never edit them. Other shells
 /// receive the same child environment using their native startup behavior.
+/// Named directories (`~name`) are defined after the user's `.zshrc`.
 enum ShellStartup {
-    static func environment(executable: String, environment: [String: String], exports: [String: String], directory: URL) throws -> [String: String] {
-        guard URL(fileURLWithPath: executable).lastPathComponent == "zsh", !exports.isEmpty else { return environment }
+    static func isZsh(_ executable: String) -> Bool { URL(fileURLWithPath: executable).lastPathComponent == "zsh" }
+    /// The dimmed help at the top of a new shell: the team's exports, then the
+    /// checkout variables, then any named directories zsh defines for them.
+    static func preamble(exports: [String: String], checkout: [String: String], namedDirectories: [String: String]) -> String? {
+        let names = namedDirectories.keys.sorted().map { "~" + $0 }
+        let lines = [ShellAgentEnvironment.exportCommand(exports), ShellAgentEnvironment.exportCommand(checkout),
+                     names.isEmpty ? nil : "# zsh: cd " + names.joined(separator: " or cd ")].compactMap { $0 }
+        return lines.isEmpty ? nil : lines.joined(separator: "\n")
+    }
+    static func environment(executable: String, environment: [String: String], exports: [String: String], namedDirectories: [String: String] = [:], directory: URL) throws -> [String: String] {
+        guard isZsh(executable), !exports.isEmpty || !namedDirectories.isEmpty else { return environment }
         let manager = FileManager.default
         try manager.createDirectory(at: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
         let apply = ShellAgentEnvironment.exportCommand(exports) ?? ""
         let wrapper = ShellAgentEnvironment.shellQuoted(directory.path)
+        let names = namedDirectories.sorted { $0.key < $1.key }.map { "hash -d \($0.key)=\(ShellAgentEnvironment.shellQuoted($0.value))" }.joined(separator: "\n")
         let scripts = [
             ".zshenv": """
             unset ZDOTDIR
@@ -38,6 +49,7 @@ enum ShellStartup {
             _chauffeur_user_zdotdir="${ZDOTDIR:-$HOME}"
             export ZDOTDIR=\(wrapper)
             \(apply)
+            \(names)
             """,
             ".zlogin": """
             ZDOTDIR="$_chauffeur_user_zdotdir"

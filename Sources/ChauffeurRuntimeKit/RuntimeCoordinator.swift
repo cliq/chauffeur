@@ -1042,6 +1042,8 @@ public actor RuntimeCoordinator {
             var environment = try LaunchPolicy.environment(base: baseEnvironment, preset: preset, projectID: session.projectID, sessionID: session.id, token: token, configurationEnvironment: session.launch.configurationEnvironment, allowMissingConfiguration: session.launch.configurationUsesDefault == true)
             environment["CHAUFFEUR_SOCKET"] = root.appendingPathComponent("runtime/runtime.sock").path
             environment["CHAUFFEUR_CTL"] = ctlPath
+            let checkout = await checkoutEnvironment(session.launch.workingDirectory)
+            environment.merge(checkout) { _, checkout in checkout }
             let shellExports = isShell ? (session.launch.configurationEnvironment ?? shellAgentExports(project: project, snapshot: snapshot)) : [:]
             environment.merge(shellExports) { _, export in export }
             let coordination = !isShell && request.coordinationEnabled
@@ -1064,10 +1066,13 @@ public actor RuntimeCoordinator {
             if preset.kind == .kimi && coordination { environment["CHAUFFEUR_KIMI_TOKEN"] = token }
             try await persist(session)
             try Task.checkCancellation()
+            var preamble: String?
             if preset.kind == .shell {
-                environment = try ShellStartup.environment(executable: session.launch.executablePath, environment: environment, exports: shellExports, directory: root.appendingPathComponent("runtime/shell-startup/\(session.id)"))
+                let named = ShellStartup.isZsh(session.launch.executablePath) ? Self.namedDirectories(checkout) : [:]
+                environment = try ShellStartup.environment(executable: session.launch.executablePath, environment: environment, exports: shellExports, namedDirectories: named, directory: root.appendingPathComponent("runtime/shell-startup/\(session.id)"))
+                preamble = ShellStartup.preamble(exports: shellExports, checkout: checkout, namedDirectories: named)
             }
-            let pane = try await terminals.spawn(session: session, payload: ExecPayload(executable: session.launch.executablePath, arguments: native.arguments, environment: environment, directory: session.launch.workingDirectory, preamble: ShellAgentEnvironment.exportCommand(shellExports)), scrollback: settings.scrollbackLines)
+            let pane = try await terminals.spawn(session: session, payload: ExecPayload(executable: session.launch.executablePath, arguments: native.arguments, environment: environment, directory: session.launch.workingDirectory, preamble: preamble), scrollback: settings.scrollbackLines)
             try Task.checkCancellation()
             session.processID = pane.processID; session.terminalIdentity = pane.paneID; session.state = .activityUnknown
             try await persist(session)
@@ -1170,6 +1175,7 @@ public actor RuntimeCoordinator {
             var environment = try LaunchPolicy.environment(base: baseEnvironment, preset: preset, projectID: session.projectID, sessionID: sessionID, token: token, configurationEnvironment: session.launch.configurationEnvironment, allowMissingConfiguration: session.launch.configurationUsesDefault == true)
             environment["CHAUFFEUR_SOCKET"] = root.appendingPathComponent("runtime/runtime.sock").path
             environment["CHAUFFEUR_CTL"] = ctlPath
+            environment.merge(await checkoutEnvironment(session.launch.workingDirectory)) { _, checkout in checkout }
             let integration = root.appendingPathComponent("runtime/integration/\(session.id)")
             try FileManager.default.createDirectory(at: integration, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
             let coordination = session.launch.preset.integration != .unavailable
@@ -1189,6 +1195,21 @@ public actor RuntimeCoordinator {
         } catch {
             throw try await finishFailedStartup(session, error: error)
         }
+    }
+    /// `MAIN_REPO` names the repository's main checkout and `WORKTREE` the checkout
+    /// the session runs in, so a terminal can `cd "$MAIN_REPO"`. Each is unset when
+    /// it doesn't apply; `LaunchPolicy` strips inherited values.
+    private func checkoutEnvironment(_ directory: String) async -> [String: String] {
+        guard let roots = await worktrees.checkoutRoots(at: directory) else { return [:] }
+        var result = ["WORKTREE": roots.worktree]
+        result["MAIN_REPO"] = roots.main
+        return result
+    }
+    /// zsh sessions can also use `~main` and `~worktree`.
+    static func namedDirectories(_ checkout: [String: String]) -> [String: String] {
+        var result: [String: String] = [:]
+        result["main"] = checkout["MAIN_REPO"]; result["worktree"] = checkout["WORKTREE"]
+        return result
     }
     /// A changed executable is checked like a new launch and its version recorded.
     private func refreshExecutable(_ session: inout Session, to resolved: String, environment: [String: String], coordination: Bool) async throws {

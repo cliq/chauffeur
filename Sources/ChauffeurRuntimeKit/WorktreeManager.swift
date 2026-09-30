@@ -36,6 +36,15 @@ public actor WorktreeManager {
         let common = try await git(path, ["rev-parse", "--path-format=absolute", "--git-common-dir"])
         return Self.identifier(Paths.canonical(Self.line(common)))
     }
+    /// The checkout containing `path` and its repository's main checkout, or nil
+    /// outside a checkout. A bare repository or a submodule has no main checkout.
+    func checkoutRoots(at path: String) async -> (main: String?, worktree: String)? {
+        guard let output = try? await git(path, ["rev-parse", "--path-format=absolute", "--show-toplevel", "--git-common-dir"], timeout: 5) else { return nil }
+        let lines = output.split(separator: "\n").map(String.init)
+        guard lines.count == 2 else { return nil }
+        let common = URL(fileURLWithPath: Paths.canonical(lines[1]))
+        return (common.lastPathComponent == ".git" ? common.deletingLastPathComponent().path : nil, Paths.canonical(lines[0]))
+    }
     private static func line(_ output: String) -> String { output.hasSuffix("\n") ? String(output.dropLast()) : output }
     private static func identifier(_ value: String) -> UUID {
         let bytes = Array(SHA256.hash(data: Data(value.utf8)).prefix(16))
