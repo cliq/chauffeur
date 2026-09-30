@@ -6,6 +6,12 @@ import ChauffeurRemoteClient
 struct SessionsView: View {
     var model: MobileAppModel
     @State private var showingSettings = false
+    /// Mirrors the desktop sidebar's "Show terminal sessions"; off leaves only agents.
+    @AppStorage("sessions.showsTerminalSessions") private var showsTerminalSessions = true
+
+    private var visibleSessions: [SessionSummary] {
+        showsTerminalSessions ? model.liveSessions : model.liveSessions.filter { $0.kind != .shell }
+    }
 
     var body: some View {
         List {
@@ -40,16 +46,23 @@ struct SessionsView: View {
                     .accessibilityLabel("Settings")
                     .accessibilityIdentifier("settings.open")
                 }
+                Toggle("Show terminal sessions", isOn: $showsTerminalSessions)
+                    .accessibilityIdentifier("sessions.showTerminals")
             }
 
             if let inventory = model.inventory {
-                let activeProjectIDs = Set(model.liveSessions.map(\.projectID))
+                let sessions = visibleSessions
+                let activeProjectIDs = Set(sessions.map(\.projectID))
                 let projects = inventory.projects.filter { !$0.archived && activeProjectIDs.contains($0.id) }
                 if projects.isEmpty {
-                    ContentUnavailableView("No active sessions", systemImage: "terminal", description: Text("Tap + to start a new session."))
+                    if model.liveSessions.isEmpty {
+                        ContentUnavailableView("No active sessions", systemImage: "terminal", description: Text("Tap + to start a new session."))
+                    } else {
+                        ContentUnavailableView("No active agent sessions", systemImage: "terminal", description: Text("Terminal sessions are hidden."))
+                    }
                 } else {
                     ForEach(projects) { project in
-                        ProjectSection(model: model, inventory: inventory, project: project)
+                        ProjectSection(model: model, inventory: inventory, project: project, liveSessions: sessions)
                     }
                 }
             } else if model.isConnecting {
@@ -133,9 +146,10 @@ private struct ProjectSection: View {
     var model: MobileAppModel
     let inventory: InventorySnapshot
     let project: ProjectSummary
+    let liveSessions: [SessionSummary]
 
     private var sessions: [SessionSummary] {
-        model.liveSessions.filter { $0.projectID == project.id }
+        liveSessions.filter { $0.projectID == project.id }
     }
 
     /// Live sessions grouped by checkout path, in the order the project's folders list their
