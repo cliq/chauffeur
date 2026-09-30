@@ -502,9 +502,10 @@ private struct ProjectWindowContent: View, Equatable {
         let live = WorktreeSessions.liveAgents(sessions).count
         let terminals = WorktreeSessions.liveTerminals(sessions).count
         let selected = layout.selectedFolderID == folder.id && layout.selectedWorktreePath.map { projectModel.canonical($0) == projectModel.canonical(row.path) } == true
-        return Button { selectCheckout(folderID: folder.id, path: row.path) } label: {
-            Label {
-                HStack(alignment: .top) {
+        // Indicators sit outside the button: a button's own tooltip hides those of its label's subviews.
+        return HStack(alignment: .top, spacing: 4) {
+            Button { selectCheckout(folderID: folder.id, path: row.path) } label: {
+                Label {
                     VStack(alignment: .leading, spacing: 2) {
                         HStack(spacing: 4) {
                             Text(row.title).lineLimit(1)
@@ -526,22 +527,25 @@ private struct ProjectWindowContent: View, Equatable {
                         }.font(.caption).foregroundStyle(.secondary)
                         if let status = row.statusLabel { Text(status).font(.caption).foregroundStyle(.secondary) }
                     }
-                    Spacer(minLength: 4)
-                    terminalIndicator(terminals)
-                    liveBadge(live)
-                    badge(WorktreeSessions.attentionCount(sessions))
-                }
-            } icon: { Image(systemName: row.isMain ? "house" : "arrow.triangle.branch") }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 6).padding(.vertical, 4)
-            .background(selected ? Color.accentColor.opacity(0.2) : .clear, in: RoundedRectangle(cornerRadius: 6))
-            .contentShape(Rectangle())
-        }.buttonStyle(.plain).help(row.path)
-            .accessibilityIdentifier(row.isMain ? "repository.main.\(folder.id)" : "repository.worktree.\(row.path)")
-            .accessibilityAddTraits(selected ? .isSelected : [])
-            .accessibilityValue(selected ? "Selected worktree" : "")
-            .id(SidebarRowID.worktree(folder.id, row.path))
-            .contextMenu { checkoutMenu(row, folder: folder) }
+                } icon: { Image(systemName: row.isMain ? "house" : "arrow.triangle.branch") }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
+            }.buttonStyle(.plain).help(row.path)
+                .accessibilityIdentifier(row.isMain ? "repository.main.\(folder.id)" : "repository.worktree.\(row.path)")
+                .accessibilityAddTraits(selected ? .isSelected : [])
+                .accessibilityValue(selected ? "Selected worktree" : "")
+            HStack(spacing: 4) {
+                terminalIndicator(terminals)
+                liveBadge(live)
+                badge(WorktreeSessions.attentionCount(sessions))
+            }
+        }
+        .padding(.horizontal, 6).padding(.vertical, 4)
+        .background(selected ? Color.accentColor.opacity(0.2) : .clear, in: RoundedRectangle(cornerRadius: 6))
+        .contentShape(Rectangle())
+        .onTapGesture { selectCheckout(folderID: folder.id, path: row.path) }
+        .id(SidebarRowID.worktree(folder.id, row.path))
+        .contextMenu { checkoutMenu(row, folder: folder) }
     }
     @ViewBuilder private func checkoutMenu(_ row: CheckoutRow, folder: ProjectFolder) -> some View {
         Button("Launch Agent…") { launchAgent(in: row, folder: folder) }.disabled(!canLaunch(in: row))
