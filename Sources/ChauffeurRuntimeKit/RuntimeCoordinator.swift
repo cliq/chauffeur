@@ -734,15 +734,8 @@ public actor RuntimeCoordinator {
         case "removeWorktree":
             let snapshot = await store.current(), worktreeID = try params.uuid("worktreeID")
             guard var stored = snapshot.worktrees.first(where: { $0.value.id == worktreeID }) else { throw ChauffeurError("missing_worktree", "Worktree not found") }
+            if stored.value.managed { return try .from(await removeManagedWorktree(stored, in: snapshot)) }
             guard !worktreeRecordWrites.contains(worktreeID) else { throw ChauffeurError("worktree_busy", "Worktree metadata is being updated. Retry removal") }
-            if stored.value.managed {
-                let relatedIDs = Set(snapshot.worktrees.filter { Paths.canonical($0.value.path) == Paths.canonical(stored.value.path) || (stored.value.gitIdentity != nil && $0.value.gitIdentity == stored.value.gitIdentity) }.map { $0.value.id })
-                try checkoutClaims.beginRemoval(worktreeID, path: stored.value.path, worktreeIDs: relatedIDs, gitIdentity: stored.value.gitIdentity, sessions: Array(sessions.values))
-                defer { checkoutClaims.endRemoval(worktreeID) }
-                try await worktrees.remove(stored.value, liveSessions: Array(sessions.values))
-                stored.value.registered = false
-                return try .from(await saveWorktree(stored.value, expectedVersion: stored.version, finishingRemoval: true))
-            }
             stored.value.registered = false; return try .from(await saveWorktree(stored.value, expectedVersion: stored.version))
         case "saveSettings":
             let value = try params.decode(RetentionSettings.self); try value.validate()
@@ -896,6 +889,41 @@ public actor RuntimeCoordinator {
         var registered = Worktree(projectID: key.projectID, folderID: key.folderID, repositoryID: repositoryID, path: key.path, repositoryPath: folder.canonicalPath, branch: entry.branch, baseCommit: entry.commit, managed: false)
         registered.gitIdentity = entry.gitIdentity
         return try await saveWorktree(registered)
+    }
+    /// Deletes a managed checkout and unregisters its record; session history stays.
+    private func removeManagedWorktree(_ stored: Stored<Worktree>, in snapshot: StoreSnapshot, discardChanges: Bool = false) async throws -> Stored<Worktree> {
+        var stored = stored
+        let worktreeID = stored.value.id
+        guard !worktreeRecordWrites.contains(worktreeID) else { throw ChauffeurError("worktree_busy", "Worktree metadata is being updated. Retry removal") }
+        let relatedIDs = Set(snapshot.worktrees.filter { Paths.canonical($0.value.path) == Paths.canonical(stored.value.path) || (stored.value.gitIdentity != nil && $0.value.gitIdentity == stored.value.gitIdentity) }.map { $0.value.id })
+        try checkoutClaims.beginRemoval(worktreeID, path: stored.value.path, worktreeIDs: relatedIDs, gitIdentity: stored.value.gitIdentity, sessions: Array(sessions.values))
+        defer { checkoutClaims.endRemoval(worktreeID) }
+        try await worktrees.remove(stored.value, liveSessions: Array(sessions.values), discardChanges: discardChanges)
+        stored.value.registered = false
+        return try await saveWorktree(stored.value, expectedVersion: stored.version, finishingRemoval: true)
+    }
+    private func createWorktreeTool(caller: Caller, arguments: JSONValue) async throws -> JSONValue {
+        guard let folderID = try optionalUUID(arguments, "folderID") ?? sessions[caller.sessionID]?.folderID else {
+            throw ChauffeurError("missing_folder", "Pass a folderID from chauffeur_discover")
+        }
+        // Tool retry keys are strings scoped to the caller; creation keys are UUIDs.
+        let retryKey = WorktreeManager.identifier("create_worktree:\(caller.sessionID.uuidString):\(try arguments.requiredString("retryKey"))")
+        let request = WorktreeCreationRequest(projectID: caller.scope.projectID, folderID: folderID, branch: try arguments.requiredString("branch"),
+                                              baseRef: arguments["baseRef"].string ?? "HEAD", retryKey: retryKey, reuseExistingBranch: arguments["reuseExistingBranch"].bool == true)
+        let worktree = try await createWorktree(request).value
+        guard worktree.registered else { throw ChauffeurError("missing_worktree", "This worktree was removed. Create a new one with a different retryKey", path: worktree.path) }
+        return .object(["worktreeID": .string(worktree.id.uuidString), "folderID": .string(worktree.folderID.uuidString), "path": .string(worktree.path),
+                        "branch": .string(worktree.branch), "baseCommit": .string(worktree.baseCommit), "baseBranch": worktree.baseBranch.map(JSONValue.string) ?? .null])
+    }
+    private func removeWorktreeTool(caller: Caller, arguments: JSONValue) async throws -> JSONValue {
+        let worktreeID = try arguments.uuid("worktreeID"), snapshot = await store.reload()
+        guard let stored = snapshot.worktrees.first(where: { $0.value.id == worktreeID && $0.value.projectID == caller.scope.projectID && $0.value.registered }) else {
+            throw ChauffeurError("missing_worktree", "No registered worktree with this ID in your project")
+        }
+        guard stored.value.managed else { throw ChauffeurError("external_worktree", "Only worktrees Chauffeur created can be removed. This checkout was created elsewhere", path: stored.value.path) }
+        let removed = try await removeManagedWorktree(stored, in: snapshot, discardChanges: arguments["discardChanges"].bool == true)
+        rescanWorktrees()
+        return .object(["worktreeID": .string(removed.value.id.uuidString), "path": .string(removed.value.path), "removed": .bool(true)])
     }
     public func createWorktree(_ request: WorktreeCreationRequest) async throws -> Stored<Worktree> {
         let fingerprint = JSONCoding.digest(try JSONCoding.encode(request))
@@ -1669,6 +1697,8 @@ public actor RuntimeCoordinator {
         case "chauffeur_register_progress": return try await setProgress(token: token, arguments: arguments)
         case "chauffeur_unregister_progress": return try await setProgress(token: token, arguments: nil)
         case "chauffeur_discover": return try await discover(caller: caller)
+        case "chauffeur_create_worktree": return try await createWorktreeTool(caller: caller, arguments: arguments)
+        case "chauffeur_remove_worktree": return try await removeWorktreeTool(caller: caller, arguments: arguments)
         case "chauffeur_send_message":
             return try .from(await ledger.send(caller: caller, recipientID: arguments.uuid("recipientID"), body: arguments.requiredString("body"), references: arguments["references"].array.compactMap(\.string), retryKey: arguments.requiredString("retryKey")))
         case "chauffeur_inbox":

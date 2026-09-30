@@ -2,7 +2,7 @@
 name: chauffeur
 description: Coordinate with peer sessions through Chauffeur's MCP tools. Use when working in a Chauffeur session to discover peers, exchange task context, check an inbox, delegate authorized work, or report a delegated result.
 metadata:
-  version: "1.5.1"
+  version: "1.6.0"
 ---
 
 # Chauffeur coordination
@@ -72,6 +72,14 @@ as `turnID`; `controllerID` identifies an adopted coordinator when it differs
 from the original parent. Include what changed, verification,
 relevant paths, and unresolved issues. Reporting leaves the interactive session
 available for follow-up.
+
+## Worktrees
+
+`chauffeur_create_worktree` makes a checkout in your repository; `baseRef`
+defaults to the main checkout's `HEAD`, so pass your branch to build on your
+work. Delegate into it with its `worktreeID` and `shareCheckout: true`.
+`chauffeur_remove_worktree` cleans up a worktree Chauffeur created; pass
+`discardChanges: true` only when the user agreed to lose uncommitted files.
 
 ## Follow-up, closure, and recovery
 

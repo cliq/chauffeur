@@ -473,7 +473,7 @@ struct LaunchFixture: Sendable {
     func path(_ name: String) -> URL { root.appendingPathComponent(name) }
     var handoff: URL { path("runtime/launch-\(request.retryKey).json") }
     /// `.opencode` answers like OpenCode (help on stderr, `models`) and records each launch in `launch-record`.
-    static func make(gatedCreation: Bool = false, kind: CLIKind = .claude) async throws -> Self {
+    static func make(gatedCreation: Bool = false, kind: CLIKind = .claude, worktreeRoot: URL? = nil) async throws -> Self {
         // Keep the Unix-domain tmux socket below macOS's path-length limit.
         let root = URL(fileURLWithPath: "/tmp/chauffeur-cancel-\(UUID())").resolvingSymlinksInPath()
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
@@ -540,7 +540,7 @@ struct LaunchFixture: Sendable {
             environment["PATH"] = bin.path + ":" + environment["PATH"]!
         }
         if kind == .opencode { try Data().write(to: root.appendingPathComponent("opencode")) }
-        let runtime = try RuntimeCoordinator(root: root, ctlPath: executable.path, environment: environment)
+        let runtime = try RuntimeCoordinator(root: root, worktreeRoot: worktreeRoot, ctlPath: executable.path, environment: environment)
         let set = PresetSet(name: "Cancellation fixture")
         let preset = AgentPreset(setID: set.id, name: "Fixture", kind: kind, executable: executable.path, configurationDirectory: root.path)
         var project = Project(name: "Cancellation fixture", presetSetID: set.id)
