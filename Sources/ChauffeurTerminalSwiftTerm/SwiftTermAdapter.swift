@@ -24,6 +24,8 @@
 //     and the pasteboard is untouched until the app writes to it.
 //  7. Tapping / clicking `https://example.com` calls `didRequestOpenLink`; a `file://` or custom
 //     scheme link does not (macOS must not open it through SwiftTerm's default handler either).
+//     On iOS the tap first shows Open Link and Copy Link, and Copy Link copies an OSC 8 link's
+//     target rather than its label.
 //  8. `reset()` blanks the screen and scrollback; the following tmux redraw repaints it.
 //  9. On iOS the keyboard shows no SwiftTerm accessory bar, and autocorrection, smart quotes and
 //     capitalization stay off.

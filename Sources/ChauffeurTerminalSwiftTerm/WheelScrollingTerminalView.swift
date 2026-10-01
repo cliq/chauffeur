@@ -12,15 +12,18 @@ import UIKit
 final class WheelScrollingTerminalView: TerminalView, UIGestureRecognizerDelegate {
     private var wheelPan: UIPanGestureRecognizer?
     private var accumulatedTranslation: CGFloat = 0
+    private var linkMenu: TerminalLinkMenu?
 
     override init(frame: CGRect, font: UIFont?) {
         super.init(frame: frame, font: font)
         installWheelPan()
+        linkMenu = TerminalLinkMenu(view: self)
     }
 
     required init?(coder: NSCoder) {
         super.init(coder: coder)
         installWheelPan()
+        linkMenu = TerminalLinkMenu(view: self)
     }
 
     private func installWheelPan() {
