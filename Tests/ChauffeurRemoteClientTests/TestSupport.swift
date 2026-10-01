@@ -200,6 +200,10 @@ final class FakeHost: @unchecked Sendable {
             let received = chunk.offset + Int64(chunk.data.count)
             let path = received == chunk.totalBytes ? "/tmp/chauffeur-uploads/\(chunk.filename)" : nil
             return RemoteResponse(id: request.id, result: .uploadedFile(UploadedFileStatus(uploadID: chunk.uploadID, receivedBytes: received, path: path)))
+        case .resolveTicket(let query):
+            let ticket = query.text.hasSuffix("/browse/MBL-1")
+                ? TicketSuggestion(key: "MBL-1", number: "1", url: query.text, branch: "feat/mbl-1", title: "MBL-1", task: query.text) : nil
+            return RemoteResponse(id: request.id, result: .ticketSuggestion(TicketSuggestionResult(ticket: ticket)))
         case .terminalResize, .detachTerminal:
             return RemoteResponse(id: request.id, result: .ack)
         }

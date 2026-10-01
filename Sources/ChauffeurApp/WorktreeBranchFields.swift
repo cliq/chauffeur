@@ -83,11 +83,25 @@ struct WorktreeBranchFields: View {
                         .accessibilityIdentifier(accessibilityPrefix + ".branch")
                         .focused($branchFocused)
                         .task { await Task.yield(); if !Task.isCancelled { branchFocused = true } }
+                        .task(id: branch) { await resolvePastedTicket() }
                     Text("from").foregroundStyle(.secondary)
                     if let folderID { RefPicker(projectID: projectID, folderID: folderID, selection: $baseRef) }
                 }
             }
         }
+    }
+}
+
+extension WorktreeBranchFields {
+    /// A pasted ticket link becomes the repository's branch name for it. Keys are left as typed,
+    /// since a key typed by hand would match before it is finished.
+    private func resolvePastedTicket() async {
+        let text = branch
+        guard let folderID, model.online, text.contains("://") else { return }
+        try? await Task.sleep(for: .milliseconds(250))
+        guard !Task.isCancelled, let ticket = try? await model.resolveTicket(projectID: projectID, folderID: folderID, text: text),
+              !Task.isCancelled, branch == text, !reuseExistingBranch, ticket.url != nil else { return }
+        branch = ticket.branch
     }
 }
 

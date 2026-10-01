@@ -122,6 +122,11 @@ public final class RemoteHostSession {
         return host.capabilities.contains(RemoteProtocol.fileUpload)
     }
 
+    public var isTicketResolutionSupported: Bool {
+        guard case .connected(let host) = connectionState else { return false }
+        return host.capabilities.contains(RemoteProtocol.ticketResolution)
+    }
+
     @ObservationIgnored private let journal: any PendingOperationJournal
     @ObservationIgnored private let clientName: String
     @ObservationIgnored private let clientVersion: String
@@ -317,6 +322,18 @@ public final class RemoteHostSession {
             throw RemoteClientError.invalidResponse("previewWorktreeDestination returned \(result.kind)")
         }
         return preview.path
+    }
+
+    /// The ticket that pasted launch-form text names, with the repository's branch template applied;
+    /// nil when it names none or the Mac predates `ticket.resolve.v1`.
+    public func resolveTicket(projectID: UUID, folderID: UUID, text: String) async throws -> TicketSuggestion? {
+        guard isTicketResolutionSupported else { return nil }
+        guard let connection else { throw RemoteClientError.disconnected }
+        let result = try await connection.request(.resolveTicket(ResolveTicketRequest(projectID: projectID, folderID: folderID, text: text)))
+        guard case .ticketSuggestion(let suggestion) = result else {
+            throw RemoteClientError.invalidResponse("resolveTicket returned \(result.kind)")
+        }
+        return suggestion.ticket
     }
 
     public func setKeepAwakeSettings(_ settings: KeepAwakeSettings) async throws {

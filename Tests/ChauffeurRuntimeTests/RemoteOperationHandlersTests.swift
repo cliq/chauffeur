@@ -206,6 +206,26 @@ struct RemoteOperationHandlersTests {
         #expect(folderError.code == "missing_folder")
     }
 
+    @Test func ticketsResolveWithTheFolderBranchTemplate() async throws {
+        let fixture = try await Fixture.make(); defer { fixture.cleanup() }
+        let stored = try #require(await fixture.runtime.store.current().projects.first)
+        var project = stored.value
+        project.folders[0].branchTemplate = "feat/{key}"
+        try await fixture.runtime.store.save(project, expectedVersion: stored.version)
+        try await fixture.runtime.start()
+        let handlers = fixture.handlers()
+        let link = "https://acme.atlassian.net/browse/MBL-8593"
+        let result = await handlers.handle(.resolveTicket(ResolveTicketRequest(projectID: project.id, folderID: fixture.folder.id, text: link)), deviceID: UUID())
+        guard case .success(.ticketSuggestion(let suggestion)) = result else { Issue.record("Unexpected result \(result)"); return }
+        #expect(suggestion.ticket == TicketSuggestion(key: "MBL-8593", number: "8593", url: link, branch: "feat/mbl-8593", title: "MBL-8593", task: link))
+        let plain = await handlers.handle(.resolveTicket(ResolveTicketRequest(projectID: project.id, folderID: fixture.folder.id, text: "Fix login flow")), deviceID: UUID())
+        guard case .success(.ticketSuggestion(let none)) = plain else { Issue.record("Unexpected result \(plain)"); return }
+        #expect(none.ticket == nil)
+        let unknownFolder = await handlers.handle(.resolveTicket(ResolveTicketRequest(projectID: project.id, folderID: UUID(), text: link)), deviceID: UUID())
+        guard case .failure(let error) = unknownFolder else { Issue.record("Unknown folder was accepted"); return }
+        #expect(error.code == "missing_folder")
+    }
+
     @Test func mismatchedFingerprintIsRefusedWithoutTouchingTheRuntime() async throws {
         let fixture = try await Fixture.make(); defer { fixture.cleanup() }
         try await fixture.runtime.start()

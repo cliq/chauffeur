@@ -475,6 +475,11 @@ final class MobileAppModel {
         return try await session.previewWorktree(projectID: projectID, folderID: folderID, branch: branch)
     }
 
+    func resolveTicket(projectID: UUID, folderID: UUID, text: String) async throws -> TicketSuggestion? {
+        guard let session else { throw RemoteClientError.disconnected }
+        return try await session.resolveTicket(projectID: projectID, folderID: folderID, text: text)
+    }
+
     /// Sends the launch and, on completion, opens the new session as the selected tab.
     func launch(_ request: LaunchOperationRequest) async -> LaunchOutcome {
         guard let session, isConnected else {

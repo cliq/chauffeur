@@ -9,6 +9,8 @@ struct RepositorySettingsView: View {
     let projectID: UUID
     let folderID: UUID
     @State private var script = ""
+    @State private var branchTemplate = ""
+    @State private var ticketLinkInTask = true
     @State private var saving = false
     @State private var failure: String?
     private var folder: ProjectFolder? { model.project(projectID)?.folders.first { $0.id == folderID } }
@@ -20,6 +22,25 @@ struct RepositorySettingsView: View {
                     Text(folder.canonicalPath).font(.system(.caption, design: .monospaced)).foregroundStyle(.secondary)
                         .lineLimit(1).truncationMode(.middle).textSelection(.enabled)
                 }
+            }
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Tickets").font(.headline)
+                Text("Paste a ticket link into a new session's title or branch to name the branch with this template.").foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                TextField("Branch template", text: $branchTemplate, prompt: Text(TicketBranchTemplate.defaultTemplate))
+                    .font(.system(.body, design: .monospaced))
+                    .autocorrectionDisabled()
+                    .accessibilityIdentifier("repository-settings.branch-template")
+                Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 2) {
+                    GridRow { Text("{key}").font(.system(.body, design: .monospaced)); Text("The lowercased ticket key, such as mbl-8593").foregroundStyle(.secondary) }
+                    GridRow { Text("{KEY}").font(.system(.body, design: .monospaced)); Text("The key as written, such as MBL-8593").foregroundStyle(.secondary) }
+                    GridRow { Text("{number}").font(.system(.body, design: .monospaced)); Text("The ticket number, such as 8593").foregroundStyle(.secondary) }
+                }.textSelection(.enabled)
+                Text("Example: " + TicketBranchTemplate.render(branchTemplate, ticket: TicketReference(key: "MBL-8593", number: "8593")))
+                    .font(.system(.caption, design: .monospaced)).foregroundStyle(.secondary)
+                    .accessibilityIdentifier("repository-settings.branch-preview")
+                Toggle("Put the ticket link in an empty initial task", isOn: $ticketLinkInTask)
+                    .accessibilityIdentifier("repository-settings.ticket-link-in-task")
             }
             VStack(alignment: .leading, spacing: 6) {
                 Text("Worktree Setup Script").font(.headline)
@@ -54,12 +75,19 @@ struct RepositorySettingsView: View {
             }
         }
         .padding(24).frame(width: 560)
-        .onAppear { script = folder?.worktreeSetupScript ?? "" }
+        .onAppear {
+            script = folder?.worktreeSetupScript ?? ""
+            branchTemplate = folder?.branchTemplate ?? ""
+            ticketLinkInTask = folder?.putsTicketLinkInTask ?? true
+        }
     }
     private func save() {
         guard var project = model.project(projectID), let index = project.folders.firstIndex(where: { $0.id == folderID }) else { return }
         let version = model.projectVersion(projectID)
         project.folders[index].worktreeSetupScript = script.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : script
+        let template = branchTemplate.trimmingCharacters(in: .whitespacesAndNewlines)
+        project.folders[index].branchTemplate = template.isEmpty ? nil : template
+        project.folders[index].ticketLinkInTask = ticketLinkInTask ? nil : false
         project.updatedAt = Date()
         saving = true; failure = nil
         Task {

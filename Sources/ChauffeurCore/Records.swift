@@ -96,6 +96,11 @@ public struct ProjectFolder: Codable, Identifiable, Equatable, Sendable {
     /// before an agent starts there (copying keys, generating files, …).
     public var worktreeSetupScript: String?
     public var hasWorktreeSetupScript: Bool { worktreeSetupScript?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false }
+    /// How a pasted ticket becomes a branch name, such as `feat/{key}`; nil uses `TicketBranchTemplate.defaultTemplate`.
+    public var branchTemplate: String?
+    /// nil puts a pasted ticket link in an empty initial task.
+    public var ticketLinkInTask: Bool?
+    public var putsTicketLinkInTask: Bool { ticketLinkInTask ?? true }
     public init(path: String, name: String? = nil) {
         self.selectedPath = path; self.canonicalPath = Paths.canonical(path)
         self.name = name ?? URL(fileURLWithPath: path).lastPathComponent

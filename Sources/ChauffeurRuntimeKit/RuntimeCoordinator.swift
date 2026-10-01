@@ -717,6 +717,12 @@ public actor RuntimeCoordinator {
             let snapshot = await store.current(), projectID = try params.uuid("projectID"), folderID = try params.uuid("folderID")
             guard let folder = snapshot.projects.first(where: { $0.value.id == projectID })?.value.folders.first(where: { $0.id == folderID && $0.registered }) else { throw ChauffeurError("missing_folder", "Select a registered repository") }
             return .object(["path": .string(try await worktrees.previewDestination(folder: folder, branch: params.requiredString("branch")).path)])
+        case "resolveTicket":
+            // Resolved here rather than in each client so tracker integrations can enrich it later.
+            let snapshot = await store.current(), projectID = try params.uuid("projectID"), folderID = try params.uuid("folderID")
+            guard let folder = snapshot.projects.first(where: { $0.value.id == projectID })?.value.folders.first(where: { $0.id == folderID && $0.registered }) else { throw ChauffeurError("missing_folder", "Select a registered repository") }
+            guard let resolution = TicketResolution.resolve(params["text"].string ?? "", folder: folder) else { return .object([:]) }
+            return .object(["ticket": try .from(resolution)])
         case "registerWorktree":
             let key = WorktreeRegistration(projectID: try params.uuid("projectID"), folderID: try params.uuid("folderID"), path: Paths.canonical(try params.requiredString("path")))
             if let pending = worktreeRegistrations[key] { return try .from(await pending.value) }

@@ -21,6 +21,9 @@ struct SessionLaunchView: View {
     @State private var folderID: UUID?
     @State private var checkout = Checkout.repository
     @State private var branchOverride: String?
+    private struct ResolvedTicket { let folderID: UUID; let title: String; let branch: String }
+    /// The branch the service rendered for a ticket title, kept so retitling to the key does not fall back to a slug.
+    @State private var ticket: ResolvedTicket?
     @State private var reuseExistingBranch = false
     @State private var existingBranch = ""
     @State private var baseRef = "HEAD"
@@ -56,7 +59,11 @@ struct SessionLaunchView: View {
     }
     private var preset: AgentPreset? { presets.first { $0.id == presetID } }
     private var folder: ProjectFolder? { currentProject.folders.first { $0.id == folderID && $0.registered } }
-    private var branch: String { reuseExistingBranch ? existingBranch : branchOverride ?? WorktreeBranchName.suggested(from: title) }
+    private var suggestedBranch: String {
+        if let ticket, ticket.folderID == folderID, ticket.title == title { return ticket.branch }
+        return WorktreeBranchName.suggested(from: title)
+    }
+    private var branch: String { reuseExistingBranch ? existingBranch : branchOverride ?? suggestedBranch }
     private var branchBinding: Binding<String> {
         Binding(get: { branch }, set: { value in
             // TextField also writes its displayed value when focus changes.
@@ -215,6 +222,7 @@ struct SessionLaunchView: View {
                     worktreeCreated(created)
                 }
             }
+            .task(id: "\(folderID?.uuidString ?? ""):\(title)") { await resolveTitleTicket() }
             .task(id: destinationRequest) {
                 guard !Task.isCancelled else { return }
                 previewedRequest = nil; previewPath = ""; previewFailure = nil
@@ -231,6 +239,23 @@ struct SessionLaunchView: View {
                 }
                 previewedRequest = request
             }
+    }
+    /// A pasted ticket link becomes the ticket's key, and an empty task becomes the link;
+    /// a bare key only changes the suggested branch.
+    private func resolveTitleTicket() async {
+        let text = title
+        guard let folderID, model.online, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              ticket?.folderID != folderID || ticket?.title != text else { return }
+        try? await Task.sleep(for: .milliseconds(250))
+        guard !Task.isCancelled, let resolved = try? await model.resolveTicket(projectID: project.id, folderID: folderID, text: text),
+              !Task.isCancelled, title == text, self.folderID == folderID else { return }
+        if resolved.url != nil {
+            if task.isEmpty, let link = resolved.task { task = link }
+            ticket = ResolvedTicket(folderID: folderID, title: resolved.title, branch: resolved.branch)
+            title = resolved.title
+        } else {
+            ticket = ResolvedTicket(folderID: folderID, title: text, branch: resolved.branch)
+        }
     }
     private var sessionFields: some View {
         Form {
@@ -325,7 +350,7 @@ struct SessionLaunchView: View {
             }
         }
         QuickSessionProbe.sheetState = {
-            .object(["title": .string(title), "branch": .string(branch), "destination": .string(destination), "previewFailure": destinationFailure.map(JSONValue.string) ?? .null, "busy": .bool(operation.isBusy), "canLaunch": .bool(canLaunch), "presetID": presetID.map { .string($0.uuidString) } ?? .null, "worktreeID": worktreeID.map { .string($0.uuidString) } ?? .null, "path": .string(primaryPath), "failure": operation.failure.map(JSONValue.string) ?? .null])
+            .object(["title": .string(title), "task": .string(task), "branch": .string(branch), "destination": .string(destination), "previewFailure": destinationFailure.map(JSONValue.string) ?? .null, "busy": .bool(operation.isBusy), "canLaunch": .bool(canLaunch), "presetID": presetID.map { .string($0.uuidString) } ?? .null, "worktreeID": worktreeID.map { .string($0.uuidString) } ?? .null, "path": .string(primaryPath), "failure": operation.failure.map(JSONValue.string) ?? .null])
         }
     }
     #endif

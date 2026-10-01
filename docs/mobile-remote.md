@@ -143,6 +143,15 @@ folder, readable only by that user, with names cleaned so the path needs no
 quoting. Files are limited to 100 MB and are deleted after a week. The paperclip
 appears only when the Mac supports uploads (`upload.v1`).
 
+**Launching from a ticket**: pasting a ticket link (Jira, Linear, GitHub,
+GitLab, or any link with a `KEY-123` segment) into the launch form's title sets
+the title to the ticket key, names the new branch with the repository's
+template, and puts the link in an empty initial task. Pasting a link into the
+branch field only renames the branch, and a bare key such as `MBL-8593` in the
+title only changes the suggested branch. The Mac resolves the ticket, so the
+template and the link-in-task toggle come from **Repository Settings → Tickets**
+on the Mac. Macs without `ticket.resolve.v1` leave both fields as typed.
+
 On disconnect (Wi-Fi loss, backgrounding, or the Mac becoming unreachable),
 terminal input is disabled and the screen shows the last known state as not
 live. Reconnecting reattaches to the same process and refreshes the current

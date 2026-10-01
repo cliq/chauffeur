@@ -530,6 +530,11 @@ struct AppSnapshot: Decodable, Sendable {
     }
     /// Creating a worktree waits for Git's checkout and the folder's setup script.
     static let worktreeSetupResponseTimeout = 1_260
+    /// The ticket that pasted launch-form text names, with the folder's branch template applied.
+    func resolveTicket(projectID: UUID, folderID: UUID, text: String) async throws -> TicketResolution? {
+        let result = try await call("resolveTicket", .object(["projectID": .string(projectID.uuidString), "folderID": .string(folderID.uuidString), "text": .string(text)]))
+        return result["ticket"] == .null ? nil : try result["ticket"].decode(TicketResolution.self)
+    }
     /// Whether a session's terminal is waiting at its own prompt. An
     /// unreachable service counts as active so closing still asks first.
     func terminalActivity(_ sessionID: UUID) async -> TerminalActivity {

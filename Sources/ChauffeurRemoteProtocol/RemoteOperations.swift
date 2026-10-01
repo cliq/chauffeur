@@ -75,6 +75,39 @@ public struct PreviewWorktreeRequest: Codable, Equatable, Sendable {
     }
 }
 
+/// Asks the Mac whether text pasted into a launch form names an issue-tracker ticket.
+public struct ResolveTicketRequest: Codable, Equatable, Sendable {
+    public var projectID: UUID
+    public var folderID: UUID
+    public var text: String
+
+    public init(projectID: UUID, folderID: UUID, text: String) {
+        self.projectID = projectID; self.folderID = folderID; self.text = text
+    }
+}
+
+/// A ticket with the repository's branch template already applied. Forms rewrite their title, and an
+/// empty task, only when `url` is set; a bare key only changes the suggested branch.
+public struct TicketSuggestion: Codable, Equatable, Sendable {
+    public var key: String?
+    public var number: String
+    public var url: String?
+    public var branch: String
+    public var title: String
+    public var task: String?
+
+    public init(key: String?, number: String, url: String?, branch: String, title: String, task: String?) {
+        self.key = key; self.number = number; self.url = url; self.branch = branch; self.title = title; self.task = task
+    }
+}
+
+/// `ticket` is nil when the text is not a ticket.
+public struct TicketSuggestionResult: Codable, Equatable, Sendable {
+    public var ticket: TicketSuggestion?
+
+    public init(ticket: TicketSuggestion?) { self.ticket = ticket }
+}
+
 public struct AttachTerminalRequest: Codable, Equatable, Sendable {
     public var sessionID: UUID
     public var takeControl: Bool
@@ -163,6 +196,7 @@ public enum RemoteOperation: Equatable, Sendable, Codable {
     case setKeepAwakeSettings(KeepAwakeSettings)
     case setKeepAwakeTimer(KeepAwakeTimerRequest)
     case uploadFileChunk(UploadFileChunkRequest)
+    case resolveTicket(ResolveTicketRequest)
 
     public var kind: String {
         switch self {
@@ -181,6 +215,7 @@ public enum RemoteOperation: Equatable, Sendable, Codable {
         case .setKeepAwakeSettings: return "setKeepAwakeSettings"
         case .setKeepAwakeTimer: return "setKeepAwakeTimer"
         case .uploadFileChunk: return "uploadFileChunk"
+        case .resolveTicket: return "resolveTicket"
         }
     }
 
@@ -218,6 +253,8 @@ public enum RemoteOperation: Equatable, Sendable, Codable {
             self = .setKeepAwakeTimer(try container.decode(KeepAwakeTimerRequest.self, forKey: .payload))
         case "uploadFileChunk":
             self = .uploadFileChunk(try container.decode(UploadFileChunkRequest.self, forKey: .payload))
+        case "resolveTicket":
+            self = .resolveTicket(try container.decode(ResolveTicketRequest.self, forKey: .payload))
         default:
             throw DecodingError.dataCorrupted(
                 DecodingError.Context(
@@ -262,6 +299,8 @@ public enum RemoteOperation: Equatable, Sendable, Codable {
             try container.encode(payload, forKey: .payload)
         case .uploadFileChunk(let payload):
             try container.encode(payload, forKey: .payload)
+        case .resolveTicket(let payload):
+            try container.encode(payload, forKey: .payload)
         }
     }
 }
@@ -279,6 +318,7 @@ public enum RemoteResult: Equatable, Sendable, Codable {
     case attachment(AttachmentInfo)
     case keepAwake(KeepAwakeStatus)
     case uploadedFile(UploadedFileStatus)
+    case ticketSuggestion(TicketSuggestionResult)
     case ack
 
     public var kind: String {
@@ -293,6 +333,7 @@ public enum RemoteResult: Equatable, Sendable, Codable {
         case .attachment: return "attachment"
         case .keepAwake: return "keepAwake"
         case .uploadedFile: return "uploadedFile"
+        case .ticketSuggestion: return "ticketSuggestion"
         case .ack: return "ack"
         }
     }
@@ -321,6 +362,8 @@ public enum RemoteResult: Equatable, Sendable, Codable {
             self = .keepAwake(try container.decode(KeepAwakeStatus.self, forKey: .payload))
         case "uploadedFile":
             self = .uploadedFile(try container.decode(UploadedFileStatus.self, forKey: .payload))
+        case "ticketSuggestion":
+            self = .ticketSuggestion(try container.decode(TicketSuggestionResult.self, forKey: .payload))
         case "ack":
             self = .ack
         default:
@@ -356,6 +399,8 @@ public enum RemoteResult: Equatable, Sendable, Codable {
         case .keepAwake(let payload):
             try container.encode(payload, forKey: .payload)
         case .uploadedFile(let payload):
+            try container.encode(payload, forKey: .payload)
+        case .ticketSuggestion(let payload):
             try container.encode(payload, forKey: .payload)
         case .ack:
             break

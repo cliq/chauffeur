@@ -38,6 +38,8 @@ struct LaunchView: View {
     @State private var reuseExistingBranch = false
     private var selectedBranch: String { reuseExistingBranch ? existingBranch : branch }
     @State private var suggestedBranch = ""
+    /// The branch the Mac rendered for a ticket title, kept so retitling to the key does not fall back to a slug.
+    @State private var ticketBranch: (title: String, branch: String)?
     @State private var baseRef = "HEAD"
     @State private var groupID: UUID?
     @State private var allowSharedCheckout = false
@@ -245,11 +247,17 @@ struct LaunchView: View {
         .navigationBarTitleDisplayMode(.inline)
         .onAppear(perform: applyDefaults)
         .onChange(of: title) { _, newTitle in
-            let slug = Self.branchSlug(from: newTitle)
-            if branch.isEmpty || branch == suggestedBranch {
-                branch = slug
+            if let ticketBranch, ticketBranch.title == newTitle {
+                suggestBranch(ticketBranch.branch)
+            } else {
+                suggestBranch(Self.branchSlug(from: newTitle))
             }
-            suggestedBranch = slug
+        }
+        .task(id: title) {
+            await resolveTitleTicket()
+        }
+        .task(id: branch) {
+            await resolveBranchTicket()
         }
         .task(id: trimmed(selectedBranch)) {
             await previewDestination()
@@ -269,6 +277,46 @@ struct LaunchView: View {
         if project?.presets.isEmpty == true {
             kind = .shell
         }
+    }
+
+    /// Fills the branch from the title until the branch is edited by hand.
+    private func suggestBranch(_ suggestion: String) {
+        if branch.isEmpty || branch == suggestedBranch {
+            branch = suggestion
+        }
+        suggestedBranch = suggestion
+    }
+
+    /// A pasted ticket link becomes the ticket's key, and an empty task becomes the link;
+    /// a bare key only changes the suggested branch. Older Macs leave the title as typed.
+    private func resolveTitleTicket() async {
+        let text = title
+        guard !trimmed(text).isEmpty, ticketBranch?.title != text else { return }
+        try? await Task.sleep(for: .milliseconds(300))
+        guard !Task.isCancelled,
+              let ticket = try? await model.resolveTicket(projectID: location.projectID, folderID: location.folderID, text: text),
+              !Task.isCancelled, title == text else { return }
+        if ticket.url != nil {
+            if trimmed(initialTask).isEmpty, let task = ticket.task {
+                initialTask = task
+            }
+            ticketBranch = (ticket.title, ticket.branch)
+            title = ticket.title
+        } else {
+            ticketBranch = (text, ticket.branch)
+            suggestBranch(ticket.branch)
+        }
+    }
+
+    /// Only a link is rewritten here: a key typed by hand would match before it is finished.
+    private func resolveBranchTicket() async {
+        let text = branch
+        guard isNewWorktree, !reuseExistingBranch, text.contains("://") else { return }
+        try? await Task.sleep(for: .milliseconds(300))
+        guard !Task.isCancelled,
+              let ticket = try? await model.resolveTicket(projectID: location.projectID, folderID: location.folderID, text: text),
+              !Task.isCancelled, branch == text, ticket.url != nil else { return }
+        branch = ticket.branch
     }
 
     /// Debounced 300 ms so typing a branch does not send a request per keystroke.

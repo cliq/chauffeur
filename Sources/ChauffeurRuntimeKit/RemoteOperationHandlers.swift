@@ -84,6 +84,19 @@ public actor RemoteOperationHandlers {
                 guard let path = response["path"].string else { throw ChauffeurError("invalid_response", "The runtime did not return a worktree destination") }
                 return .success(.worktreeDestination(WorktreeDestinationPreview(path: path)))
             } catch { return .failure(Self.remoteError(error)) }
+        case .resolveTicket(let request):
+            do {
+                let params: JSONValue = .object([
+                    "projectID": .string(request.projectID.uuidString),
+                    "folderID": .string(request.folderID.uuidString),
+                    "text": .string(request.text)
+                ])
+                let response = try await runtime.handle(IPCRequest("resolveTicket", params: params))
+                let ticket = try response["ticket"] == .null ? nil : response["ticket"].decode(TicketResolution.self)
+                return .success(.ticketSuggestion(TicketSuggestionResult(ticket: ticket.map {
+                    TicketSuggestion(key: $0.key, number: $0.number, url: $0.url, branch: $0.branch, title: $0.title, task: $0.task)
+                })))
+            } catch { return .failure(Self.remoteError(error)) }
         case .launch(let request):
             return .success(.operation(await launch(request, deviceID: deviceID)))
         case .getOperationStatus(let request):

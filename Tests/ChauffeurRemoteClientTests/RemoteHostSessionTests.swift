@@ -79,7 +79,20 @@ struct RemoteHostSessionTests {
         #expect(!session.isFileUploadSupported)
         await #expect(throws: RemoteClientError.self) { _ = try await session.uploadFile(Data([1]), filename: "a.png") }
         #expect(factory.hosts[0].requests(ofKind: "uploadFileChunk").isEmpty)
+        #expect(!session.isTicketResolutionSupported)
+        #expect(try await session.resolveTicket(projectID: UUID(), folderID: UUID(), text: "https://acme.atlassian.net/browse/MBL-1") == nil)
+        #expect(factory.hosts[0].requests(ofKind: "resolveTicket").isEmpty)
         session.disconnect()
+    }
+
+    @Test func ticketsResolveOnTheMac() async throws {
+        let (session, factory) = makeSession()
+        await session.connect()
+        defer { session.disconnect() }
+        let link = "https://acme.atlassian.net/browse/MBL-1"
+        #expect(try await session.resolveTicket(projectID: UUID(), folderID: UUID(), text: link)?.branch == "feat/mbl-1")
+        #expect(try await session.resolveTicket(projectID: UUID(), folderID: UUID(), text: "Fix login") == nil)
+        #expect(factory.hosts[0].requests(ofKind: "resolveTicket").count == 2)
     }
 
     @Test func filesUploadInOrderedChunksAndReturnTheMacPath() async throws {
