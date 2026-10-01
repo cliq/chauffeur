@@ -62,19 +62,10 @@ final class TerminalLinkMenu: NSObject, UIGestureRecognizerDelegate, @preconcurr
     private func linkAt(_ point: CGPoint) -> String? {
         guard let view else { return nil }
         let terminal = view.getTerminal()
-        let cell = Self.cellSize(view)
+        let cell = view.touchCellSize
         guard terminal.cols > 0, cell.width > 0, cell.height > 0, point.x >= 0, point.y >= 0 else { return nil }
         let position = Position(col: min(terminal.cols - 1, Int(point.x / cell.width)), row: Int(point.y / cell.height))
         return terminal.link(at: .buffer(position), mode: .explicitAndImplicit)
-    }
-
-    /// SwiftTerm's cell size, which it keeps private: the content is one cell per column wide,
-    /// and a row is the font's line height snapped up to the pixel grid.
-    private static func cellSize(_ view: TerminalView) -> CGSize {
-        let font = view.font as CTFont
-        let scale = UIScreen.main.scale
-        let line = ceil(CTFontGetAscent(font) + CTFontGetDescent(font) + CTFontGetLeading(font))
-        return CGSize(width: view.contentSize.width / CGFloat(max(1, view.getTerminal().cols)), height: ceil(line * scale) / scale)
     }
 }
 #endif
