@@ -18,10 +18,77 @@ extension GhosttySurfaceView {
 
     override func mouseDown(with event: NSEvent) {
         window?.makeFirstResponder(self)
+        leftClickStart = event.locationInWindow
         sendButton(GHOSTTY_MOUSE_PRESS, GHOSTTY_MOUSE_LEFT, event)
     }
 
-    override func mouseUp(with event: NSEvent) { sendButton(GHOSTTY_MOUSE_RELEASE, GHOSTTY_MOUSE_LEFT, event) }
+    /// The click reaches the program first. A plain click on a link then offers to open or copy
+    /// it; a Cmd-click opens it.
+    override func mouseUp(with event: NSEvent) {
+        isReleasingLeftButton = true; openedLinkOnRelease = false
+        sendButton(GHOSTTY_MOUSE_RELEASE, GHOSTTY_MOUSE_LEFT, event)
+        isReleasingLeftButton = false
+        let start = leftClickStart
+        leftClickStart = nil
+        guard !openedLinkOnRelease, let start, hypot(event.locationInWindow.x - start.x, event.locationInWindow.y - start.y) < 4 else { return }
+        let modifiers = event.modifierFlags.intersection([.shift, .control, .option, .command])
+        guard modifiers.isEmpty || modifiers == .command, let link = linkUnderPointer(event) else { return }
+        if modifiers == .command { host?.surfaceDidReceive(.openURL(link)) } else { showLinkMenu(link, event) }
+    }
+
+    /// The link Ghostty finds under the pointer: an OSC 8 hyperlink's target or a URL in the text.
+    ///
+    /// Ghostty only looks for links while Cmd is held, and not at all while the program reports
+    /// the mouse (tmux always does) unless Shift releases it, so the view moves the pointer there
+    /// with those modifiers and reads the hover Ghostty reports, then puts the real ones back.
+    /// Leaving the surface first makes Ghostty look again at the same cell.
+    private func linkUnderPointer(_ event: NSEvent) -> String? {
+        guard let surface else { return nil }
+        let point = convert(event.locationInWindow, from: nil)
+        let x = point.x, y = bounds.height - point.y
+        let mods = Self.ghosttyMods(event.modifierFlags)
+        isProbingLink = true; probedLink = nil
+        let probes = [GHOSTTY_MODS_SUPER.rawValue | GHOSTTY_MODS_SHIFT.rawValue, GHOSTTY_MODS_SUPER.rawValue]
+        for probe in probes where probedLink == nil {
+            ghostty_surface_mouse_pos(surface, -1, -1, mods)
+            ghostty_surface_mouse_pos(surface, x, y, ghostty_input_mods_e(rawValue: probe))
+        }
+        ghostty_surface_mouse_pos(surface, -1, -1, mods)
+        isProbingLink = false
+        ghostty_surface_mouse_pos(surface, x, y, mods)
+        defer { probedLink = nil }
+        return probedLink
+    }
+
+    private func showLinkMenu(_ link: String, _ event: NSEvent) {
+        let menu = NSMenu()
+        if let scheme = URL(string: link)?.scheme?.lowercased(), ["http", "https", "mailto"].contains(scheme) {
+            let open = menu.addItem(withTitle: "Open Link", action: #selector(openLink(_:)), keyEquivalent: "")
+            open.target = self; open.representedObject = link
+        }
+        let copy = menu.addItem(withTitle: "Copy Link", action: #selector(copyLink(_:)), keyEquivalent: "")
+        copy.target = self; copy.representedObject = link
+        menu.addItem(.separator())
+        menu.addItem(withTitle: link, action: nil, keyEquivalent: "").isEnabled = false
+        popUpMenu(menu, at: event)
+    }
+
+    /// A plain pop-up rather than a context menu: AppKit adds AutoFill to a text input view's
+    /// context menus.
+    private func popUpMenu(_ menu: NSMenu, at event: NSEvent) {
+        menu.popUp(positioning: nil, at: convert(event.locationInWindow, from: nil), in: self)
+    }
+
+    @objc private func openLink(_ sender: NSMenuItem) {
+        guard let link = sender.representedObject as? String else { return }
+        host?.surfaceDidReceive(.openURL(link))
+    }
+
+    @objc private func copyLink(_ sender: NSMenuItem) {
+        guard let link = sender.representedObject as? String else { return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(link, forType: .string)
+    }
 
     override func rightMouseDown(with event: NSEvent) {
         window?.makeFirstResponder(self)
@@ -30,7 +97,7 @@ extension GhosttySurfaceView {
         guard selectionText() == nil else {
             let menu = NSMenu()
             menu.addItem(withTitle: "Copy", action: #selector(copy(_:)), keyEquivalent: "").target = self
-            NSMenu.popUpContextMenu(menu, with: event, for: self)
+            popUpMenu(menu, at: event)
             return
         }
         sendButton(GHOSTTY_MOUSE_PRESS, GHOSTTY_MOUSE_RIGHT, event)

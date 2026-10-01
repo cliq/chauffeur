@@ -12,6 +12,8 @@ enum GhosttySurfaceEvent: Sendable, Equatable {
     case searchTotal(Int?)
     case searchSelected(Int?)
     case mouseShape(UInt32)
+    /// The link under the pointer, or empty once it leaves it.
+    case mouseOverLink(String)
     case clipboardWrite(String)
     /// Ghostty's conditional state (light/dark) changed; answer with the surface's config.
     case reloadConfig
@@ -41,6 +43,10 @@ enum GhosttySurfaceEvent: Sendable, Equatable {
             self = .searchSelected(selected < 0 ? nil : Int(selected))
         case GHOSTTY_ACTION_MOUSE_SHAPE:
             self = .mouseShape(action.action.mouse_shape.rawValue)
+        case GHOSTTY_ACTION_MOUSE_OVER_LINK:
+            let payload = action.action.mouse_over_link
+            guard let url = payload.url else { self = .mouseOverLink(""); return }
+            self = .mouseOverLink(String(decoding: UnsafeRawBufferPointer(start: url, count: Int(payload.len)), as: UTF8.self))
         case GHOSTTY_ACTION_RELOAD_CONFIG:
             self = .reloadConfig
         default:

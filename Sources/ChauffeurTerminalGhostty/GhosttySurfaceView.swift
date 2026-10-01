@@ -48,6 +48,14 @@ final class GhosttySurfaceView: NSView {
     var lastPerformKeyEvent: TimeInterval?
     // Mouse state, see GhosttySurfaceView+Mouse.swift.
     var cursor: NSCursor = .iBeam
+    /// Where the left button went down, to tell a click from a drag.
+    var leftClickStart: NSPoint?
+    /// Set while the view asks Ghostty for the link under the pointer.
+    var isProbingLink = false
+    var probedLink: String?
+    /// Set while a left release is sent; Ghostty opens a Cmd-clicked link itself when it can.
+    var isReleasingLeftButton = false
+    var openedLinkOnRelease = false
     // Accessibility cache, see GhosttySurfaceView+Accessibility.swift.
     var accessibilityCache: (text: String, time: Date)?
 
@@ -155,8 +163,15 @@ final class GhosttySurfaceView: NSView {
     func handle(_ event: GhosttySurfaceEvent) {
         switch event {
         case .mouseShape(let raw):
+            // A link probe changes Ghostty's shape and puts it back; the pointer should not flicker.
+            guard !isProbingLink else { return }
             cursor = Self.cursor(for: ghostty_action_mouse_shape_e(rawValue: raw))
             window?.invalidateCursorRects(for: self)
+        case .mouseOverLink(let link):
+            if isProbingLink, !link.isEmpty { probedLink = link }
+        case .openURL:
+            if isReleasingLeftButton { openedLinkOnRelease = true }
+            host?.surfaceDidReceive(event)
         case .reloadConfig:
             guard let surface, let config = appliedConfig ?? runtime?.config else { return }
             ghostty_surface_update_config(surface, config.raw)
