@@ -11,4 +11,30 @@
   <key>LSMinimumSystemVersion</key><string>15.0</string>
   <key>LSUIElement</key><true/>
   <key>NSPrincipalClass</key><string>NSApplication</string>
+  <!-- TCC attributes every session tool to this app. Without a purpose string
+       (and, under the hardened runtime, the matching entitlement in
+       Sessions.entitlements) macOS denies the request without prompting.
+       Scripts/verify-session-privacy.py checks both sides of the signed app. -->
+  <key>NSCameraUsageDescription</key><string>A tool running in a Chauffeur session wants to use the camera.</string>
+  <key>NSMicrophoneUsageDescription</key><string>A tool running in a Chauffeur session wants to use the microphone.</string>
+  <key>NSAudioCaptureUsageDescription</key><string>A tool running in a Chauffeur session wants to record audio from other apps.</string>
+  <key>NSSpeechRecognitionUsageDescription</key><string>A tool running in a Chauffeur session wants to use speech recognition.</string>
+  <key>NSLocationUsageDescription</key><string>A tool running in a Chauffeur session wants to use your location.</string>
+  <key>NSLocationWhenInUseUsageDescription</key><string>A tool running in a Chauffeur session wants to use your location.</string>
+  <key>NSContactsUsageDescription</key><string>A tool running in a Chauffeur session wants to access your contacts.</string>
+  <key>NSCalendarsUsageDescription</key><string>A tool running in a Chauffeur session wants to access your calendars.</string>
+  <key>NSCalendarsFullAccessUsageDescription</key><string>A tool running in a Chauffeur session wants to access your calendars.</string>
+  <key>NSCalendarsWriteOnlyAccessUsageDescription</key><string>A tool running in a Chauffeur session wants to add events to your calendars.</string>
+  <key>NSRemindersUsageDescription</key><string>A tool running in a Chauffeur session wants to access your reminders.</string>
+  <key>NSRemindersFullAccessUsageDescription</key><string>A tool running in a Chauffeur session wants to access your reminders.</string>
+  <key>NSPhotoLibraryUsageDescription</key><string>A tool running in a Chauffeur session wants to access your photo library.</string>
+  <key>NSPhotoLibraryAddUsageDescription</key><string>A tool running in a Chauffeur session wants to add to your photo library.</string>
+  <key>NSAppleEventsUsageDescription</key><string>A tool running in a Chauffeur session wants to control another app.</string>
+  <key>NSBluetoothAlwaysUsageDescription</key><string>A tool running in a Chauffeur session wants to use Bluetooth.</string>
+  <key>NSLocalNetworkUsageDescription</key><string>A tool running in a Chauffeur session wants to connect to devices on your local network.</string>
+  <key>NSDesktopFolderUsageDescription</key><string>A tool running in a Chauffeur session wants to access your Desktop folder.</string>
+  <key>NSDocumentsFolderUsageDescription</key><string>A tool running in a Chauffeur session wants to access your Documents folder.</string>
+  <key>NSDownloadsFolderUsageDescription</key><string>A tool running in a Chauffeur session wants to access your Downloads folder.</string>
+  <key>NSRemovableVolumesUsageDescription</key><string>A tool running in a Chauffeur session wants to access a removable volume.</string>
+  <key>NSNetworkVolumesUsageDescription</key><string>A tool running in a Chauffeur session wants to access a network volume.</string>
 </dict></plist>

@@ -64,7 +64,9 @@ cp "$SRCROOT/Resources/sessions/Info.plist" "$task_sessions_app/Contents/Info.pl
 /usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier $task_sessions_identifier" "$task_sessions_app/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c "Set :CFBundleName $task_sessions_name" "$task_sessions_app/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName $task_sessions_name" "$task_sessions_app/Contents/Info.plist"
-/usr/bin/codesign --force "${task_signing_flags[@]}" --sign "$task_identity" "$task_sessions_app"
+/usr/bin/codesign --force "${task_signing_flags[@]}" --entitlements "$SRCROOT/Resources/sessions/Sessions.entitlements" \
+  --sign "$task_identity" "$task_sessions_app"
+/usr/bin/python3 "$SRCROOT/Scripts/verify-session-privacy.py" "$task_sessions_app"
 # Running owners use immutable copies in Application Support, never this path.
 if [[ -d "$task_app_dir/Library/ChauffeurSessions.app" ]]; then
   mv "$task_app_dir/Library/ChauffeurSessions.app" "$task_stage/previous-sessions.app"

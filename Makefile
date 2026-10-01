@@ -79,6 +79,7 @@ test-ui:
 
 verify:
 	/usr/bin/codesign --verify --deep --strict "$(APP)"
+	python3 Scripts/verify-session-privacy.py "$(APP)/Contents/Library/ChauffeurSessions.app"
 
 clean: gen
 	xcodebuild -project Chauffeur.xcodeproj -scheme Chauffeur \

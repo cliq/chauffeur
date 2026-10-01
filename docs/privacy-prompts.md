@@ -36,6 +36,28 @@ Sessions helper was then tested separately against synthetic protected AppData:
 TCC named `dev.cliq.chauffeur.sessions`, with one prompt shared across new Python
 sessions and runtime restarts, and a new prompt for the updated helper owner.
 
+## Services Sessions can prompt for
+
+Under the hardened runtime, macOS denies a request without prompting unless the
+responsible app declares the service. Chauffeur Sessions therefore carries a
+purpose string in `Resources/sessions/Info.plist` for camera, microphone, system
+audio, speech recognition, location, contacts, calendars, reminders, photos,
+automation, Bluetooth, local network and protected folders/volumes, plus the
+matching entitlements in `Resources/sessions/Sessions.entitlements`.
+`Scripts/verify-session-privacy.py` checks the signed helper during every build
+and `make verify`; add new services to its list as well.
+
+Terminal prompts for everything through the private
+`com.apple.private.tcc.allow-prompting` entitlement. AMFI kills Developer ID
+binaries that claim it, so Chauffeur declares each public service instead.
+Screen Recording, Accessibility, Input Monitoring and Full Disk Access have no
+purpose string; grant them to Chauffeur Sessions in System Settings when needed.
+Sessions started under an older helper keep its declarations, so start a new
+session after updating.
+
+A silent denial shows in the `com.apple.TCC` log as `Policy disallows prompt`,
+usually preceded by `requires entitlement … but it is missing`.
+
 ## Investigating repeated prompts
 
 Record the exact application named by the prompt and the protected location.
