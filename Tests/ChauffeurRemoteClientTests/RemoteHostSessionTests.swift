@@ -76,7 +76,28 @@ struct RemoteHostSessionTests {
             try await session.setKeepAwakeSettings(KeepAwakeSettings(automatic: true))
         }
         #expect(factory.hosts[0].requests(ofKind: "setKeepAwakeSettings").isEmpty)
+        #expect(!session.isFileUploadSupported)
+        await #expect(throws: RemoteClientError.self) { _ = try await session.uploadFile(Data([1]), filename: "a.png") }
+        #expect(factory.hosts[0].requests(ofKind: "uploadFileChunk").isEmpty)
         session.disconnect()
+    }
+
+    @Test func filesUploadInOrderedChunksAndReturnTheMacPath() async throws {
+        let (session, factory) = makeSession()
+        await session.connect()
+        defer { session.disconnect() }
+        let data = Data(repeating: 7, count: UploadFileChunkRequest.chunkBytes * 2 + 10)
+        var fractions: [Double] = []
+        let path = try await session.uploadFile(data, filename: "screenshot.png") { fractions.append($0) }
+        #expect(path == "/tmp/chauffeur-uploads/screenshot.png")
+        let chunks = factory.hosts[0].requests(ofKind: "uploadFileChunk").compactMap { request -> UploadFileChunkRequest? in
+            if case .uploadFileChunk(let chunk) = request.operation { return chunk }
+            return nil
+        }
+        #expect(chunks.map(\.offset) == [0, Int64(UploadFileChunkRequest.chunkBytes), Int64(UploadFileChunkRequest.chunkBytes * 2)])
+        #expect(Set(chunks.map(\.uploadID)).count == 1 && chunks.allSatisfy { $0.totalBytes == Int64(data.count) })
+        #expect(chunks.reduce(Data()) { $0 + $1.data } == data)
+        #expect(fractions.last == 1)
     }
 
     @Test func keepAwakeMutationDoesNotMarkStaleInventoryFresh() async throws {

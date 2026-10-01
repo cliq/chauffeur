@@ -117,6 +117,11 @@ public final class RemoteHostSession {
         return host.capabilities.contains(RemoteProtocol.keepAwake)
     }
 
+    public var isFileUploadSupported: Bool {
+        guard case .connected(let host) = connectionState else { return false }
+        return host.capabilities.contains(RemoteProtocol.fileUpload)
+    }
+
     @ObservationIgnored private let journal: any PendingOperationJournal
     @ObservationIgnored private let clientName: String
     @ObservationIgnored private let clientVersion: String
@@ -322,6 +327,35 @@ public final class RemoteHostSession {
     public func setKeepAwakeTimer(until: Date?) async throws {
         let status = try await requestKeepAwake(.setKeepAwakeTimer(KeepAwakeTimerRequest(until: until)))
         updateKeepAwake(status)
+    }
+
+    /// Sends a file to the Mac in chunks and returns where the Mac saved it. `progress` receives
+    /// the fraction the Mac has confirmed. A chunk whose response is lost is sent once more.
+    public func uploadFile(_ data: Data, filename: String, progress: @MainActor (Double) -> Void = { _ in }) async throws -> String {
+        guard isFileUploadSupported, let connection else {
+            throw RemoteClientError.invalidResponse("Update Chauffeur on your Mac to send files from this device.")
+        }
+        guard !data.isEmpty, Int64(data.count) <= UploadFileChunkRequest.maxTotalBytes else {
+            throw RemoteClientError.invalidResponse("Files must be between 1 byte and \(UploadFileChunkRequest.maxTotalBytes / 1_048_576) MB.")
+        }
+        let uploadID = UUID(), total = Int64(data.count)
+        var offset = 0
+        while true {
+            let end = min(offset + UploadFileChunkRequest.chunkBytes, data.count)
+            let chunk = UploadFileChunkRequest(uploadID: uploadID, filename: filename, totalBytes: total, offset: Int64(offset), data: data.subdata(in: offset..<end))
+            let result: RemoteResult
+            do { result = try await connection.request(.uploadFileChunk(chunk)) }
+            catch RemoteClientError.timeout { result = try await connection.request(.uploadFileChunk(chunk)) }
+            guard case .uploadedFile(let status) = result, status.uploadID == uploadID else {
+                throw RemoteClientError.invalidResponse("uploadFileChunk returned \(result.kind)")
+            }
+            progress(Double(status.receivedBytes) / Double(total))
+            if let path = status.path { return path }
+            guard status.receivedBytes == Int64(end) else {
+                throw RemoteClientError.invalidResponse("The Mac lost part of the file. Send it again.")
+            }
+            offset = end
+        }
     }
 
     // MARK: Terminals
