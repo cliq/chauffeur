@@ -22,7 +22,7 @@ The **Terminal** section of the same pane sets the default look of every termina
   JetBrains Mono. **Size** ranges from 8 to 32 points.
 - **Light Mode Colors** and **Dark Mode Colors** pick a color theme for each system
   appearance from a curated list (Catppuccin, Dracula, GitHub, Gruvbox, Nord, Solarized,
-  Tokyo Night, and more). **System** keeps the default colors described above.
+  Tokyo Night, Terminal.app's Homebrew, and more). **System** keeps the default colors described above.
 
 Changes apply to open terminals immediately, without reconnecting or losing their text,
 and are saved for future launches. A font change resizes the terminal grid, and the

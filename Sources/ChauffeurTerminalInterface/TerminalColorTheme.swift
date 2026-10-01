@@ -77,6 +77,9 @@ public enum TerminalThemeCatalog {
                            palette: ["#282828", "#cc241d", "#98971a", "#d79921", "#458588", "#b16286", "#689d6a", "#a89984", "#928374", "#fb4934", "#b8bb26", "#fabd2f", "#83a598", "#d3869b", "#8ec07c", "#ebdbb2"]),
         TerminalColorTheme(name: "Gruvbox Light", background: "#fbf1c7", foreground: "#3c3836", cursor: "#3c3836", cursorText: "#fbf1c7", selectionBackground: "#3c3836", selectionForeground: "#fbf1c7",
                            palette: ["#fbf1c7", "#cc241d", "#98971a", "#d79921", "#458588", "#b16286", "#689d6a", "#7c6f64", "#928374", "#9d0006", "#79740e", "#b57614", "#076678", "#8f3f71", "#427b58", "#3c3836"]),
+        // Terminal.app's "Homebrew" profile, with its translucent selection flattened onto the black background.
+        TerminalColorTheme(name: "Homebrew", background: "#000000", foreground: "#28fe14", cursor: "#38fe27", cursorText: "#000000", selectionBackground: "#081e9b", selectionForeground: "#28fe14",
+                           palette: basicANSI),
         TerminalColorTheme(name: "Kanagawa Lotus", background: "#f2ecbc", foreground: "#545464", cursor: "#43436c", cursorText: "#f2ecbc", selectionBackground: "#545464", selectionForeground: "#f2ecbc",
                            palette: ["#1f1f28", "#c84053", "#6f894e", "#77713f", "#4d699b", "#b35b79", "#597b75", "#545464", "#8a8980", "#d7474b", "#6e915f", "#836f4a", "#6693bf", "#624c83", "#5e857a", "#43436c"]),
         TerminalColorTheme(name: "Kanagawa Wave", background: "#1f1f28", foreground: "#dcd7ba", cursor: "#dcd7ba", cursorText: "#1f1f28", selectionBackground: "#dcd7ba", selectionForeground: "#1f1f28",

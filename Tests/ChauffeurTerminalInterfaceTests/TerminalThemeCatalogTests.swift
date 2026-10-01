@@ -14,6 +14,7 @@ struct TerminalThemeCatalogTests {
     @Test func themesAreClassifiedByBackground() {
         #expect(TerminalThemeCatalog.theme(named: "Solarized Light")?.isDark == false)
         #expect(TerminalThemeCatalog.theme(named: "Tokyo Night")?.isDark == true)
+        #expect(TerminalThemeCatalog.theme(named: "Homebrew")?.isDark == true)
         #expect(TerminalThemeCatalog.theme(named: "Missing") == nil)
         #expect(TerminalThemeCatalog.theme(named: nil) == nil)
     }
