@@ -202,6 +202,16 @@ final class MobileAppModel {
         }
     }
 
+    // MARK: - Files
+
+    var fileUploadIsSupported: Bool { isConnected && session?.isFileUploadSupported == true }
+
+    /// Sends a file to the connected Mac and returns the path it was saved at.
+    func uploadFile(_ data: Data, filename: String, progress: @MainActor (Double) -> Void) async throws -> String {
+        guard let session, isConnected else { throw RemoteClientError.disconnected }
+        return try await session.uploadFile(data, filename: filename, progress: progress)
+    }
+
     // MARK: - Connection
 
     /// Connects to the selected Mac. `RemoteHostSession.connect()` reconciles pending launches and

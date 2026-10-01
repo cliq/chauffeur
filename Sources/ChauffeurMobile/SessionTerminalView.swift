@@ -34,7 +34,7 @@ struct SessionTerminalView: View {
                     .opacity(isInputEnabled(controller) ? 1 : 0.6)
                     .accessibilityIdentifier("terminal-surface")
                 Divider()
-                KeyAccessoryBar(adapter: adapter)
+                KeyAccessoryBar(adapter: adapter, model: model)
                     .disabled(!isInputEnabled(controller))
             } else {
                 ContentUnavailableView {
@@ -313,10 +313,12 @@ private struct FakeTerminalScreen: View {
 /// Ctrl is a one-shot modifier: tap it, then type any key on the keyboard (Ctrl+/ included) or pick a
 /// shortcut from the row it reveals.
 /// Shift and Option apply to the next arrow and can be combined.
+/// The paperclip sends a photo or file to the Mac and pastes its path, when the Mac supports it.
 struct KeyAccessoryBar: View {
     static let controlLetters: [Character] = ["c", "d", "z", "l", "r", "a", "e", "u", "k"]
 
     let adapter: any TerminalEngineAdapter
+    var model: MobileAppModel?
     @State private var arrowModifiers: TerminalArrowModifiers = []
     @State private var controlArmed = false
     /// The adapter holding the armed Ctrl, so switching tabs disarms the one that was armed.
@@ -387,6 +389,10 @@ struct KeyAccessoryBar: View {
                 .padding(.vertical, 8)
             }
             .scrollIndicators(.hidden)
+            if let model, model.fileUploadIsSupported {
+                FileUploadButton(model: model, adapter: adapter)
+                    .padding(.horizontal, 8)
+            }
             Divider().frame(height: 24)
             // Pinned outside the scrolling row so it is always reachable. Hiding the keyboard gives the
             // terminal the full screen; a tap on the terminal or this button brings it back.

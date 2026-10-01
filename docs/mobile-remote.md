@@ -133,6 +133,16 @@ session does not start a new process — it just attaches to what's already
 running. Closing a tab on the phone only detaches that tab's view; it does not
 stop the underlying process.
 
+**Sending a screenshot or file**: the paperclip on the terminal's key bar
+offers **Photo Library** and **Files**. The phone sends the item to the Mac in
+1 MB chunks, then pastes the path it was saved at into the terminal, followed by
+a space. Hand it to an agent with a prompt such as "look at this screenshot".
+Screenshots keep their PNG format; HEIC and other photo formats are converted to
+JPEG. Files go to `chauffeur-uploads/<id>/<name>` in the Mac user's temporary
+folder, readable only by that user, with names cleaned so the path needs no
+quoting. Files are limited to 100 MB and are deleted after a week. The paperclip
+appears only when the Mac supports uploads (`upload.v1`).
+
 On disconnect (Wi-Fi loss, backgrounding, or the Mac becoming unreachable),
 terminal input is disabled and the screen shows the last known state as not
 live. Reconnecting reattaches to the same process and refreshes the current
