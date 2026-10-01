@@ -127,10 +127,10 @@ attached on \<device\>" banner with a **Take control** action, and it never
 reclaims control automatically after a deliberate transfer. The controlling
 client owns the terminal's size.
 
-Tabs (which sessions are open, and in what order) are local to each device;
-they are not synchronized between the phone and the Mac. Opening an existing
-session does not start a new process — it just attaches to what's already
-running. Closing a tab on the phone only detaches that tab's view; it does not
+The terminal screen shows only the session you opened from the list; return to
+the list to switch sessions. Opening an existing session does not start a new
+process — it just attaches to what's already running. **Close** in the
+terminal's menu detaches the phone's view and returns to the list; it does not
 stop the underlying process.
 
 **Sending a screenshot or file**: the paperclip on the terminal's key bar

@@ -5,7 +5,7 @@ import ChauffeurRemoteClient
 import ChauffeurTerminalInterface
 import ChauffeurTerminalTesting
 
-/// 03 / Terminal + session tabs, with 03b (connection lost) as a banner. Taking control is immediate:
+/// 03 / Terminal for the session picked in the list, with 03b (connection lost) as a banner. Taking control is immediate:
 /// the other side loses input but the session keeps running, so there is nothing worth confirming.
 ///
 /// The key bar sits below the surface and the view does not ignore the keyboard safe area, so the
@@ -15,9 +15,6 @@ struct SessionTerminalView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            TabStrip(model: model)
-            Divider()
-
             if let sessionID = model.selectedTab {
                 let adapter = model.adapter(for: sessionID)
                 let controller = model.terminals[sessionID]
@@ -38,11 +35,11 @@ struct SessionTerminalView: View {
                     .disabled(!isInputEnabled(controller))
             } else {
                 ContentUnavailableView {
-                    Label("No open tabs", systemImage: "rectangle.on.rectangle.slash")
+                    Label("No session open", systemImage: "terminal")
                 } description: {
-                    Text("Open a session from the list or start a new tab.")
+                    Text("Choose a session from the list.")
                 } actions: {
-                    Button("New tab") { newTab() }
+                    Button("Show Sessions") { model.path = [.sessions] }
                 }
                 .frame(maxHeight: .infinity)
             }
@@ -69,8 +66,8 @@ struct SessionTerminalView: View {
                             model.path.append(.progress(sessionID: sessionID))
                         }
                         .accessibilityIdentifier("terminal-progress")
-                        Button("Close tab", systemImage: "xmark.rectangle") {
-                            model.closeTab(sessionID)
+                        Button("Close", systemImage: "xmark.rectangle") {
+                            close(sessionID)
                         }
                     }
                 }
@@ -118,15 +115,15 @@ struct SessionTerminalView: View {
             case .ended:
                 StatusBanner(
                     title: "Session ended",
-                    message: "The process exited on your Mac. Close this tab or launch a new session.",
-                    actionTitle: "Close tab"
+                    message: "The process exited on your Mac. Close it or launch a new session.",
+                    actionTitle: "Close"
                 ) {
-                    model.closeTab(sessionID)
+                    close(sessionID)
                 }
             case .idle:
                 StatusBanner(
                     title: "Not attached",
-                    message: "This tab is not showing the live terminal yet.",
+                    message: "This screen is not showing the live terminal yet.",
                     actionTitle: "Attach"
                 ) {
                     Task { await model.retryTerminal(sessionID) }
@@ -166,7 +163,7 @@ struct SessionTerminalView: View {
     }
 
     private var subtitle: String {
-        guard let session = model.selectedSession else { return "No tab selected" }
+        guard let session = model.selectedSession else { return "No session open" }
         let control: String
         switch model.selectedTab.flatMap({ model.terminals[$0] })?.state {
         case .attached: control = "Controlled here"
@@ -180,92 +177,10 @@ struct SessionTerminalView: View {
         return "\(branch) · \(control)"
     }
 
-    private func newTab() {
-        if let session = model.selectedSession {
-            model.path.append(.launch(model.location(of: session)))
-        } else {
-            model.path.append(.location(projectID: nil))
-        }
-    }
-}
-
-/// Open tabs for this device. `+` skips Location and opens Launch with the current checkout.
-private struct TabStrip: View {
-    var model: MobileAppModel
-
-    var body: some View {
-        HStack(spacing: 0) {
-            ScrollView(.horizontal) {
-                HStack(spacing: 6) {
-                    ForEach(model.openTabs, id: \.self) { sessionID in
-                        let session = model.session(sessionID)
-                        TabChip(
-                            title: session?.title ?? "Session",
-                            kind: session?.kind,
-                            isSelected: model.selectedTab == sessionID,
-                            onSelect: { model.selectTab(sessionID) },
-                            onClose: { model.closeTab(sessionID) }
-                        )
-                    }
-                }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
-            }
-            .scrollIndicators(.hidden)
-
-            Button("New tab", systemImage: "plus") {
-                if let session = model.selectedSession {
-                    model.path.append(.launch(model.location(of: session)))
-                } else {
-                    model.path.append(.location(projectID: nil))
-                }
-            }
-            .labelStyle(.iconOnly)
-            .padding(.horizontal, 12)
-            .disabled(!model.isConnected)
-            .accessibilityIdentifier("terminal-new-tab")
-        }
-        .background(Color(uiColor: .secondarySystemBackground))
-    }
-}
-
-private struct TabChip: View {
-    let title: String
-    let kind: RemoteSessionKind?
-    let isSelected: Bool
-    var onSelect: () -> Void
-    var onClose: () -> Void
-
-    var body: some View {
-        HStack(spacing: 6) {
-            Button(action: onSelect) {
-                HStack(spacing: 6) {
-                    if let kind {
-                        Text(kind.label)
-                            .font(.caption2.weight(.semibold))
-                            .foregroundStyle(.secondary)
-                    }
-                    Text(title)
-                        .font(.subheadline.weight(isSelected ? .semibold : .regular))
-                        .lineLimit(1)
-                }
-            }
-            .buttonStyle(.plain)
-            Button("Close tab", systemImage: "xmark") {
-                onClose()
-            }
-            .labelStyle(.iconOnly)
-            .font(.caption2)
-            .buttonStyle(.plain)
-            .foregroundStyle(.secondary)
-        }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 6)
-        .background(isSelected ? Color(uiColor: .systemBackground) : Color.clear, in: RoundedRectangle(cornerRadius: 8))
-        .overlay {
-            RoundedRectangle(cornerRadius: 8)
-                .strokeBorder(isSelected ? Color.secondary.opacity(0.4) : Color.clear)
-        }
+    /// Detaches the session and returns to the list, rather than switching to another open session.
+    private func close(_ sessionID: UUID) {
+        model.closeTab(sessionID)
+        model.path = [.sessions]
     }
 }
 
