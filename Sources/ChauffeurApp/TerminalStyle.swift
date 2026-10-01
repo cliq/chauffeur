@@ -31,18 +31,31 @@ struct TerminalStyle: Equatable {
     var fontSize: Double
     var light: TerminalColorChoice
     var dark: TerminalColorChoice
+    /// How opaque terminal backgrounds are, as Terminal.app's background opacity: below 1 the
+    /// desktop shows through the terminal area of project windows.
+    var backgroundOpacity: Double
 
     static let `default` = TerminalStyle(fontFamily: nil, fontSize: 13, light: .system, dark: .system)
     static let fontSizes: ClosedRange<Double> = 8...32
+    /// Kept above a floor so text stays readable over whatever is behind the window.
+    static let backgroundOpacities: ClosedRange<Double> = 0.3...1
 
-    init(fontFamily: String?, fontSize: Double, light: TerminalColorChoice, dark: TerminalColorChoice) {
+    init(fontFamily: String?, fontSize: Double, light: TerminalColorChoice, dark: TerminalColorChoice, backgroundOpacity: Double = 1) {
         self.fontFamily = fontFamily
         self.fontSize = min(max(fontSize, Self.fontSizes.lowerBound), Self.fontSizes.upperBound)
         self.light = light
         self.dark = dark
+        self.backgroundOpacity = min(max(backgroundOpacity, Self.backgroundOpacities.lowerBound), Self.backgroundOpacities.upperBound)
     }
 
     func choice(dark: Bool) -> TerminalColorChoice { dark ? self.dark : light }
+
+    /// The same style with a fully opaque background.
+    var opaque: TerminalStyle {
+        var style = self
+        style.backgroundOpacity = 1
+        return style
+    }
 
     /// The colors to hand the engine, or `nil` for the system colors.
     func appearanceColors(dark: Bool) -> TerminalColorTheme? {
@@ -86,13 +99,15 @@ struct TerminalStyle: Equatable {
 
     func appearance(scrollback: Int) -> TerminalAppearance {
         TerminalAppearance(fontName: fontFamily, fontSize: fontSize, scrollbackLines: scrollback, followsSystemColors: true,
-                           lightColors: appearanceColors(dark: false), darkColors: appearanceColors(dark: true))
+                           lightColors: appearanceColors(dark: false), darkColors: appearanceColors(dark: true),
+                           backgroundOpacity: backgroundOpacity)
     }
 
     // MARK: Persistence
 
     private static let fontFamilyKey = "terminalFontFamily"
     private static let fontSizeKey = "terminalFontSize"
+    private static let backgroundOpacityKey = "terminalBackgroundOpacity"
     private static func themeKey(dark: Bool) -> String { dark ? "terminalDarkTheme" : "terminalLightTheme" }
     private static func customKey(dark: Bool) -> String { dark ? "terminalDarkCustomColors" : "terminalLightCustomColors" }
 
@@ -111,13 +126,15 @@ struct TerminalStyle: Equatable {
                 return .system
             }
         }
+        let opacity = preferences.object(forKey: Self.backgroundOpacityKey) as? Double
         self.init(fontFamily: preferences.string(forKey: Self.fontFamilyKey), fontSize: size > 0 ? size : Self.default.fontSize,
-                  light: choice(dark: false), dark: choice(dark: true))
+                  light: choice(dark: false), dark: choice(dark: true), backgroundOpacity: opacity ?? Self.default.backgroundOpacity)
     }
 
     func save(to preferences: UserDefaults) {
         preferences.set(fontFamily, forKey: Self.fontFamilyKey)
         preferences.set(fontSize, forKey: Self.fontSizeKey)
+        preferences.set(backgroundOpacity, forKey: Self.backgroundOpacityKey)
         for dark in [false, true] {
             let choice = choice(dark: dark)
             preferences.set(choice.tag, forKey: Self.themeKey(dark: dark))

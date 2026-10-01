@@ -23,6 +23,10 @@ The **Terminal** section of the same pane sets the default look of every termina
 - **Light Mode Colors** and **Dark Mode Colors** pick a color theme for each system
   appearance from a curated list (Catppuccin, Dracula, GitHub, Gruvbox, Nord, Solarized,
   Tokyo Night, Terminal.app's Homebrew, and more). **System** keeps the default colors described above.
+- **Background Opacity** works like Terminal.app's: below 100% the desktop and other windows show
+  through the terminal area of project windows, including the placeholder shown when no terminal
+  is open. The sidebar, header and tabs stay opaque, and the History sheet always draws an opaque
+  terminal. It applies in both light and dark mode, whatever the color theme.
 
 Changes apply to open terminals immediately, without reconnecting or losing their text,
 and are saved for future launches. A font change resizes the terminal grid, and the

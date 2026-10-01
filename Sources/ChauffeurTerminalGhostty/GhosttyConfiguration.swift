@@ -9,6 +9,8 @@ struct GhosttyConfiguration: Hashable, Sendable {
     var fontName: String?
     var fontSize: Double
     var scrollbackLines: Int
+    /// How much of the default background is painted; below 1 the window behind shows through.
+    var backgroundOpacity: Double
     /// Light and dark palettes resolved from the system colors, or `nil` for Ghostty's defaults.
     var colors: GhosttyColorPair?
 
@@ -17,6 +19,7 @@ struct GhosttyConfiguration: Hashable, Sendable {
         fontName = appearance.fontName
         fontSize = appearance.fontSize
         scrollbackLines = appearance.scrollbackLines
+        backgroundOpacity = min(max(appearance.backgroundOpacity, 0), 1)
         let light = appearance.lightColors, dark = appearance.darkColors
         colors = appearance.followsSystemColors || light != nil || dark != nil
             ? GhosttyColorPair(light: light.map(GhosttyPalette.init) ?? .resolved(in: .aqua), dark: dark.map(GhosttyPalette.init) ?? .resolved(in: .darkAqua))
@@ -61,6 +64,9 @@ struct GhosttyConfiguration: Hashable, Sendable {
         ]
         if let fontName, !fontName.isEmpty {
             lines.insert("font-family = \(fontName)", at: 0)
+        }
+        if backgroundOpacity < 1 {
+            lines.append("background-opacity = \(Self.literal(backgroundOpacity))")
         }
         if let colors {
             lines += (dark ? colors.dark : colors.light).configLines

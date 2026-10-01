@@ -10,6 +10,9 @@ public struct TerminalAppearance: Equatable, Sendable {
     /// that mode.
     public var lightColors: TerminalColorTheme?
     public var darkColors: TerminalColorTheme?
+    /// How opaque the default background is, from 0 to 1. Engines that cannot draw a translucent
+    /// background ignore it.
+    public var backgroundOpacity: Double
 
     public init(
         fontName: String? = nil,
@@ -17,7 +20,8 @@ public struct TerminalAppearance: Equatable, Sendable {
         scrollbackLines: Int = 10_000,
         followsSystemColors: Bool = true,
         lightColors: TerminalColorTheme? = nil,
-        darkColors: TerminalColorTheme? = nil
+        darkColors: TerminalColorTheme? = nil,
+        backgroundOpacity: Double = 1
     ) {
         self.fontName = fontName
         self.fontSize = fontSize
@@ -25,6 +29,7 @@ public struct TerminalAppearance: Equatable, Sendable {
         self.followsSystemColors = followsSystemColors
         self.lightColors = lightColors
         self.darkColors = darkColors
+        self.backgroundOpacity = backgroundOpacity
     }
 
     public static let `default` = TerminalAppearance()

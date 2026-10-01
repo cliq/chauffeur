@@ -136,6 +136,8 @@ private struct ProjectWindowContent: View, Equatable {
     @State private var recentConversationsRow: CheckoutRow?
     @State private var renamingSession: Session?
     @State private var renameTitle = ""
+    /// The terminals' background opacity; below 1 the window lets the desktop through terminal areas.
+    @State private var terminalOpacity = 1.0
     @FocusState private var searchFocused: Bool
     init(model: AppModel, projectModel: ProjectModel) {
         self.model = model; self.projectModel = projectModel; projectID = projectModel.id
@@ -166,7 +168,7 @@ private struct ProjectWindowContent: View, Equatable {
                             detailArea(project)
                             if layout.detailsVisible, let session = projectSession(layout.state.selectedSessionID) { SessionSidebarView(session: session, project: project).frame(minWidth: 300, idealWidth: 340, maxWidth: 460) }
                         }
-                    }
+                    }.background(terminalOpacity < 1 ? Color(nsColor: .windowBackgroundColor) : .clear, aroundTerminals: true)
                 }
                 .navigationTitle(project.name)
                 .toolbar {
@@ -213,14 +215,15 @@ private struct ProjectWindowContent: View, Equatable {
                 VStack(spacing: 20) {
                     ContentUnavailableView(online ? "Project unavailable" : "Connecting…", systemImage: "folder.badge.questionmark", description: Text("Restore the project directory or choose another project. Existing agents remain in the background service."))
                     ServiceHealthView(); Button("Open Projects") { openWindow(id: "welcome") }
-                }.padding(24)
+                }.padding(24).frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(Color(nsColor: .windowBackgroundColor), aroundTerminals: false)
             }
         }.frame(minWidth: 880, minHeight: 560)
             .overlay { if layout.newTabPresented { newTabPrompt } }
             .alert("Could not close tab", isPresented: Binding(get: { tabError != nil }, set: { if !$0 { tabError = nil } })) {
                 Button("OK") { tabError = nil }
             } message: { Text(tabError ?? "") }
-            .background(WindowObserver(projectID: projectID, layout: layout, handleKey: handleKey, didChangeFrame: saveLayout, didShow: {
+            .background(WindowObserver(projectID: projectID, layout: layout, translucent: terminalOpacity < 1, handleKey: handleKey, didChangeFrame: saveLayout, didShow: {
                 // Wait for the native project window to be visible before
                 // closing Welcome. Preserve any other project-creation draft.
                 guard project != nil else { return }
@@ -231,7 +234,7 @@ private struct ProjectWindowContent: View, Equatable {
                 layout.state.wasOpen = false; model.saveWindow(layout.state); model.openProjects.remove(projectID)
                 layout.loaded = false
             }))
-            .onAppear { restore(); consumeSessionRoute(); consumeProjectRoute() }
+            .onAppear { restore(); consumeSessionRoute(); consumeProjectRoute(); terminalOpacity = model.terminalStyle.backgroundOpacity }
             .onChange(of: projectModel.slice.pendingSessionRoute) { _, _ in consumeSessionRoute() }
             .onChange(of: projectModel.slice.pendingProjectRoute) { _, _ in consumeProjectRoute() }
             .onChange(of: online) { _, online in if online { restore(); layout.synchronizeTerminals(model: model) } }
@@ -258,6 +261,7 @@ private struct ProjectWindowContent: View, Equatable {
             // Color wells report every step of a drag; apply the settled value.
             .onReceive(model.$terminalStyle.debounce(for: .milliseconds(120), scheduler: RunLoop.main)) { style in
                 for controller in layout.controllers.values { controller.setStyle(style) }
+                terminalOpacity = style.backgroundOpacity
             }
             .onReceive(NotificationCenter.default.publisher(for: .chauffeurCommand)) { notification in
                 guard layout.window?.isKeyWindow == true, let command = notification.object as? String else { return }
@@ -718,6 +722,7 @@ private struct ProjectWindowContent: View, Equatable {
                             ProgressView()
                             Text("Starting \(selectedPending.title)…").foregroundStyle(.secondary)
                         }.frame(maxWidth: .infinity, maxHeight: .infinity)
+                            .terminalPlaceholder(opacity: terminalOpacity)
                             .accessibilityIdentifier("terminal.launching")
                     } else if let selected = sessions.first(where: { $0.id == selectedID }) {
                         // Per-session identity so a new selection hosts its own
@@ -737,7 +742,7 @@ private struct ProjectWindowContent: View, Equatable {
             VStack(spacing: 16) {
                 ContentUnavailableView("Choose a repository or worktree", systemImage: "arrow.triangle.branch", description: Text("Select a checkout in the sidebar to see its sessions, or launch an agent using this project's agent presets."))
                 Button("New Session…") { showLaunch() }.buttonStyle(.borderedProminent).disabled(!canLaunch)
-            }.frame(maxWidth: .infinity, maxHeight: .infinity)
+            }.frame(maxWidth: .infinity, maxHeight: .infinity).terminalPlaceholder(opacity: terminalOpacity)
         }
     }
     private func checkoutEmptyState(_ row: CheckoutRow, folder: ProjectFolder, hasFinished: Bool) -> some View {
@@ -753,7 +758,7 @@ private struct ProjectWindowContent: View, Equatable {
                 }
                 Button("Recent Conversations…") { recentConversationsRow = row }.disabled(!online).accessibilityIdentifier("checkout.empty.recentConversations")
             }
-        }.frame(maxWidth: .infinity, maxHeight: .infinity)
+        }.frame(maxWidth: .infinity, maxHeight: .infinity).terminalPlaceholder(opacity: terminalOpacity)
     }
     private func repositoryOverview(_ folder: ProjectFolder, project: Project) -> some View {
         let rows = checkouts(for: folder, project: project)
@@ -1378,6 +1383,8 @@ private struct SessionStrip: View {
 struct WindowObserver: NSViewRepresentable {
     let projectID: UUID
     @ObservedObject var layout: ProjectLayout
+    /// A translucent window shows the desktop wherever its content paints nothing.
+    let translucent: Bool
     let handleKey: (NSEvent) -> Bool
     let didChangeFrame: () -> Void
     let didShow: () -> Void
@@ -1395,6 +1402,11 @@ struct WindowObserver: NSViewRepresentable {
                 context.coordinator.observe(window)
             }
             context.coordinator.restoreFrame(window)
+            if window.isOpaque == self.translucent {
+                window.isOpaque = !self.translucent
+                // Nearly clear rather than clear keeps the window's shadow and resize edges.
+                window.backgroundColor = self.translucent ? NSColor.white.withAlphaComponent(0.001) : .windowBackgroundColor
+            }
         }
     }
     static func dismantleNSView(_ view: NSView, coordinator: Coordinator) {

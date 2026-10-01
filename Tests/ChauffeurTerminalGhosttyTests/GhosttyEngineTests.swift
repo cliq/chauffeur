@@ -25,6 +25,13 @@ struct GhosttyEngineTests {
         #expect(rendered.contains("keybind = alt+left=esc:b\n"))
         #expect(!rendered.contains("background ="))
         #expect(!rendered.contains("font-family"))
+        #expect(!rendered.contains("background-opacity"))
+    }
+
+    @Test func translucentBackgroundsSetGhosttysOpacity() {
+        let rendered = GhosttyConfiguration(TerminalAppearance(backgroundOpacity: 0.85)).rendered(dark: true)
+        #expect(rendered.contains("background-opacity = 0.85\n"))
+        #expect(GhosttyTerminalAdapter(appearance: TerminalAppearance(backgroundOpacity: 0.85)).configurationDiagnostics == [])
     }
 
     @Test func numbersUseAPeriodWhateverTheLocale() {

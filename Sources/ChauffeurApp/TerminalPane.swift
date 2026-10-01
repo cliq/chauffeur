@@ -55,6 +55,8 @@ enum TerminalControlState: Equatable { case detached, connecting, connected, con
         self.sessionID = sessionID
         self.readOnly = readOnly
         self.scrollback = scrollback
+        // History opens in a sheet, an opaque window with nothing to show through.
+        let style = readOnly ? style.opaque : style
         self.style = style
         // Default colors follow the system appearance; file drops paste quoted
         // paths through the adapter's input gate and bracketed paste.
@@ -214,6 +216,7 @@ enum TerminalControlState: Equatable { case detached, connecting, connected, con
     /// scrollback; a grid change reaches the process as a resize. A zoomed
     /// terminal returns to the new default size.
     func setStyle(_ style: TerminalStyle) {
+        let style = readOnly ? style.opaque : style
         guard style != self.style else { return }
         self.style = style
         adapter.resetFontSize()
@@ -288,6 +291,37 @@ struct TerminalHost: NSViewRepresentable {
     func updateNSView(_ nsView: NSView, context: Context) {}
 }
 
+/// The frames of the terminal areas in a view: live terminals and the placeholders shown in their
+/// place. Backgrounds behind them leave a hole, so a translucent window shows the desktop there.
+struct TerminalFramesKey: PreferenceKey {
+    static let defaultValue: [Anchor<CGRect>] = []
+    static func reduce(value: inout [Anchor<CGRect>], nextValue: () -> [Anchor<CGRect>]) { value += nextValue() }
+}
+
+extension View {
+    /// Marks the view as a terminal area that paints its own, possibly translucent, background.
+    func terminalArea() -> some View {
+        anchorPreference(key: TerminalFramesKey.self, value: .bounds) { [$0] }
+    }
+
+    /// A terminal area standing in for a terminal: `color` at the terminals' background opacity.
+    func terminalPlaceholder(_ color: Color = Color(nsColor: .windowBackgroundColor), opacity: Double) -> some View {
+        background(color.opacity(opacity)).terminalArea()
+    }
+
+    /// Fills the background with `color` except where a terminal area inside reports its frame.
+    func background(_ color: Color, aroundTerminals: Bool) -> some View {
+        backgroundPreferenceValue(TerminalFramesKey.self) { frames in
+            GeometryReader { proxy in
+                Path { path in
+                    path.addRect(CGRect(origin: .zero, size: proxy.size))
+                    if aroundTerminals { for frame in frames { path.addRect(proxy[frame]) } }
+                }.fill(color, style: FillStyle(eoFill: true))
+            }.ignoresSafeArea()
+        }
+    }
+}
+
 struct TerminalPane: View {
     @EnvironmentObject private var model: AppModel
     let session: Session
@@ -313,6 +347,7 @@ struct TerminalPane: View {
             } else if let status = controller.status, !controller.connected { Text(status).font(.caption).padding(8).frame(maxWidth: .infinity, alignment: .leading).background(.orange.opacity(0.12)) }
             if session.state.isLive {
                 TerminalHost(controller: controller)
+                    .terminalArea()
                     .overlay {
                         if !controller.connected && (controller.controlState == .connecting || controller.controlState == .detached || controller.controlState == .connected) {
                             VStack(spacing: 12) {
@@ -333,8 +368,9 @@ struct TerminalPane: View {
                         Button("Resume Conversation") { model.perform { _ = try await model.call("resume", .object(["sessionID": .string(session.id.uuidString)])) } }.buttonStyle(.borderedProminent)
                     }
                 }.padding(32).frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .terminalPlaceholder(Color(nsColor: .textBackgroundColor), opacity: model.terminalStyle.backgroundOpacity)
             }
-        }.background(Color(nsColor: .textBackgroundColor))
+        }.background(Color(nsColor: .textBackgroundColor), aroundTerminals: true)
             .sheet(isPresented: $controller.historyPresented, onDismiss: { if !controller.historyPresented { controller.historyController = nil } }) {
                 if let history = controller.historyController { TerminalHistoryView(session: session, controller: history).environmentObject(model) }
             }

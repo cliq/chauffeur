@@ -224,11 +224,18 @@ struct AppearanceSettingsView: View {
                 }.accessibilityIdentifier("terminal-font.size")
                 themePicker("Light Mode Colors", dark: false).accessibilityIdentifier("terminal-theme.light")
                 themePicker("Dark Mode Colors", dark: true).accessibilityIdentifier("terminal-theme.dark")
+                LabeledContent("Background Opacity") {
+                    HStack {
+                        Slider(value: $model.terminalStyle.backgroundOpacity, in: TerminalStyle.backgroundOpacities, step: 0.05)
+                        Text(model.terminalStyle.backgroundOpacity.formatted(.percent.precision(.fractionLength(0))))
+                            .monospacedDigit().frame(width: 44, alignment: .trailing)
+                    }
+                }.accessibilityIdentifier("terminal-background.opacity")
                 HStack(spacing: 8) {
                     TerminalStylePreview(colors: model.terminalStyle.colors(dark: false), style: model.terminalStyle, label: "Light")
                     TerminalStylePreview(colors: model.terminalStyle.colors(dark: true), style: model.terminalStyle, label: "Dark")
                 }
-                Text("Applies to all terminals immediately and resets any zoom. Use View ▸ Bigger or Smaller (⌘+ and ⌘−) to zoom one terminal until you close it. Colors an agent draws itself stay under that CLI’s control.")
+                Text("Below 100%, the desktop shows through terminal backgrounds, as in Terminal.app. Applies to all terminals immediately and resets any zoom. Use View ▸ Bigger or Smaller (⌘+ and ⌘−) to zoom one terminal until you close it. Colors an agent draws itself stay under that CLI’s control.")
                     .font(.caption).foregroundStyle(.secondary)
             }
             Section("Terminal Colors") {
@@ -287,7 +294,7 @@ private struct TerminalStylePreview: View {
             }
         }
         .font(style.previewFont).lineLimit(1).padding(8).frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color(hex: colors.background), in: RoundedRectangle(cornerRadius: 6))
+        .background(Color(hex: colors.background).opacity(style.backgroundOpacity), in: RoundedRectangle(cornerRadius: 6))
         .accessibilityHidden(true)
     }
 }
