@@ -6,7 +6,7 @@ import ChauffeurRemoteProtocol
 import ChauffeurRemoteClient
 import ChauffeurTerminalInterface
 
-/// Sends a photo or file to the Mac and pastes the path the Mac saved it at into the terminal,
+/// Sends a photo, a copied image or a file to the Mac and pastes the path the Mac saved it at into the terminal,
 /// so a screenshot can be handed to an agent.
 struct FileUploadButton: View {
     var model: MobileAppModel
@@ -21,6 +21,8 @@ struct FileUploadButton: View {
         Menu {
             Button("Photo Library", systemImage: "photo.on.rectangle") { choosingPhoto = true }
                 .accessibilityIdentifier("upload-photo")
+            Button("Paste Image", systemImage: "doc.on.clipboard") { Task { await send { try Self.pastedImage() } } }
+                .accessibilityIdentifier("upload-paste")
             Button("Files", systemImage: "folder") { choosingFile = true }
                 .accessibilityIdentifier("upload-file")
         } label: {
@@ -85,13 +87,35 @@ struct FileUploadButton: View {
             throw CocoaError(.fileReadUnknown, userInfo: [NSLocalizedDescriptionKey: "The photo could not be loaded."])
         }
         let type = item.supportedContentTypes.first { $0.conforms(to: .image) }
-        let stamp = Date.now.formatted(.iso8601.year().month().day().dateSeparator(.dash).time(includingFractionalSeconds: false).timeSeparator(.omitted))
+        let stamp = stamp()
         if let type, type.conforms(to: .png) { return (data, "screenshot-\(stamp).png") }
         if let type, type.conforms(to: .jpeg) || type.conforms(to: .gif), let ext = type.preferredFilenameExtension { return (data, "photo-\(stamp).\(ext)") }
         guard let jpeg = UIImage(data: data)?.jpegData(compressionQuality: 0.9) else {
             throw CocoaError(.fileReadCorruptFile, userInfo: [NSLocalizedDescriptionKey: "The photo's format is not supported."])
         }
         return (jpeg, "photo-\(stamp).jpg")
+    }
+
+    /// The clipboard's image in the format it was copied as when agents can read it, else as PNG.
+    /// Reading it may ask the user to allow the paste.
+    private static func pastedImage() throws -> (data: Data, filename: String) {
+        let pasteboard = UIPasteboard.general
+        guard pasteboard.hasImages else {
+            throw CocoaError(.fileReadNoSuchFile, userInfo: [NSLocalizedDescriptionKey: "There is no image on the clipboard."])
+        }
+        for type in [UTType.png, .jpeg, .gif] {
+            if let data = pasteboard.data(forPasteboardType: type.identifier), let ext = type.preferredFilenameExtension {
+                return (data, "pasted-\(stamp()).\(ext)")
+            }
+        }
+        guard let png = pasteboard.image?.pngData() else {
+            throw CocoaError(.fileReadCorruptFile, userInfo: [NSLocalizedDescriptionKey: "The copied image's format is not supported."])
+        }
+        return (png, "pasted-\(stamp()).png")
+    }
+
+    private static func stamp() -> String {
+        Date.now.formatted(.iso8601.year().month().day().dateSeparator(.dash).time(includingFractionalSeconds: false).timeSeparator(.omitted))
     }
 
     private static func file(at url: URL) throws -> (data: Data, filename: String) {
