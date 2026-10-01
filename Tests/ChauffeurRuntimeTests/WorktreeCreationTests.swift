@@ -366,6 +366,9 @@ struct WorktreeCreationTests {
         #expect(snapshot.sessions.isEmpty && snapshot.worktrees.isEmpty)
         #expect(try await fixture.runtime.worktrees.inventory(at: fixture.repo.path).count == 1)
         #expect(try await fixture.runtime.snapshot()["sessions"].array.isEmpty)
+        // The deleted checkout leaves the published inventory with the reply, before any rescan.
+        let published = try await fixture.runtime.snapshot()["repositoryInventories"].decode([RepositoryInventory].self)
+        #expect(!published.flatMap(\.entries).contains { $0.path == Paths.canonical(external.path) })
         // A branch without unique commits is removed too.
         #expect(try await ProcessRunner.run("/usr/bin/git", ["-C", fixture.repo.path, "show-ref", "--verify", "refs/heads/external"]).status != 0)
         // The main checkout can never be deleted this way.

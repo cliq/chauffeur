@@ -122,6 +122,8 @@ private struct ProjectWindowContent: View, Equatable {
     @State private var deletingCheckout: CheckoutRow?
     @State private var deletionPreview = WorktreeDeletionPreview(hasChanges: false)
     @State private var checkingDeletion = false
+    /// Canonical paths of checkouts whose deletion is still running.
+    @State private var deletingWorktrees = Set<String>()
     private struct TabClosure {
         let session: Session
         let command: String?
@@ -542,6 +544,7 @@ private struct ProjectWindowContent: View, Equatable {
         let live = WorktreeSessions.liveAgents(sessions).count
         let terminals = WorktreeSessions.liveTerminals(sessions).count
         let selected = layout.selectedFolderID == folder.id && layout.selectedWorktreePath.map { projectModel.canonical($0) == projectModel.canonical(row.path) } == true
+        let deleting = isDeleting(row)
         // Indicators sit outside the button: a button's own tooltip hides those of its label's subviews.
         return HStack(alignment: .top, spacing: 4) {
             Button { selectCheckout(folderID: folder.id, path: row.path) } label: {
@@ -565,7 +568,8 @@ private struct ProjectWindowContent: View, Equatable {
                                     .accessibilityIdentifier("repository.unmerged.\(row.path)")
                             }
                         }.font(.caption).foregroundStyle(.secondary)
-                        if let status = row.statusLabel { Text(status).font(.caption).foregroundStyle(.secondary) }
+                        if deleting { Text("Deleting…").font(.caption).foregroundStyle(.secondary) }
+                        else if let status = row.statusLabel { Text(status).font(.caption).foregroundStyle(.secondary) }
                     }
                 } icon: { Image(systemName: row.isMain ? "house" : "arrow.triangle.branch") }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -575,7 +579,9 @@ private struct ProjectWindowContent: View, Equatable {
                 .accessibilityAddTraits(selected ? .isSelected : [])
                 .accessibilityValue(selected ? "Selected worktree" : "")
             HStack(spacing: 4) {
-                if runningSetup.contains(row.path) {
+                if deleting {
+                    ProgressView().controlSize(.mini).help("Deleting the worktree").accessibilityLabel("Deleting the worktree")
+                } else if runningSetup.contains(row.path) {
                     ProgressView().controlSize(.mini).help("Running the setup script").accessibilityLabel("Running the setup script")
                 }
                 terminalIndicator(terminals)
@@ -588,6 +594,8 @@ private struct ProjectWindowContent: View, Equatable {
         .contentShape(Rectangle())
         .onTapGesture { selectCheckout(folderID: folder.id, path: row.path) }
         .id(SidebarRowID.worktree(folder.id, row.path))
+        .opacity(deleting ? 0.5 : 1)
+        .disabled(deleting)
         .contextMenu { checkoutMenu(row, folder: folder) }
     }
     @ViewBuilder private func checkoutMenu(_ row: CheckoutRow, folder: ProjectFolder) -> some View {
@@ -606,7 +614,7 @@ private struct ProjectWindowContent: View, Equatable {
             if isHidden(row) { Button("Show Worktree") { setHidden(row, false) } }
             else { Button("Hide Worktree") { setHidden(row, true) }.help("Move to the Hidden section until you work on it again") }
             Button("Delete Worktree…", role: .destructive) { prepareDeletion(row) }
-                .disabled(!online || !row.liveSessions.isEmpty)
+                .disabled(!online || !row.liveSessions.isEmpty || isDeleting(row))
                 .help(row.liveSessions.isEmpty ? "" : "Stop its live sessions first")
         }
     }
@@ -734,7 +742,7 @@ private struct ProjectWindowContent: View, Equatable {
                                    description: Text(row.finished ? "The checkout no longer exists. Its finished sessions stay available above until you delete the worktree." : "Launch an agent or open a shell in \(row.title)."))
             HStack(spacing: 12) {
                 if row.finished {
-                    Button("Delete Worktree…", role: .destructive) { prepareDeletion(row) }.disabled(!online || !row.liveSessions.isEmpty)
+                    Button("Delete Worktree…", role: .destructive) { prepareDeletion(row) }.disabled(!online || !row.liveSessions.isEmpty || isDeleting(row))
                 } else {
                     Button("Launch Agent…") { launchAgent(in: row, folder: folder) }.buttonStyle(.borderedProminent).disabled(!canLaunch(in: row)).accessibilityIdentifier("checkout.empty.launch")
                     Button("Open Shell") { openShell(in: row, folder: folder) }.disabled(!canLaunch(in: row)).accessibilityIdentifier("checkout.empty.shell")
@@ -1058,8 +1066,9 @@ private struct ProjectWindowContent: View, Equatable {
         }
     }
 
+    private func isDeleting(_ row: CheckoutRow) -> Bool { deletingWorktrees.contains(projectModel.canonical(row.path)) }
     private func prepareDeletion(_ row: CheckoutRow) {
-        guard let project, !checkingDeletion else { return }
+        guard let project, !checkingDeletion, !isDeleting(row) else { return }
         checkingDeletion = true
         model.perform {
             defer { checkingDeletion = false }
@@ -1071,8 +1080,13 @@ private struct ProjectWindowContent: View, Equatable {
     private func deleteWorktree(_ row: CheckoutRow) {
         guard let project else { return }
         let discardChanges = deletionPreview.hasChanges
+        let path = projectModel.canonical(row.path)
+        guard deletingWorktrees.insert(path).inserted else { return }
         model.perform {
-            _ = try await model.call("deleteWorktree", .object(["projectID": .string(project.id.uuidString), "folderID": .string(row.folderID.uuidString), "path": .string(row.path), "discardChanges": .bool(discardChanges)]))
+            defer { deletingWorktrees.remove(path) }
+            _ = try await model.call("deleteWorktree", .object(["projectID": .string(project.id.uuidString), "folderID": .string(row.folderID.uuidString), "path": .string(row.path), "discardChanges": .bool(discardChanges)]), responseTimeout: 300)
+            // Pick up the shortened inventory before the row stops showing its progress.
+            try await model.refresh()
             setHidden(row, false)
             if layout.selectedWorktreePath.map({ projectModel.canonical($0) == projectModel.canonical(row.path) }) == true {
                 layout.selectCheckout(folderID: row.folderID, path: nil, sessions: [])

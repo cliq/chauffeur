@@ -43,6 +43,9 @@ public actor RuntimeCoordinator {
     private var setupLogDirectory: URL { root.appendingPathComponent("runtime/worktree-setup") }
     /// Checkouts Chauffeur created that a finished scan has not observed yet.
     private var createdCheckouts: [(repositoryID: UUID, entry: GitWorktree)] = []
+    /// Checkouts deleted since the last scan began; a scan already in flight
+    /// may still list them, so they stay out of the inventory until a fresh one.
+    private var removedCheckouts: Set<String> = []
     private var worktreeScan: Task<Void, Never>?
     private var worktreeRecordWrites = Set<UUID>()
     private var worktreeCreations: [UUID: (String, Task<Stored<Worktree>, Error>)] = [:]
@@ -204,6 +207,7 @@ public actor RuntimeCoordinator {
     private func scanWorktrees() async {
         // Checkouts created before this scan began are in Git's list by now.
         let observedCreations = Set(createdCheckouts.map(\.entry.path))
+        let observedRemovals = removedCheckouts
         let snapshot = await store.refresh()
         let records = snapshot.worktrees.filter { $0.value.registered }
         var seenSources = Set<String>()
@@ -255,7 +259,23 @@ public actor RuntimeCoordinator {
             catch { record(ChauffeurError("worktree_unavailable", "Worktree reconciliation could not save a record")) }
         }
         createdCheckouts.removeAll { observedCreations.contains($0.entry.path) }
-        repositoryInventories = Self.including(createdCheckouts, in: observations)
+        repositoryInventories = Self.excluding(removedCheckouts, from: Self.including(createdCheckouts, in: observations))
+        removedCheckouts.subtract(observedRemovals)
+    }
+    /// Drops a checkout Chauffeur just deleted without waiting for the next
+    /// scan of every repository, so it leaves the sidebar at once.
+    private func unlistRemovedCheckout(_ path: String) {
+        createdCheckouts.removeAll { $0.entry.path == path }
+        removedCheckouts.insert(path)
+        repositoryInventories = Self.excluding([path], from: repositoryInventories)
+    }
+    static func excluding(_ removed: Set<String>, from observations: [RepositoryInventory]) -> [RepositoryInventory] {
+        guard !removed.isEmpty else { return observations }
+        return observations.map { observation in
+            var result = observation
+            result.entries.removeAll { removed.contains($0.path) }
+            return result
+        }
     }
     /// Lists a checkout Chauffeur just created without waiting for the next
     /// scan of every repository, so it appears in the sidebar at once.
@@ -265,6 +285,7 @@ public actor RuntimeCoordinator {
         entry.baseBranch = worktree.baseBranch; entry.unmergedCommits = worktree.baseBranch == nil ? nil : 0
         createdCheckouts.removeAll { $0.entry.path == entry.path }
         createdCheckouts.append((worktree.repositoryID, entry))
+        removedCheckouts.remove(entry.path)
         // The periodic scan fills in its real status and drops this placeholder.
         repositoryInventories = Self.including(createdCheckouts, in: repositoryInventories)
     }
@@ -699,7 +720,9 @@ public actor RuntimeCoordinator {
             return try await deleteWorktree(projectID: params.uuid("projectID"), folderID: params.uuid("folderID"), path: params.requiredString("path"), preview: true)
         case "deleteWorktree":
             let result = try await deleteWorktree(projectID: params.uuid("projectID"), folderID: params.uuid("folderID"), path: params.requiredString("path"), discardChanges: params["discardChanges"].bool == true)
-            await reconcileWorktrees()
+            // The row leaves the inventory now; the full rescan fills in the rest without holding up the reply.
+            if let path = result["path"].string { unlistRemovedCheckout(path) }
+            rescanWorktrees()
             return result
         case "pruneWorktrees":
             let snapshot = await store.current(), projectID = try params.uuid("projectID"), folderID = try params.uuid("folderID")
@@ -931,6 +954,7 @@ public actor RuntimeCoordinator {
         }
         guard stored.value.managed else { throw ChauffeurError("external_worktree", "Only worktrees Chauffeur created can be removed. This checkout was created elsewhere", path: stored.value.path) }
         let removed = try await removeManagedWorktree(stored, in: snapshot, discardChanges: arguments["discardChanges"].bool == true)
+        unlistRemovedCheckout(Paths.canonical(removed.value.path))
         rescanWorktrees()
         return .object(["worktreeID": .string(removed.value.id.uuidString), "path": .string(removed.value.path), "removed": .bool(true)])
     }

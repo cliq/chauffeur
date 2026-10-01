@@ -125,7 +125,7 @@ struct WorktreesView: View {
             .sheet(item: $removing) { row in
                 WorktreeDeletionSheet(row: row, preview: deletionPreview, confirm: {
                     let discardChanges = deletionPreview.hasChanges
-                    run { _ = try await model.call("deleteWorktree", .object(["projectID": .string(project.id.uuidString), "folderID": .string(row.folderID.uuidString), "path": .string(row.path), "discardChanges": .bool(discardChanges)])) }
+                    run { _ = try await model.call("deleteWorktree", .object(["projectID": .string(project.id.uuidString), "folderID": .string(row.folderID.uuidString), "path": .string(row.path), "discardChanges": .bool(discardChanges)]), responseTimeout: 300) }
                     removing = nil
                 }, cancel: { removing = nil })
             }
