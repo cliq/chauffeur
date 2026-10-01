@@ -196,6 +196,10 @@ final class FakeHost: @unchecked Sendable {
         case .attachTerminal(let attach):
             let info = AttachmentInfo(generation: attachmentGeneration, sessionID: attach.sessionID, cols: attach.cols, rows: attach.rows)
             return RemoteResponse(id: request.id, result: .attachment(info))
+        case .uploadFileChunk(let chunk):
+            let received = chunk.offset + Int64(chunk.data.count)
+            let path = received == chunk.totalBytes ? "/tmp/chauffeur-uploads/\(chunk.filename)" : nil
+            return RemoteResponse(id: request.id, result: .uploadedFile(UploadedFileStatus(uploadID: chunk.uploadID, receivedBytes: received, path: path)))
         case .terminalResize, .detachTerminal:
             return RemoteResponse(id: request.id, result: .ack)
         }

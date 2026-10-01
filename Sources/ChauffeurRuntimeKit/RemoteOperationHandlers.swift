@@ -10,14 +10,17 @@ public actor RemoteOperationHandlers {
     private let journal: RemoteOperationJournal
     private let hostName: String
     private let isAttached: @Sendable (UUID) async -> Bool
+    private let uploads: RemoteUploadStore
     private var journalLoaded = false
     /// Launches still running on this actor, by operation key.
     private var tasks: [UUID: Task<OperationStatus, Never>] = [:]
     private var revision: UInt64 = 0
     private var lastDigest: String?
 
-    public init(runtime: RuntimeCoordinator, root: URL, hostName: String, isAttached: @escaping @Sendable (UUID) async -> Bool = { _ in false }) {
+    public init(runtime: RuntimeCoordinator, root: URL, hostName: String, uploads: RemoteUploadStore = RemoteUploadStore(),
+                isAttached: @escaping @Sendable (UUID) async -> Bool = { _ in false }) {
         self.runtime = runtime
+        self.uploads = uploads
         self.journal = RemoteOperationJournal(root: root)
         self.hostName = hostName
         self.isAttached = isAttached
@@ -31,6 +34,9 @@ public actor RemoteOperationHandlers {
         switch operation {
         case .hello, .pair, .attachTerminal, .terminalResize, .detachTerminal:
             return .failure(RemoteError(code: "unsupported_operation", message: "\(operation.kind) is handled by the connection layer"))
+        case .uploadFileChunk(let chunk):
+            do { return .success(.uploadedFile(try await uploads.receive(chunk, deviceID: deviceID))) }
+            catch { return .failure(Self.remoteError(error)) }
         case .getKeepAwake:
             return .success(.keepAwake(await runtime.keepAwakeStatus()))
         case .setKeepAwakeSettings(let settings):

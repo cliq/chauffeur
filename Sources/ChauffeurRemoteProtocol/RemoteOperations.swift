@@ -117,6 +117,34 @@ public struct OperationStatusRequest: Codable, Equatable, Sendable {
     }
 }
 
+/// One piece of a file the phone sends to the Mac. Chunks arrive in order; `offset` is where
+/// `data` starts, and the upload finishes when `offset + data.count == totalBytes`. Resending a
+/// chunk the Mac already has is accepted, so a retry after a lost response is safe.
+public struct UploadFileChunkRequest: Codable, Equatable, Sendable {
+    public static let chunkBytes = 1024 * 1024
+    public static let maxTotalBytes: Int64 = 100 * 1024 * 1024
+    public var uploadID: UUID
+    public var filename: String
+    public var totalBytes: Int64
+    public var offset: Int64
+    public var data: Data
+
+    public init(uploadID: UUID, filename: String, totalBytes: Int64, offset: Int64, data: Data) {
+        self.uploadID = uploadID; self.filename = filename; self.totalBytes = totalBytes; self.offset = offset; self.data = data
+    }
+}
+
+/// How much of an upload the Mac holds; `path` is set once the whole file arrived.
+public struct UploadedFileStatus: Codable, Equatable, Sendable {
+    public var uploadID: UUID
+    public var receivedBytes: Int64
+    public var path: String?
+
+    public init(uploadID: UUID, receivedBytes: Int64, path: String? = nil) {
+        self.uploadID = uploadID; self.receivedBytes = receivedBytes; self.path = path
+    }
+}
+
 // MARK: - RemoteOperation
 
 public enum RemoteOperation: Equatable, Sendable, Codable {
@@ -134,6 +162,7 @@ public enum RemoteOperation: Equatable, Sendable, Codable {
     case getKeepAwake
     case setKeepAwakeSettings(KeepAwakeSettings)
     case setKeepAwakeTimer(KeepAwakeTimerRequest)
+    case uploadFileChunk(UploadFileChunkRequest)
 
     public var kind: String {
         switch self {
@@ -151,6 +180,7 @@ public enum RemoteOperation: Equatable, Sendable, Codable {
         case .getKeepAwake: return "getKeepAwake"
         case .setKeepAwakeSettings: return "setKeepAwakeSettings"
         case .setKeepAwakeTimer: return "setKeepAwakeTimer"
+        case .uploadFileChunk: return "uploadFileChunk"
         }
     }
 
@@ -186,6 +216,8 @@ public enum RemoteOperation: Equatable, Sendable, Codable {
             self = .setKeepAwakeSettings(try container.decode(KeepAwakeSettings.self, forKey: .payload))
         case "setKeepAwakeTimer":
             self = .setKeepAwakeTimer(try container.decode(KeepAwakeTimerRequest.self, forKey: .payload))
+        case "uploadFileChunk":
+            self = .uploadFileChunk(try container.decode(UploadFileChunkRequest.self, forKey: .payload))
         default:
             throw DecodingError.dataCorrupted(
                 DecodingError.Context(
@@ -228,6 +260,8 @@ public enum RemoteOperation: Equatable, Sendable, Codable {
             try container.encode(payload, forKey: .payload)
         case .setKeepAwakeTimer(let payload):
             try container.encode(payload, forKey: .payload)
+        case .uploadFileChunk(let payload):
+            try container.encode(payload, forKey: .payload)
         }
     }
 }
@@ -244,6 +278,7 @@ public enum RemoteResult: Equatable, Sendable, Codable {
     case operation(OperationStatus)
     case attachment(AttachmentInfo)
     case keepAwake(KeepAwakeStatus)
+    case uploadedFile(UploadedFileStatus)
     case ack
 
     public var kind: String {
@@ -257,6 +292,7 @@ public enum RemoteResult: Equatable, Sendable, Codable {
         case .operation: return "operation"
         case .attachment: return "attachment"
         case .keepAwake: return "keepAwake"
+        case .uploadedFile: return "uploadedFile"
         case .ack: return "ack"
         }
     }
@@ -283,6 +319,8 @@ public enum RemoteResult: Equatable, Sendable, Codable {
             self = .attachment(try container.decode(AttachmentInfo.self, forKey: .payload))
         case "keepAwake":
             self = .keepAwake(try container.decode(KeepAwakeStatus.self, forKey: .payload))
+        case "uploadedFile":
+            self = .uploadedFile(try container.decode(UploadedFileStatus.self, forKey: .payload))
         case "ack":
             self = .ack
         default:
@@ -316,6 +354,8 @@ public enum RemoteResult: Equatable, Sendable, Codable {
         case .attachment(let payload):
             try container.encode(payload, forKey: .payload)
         case .keepAwake(let payload):
+            try container.encode(payload, forKey: .payload)
+        case .uploadedFile(let payload):
             try container.encode(payload, forKey: .payload)
         case .ack:
             break

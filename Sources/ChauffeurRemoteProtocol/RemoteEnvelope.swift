@@ -2,11 +2,13 @@ import Foundation
 
 public enum RemoteProtocol {
     public static let version = 1
-    public static let capabilities = ["terminal.binary.v1", "launch.worktree.v1", "inventory.v1", "progress.v1", "worktree.branches.v1", openSessionKinds, keepAwake]
+    public static let capabilities = ["terminal.binary.v1", "launch.worktree.v1", "inventory.v1", "progress.v1", "worktree.branches.v1", openSessionKinds, keepAwake, fileUpload]
     /// A client with this capability decodes any session kind (an unknown one as `agent`). Builds without it fail to
     /// decode a whole inventory that names a kind they don't know, so the Mac sends them `shell` instead.
     public static let openSessionKinds = "sessionKinds.open.v1"
     public static let keepAwake = "keepAwake.v1"
+    /// The Mac accepts `uploadFileChunk` and keeps finished files in a temporary folder.
+    public static let fileUpload = "upload.v1"
     /// The kinds every client decodes, including those without `openSessionKinds`.
     public static let legacySessionKinds: Set<RemoteSessionKind> = [.codex, .claude, .shell]
 }
