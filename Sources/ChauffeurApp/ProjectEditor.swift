@@ -36,7 +36,7 @@ struct ProjectEditor: View {
             Text("Folders").font(.headline)
             HStack {
                 Button("Choose Parent Folder…") { chooseParent() }.disabled(discovering)
-                Button("Add Folder…") { if let path = FilePanels.directory() { add(ProjectFolder(path: path)) } }
+                Button("Add Folder…") { if let path = FilePanels.directory(startingAt: discoveryFolder.map { URL(fileURLWithPath: $0, isDirectory: true) }) { add(ProjectFolder(path: path)) } }
                 if project == nil {
                     Button("Start Empty") { folders = []; setCandidates([]); discoveryFolder = nil; discoveryErrors = [] }
                         .disabled(discovering)

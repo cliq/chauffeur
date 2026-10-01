@@ -386,7 +386,7 @@ private struct ProjectWindowContent: View, Equatable {
                             repositoryRow(folder, project: project)
                         }
                         Button("Add Folder…", systemImage: "folder.badge.plus") {
-                            if let path = FilePanels.directory() { let version = model.projectVersion(project.id); var changed = project; changed.addFolder(ProjectFolder(path: path)); model.perform { try await model.saveProject(changed, version: version) } }
+                            if let path = FilePanels.directory(startingAt: addFolderStart(project)) { let version = model.projectVersion(project.id); var changed = project; changed.addFolder(ProjectFolder(path: path)); model.perform { try await model.saveProject(changed, version: version) } }
                         }.buttonStyle(.plain)
                     }
                     let hidden = hiddenCheckouts(project)
@@ -411,6 +411,10 @@ private struct ProjectWindowContent: View, Equatable {
                 .accessibilityIdentifier("sidebar.repositories.activeAgentsOnly")
                 .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 12).padding(.top, 8)
         }
+    }
+    /// Where Add Folder opens: the selected repository's main checkout, else the project's parent folder.
+    private func addFolderStart(_ project: Project) -> URL? {
+        (selectedFolder?.canonicalPath ?? project.discoveryFolder).map { URL(fileURLWithPath: $0, isDirectory: true) }
     }
     private func sessionsSidebar(_ project: Project) -> some View {
         VStack(spacing: 0) {
