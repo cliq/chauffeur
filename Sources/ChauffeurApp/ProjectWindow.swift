@@ -320,7 +320,31 @@ private struct ProjectWindowContent: View, Equatable {
     private func hiddenCheckouts(_ project: Project) -> [(folder: ProjectFolder, row: CheckoutRow)] {
         guard !layout.state.hiddenWorktreePaths.isEmpty else { return [] }
         return project.folders.filter(\.registered).flatMap { folder in
-            readiness(for: folder).isPending ? [] : checkouts(for: folder, project: project).filter(isHidden).map { (folder: folder, row: $0) }
+            readiness(for: folder).isPending ? [] : checkouts(for: folder, project: project).filter { isHidden($0) && passesAgentFilter($0, folder: folder) }.map { (folder: folder, row: $0) }
+        }
+    }
+    /// Checkouts listed under their repository: hidden worktrees move to the
+    /// Hidden section, and the active-agents filter drops idle checkouts.
+    private func listedCheckouts(for folder: ProjectFolder, project: Project) -> [CheckoutRow] {
+        checkouts(for: folder, project: project).filter { !isHidden($0) && passesAgentFilter($0, folder: folder) }
+    }
+    /// With the active-agents filter on, a checkout stays listed while a live
+    /// agent runs in it or while it is selected; open shells alone do not count.
+    private func passesAgentFilter(_ row: CheckoutRow, folder: ProjectFolder) -> Bool {
+        guard layout.state.showsOnlyActiveAgents else { return true }
+        let selected = layout.selectedFolderID == folder.id && layout.selectedWorktreePath.map { projectModel.canonical($0) == projectModel.canonical(row.path) } == true
+        return selected || !WorktreeSessions.liveAgents(sessions(in: folder, path: row.path)).isEmpty
+    }
+    /// Registered repositories the sidebar lists. With the active-agents filter
+    /// on, only those with a listed checkout, or that are selected, remain; a
+    /// repository still loading its inventory counts its live agents instead.
+    private func listedFolders(_ project: Project) -> [ProjectFolder] {
+        let folders = project.folders.filter(\.registered)
+        guard layout.state.showsOnlyActiveAgents else { return folders }
+        return folders.filter { folder in
+            if layout.selectedFolderID == folder.id { return true }
+            if readiness(for: folder).isPending { return !WorktreeSessions.liveAgents(allSessions.filter { $0.folderID == folder.id }).isEmpty }
+            return !listedCheckouts(for: folder, project: project).isEmpty
         }
     }
     /// Keeps a checkout's row on screen: its repository expands, or the Hidden section for a hidden worktree.
@@ -348,32 +372,42 @@ private struct ProjectWindowContent: View, Equatable {
         }.navigationSplitViewColumnWidth(min: 220, ideal: 260, max: 370)
     }
     private func repositoriesSidebar(_ project: Project) -> some View {
-        ScrollViewReader { proxy in
-            List {
-                Section("Repositories") {
-                    ForEach(project.folders.filter(\.registered)) { folder in
-                        repositoryRow(folder, project: project)
-                    }
-                    Button("Add Folder…", systemImage: "folder.badge.plus") {
-                        if let path = FilePanels.directory() { let version = model.projectVersion(project.id); var changed = project; changed.addFolder(ProjectFolder(path: path)); model.perform { try await model.saveProject(changed, version: version) } }
-                    }.buttonStyle(.plain)
-                }
-                let hidden = hiddenCheckouts(project)
-                if !hidden.isEmpty {
-                    Section("Hidden", isExpanded: $hiddenSectionExpanded) {
-                        ForEach(hidden, id: \.row.id) { entry in
-                            checkoutRow(entry.row, folder: entry.folder, project: project, showsRepository: project.folders.filter(\.registered).count > 1)
+        VStack(spacing: 0) {
+            ScrollViewReader { proxy in
+                List {
+                    Section("Repositories") {
+                        let folders = listedFolders(project)
+                        if folders.isEmpty, layout.state.showsOnlyActiveAgents {
+                            Text("No active agents").font(.caption).foregroundStyle(.secondary)
                         }
-                    }.accessibilityIdentifier("sidebar.hidden")
-                }
-            }.listStyle(.sidebar)
-                .task(id: sidebarReveal?.id) {
-                    guard let reveal = sidebarReveal else { return }
-                    // Let the newly inserted row and expanded repository lay out.
-                    await Task.yield()
-                    guard !Task.isCancelled, sidebarReveal?.id == reveal.id else { return }
-                    proxy.scrollTo(reveal.row, anchor: .center)
-                }
+                        ForEach(folders) { folder in
+                            repositoryRow(folder, project: project)
+                        }
+                        Button("Add Folder…", systemImage: "folder.badge.plus") {
+                            if let path = FilePanels.directory() { let version = model.projectVersion(project.id); var changed = project; changed.addFolder(ProjectFolder(path: path)); model.perform { try await model.saveProject(changed, version: version) } }
+                        }.buttonStyle(.plain)
+                    }
+                    let hidden = hiddenCheckouts(project)
+                    if !hidden.isEmpty {
+                        Section("Hidden", isExpanded: $hiddenSectionExpanded) {
+                            ForEach(hidden, id: \.row.id) { entry in
+                                checkoutRow(entry.row, folder: entry.folder, project: project, showsRepository: project.folders.filter(\.registered).count > 1)
+                            }
+                        }.accessibilityIdentifier("sidebar.hidden")
+                    }
+                }.listStyle(.sidebar)
+                    .task(id: sidebarReveal?.id) {
+                        guard let reveal = sidebarReveal else { return }
+                        // Let the newly inserted row and expanded repository lay out.
+                        await Task.yield()
+                        guard !Task.isCancelled, sidebarReveal?.id == reveal.id else { return }
+                        proxy.scrollTo(reveal.row, anchor: .center)
+                    }
+            }
+            Toggle("Show only active agents", isOn: $layout.state.showsOnlyActiveAgents).toggleStyle(.checkbox).font(.caption)
+                .help("List only checkouts with a live agent session; open shells alone do not count")
+                .accessibilityIdentifier("sidebar.repositories.activeAgentsOnly")
+                .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 12).padding(.top, 8)
         }
     }
     private func sessionsSidebar(_ project: Project) -> some View {
@@ -454,7 +488,7 @@ private struct ProjectWindowContent: View, Equatable {
             if readiness.isPending {
                 inventoryPendingRow(folder)
             } else {
-                ForEach(rows.filter { !isHidden($0) }) { row in checkoutRow(row, folder: folder, project: project) }
+                ForEach(listedCheckouts(for: folder, project: project)) { row in checkoutRow(row, folder: folder, project: project) }
                 inventoryStatusRow(readiness, folder: folder)
             }
             Button("New Worktree & Session…", systemImage: "plus") { showLaunch(folderID: folder.id, newWorktree: true) }
@@ -1054,13 +1088,13 @@ private struct ProjectWindowContent: View, Equatable {
         selectSession(ordered[((current + offset) % ordered.count + ordered.count) % ordered.count].id)
     }
     /// The sidebar rows ⌘↑/⌘↓ moves through in Repositories mode: every
-    /// registered repository followed by its checkouts, collapsed ones aside,
+    /// listed repository followed by its listed checkouts, collapsed ones aside,
     /// then the Hidden section's worktrees when it is expanded.
     private func sidebarRows(_ project: Project) -> [(folderID: UUID, path: String?)] {
-        let repositories = project.folders.filter(\.registered).flatMap { folder -> [(folderID: UUID, path: String?)] in
+        let repositories = listedFolders(project).flatMap { folder -> [(folderID: UUID, path: String?)] in
             let repository = [(folderID: folder.id, path: String?.none)]
             guard !collapsedRepositories.contains(folder.id) else { return repository }
-            return repository + checkouts(for: folder, project: project).filter { !isHidden($0) }.map { (folderID: folder.id, path: String?($0.path)) }
+            return repository + listedCheckouts(for: folder, project: project).map { (folderID: folder.id, path: String?($0.path)) }
         }
         guard hiddenSectionExpanded else { return repositories }
         return repositories + hiddenCheckouts(project).map { (folderID: $0.folder.id, path: String?($0.row.path)) }

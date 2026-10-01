@@ -54,6 +54,16 @@ struct WorktreeNavigationTests {
         #expect(throws: (any Error).self) { try state.validate() }
     }
 
+    @Test func activeAgentsFilterSurvivesARestartAndDefaultsOff() throws {
+        var state = WindowState(projectID: UUID())
+        #expect(!state.showsOnlyActiveAgents)
+        state.showsOnlyActiveAgents = true
+        #expect(try JSONCoding.decode(WindowState.self, from: JSONCoding.encode(state)).showsOnlyActiveAgents)
+        var value = try JSONCoding.decode(JSONValue.self, from: JSONCoding.encode(state))
+        if case .object(var fields) = value { fields.removeValue(forKey: "showsOnlyActiveAgents"); value = .object(fields) }
+        #expect(try !value.decode(WindowState.self).showsOnlyActiveAgents)
+    }
+
     @Test func closedTabsSurviveARestart() throws {
         var state = WindowState(projectID: UUID())
         let closed = [UUID(), UUID()]

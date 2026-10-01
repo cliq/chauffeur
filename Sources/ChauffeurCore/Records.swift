@@ -297,6 +297,9 @@ public struct WindowState: Record, Equatable {
     public var sidebarMode: SidebarMode = .repositories
     /// Whether the Sessions sidebar lists plain terminal sessions beside agents.
     public var showsTerminalSessions = true
+    /// Whether the Repositories sidebar lists only checkouts with live agent
+    /// sessions. Open shells alone do not keep a checkout listed.
+    public var showsOnlyActiveAgents = false
     /// User ordering of session tabs; each checkout displays its matching subset.
     public var sessionTabOrder: [UUID] = []
     /// Sessions whose tabs the user closed while the session record was kept (finished
@@ -323,6 +326,7 @@ public struct WindowState: Record, Equatable {
         selectedWorktreePath = try container.decodeIfPresent(String.self, forKey: .selectedWorktreePath)
         sidebarMode = try container.decodeIfPresent(SidebarMode.self, forKey: .sidebarMode) ?? .repositories
         showsTerminalSessions = try container.decodeIfPresent(Bool.self, forKey: .showsTerminalSessions) ?? true
+        showsOnlyActiveAgents = try container.decodeIfPresent(Bool.self, forKey: .showsOnlyActiveAgents) ?? false
         sessionTabOrder = try container.decodeIfPresent([UUID].self, forKey: .sessionTabOrder) ?? []
         closedSessionTabs = try container.decodeIfPresent([UUID].self, forKey: .closedSessionTabs) ?? []
         hiddenWorktreePaths = try container.decodeIfPresent([String].self, forKey: .hiddenWorktreePaths) ?? []
