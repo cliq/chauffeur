@@ -76,6 +76,13 @@ struct TeamAgentRuntimeTests {
         #expect(result.phase == .completed)
         let sessionID = try #require(result.sessionID)
         #expect(await fixture.runtime.store.reload().sessions.contains { $0.value.id == sessionID && $0.value.launch.preset.id == base.id })
+        let session = try #require(await fixture.runtime.store.reload().sessions.first { $0.value.id == sessionID }?.value)
+        #expect(!session.coordinationEnabled)
+
+        let coordinated = LaunchSpec(projectID: fixture.request.projectID, folderID: fixture.request.folderID, agentPresetID: base.id, allowSharedCheckout: true, coordinationEnabled: true)
+        let coordinatedResult = await handlers.launch(LaunchOperationRequest(operationKey: UUID(), fingerprint: LaunchOperationRequest.computeFingerprint(newWorktree: nil, launch: coordinated), launch: coordinated), deviceID: UUID())
+        // The fixture runs no MCP service, so a launch that asks for coordination reaches the runtime and is refused.
+        #expect(coordinatedResult.phase == .failed && coordinatedResult.error?.code == "integration_unavailable")
     }
 
     @Test func globalPresetLaunchesAndSnapshotsStayFixedAfterBaseAndTeamEdits() async throws {

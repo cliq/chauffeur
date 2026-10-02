@@ -160,6 +160,14 @@ final class MobileAppModel {
         return false
     }
 
+    var launchCoordinationIsSupported: Bool {
+        if let session { return session.isLaunchCoordinationSupported }
+        if case .connected(let host) = connectionState {
+            return host.capabilities.contains(RemoteProtocol.launchCoordination)
+        }
+        return false
+    }
+
     @discardableResult
     func setKeepAwakeSettings(_ settings: KeepAwakeSettings) async -> Bool {
         guard let session, isConnected, !inventoryIsStale, !keepAwakeMutationPending else { return false }

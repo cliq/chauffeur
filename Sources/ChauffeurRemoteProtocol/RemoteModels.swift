@@ -338,6 +338,9 @@ public struct LaunchSpec: Codable, Equatable, Sendable {
     public var title: String?
     public var task: String?
     public var allowSharedCheckout: Bool
+    /// Turns on Chauffeur messaging and delegation for an agent. Stored as `true` or nil so a launch without it
+    /// encodes, and fingerprints, the same as before the field existed.
+    public var coordinationEnabled: Bool?
 
     public init(
         projectID: UUID,
@@ -347,7 +350,8 @@ public struct LaunchSpec: Codable, Equatable, Sendable {
         agentPresetID: UUID? = nil,
         title: String? = nil,
         task: String? = nil,
-        allowSharedCheckout: Bool = false
+        allowSharedCheckout: Bool = false,
+        coordinationEnabled: Bool = false
     ) {
         self.projectID = projectID
         self.folderID = folderID
@@ -357,6 +361,7 @@ public struct LaunchSpec: Codable, Equatable, Sendable {
         self.title = title
         self.task = task
         self.allowSharedCheckout = allowSharedCheckout
+        self.coordinationEnabled = coordinationEnabled ? true : nil
     }
 }
 

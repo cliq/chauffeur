@@ -197,7 +197,7 @@ public actor RemoteOperationHandlers {
             if let preset {
                 launchRequest = LaunchRequest(projectID: project.id, groupID: group.id, presetID: preset.id, folderID: folder.id,
                                               title: title ?? "\(preset.name) · \(folder.name)", worktreeID: worktreeID, additionalFolderIDs: [], task: spec.task,
-                                              allowSharedCheckout: request.newWorktree == nil && spec.allowSharedCheckout, coordinationEnabled: false, retryKey: context.sessionKey)
+                                              allowSharedCheckout: request.newWorktree == nil && spec.allowSharedCheckout, coordinationEnabled: spec.coordinationEnabled == true, retryKey: context.sessionKey)
             } else {
                 launchRequest = LaunchRequest.shell(projectID: project.id, groupID: group.id, folderID: folder.id,
                                                     title: title ?? "Shell · \(branch.isEmpty ? folder.name : branch)", worktreeID: worktreeID, retryKey: context.sessionKey)

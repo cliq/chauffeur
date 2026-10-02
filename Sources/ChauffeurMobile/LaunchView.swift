@@ -43,6 +43,7 @@ struct LaunchView: View {
     @State private var baseRef = "HEAD"
     @State private var groupID: UUID?
     @State private var allowSharedCheckout = false
+    @State private var coordination = false
     @State private var destination: String?
     @State private var destinationError: String?
     @State private var operationKey = UUID()
@@ -72,6 +73,11 @@ struct LaunchView: View {
     private var isSharedCheckout: Bool {
         guard case .existing(let path) = location.checkout else { return false }
         return model.liveSessions.contains { $0.checkoutPath == path }
+    }
+
+    /// Older Macs ignore the flag, so the toggle only appears when the Mac would honor it.
+    private var offersCoordination: Bool {
+        kind == .agent && model.launchCoordinationIsSupported
     }
 
     private var canLaunch: Bool {
@@ -191,6 +197,20 @@ struct LaunchView: View {
             }
 
             Section {
+                if offersCoordination {
+                    Toggle(isOn: $coordination) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Enable Chauffeur messaging and delegation")
+                                .font(.subheadline.weight(.semibold))
+                            Text(coordination
+                                 ? "Experimental: CLI integration is under compatibility validation."
+                                 : "Basic terminal mode: messaging, delegation, and semantic status signals are unavailable.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .accessibilityIdentifier("launch-coordination")
+                }
                 Picker("Group", selection: $groupID) {
                     Text("Project default").tag(UUID?.none)
                     ForEach(project?.groups ?? []) { group in
@@ -198,7 +218,9 @@ struct LaunchView: View {
                     }
                 }
             } footer: {
-                Text("Uses existing Mac configuration.")
+                Text(offersCoordination
+                     ? "Sessions message and delegate only within their group. Uses existing Mac configuration."
+                     : "Uses existing Mac configuration.")
             }
 
             if let failure {
@@ -364,7 +386,8 @@ struct LaunchView: View {
             agentPresetID: agentPresetID,
             title: optional(title),
             task: optional(initialTask),
-            allowSharedCheckout: isSharedCheckout && allowSharedCheckout
+            allowSharedCheckout: isSharedCheckout && allowSharedCheckout,
+            coordinationEnabled: offersCoordination && coordination
         )
         let fingerprint = LaunchOperationRequest.computeFingerprint(newWorktree: newWorktree, launch: spec)
         // A changed payload after a failure is a new operation, never a retry of the old one.

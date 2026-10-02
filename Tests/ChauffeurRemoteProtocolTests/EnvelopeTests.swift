@@ -198,6 +198,17 @@ struct EnvelopeTests {
         #expect(first == second)
     }
 
+    @Test func launchWithoutCoordinationEncodesAsBeforeTheFieldExisted() throws {
+        let plain = LaunchSpec(projectID: UUID(), folderID: UUID())
+        let plainJSON = try #require(String(data: RemoteJSON.encode(plain), encoding: .utf8))
+        #expect(!plainJSON.contains("coordinationEnabled"))
+
+        var coordinated = plain
+        coordinated.coordinationEnabled = true
+        #expect(try RemoteJSON.decode(LaunchSpec.self, from: RemoteJSON.encode(coordinated)).coordinationEnabled == true)
+        #expect(LaunchOperationRequest.computeFingerprint(newWorktree: nil, launch: plain) != LaunchOperationRequest.computeFingerprint(newWorktree: nil, launch: coordinated))
+    }
+
     @Test func computeFingerprintDiffersWhenBranchChanges() {
         let launch = LaunchSpec(projectID: UUID(), folderID: UUID())
         let worktreeA = WorktreeCreationSpec(branch: "feature/a", baseRef: "main")

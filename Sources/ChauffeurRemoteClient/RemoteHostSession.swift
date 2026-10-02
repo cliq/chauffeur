@@ -127,6 +127,11 @@ public final class RemoteHostSession {
         return host.capabilities.contains(RemoteProtocol.ticketResolution)
     }
 
+    public var isLaunchCoordinationSupported: Bool {
+        guard case .connected(let host) = connectionState else { return false }
+        return host.capabilities.contains(RemoteProtocol.launchCoordination)
+    }
+
     @ObservationIgnored private let journal: any PendingOperationJournal
     @ObservationIgnored private let clientName: String
     @ObservationIgnored private let clientVersion: String
