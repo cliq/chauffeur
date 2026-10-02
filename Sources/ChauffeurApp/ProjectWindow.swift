@@ -358,7 +358,6 @@ private struct ProjectWindowContent: View, Equatable {
         collapsedRepositories.remove(folderID)
         if let path, isHidden(path: path) { hiddenSectionExpanded = true }
     }
-    private func attentionCount(in folder: ProjectFolder) -> Int { WorktreeSessions.attentionCount(allSessions.filter { $0.folderID == folder.id }) }
     private var canLaunch: Bool { online && project?.archived == false }
     private func canLaunch(in checkout: CheckoutRow) -> Bool { canLaunch && checkout.availability == .available }
 
@@ -483,12 +482,27 @@ private struct ProjectWindowContent: View, Equatable {
         if !parts.isEmpty { return parts.joined(separator: " · ") }
         return sessions.isEmpty ? "No sessions" : "\(sessions.count) finished"
     }
-    @ViewBuilder private func badge(_ count: Int) -> some View {
-        if count > 0 {
-            Text("\(count)").font(.caption2).fontWeight(.semibold).foregroundStyle(.white)
+    /// Orange: live sessions waiting on the user. The tooltip names each one and why.
+    @ViewBuilder private func badge(_ sessions: [Session]) -> some View {
+        let waiting = WorktreeSessions.live(sessions).filter(\.needsAttention)
+        if !waiting.isEmpty {
+            Text("\(waiting.count)").font(.caption2).fontWeight(.semibold).foregroundStyle(.white)
                 .padding(.horizontal, 6).padding(.vertical, 1).background(.orange, in: Capsule())
-                .accessibilityLabel("\(count) sessions need attention")
+                .help(waiting.map { "\($0.title): \(attentionReason($0))" }.joined(separator: "\n"))
+                .accessibilityLabel("\(waiting.count) session\(waiting.count == 1 ? " needs" : "s need") attention")
         }
+    }
+    /// Mirrors `Session.needsAttention`.
+    private func attentionReason(_ session: Session) -> String {
+        var reasons: [String] = []
+        if session.pendingMessages > 0 { reasons.append("\(session.pendingMessages) Chauffeur message\(session.pendingMessages == 1 ? "" : "s") not yet read by the agent") }
+        switch session.state {
+        case .needsAttention: reasons.append("waiting for your input")
+        case .failed: reasons.append("failed")
+        case .turnFinished where session.unread: reasons.append("finished a turn you haven't seen")
+        default: break
+        }
+        return reasons.joined(separator: "; ")
     }
     private func repositoryRow(_ folder: ProjectFolder, project: Project) -> some View {
         let rows = checkouts(for: folder, project: project)
@@ -505,13 +519,15 @@ private struct ProjectWindowContent: View, Equatable {
                 .buttonStyle(.plain).font(.caption).disabled(!canLaunch || folder.availability != .available || readiness.isPending)
                 .accessibilityIdentifier("repository.new-worktree.\(folder.id)")
         } label: {
-            Button { selectCheckout(folderID: folder.id, path: nil) } label: {
-                HStack {
+            // The badge sits outside the button so its tooltip is not hidden by the path's.
+            HStack {
+                Button { selectCheckout(folderID: folder.id, path: nil) } label: {
                     Label { Text(folder.name).foregroundStyle(overviewSelected ? Color.accentColor : Color.primary) } icon: { Image(systemName: FileManager.default.isReadableFile(atPath: folder.canonicalPath) ? "folder" : "folder.badge.questionmark") }
-                    Spacer()
-                    badge(attentionCount(in: folder))
-                }.contentShape(Rectangle())
-            }.buttonStyle(.plain).help(folder.selectedPath).accessibilityIdentifier("repository.\(folder.id)")
+                        .frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
+                }.buttonStyle(.plain).help(folder.selectedPath).accessibilityIdentifier("repository.\(folder.id)")
+                badge(allSessions.filter { $0.folderID == folder.id })
+            }.contentShape(Rectangle())
+                .onTapGesture { selectCheckout(folderID: folder.id, path: nil) }
                 .contextMenu {
                     Button("Launch Agent…") { showLaunch(folderID: folder.id) }.disabled(!canLaunch || readiness.isPending)
                     Button("Open Shell") { openShell(in: rows[0], folder: folder) }.disabled(!canLaunch(in: rows[0]) || readiness.isPending)
@@ -554,12 +570,14 @@ private struct ProjectWindowContent: View, Equatable {
         let selected = layout.selectedFolderID == folder.id && layout.selectedWorktreePath.map { projectModel.canonical($0) == projectModel.canonical(row.path) } == true
         let deleting = isDeleting(row)
         // Indicators sit outside the button: a button's own tooltip hides those of its label's subviews.
+        // For the same reason the path tooltip goes on the title, subtitle and icon, not the button,
+        // so the dirty and unmerged glyphs inside the label keep theirs.
         return HStack(alignment: .top, spacing: 4) {
             Button { selectCheckout(folderID: folder.id, path: row.path) } label: {
                 Label {
                     VStack(alignment: .leading, spacing: 2) {
                         HStack(spacing: 4) {
-                            Text(row.title).lineLimit(1)
+                            Text(row.title).lineLimit(1).help(row.path)
                             if row.isDirty {
                                 Circle().fill(.secondary).frame(width: 6, height: 6)
                                     .help("Uncommitted changes")
@@ -568,7 +586,7 @@ private struct ProjectWindowContent: View, Equatable {
                             }
                         }
                         HStack(spacing: 4) {
-                            Text((showsRepository ? "\(folder.name) · " : "") + (row.isMain ? "Main checkout" : URL(fileURLWithPath: row.path).lastPathComponent)).lineLimit(1)
+                            Text((showsRepository ? "\(folder.name) · " : "") + (row.isMain ? "Main checkout" : URL(fileURLWithPath: row.path).lastPathComponent)).lineLimit(1).help(row.path)
                             if let unmerged = row.unmergedDescription {
                                 Text("·")
                                 HStack(spacing: 3) { UnmergedCommitsGlyph(); Text("\(row.unmergedCount)") }
@@ -577,12 +595,12 @@ private struct ProjectWindowContent: View, Equatable {
                             }
                         }.font(.caption).foregroundStyle(.secondary)
                         if deleting { Text("Deleting…").font(.caption).foregroundStyle(.secondary) }
-                        else if let status = row.statusLabel { Text(status).font(.caption).foregroundStyle(.secondary) }
+                        else if let status = row.statusLabel { Text(status).font(.caption).foregroundStyle(.secondary).help(row.path) }
                     }
-                } icon: { Image(systemName: row.isMain ? "house" : "arrow.triangle.branch") }
+                } icon: { Image(systemName: row.isMain ? "house" : "arrow.triangle.branch").help(row.path) }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .contentShape(Rectangle())
-            }.buttonStyle(.plain).help(row.path)
+            }.buttonStyle(.plain)
                 .accessibilityIdentifier(row.isMain ? "repository.main.\(folder.id)" : "repository.worktree.\(row.path)")
                 .accessibilityAddTraits(selected ? .isSelected : [])
                 .accessibilityValue(selected ? "Selected worktree" : "")
@@ -594,7 +612,7 @@ private struct ProjectWindowContent: View, Equatable {
                 }
                 terminalIndicator(terminals)
                 liveBadge(live)
-                badge(WorktreeSessions.attentionCount(sessions))
+                badge(sessions)
             }
         }
         .padding(.horizontal, 6).padding(.vertical, 4)
@@ -801,7 +819,7 @@ private struct ProjectWindowContent: View, Equatable {
                     }
                     Spacer()
                     Text(checkoutSummary(sessions, agents: live, terminals: terminals)).font(.caption).foregroundStyle(.secondary)
-                    badge(WorktreeSessions.attentionCount(sessions))
+                    badge(sessions)
                     Button("Open") { selectCheckout(folderID: folder.id, path: row.path) }.controlSize(.small)
                 }.padding(.vertical, 4)
                     .contextMenu { checkoutMenu(row, folder: folder) }
