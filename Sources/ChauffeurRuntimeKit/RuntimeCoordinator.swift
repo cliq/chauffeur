@@ -947,6 +947,30 @@ public actor RuntimeCoordinator {
         return .object(["worktreeID": .string(worktree.id.uuidString), "folderID": .string(worktree.folderID.uuidString), "path": .string(worktree.path),
                         "branch": .string(worktree.branch), "baseCommit": .string(worktree.baseCommit), "baseBranch": worktree.baseBranch.map(JSONValue.string) ?? .null])
     }
+    /// Starts a session the user drives: no delegation, report, follow-up, or
+    /// closure by the caller, and the preset's own permission mode. It joins the
+    /// caller's group, so either side can still message the other.
+    private func launchSessionTool(caller: Caller, arguments: JSONValue) async throws -> JSONValue {
+        guard let current = sessions[caller.sessionID], current.parentID == nil else {
+            throw ChauffeurError("delegation_depth", "Delegated sessions cannot launch further sessions")
+        }
+        let task = try arguments.requiredString("task")
+        try Validation.require(task.utf8.count <= 64 * 1024, "Task must contain 1–65,536 UTF-8 bytes")
+        let title = arguments["title"].string.flatMap { $0.isEmpty ? nil : $0 } ?? String(task.prefix(100))
+        // Tool retry keys are strings scoped to the caller; launch keys are the session UUID.
+        let retryKey = WorktreeManager.identifier("launch_session:\(caller.sessionID.uuidString):\(try arguments.requiredString("retryKey"))")
+        let snapshot = await store.current()
+        guard let project = snapshot.projects.first(where: { $0.value.id == caller.scope.projectID })?.value else { throw ChauffeurError("missing_project", "Your project is unavailable") }
+        var request = LaunchRequest(projectID: caller.scope.projectID, groupID: caller.scope.groupID, presetID: try arguments.uuid("presetID"), folderID: try arguments.uuid("folderID"), title: title,
+                                    worktreeID: try optionalUUID(arguments, "worktreeID"), task: task, allowSharedCheckout: true, coordinationEnabled: true, retryKey: retryKey)
+        request.modelOverride = arguments["model"].string; request.reasoningOverride = arguments["reasoningEffort"].string
+        request.additionalFolderIDs = project.folders.filter { current.launch.additionalPaths.contains($0.canonicalPath) }.map(\.id)
+        request.launchedBySessionID = caller.sessionID
+        let session = try await launch(request)
+        return .object(["sessionID": .string(session.id.uuidString), "title": .string(session.title), "state": .string(session.state.rawValue),
+                        "workingDirectory": .string(session.launch.workingDirectory), "worktreeID": session.worktreeID.map { .string($0.uuidString) } ?? .null,
+                        "coordinated": .bool(false)])
+    }
     private func removeWorktreeTool(caller: Caller, arguments: JSONValue) async throws -> JSONValue {
         let worktreeID = try arguments.uuid("worktreeID"), snapshot = await store.reload()
         guard let stored = snapshot.worktrees.first(where: { $0.value.id == worktreeID && $0.value.projectID == caller.scope.projectID && $0.value.registered }) else {
@@ -1139,6 +1163,7 @@ public actor RuntimeCoordinator {
         session.id = sessionID; session.worktreeID = request.worktreeID; session.initialTask = request.task
         session.launchRequestFingerprint = fingerprint
         session.parentID = child?.parentID; session.delegationID = child?.id; session.runtimeID = id
+        session.launchedBySessionID = request.launchedBySessionID
         session.historyProtected = child == nil ? nil : true
         if preset.kind.provider?.preassignsConversationID == true { session.nativeConversationID = session.id.uuidString }
         do {
@@ -1228,7 +1253,8 @@ public actor RuntimeCoordinator {
                 initialTaskDeliveries[session.id] = Task { await self.deliverKimiInitialTask(session: launched, prompt: task) }
             }
             try Task.checkCancellation()
-            if child == nil && !isShell {
+            // An agent's choice of preset does not change the user's default.
+            if child == nil && !isShell && request.launchedBySessionID == nil {
                 do { try await store.rememberPreset(preset.id, projectID: project.id, setID: set.id) }
                 catch let error as ChauffeurError { record(error) }
                 catch { record(ChauffeurError("preset_preference", "The session started, but its agent preset choice could not be saved")) }
@@ -1758,6 +1784,7 @@ public actor RuntimeCoordinator {
         case "chauffeur_unregister_progress": return try await setProgress(token: token, arguments: nil)
         case "chauffeur_discover": return try await discover(caller: caller)
         case "chauffeur_create_worktree": return try await createWorktreeTool(caller: caller, arguments: arguments)
+        case "chauffeur_launch_session": return try await launchSessionTool(caller: caller, arguments: arguments)
         case "chauffeur_remove_worktree": return try await removeWorktreeTool(caller: caller, arguments: arguments)
         case "chauffeur_send_message":
             return try .from(await ledger.send(caller: caller, recipientID: arguments.uuid("recipientID"), body: arguments.requiredString("body"), references: arguments["references"].array.compactMap(\.string), retryKey: arguments.requiredString("retryKey")))

@@ -9,7 +9,7 @@ destinations, versions, and guidance. **Refresh** also repairs missing links.
 The skills update with the app; an existing user-owned skill at the same discovery path is preserved and reported as a conflict.
 
 The `chauffeur` skill explains discovery, messages, bounded inbox waiting,
-authorized delegation, attributed results, follow-up turns, retained-history
+when to launch a session the user drives instead of delegating, authorized delegation, attributed results, follow-up turns, retained-history
 closure, retries, and recovery. `chauffeur-orchestrator` executes a saved plan
 through one visible worker at a time. Its six role references provide freely
 overridable model/reasoning suggestions. Installing guidance does not launch an

@@ -1,8 +1,8 @@
 ---
 name: chauffeur-orchestrator
-description: Execute an implementation plan through sequential, visible Chauffeur worker sessions. Use when a coordinator should decompose saved work, launch role-guided workers in the current checkout, review results, request corrections or replacements, and maintain durable progress.
+description: Execute an implementation plan through sequential, visible Chauffeur worker sessions. Use when a coordinator should decompose saved work, launch role-guided workers in the current checkout, review results, request corrections or replacements, and maintain durable progress. Not for starting independent sessions the user will drive; the chauffeur skill launches those.
 metadata:
-  version: "1.2.1"
+  version: "1.3.0"
 ---
 
 # Chauffeur orchestrator
@@ -12,6 +12,11 @@ a saved plan. This workflow extends Chauffeur coordination; it does not invoke
 or modify the native Agent Team skill. Delegated workers are interactive and
 visible to the user. They share filesystem state only when you explicitly select
 the current registered checkout.
+
+This workflow is only for work you coordinate. When the user wants sessions to
+drive themselves, launch them with `chauffeur_launch_session` as the Chauffeur
+skill describes, and do not track them here. When you start a worker, tell the
+user you are coordinating it and will review its report.
 
 ## Prepare durable progress
 

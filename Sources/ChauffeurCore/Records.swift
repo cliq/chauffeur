@@ -230,6 +230,9 @@ public struct Session: Record, Equatable {
     public var waiting: SessionWait?
     public var parentID: UUID?
     public var delegationID: UUID?
+    /// The session that started this one with `chauffeur_launch_session`. Unlike a
+    /// delegated child, it belongs to the user and never reports back.
+    public var launchedBySessionID: UUID?
     public var historyProtected: Bool?
     public var progress: ProgressRegistration?
     public var closureOutcome: String?

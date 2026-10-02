@@ -56,6 +56,8 @@ public struct LaunchRequest: Codable, Sendable {
     public var reasoningOverride: String?
     /// nil inherits the preset.
     public var autoApproveOverride: Bool?
+    /// Set when another session launched this one for the user to drive.
+    public var launchedBySessionID: UUID?
     public var launchKind: LaunchKind { kind ?? .agent }
     public init(projectID: UUID, groupID: UUID, presetID: UUID, folderID: UUID, title: String, worktreeID: UUID? = nil, additionalFolderIDs: [UUID] = [], task: String? = nil, allowSharedCheckout: Bool = false, coordinationEnabled: Bool = false, retryKey: UUID = UUID(), kind: LaunchKind? = nil, modelOverride: String? = nil, reasoningOverride: String? = nil, autoApproveOverride: Bool? = nil) {
         self.projectID = projectID; self.groupID = groupID; self.presetID = presetID; self.folderID = folderID; self.title = title
