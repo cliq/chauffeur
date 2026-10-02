@@ -745,7 +745,9 @@ private struct ProjectWindowContent: View, Equatable {
                     } else if let selected = sessions.first(where: { $0.id == selectedID }) {
                         // Per-session identity so a new selection hosts its own
                         // terminal view instead of updating the previous one's.
-                        TerminalPane(session: selected, controller: layout.controller(for: selected.id, scrollback: model.snapshot.settings.scrollbackLines, style: model.terminalStyle)).frame(minWidth: 240).id(selected.id)
+                        TerminalPane(session: selected, controller: layout.controller(for: selected.id, scrollback: model.snapshot.settings.scrollbackLines, style: model.terminalStyle),
+                                     deleteWorktree: !row.isMain && row.liveSessions.isEmpty ? { prepareDeletion(row) } : nil,
+                                     deleteWorktreeDisabled: !online || isDeleting(row)).frame(minWidth: 240).id(selected.id)
                     } else {
                         checkoutEmptyState(row, folder: folder, hasFinished: !WorktreeSessions.finished(sessions).isEmpty)
                     }
@@ -773,6 +775,9 @@ private struct ProjectWindowContent: View, Equatable {
                 } else {
                     Button("Launch Agent…") { launchAgent(in: row, folder: folder) }.buttonStyle(.borderedProminent).disabled(!canLaunch(in: row)).accessibilityIdentifier("checkout.empty.launch")
                     Button("Open Shell") { openShell(in: row, folder: folder) }.disabled(!canLaunch(in: row)).accessibilityIdentifier("checkout.empty.shell")
+                    if !row.isMain, row.liveSessions.isEmpty {
+                        Button("Delete Worktree…", role: .destructive) { prepareDeletion(row) }.disabled(!online || isDeleting(row)).accessibilityIdentifier("checkout.empty.delete")
+                    }
                 }
                 Button("Recent Conversations…") { recentConversationsRow = row }.disabled(!online).accessibilityIdentifier("checkout.empty.recentConversations")
             }

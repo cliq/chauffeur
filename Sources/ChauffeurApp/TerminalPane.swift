@@ -326,6 +326,9 @@ struct TerminalPane: View {
     @EnvironmentObject private var model: AppModel
     let session: Session
     @ObservedObject var controller: TerminalController
+    /// Offered on the stopped-session placeholder when its worktree can be deleted.
+    var deleteWorktree: (() -> Void)?
+    var deleteWorktreeDisabled = false
     var body: some View {
         VStack(spacing: 0) {
             HStack {
@@ -366,6 +369,9 @@ struct TerminalPane: View {
                     Button("Open History", systemImage: "clock.arrow.circlepath") { controller.find() }
                     if session.nativeConversationID != nil {
                         Button("Resume Conversation") { model.perform { _ = try await model.call("resume", .object(["sessionID": .string(session.id.uuidString)])) } }.buttonStyle(.borderedProminent)
+                    }
+                    if let deleteWorktree {
+                        Button("Delete Worktree…", role: .destructive) { deleteWorktree() }.disabled(deleteWorktreeDisabled).accessibilityIdentifier("terminal.stopped.deleteWorktree")
                     }
                 }.padding(32).frame(maxWidth: .infinity, maxHeight: .infinity)
                     .terminalPlaceholder(Color(nsColor: .textBackgroundColor), opacity: model.terminalStyle.backgroundOpacity)
