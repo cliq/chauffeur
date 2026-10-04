@@ -45,7 +45,9 @@ delivered notifications while keeping the service menu available. Re-enabling do
 The macOS permission grant remains in System Settings. The runtime refreshes the
 helper after service/app updates so a click opens the current containing app.
 Only project/session UUIDs travel in the navigation URL. The main app validates
-their membership against its current store before opening a window.
+their membership against its current store before opening a window. The parser
+is the portable `SessionLink` (ChauffeurRemoteProtocol), shared with the iPhone
+app, which opens the same links (see `mobile-remote.md`).
 
 ## Verification and remaining acceptance
 

@@ -46,6 +46,8 @@ struct RootView: View {
                     }
                 }
         }
+        // Session links (`chauffeur://session/<project>/<session>`) from other apps.
+        .onOpenURL { model.openSessionURL($0) }
     }
 }
 

@@ -23,6 +23,20 @@ struct SessionsView: View {
                 }
             }
 
+            if let error = model.connectError {
+                Section {
+                    HStack(alignment: .firstTextBaseline) {
+                        Label(error, systemImage: "exclamationmark.triangle.fill")
+                            .foregroundStyle(.orange)
+                        Spacer()
+                        Button("Dismiss", systemImage: "xmark") { model.connectError = nil }
+                            .labelStyle(.iconOnly)
+                            .buttonStyle(.borderless)
+                    }
+                    .accessibilityIdentifier("sessions-error")
+                }
+            }
+
             Section {
                 HStack(spacing: 8) {
                     Circle()

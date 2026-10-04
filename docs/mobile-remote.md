@@ -120,6 +120,18 @@ every device at once and requires re-pairing all of them.
 including ones without an open desktop window. Selecting a session opens its
 terminal.
 
+**Session links**: the iPhone app answers to the same session deep link the Mac
+exports to every session as `CHAUFFEUR_SESSION_URL`
+(`chauffeur://session/<project-id>/<session-id>`; `chauffeur-debug://` for
+Debug builds), so another app on the phone (such as Claude Monitor) can open a
+session's terminal directly. A link that arrives before the phone is connected
+waits while the app connects to the selected Mac and then opens the session,
+refreshing the list once if the session just launched. Links are only resolved
+against the selected Mac; if it doesn't report that session, the sessions list
+shows "That session is no longer available on \<Mac\>". A Debug phone build only
+accepts `chauffeur-debug://` links and a Release build only `chauffeur://`, so
+the link must come from a Mac running the same kind of build.
+
 **Take Control**: only one client — desktop or phone — controls a session's
 terminal input and size at a time. Taking control is an explicit, visible
 handoff in both directions: the side that loses control sees a "Terminal is

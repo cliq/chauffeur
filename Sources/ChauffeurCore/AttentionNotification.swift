@@ -1,20 +1,17 @@
 import Foundation
+import ChauffeurRemoteProtocol
 
 /// A navigation target only. URLs never contain a socket, command, or file path.
 public struct SessionRoute: Codable, Sendable, Equatable {
     public let projectID: UUID
     public let sessionID: UUID
     public init(projectID: UUID, sessionID: UUID) { self.projectID = projectID; self.sessionID = sessionID }
+    /// Parsing and formatting live in the portable `SessionLink`, shared with the iOS client.
     public init?(url: URL) {
-        guard let parts = URLComponents(url: url, resolvingAgainstBaseURL: false),
-              parts.scheme == AppBuild.current.urlScheme, parts.host == "session", parts.user == nil,
-              parts.password == nil, parts.port == nil, parts.query == nil, parts.fragment == nil else { return nil }
-        let path = parts.percentEncodedPath.split(separator: "/", omittingEmptySubsequences: false)
-        guard path.count == 3, path[0].isEmpty,
-              let projectID = UUID(uuidString: String(path[1])), let sessionID = UUID(uuidString: String(path[2])) else { return nil }
-        self.init(projectID: projectID, sessionID: sessionID)
+        guard let link = SessionLink(url: url, scheme: AppBuild.current.urlScheme) else { return nil }
+        self.init(projectID: link.projectID, sessionID: link.sessionID)
     }
-    public var url: URL { URL(string: "\(AppBuild.current.urlScheme)://session/\(projectID.uuidString)/\(sessionID.uuidString)")! }
+    public var url: URL { SessionLink(projectID: projectID, sessionID: sessionID).url(scheme: AppBuild.current.urlScheme) }
 }
 
 public enum AttentionReason: String, Codable, Sendable {

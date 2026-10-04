@@ -119,6 +119,14 @@ targets:
         product: ChauffeurTerminalTesting
       - package: SwiftTerm
         product: SwiftTerm
+    # Merged with the INFOPLIST_KEY_* settings below (GENERATE_INFOPLIST_FILE stays on).
+    # Registers the same per-build scheme as the Mac app so session links open here too.
+    info:
+      path: .build/generated/ChauffeurMobile-Info.plist
+      properties:
+        CFBundleURLTypes:
+          - CFBundleURLName: dev.chauffeur.session
+            CFBundleURLSchemes: ["$(CHAUFFEUR_URL_SCHEME)"]
     settings:
       base:
         PRODUCT_NAME: Chauffeur

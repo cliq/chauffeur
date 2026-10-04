@@ -59,6 +59,16 @@ final class MobileAppModel {
         #endif
     }()
 
+    /// The session-link scheme this build answers to, matching the Mac build that exports
+    /// `CHAUFFEUR_SESSION_URL` (registered as `$(CHAUFFEUR_URL_SCHEME)` in project.yml).
+    static let urlScheme: String = {
+        #if DEBUG
+        "chauffeur-debug"
+        #else
+        "chauffeur"
+        #endif
+    }()
+
     /// Every paired Mac, in pairing order.
     private(set) var savedHosts: [SavedHost] = []
     /// The Mac this phone connects to, remembered across launches.
@@ -76,6 +86,8 @@ final class MobileAppModel {
     private(set) var terminals: [UUID: RemoteSessionController] = [:]
     private(set) var keepAwakeMutationPending = false
     private(set) var keepAwakeMutationError: String?
+    /// A session link waiting for a connection to the selected Mac (or for its inventory).
+    private(set) var pendingSessionRoute: SessionLink?
 
     @ObservationIgnored let credentials: any CredentialStore
     @ObservationIgnored let makeTerminalAdapter: @MainActor () -> any TerminalEngineAdapter
@@ -243,6 +255,8 @@ final class MobileAppModel {
         if path.isEmpty {
             path = [.sessions]
         }
+        // A link that arrived before (or while) connecting is opened now.
+        await processPendingSessionRoute()
         await attachSelectedTerminalIfNeeded()
     }
 
@@ -282,6 +296,8 @@ final class MobileAppModel {
         replaceSession()
         path = []
         connectError = nil
+        // A pending link is only ever resolved against the Mac that was selected when it arrived.
+        pendingSessionRoute = nil
         selectedHostID = hostID
         defaults?.set(hostID.uuidString, forKey: Self.selectedHostKey)
     }
@@ -297,6 +313,7 @@ final class MobileAppModel {
         if hostID == selectedHostID {
             replaceSession()
             path = []
+            pendingSessionRoute = nil
             selectedHostID = nil
             defaults?.removeObject(forKey: Self.selectedHostKey)
         }
@@ -315,6 +332,48 @@ final class MobileAppModel {
 
     func refreshInventory() async {
         await session?.refreshInventory()
+    }
+
+    // MARK: - Session links
+
+    /// Opens a `chauffeur://session/<project>/<session>` link (for example from Claude Monitor).
+    /// Links that don't parse for this build's scheme are ignored. While disconnected the link
+    /// waits and a saved Mac is connected; `connect()` opens it once connected.
+    @discardableResult
+    func openSessionURL(_ url: URL) -> Task<Void, Never>? {
+        guard let route = SessionLink(url: url, scheme: Self.urlScheme) else { return nil }
+        pendingSessionRoute = route
+        if isConnected {
+            return Task { await processPendingSessionRoute() }
+        }
+        // An in-flight connect picks the link up when it finishes.
+        guard savedHost != nil, !isConnecting else { return nil }
+        return Task { await connect() }
+    }
+
+    /// Opens the pending link's terminal when the selected Mac reports the session, refreshing
+    /// the inventory once in case it just launched. Otherwise drops the link with a message.
+    func processPendingSessionRoute() async {
+        guard isConnected, let route = pendingSessionRoute else { return }
+        if !Self.inventory(inventory, contains: route), let session {
+            await session.refreshInventory()
+        }
+        // Another link, a Mac switch, or a disconnect may have happened during the refresh.
+        guard isConnected, pendingSessionRoute == route else { return }
+        pendingSessionRoute = nil
+        guard Self.inventory(inventory, contains: route) else {
+            // Like the Mac, fall back to the list, which shows the message.
+            connectError = "That session is no longer available on \(hostName ?? "this Mac")."
+            Self.dismissKeyboard()
+            path = [.sessions]
+            return
+        }
+        connectError = nil
+        openSession(route.sessionID)
+    }
+
+    private static func inventory(_ inventory: InventorySnapshot?, contains route: SessionLink) -> Bool {
+        inventory?.session(route.sessionID)?.projectID == route.projectID
     }
 
     // MARK: - App lifecycle
