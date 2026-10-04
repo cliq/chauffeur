@@ -17,8 +17,19 @@ struct CheckoutRow: Identifiable {
     var hasUncommittedChanges: Bool? = nil
     var unmergedCommits: Int? = nil
     var baseBranch: String? = nil
+    /// False for the main row of a folder Git does not track: it has no branch or worktrees.
+    var isRepository = true
     var id: String { path }
-    var title: String { branch.isEmpty ? (isMain ? "Main checkout" : "Detached HEAD") : branch }
+    var title: String {
+        guard isRepository else { return URL(fileURLWithPath: path).lastPathComponent }
+        return branch.isEmpty ? (isMain ? "Main checkout" : "Detached HEAD") : branch
+    }
+    /// What kind of checkout this is, shown beneath the title.
+    var kindLabel: String {
+        guard isRepository else { return "Not a Git repository" }
+        return isMain ? "Main checkout" : URL(fileURLWithPath: path).lastPathComponent
+    }
+    var systemImage: String { isRepository ? (isMain ? "house" : "arrow.triangle.branch") : "folder" }
     /// The checkout no longer exists; the row only carries history.
     var finished: Bool { availability != .available }
     var liveSessions: [Session] { WorktreeSessions.live(sessions) }
@@ -64,6 +75,7 @@ enum CheckoutRows {
         let mainEntry = entries.first { $0.path == folder.canonicalPath }
         var main = CheckoutRow(folderID: folder.id, path: folder.canonicalPath, branch: mainEntry?.branch ?? "", availability: folder.availability, worktreeID: nil, isMain: true, managed: false, sessions: history(at: folder.canonicalPath))
         main.applyStatus(from: mainEntry)
+        main.isRepository = inventory?.status != .notRepository
         var rows: [CheckoutRow] = []
         var matched = Set<UUID>()
         for entry in entries where entry.path != folder.canonicalPath {

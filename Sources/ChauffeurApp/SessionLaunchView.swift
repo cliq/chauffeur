@@ -59,6 +59,13 @@ struct SessionLaunchView: View {
     }
     private var preset: AgentPreset? { presets.first { $0.id == presetID } }
     private var folder: ProjectFolder? { currentProject.folders.first { $0.id == folderID && $0.registered } }
+    /// A folder Git does not track can only run sessions in place. Until the
+    /// runtime has scanned it, worktree creation stays on offer.
+    private func isRepository(_ folderID: UUID?) -> Bool {
+        guard let folder = currentProject.folders.first(where: { $0.id == folderID }) else { return true }
+        return model.snapshot.repositoryInventories?.observation(for: folder.canonicalPath)?.status != .notRepository
+    }
+    private func initialCheckout(in folderID: UUID?) -> Checkout { startsInNewWorktree && isRepository(folderID) ? .newWorktree : .repository }
     private var suggestedBranch: String {
         if let ticket, ticket.folderID == folderID, ticket.title == title { return ticket.branch }
         return WorktreeBranchName.suggested(from: title)
@@ -202,7 +209,7 @@ struct SessionLaunchView: View {
                 let choices = presets.map(\.id)
                 presetID = currentProject.lastPresetID.flatMap { choices.contains($0) ? $0 : nil } ?? presets.first?.id
                 folderID = currentProject.folders.first { $0.id == initialFolderID && $0.registered }?.id ?? currentProject.folders.first(where: \.registered)?.id
-                checkout = startsInNewWorktree ? .newWorktree : .repository
+                checkout = initialCheckout(in: folderID)
                 if let initialWorktreeID, worktrees.contains(where: { $0.id == initialWorktreeID }) { checkout = .existing(initialWorktreeID) }
                 #if DEBUG
                 configureProbe()
@@ -280,25 +287,28 @@ struct SessionLaunchView: View {
                     folderID = selected
                     baseRef = "HEAD"
                     existingBranch = ""
-                    checkout = startsInNewWorktree ? .newWorktree : .repository
+                    checkout = initialCheckout(in: selected)
                     shared = false
                 })) {
                     Text("Choose a folder").tag(UUID?.none)
                     ForEach(currentProject.folders.filter(\.registered)) { folder in Text(folder.name).tag(Optional(folder.id)) }
                 }
-                Picker("Work in", selection: $checkout) {
-                    Text("Repository folder").tag(Checkout.repository)
-                    ForEach(worktrees) { tree in Text("\(tree.branch.isEmpty ? "Detached HEAD" : tree.branch) · \(tree.availability.rawValue)").tag(Checkout.existing(tree.id)) }
-                    Divider()
-                    Text("New worktree…").tag(Checkout.newWorktree)
-                }.onChange(of: checkout) { _, value in
-                    shared = false
+                if isRepository(folderID) {
+                    Picker("Work in", selection: $checkout) {
+                        Text("Repository folder").tag(Checkout.repository)
+                        ForEach(worktrees) { tree in Text("\(tree.branch.isEmpty ? "Detached HEAD" : tree.branch) · \(tree.availability.rawValue)").tag(Checkout.existing(tree.id)) }
+                        Divider()
+                        Text("New worktree…").tag(Checkout.newWorktree)
+                    }.onChange(of: checkout) { _, value in
+                        shared = false
+                    }
                 }
                 if checkout == .newWorktree {
                     WorktreeBranchFields(projectID: project.id, folderID: folderID, reuseExistingBranch: $reuseExistingBranch, branch: branchBinding, baseRef: $baseRef)
                 }
             }
             if checkout == .newWorktree { Text("Creates a separate checkout for this repository, then starts your agent there.").font(.caption).foregroundStyle(.secondary) }
+            else if !isRepository(folderID) { Text("This folder is not a Git repository, so sessions run in the folder itself.").font(.caption).foregroundStyle(.secondary) }
         }
     }
     @ViewBuilder private var additionalFolders: some View {

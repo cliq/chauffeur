@@ -508,6 +508,7 @@ private struct ProjectWindowContent: View, Equatable {
         let rows = checkouts(for: folder, project: project)
         let overviewSelected = layout.selectedFolderID == folder.id && layout.selectedWorktreePath == nil
         let readiness = readiness(for: folder)
+        let isRepository = readiness != .notRepository
         return DisclosureGroup(isExpanded: Binding(get: { !collapsedRepositories.contains(folder.id) }, set: { if $0 { collapsedRepositories.remove(folder.id) } else { collapsedRepositories.insert(folder.id) } })) {
             if readiness.isPending {
                 inventoryPendingRow(folder)
@@ -515,9 +516,11 @@ private struct ProjectWindowContent: View, Equatable {
                 ForEach(listedCheckouts(for: folder, project: project)) { row in checkoutRow(row, folder: folder, project: project) }
                 inventoryStatusRow(readiness, folder: folder)
             }
-            Button("New Worktree & Session…", systemImage: "plus") { showLaunch(folderID: folder.id, newWorktree: true) }
-                .buttonStyle(.plain).font(.caption).disabled(!canLaunch || folder.availability != .available || readiness.isPending)
-                .accessibilityIdentifier("repository.new-worktree.\(folder.id)")
+            if isRepository {
+                Button("New Worktree & Session…", systemImage: "plus") { showLaunch(folderID: folder.id, newWorktree: true) }
+                    .buttonStyle(.plain).font(.caption).disabled(!canLaunch || folder.availability != .available || readiness.isPending)
+                    .accessibilityIdentifier("repository.new-worktree.\(folder.id)")
+            }
         } label: {
             // The badge sits outside the button so its tooltip is not hidden by the path's.
             HStack {
@@ -531,10 +534,12 @@ private struct ProjectWindowContent: View, Equatable {
                 .contextMenu {
                     Button("Launch Agent…") { showLaunch(folderID: folder.id) }.disabled(!canLaunch || readiness.isPending)
                     Button("Open Shell") { openShell(in: rows[0], folder: folder) }.disabled(!canLaunch(in: rows[0]) || readiness.isPending)
-                    Button("New Worktree & Session…") { showLaunch(folderID: folder.id, newWorktree: true) }
-                        .disabled(!canLaunch || folder.availability != .available || readiness.isPending)
+                    if isRepository {
+                        Button("New Worktree & Session…") { showLaunch(folderID: folder.id, newWorktree: true) }
+                            .disabled(!canLaunch || folder.availability != .available || readiness.isPending)
+                    }
                     Divider()
-                    Button("Manage Worktrees…") { showWorktrees(folderID: folder.id) }.disabled(readiness.isPending)
+                    if isRepository { Button("Manage Worktrees…") { showWorktrees(folderID: folder.id) }.disabled(readiness.isPending) }
                     Button("Repository Settings…") { settingsSheet = FolderSheet(id: folder.id) }
                     Button("Relink / Edit Folder…") { editingProject = true }
                     Button("Reveal in Finder") { FilePanels.reveal(folder.selectedPath) }
@@ -557,9 +562,7 @@ private struct ProjectWindowContent: View, Equatable {
                     .buttonStyle(.plain).font(.caption).disabled(!online)
                     .accessibilityIdentifier("repository.retry-inventory.\(folder.id)")
             }.padding(.horizontal, 6).padding(.vertical, 4)
-        case .notRepository:
-            Text("Not a Git repository").font(.caption).foregroundStyle(.secondary).padding(.horizontal, 6)
-        case .pending, .ready:
+        case .pending, .ready, .notRepository:
             EmptyView()
         }
     }
@@ -586,7 +589,7 @@ private struct ProjectWindowContent: View, Equatable {
                             }
                         }
                         HStack(spacing: 4) {
-                            Text((showsRepository ? "\(folder.name) · " : "") + (row.isMain ? "Main checkout" : URL(fileURLWithPath: row.path).lastPathComponent)).lineLimit(1).help(row.path)
+                            Text((showsRepository ? "\(folder.name) · " : "") + row.kindLabel).lineLimit(1).help(row.path)
                             if let unmerged = row.unmergedDescription {
                                 Text("·")
                                 HStack(spacing: 3) { UnmergedCommitsGlyph(); Text("\(row.unmergedCount)") }
@@ -597,7 +600,7 @@ private struct ProjectWindowContent: View, Equatable {
                         if deleting { Text("Deleting…").font(.caption).foregroundStyle(.secondary) }
                         else if let status = row.statusLabel { Text(status).font(.caption).foregroundStyle(.secondary).help(row.path) }
                     }
-                } icon: { Image(systemName: row.isMain ? "house" : "arrow.triangle.branch").help(row.path) }
+                } icon: { Image(systemName: row.systemImage).help(row.path) }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .contentShape(Rectangle())
             }.buttonStyle(.plain)
@@ -629,7 +632,7 @@ private struct ProjectWindowContent: View, Equatable {
         Button("Open Shell") { openShell(in: row, folder: folder) }.disabled(!canLaunch(in: row))
         Divider()
         Button("Recent Conversations…") { recentConversationsRow = row }.disabled(!online)
-        Button("Manage Worktrees…") { showWorktrees(folderID: folder.id) }
+        if row.isRepository { Button("Manage Worktrees…") { showWorktrees(folderID: folder.id) } }
         Button("Reveal in Finder") { FilePanels.reveal(row.path) }.disabled(row.availability != .available)
         if !row.isMain {
             Divider()
@@ -698,7 +701,7 @@ private struct ProjectWindowContent: View, Equatable {
                         CopyableText(value: row.branch, what: "branch") { Text(row.title).font(.caption).foregroundStyle(.secondary) }
                             .accessibilityIdentifier("checkout.header.branch")
                     } else {
-                        Text(row.map(\.title) ?? "\(folder.name) · all checkouts").font(.caption).foregroundStyle(.secondary)
+                        Text(row.map { $0.isRepository ? $0.title : $0.kindLabel } ?? (readiness(for: folder) == .notRepository ? "Not a Git repository" : "\(folder.name) · all checkouts")).font(.caption).foregroundStyle(.secondary)
                     }
                 }
                 let target = row ?? checkout(folder: folder, path: folder.canonicalPath, project: project)
@@ -794,8 +797,10 @@ private struct ProjectWindowContent: View, Equatable {
                 }
                 Spacer()
                 Button("Repository Settings…") { settingsSheet = FolderSheet(id: folder.id) }.accessibilityIdentifier("overview.settings.\(folder.id)")
-                Button("Manage Worktrees…") { showWorktrees(folderID: folder.id) }.disabled(readiness.isPending)
-                Button("New Worktree & Session…") { showLaunch(folderID: folder.id, newWorktree: true) }.disabled(!canLaunch || folder.availability != .available || readiness.isPending)
+                if readiness != .notRepository {
+                    Button("Manage Worktrees…") { showWorktrees(folderID: folder.id) }.disabled(readiness.isPending)
+                    Button("New Worktree & Session…") { showLaunch(folderID: folder.id, newWorktree: true) }.disabled(!canLaunch || folder.availability != .available || readiness.isPending)
+                }
             }.padding(20)
             if readiness.isPending {
                 VStack(spacing: 12) {
@@ -816,7 +821,7 @@ private struct ProjectWindowContent: View, Equatable {
                 let live = WorktreeSessions.liveAgents(sessions).count
                 let terminals = WorktreeSessions.liveTerminals(sessions).count
                 HStack(alignment: .center, spacing: 12) {
-                    Image(systemName: row.isMain ? "house" : "arrow.triangle.branch").foregroundStyle(.secondary)
+                    Image(systemName: row.systemImage).foregroundStyle(.secondary)
                     VStack(alignment: .leading, spacing: 2) {
                         Text(row.title).fontWeight(.medium)
                         Text(row.path).font(.system(.caption, design: .monospaced)).foregroundStyle(.secondary).lineLimit(1)
