@@ -180,6 +180,10 @@ final class MobileAppModel {
         return false
     }
 
+    var groupCreationIsSupported: Bool {
+        session?.isGroupCreationSupported ?? false
+    }
+
     @discardableResult
     func setKeepAwakeSettings(_ settings: KeepAwakeSettings) async -> Bool {
         guard let session, isConnected, !inventoryIsStale, !keepAwakeMutationPending else { return false }
@@ -545,6 +549,11 @@ final class MobileAppModel {
     func resolveTicket(projectID: UUID, folderID: UUID, text: String) async throws -> TicketSuggestion? {
         guard let session else { throw RemoteClientError.disconnected }
         return try await session.resolveTicket(projectID: projectID, folderID: folderID, text: text)
+    }
+
+    func createGroup(projectID: UUID, name: String) async throws -> GroupSummary {
+        guard let session else { throw RemoteClientError.disconnected }
+        return try await session.createGroup(projectID: projectID, name: name)
     }
 
     /// Sends the launch and, on completion, opens the new session as the selected tab.

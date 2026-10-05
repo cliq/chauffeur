@@ -108,6 +108,16 @@ public struct TicketSuggestionResult: Codable, Equatable, Sendable {
     public init(ticket: TicketSuggestion?) { self.ticket = ticket }
 }
 
+/// Adds a group to a project, or reopens the one already named this way.
+public struct CreateGroupRequest: Codable, Equatable, Sendable {
+    public var projectID: UUID
+    public var name: String
+
+    public init(projectID: UUID, name: String) {
+        self.projectID = projectID; self.name = name
+    }
+}
+
 public struct AttachTerminalRequest: Codable, Equatable, Sendable {
     public var sessionID: UUID
     public var takeControl: Bool
@@ -197,6 +207,7 @@ public enum RemoteOperation: Equatable, Sendable, Codable {
     case setKeepAwakeTimer(KeepAwakeTimerRequest)
     case uploadFileChunk(UploadFileChunkRequest)
     case resolveTicket(ResolveTicketRequest)
+    case createGroup(CreateGroupRequest)
 
     public var kind: String {
         switch self {
@@ -216,6 +227,7 @@ public enum RemoteOperation: Equatable, Sendable, Codable {
         case .setKeepAwakeTimer: return "setKeepAwakeTimer"
         case .uploadFileChunk: return "uploadFileChunk"
         case .resolveTicket: return "resolveTicket"
+        case .createGroup: return "createGroup"
         }
     }
 
@@ -255,6 +267,8 @@ public enum RemoteOperation: Equatable, Sendable, Codable {
             self = .uploadFileChunk(try container.decode(UploadFileChunkRequest.self, forKey: .payload))
         case "resolveTicket":
             self = .resolveTicket(try container.decode(ResolveTicketRequest.self, forKey: .payload))
+        case "createGroup":
+            self = .createGroup(try container.decode(CreateGroupRequest.self, forKey: .payload))
         default:
             throw DecodingError.dataCorrupted(
                 DecodingError.Context(
@@ -301,6 +315,8 @@ public enum RemoteOperation: Equatable, Sendable, Codable {
             try container.encode(payload, forKey: .payload)
         case .resolveTicket(let payload):
             try container.encode(payload, forKey: .payload)
+        case .createGroup(let payload):
+            try container.encode(payload, forKey: .payload)
         }
     }
 }
@@ -319,6 +335,7 @@ public enum RemoteResult: Equatable, Sendable, Codable {
     case keepAwake(KeepAwakeStatus)
     case uploadedFile(UploadedFileStatus)
     case ticketSuggestion(TicketSuggestionResult)
+    case group(GroupSummary)
     case ack
 
     public var kind: String {
@@ -334,6 +351,7 @@ public enum RemoteResult: Equatable, Sendable, Codable {
         case .keepAwake: return "keepAwake"
         case .uploadedFile: return "uploadedFile"
         case .ticketSuggestion: return "ticketSuggestion"
+        case .group: return "group"
         case .ack: return "ack"
         }
     }
@@ -364,6 +382,8 @@ public enum RemoteResult: Equatable, Sendable, Codable {
             self = .uploadedFile(try container.decode(UploadedFileStatus.self, forKey: .payload))
         case "ticketSuggestion":
             self = .ticketSuggestion(try container.decode(TicketSuggestionResult.self, forKey: .payload))
+        case "group":
+            self = .group(try container.decode(GroupSummary.self, forKey: .payload))
         case "ack":
             self = .ack
         default:
@@ -401,6 +421,8 @@ public enum RemoteResult: Equatable, Sendable, Codable {
         case .uploadedFile(let payload):
             try container.encode(payload, forKey: .payload)
         case .ticketSuggestion(let payload):
+            try container.encode(payload, forKey: .payload)
+        case .group(let payload):
             try container.encode(payload, forKey: .payload)
         case .ack:
             break

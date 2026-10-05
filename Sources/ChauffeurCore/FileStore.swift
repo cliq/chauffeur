@@ -440,6 +440,18 @@ public actor FileStore {
         let saved = try write(value, at: URL(fileURLWithPath: stored.path), expectedVersion: stored.version)
         snapshot.projects.removeAll { $0.value.id == projectID }; snapshot.projects.append(saved)
     }
+    /// Patch only the repository's launch choices, so the next agent launched there starts with them.
+    public func rememberLaunchChoices(groupID: UUID, coordinationEnabled: Bool, projectID: UUID, folderID: UUID) throws {
+        _ = reload()
+        guard let stored = snapshot.projects.first(where: { $0.value.id == projectID }),
+              stored.value.groups.contains(where: { $0.id == groupID && !$0.archived }),
+              let index = stored.value.folders.firstIndex(where: { $0.id == folderID }) else { return }
+        var value = stored.value
+        guard value.folders[index].lastGroupID != groupID || value.folders[index].lastCoordinationEnabled != coordinationEnabled else { return }
+        value.folders[index].lastGroupID = groupID; value.folders[index].lastCoordinationEnabled = coordinationEnabled
+        let saved = try write(value, at: URL(fileURLWithPath: stored.path), expectedVersion: stored.version)
+        snapshot.projects.removeAll { $0.value.id == projectID }; snapshot.projects.append(saved)
+    }
     /// Session launch snapshots are self-contained; only current project assignments
     /// prevent deletion. Configuration directories referenced by presets are untouched.
     public func deletePresetSet(_ id: UUID, expectedVersion: String) throws {

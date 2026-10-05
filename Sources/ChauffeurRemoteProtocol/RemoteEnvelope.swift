@@ -2,7 +2,7 @@ import Foundation
 
 public enum RemoteProtocol {
     public static let version = 1
-    public static let capabilities = ["terminal.binary.v1", "launch.worktree.v1", "inventory.v1", "progress.v1", "worktree.branches.v1", openSessionKinds, keepAwake, fileUpload, ticketResolution, launchCoordination]
+    public static let capabilities = ["terminal.binary.v1", "launch.worktree.v1", "inventory.v1", "progress.v1", "worktree.branches.v1", openSessionKinds, keepAwake, fileUpload, ticketResolution, launchCoordination, groupCreation]
     /// A client with this capability decodes any session kind (an unknown one as `agent`). Builds without it fail to
     /// decode a whole inventory that names a kind they don't know, so the Mac sends them `shell` instead.
     public static let openSessionKinds = "sessionKinds.open.v1"
@@ -13,6 +13,8 @@ public enum RemoteProtocol {
     public static let ticketResolution = "ticket.resolve.v1"
     /// The Mac honors `LaunchSpec.coordinationEnabled`; older Macs launch every remote agent without it.
     public static let launchCoordination = "launch.coordination.v1"
+    /// The Mac accepts `createGroup`.
+    public static let groupCreation = "group.create.v1"
     /// The kinds every client decodes, including those without `openSessionKinds`.
     public static let legacySessionKinds: Set<RemoteSessionKind> = [.codex, .claude, .shell]
 }

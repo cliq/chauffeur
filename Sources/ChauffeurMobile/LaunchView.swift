@@ -44,6 +44,10 @@ struct LaunchView: View {
     @State private var groupID: UUID?
     @State private var allowSharedCheckout = false
     @State private var coordination = false
+    @State private var namingGroup = false
+    @State private var newGroupName = ""
+    @State private var groupError: String?
+    @State private var appliedRepositoryChoices = false
     @State private var destination: String?
     @State private var destinationError: String?
     @State private var operationKey = UUID()
@@ -126,6 +130,11 @@ struct LaunchView: View {
                             .foregroundStyle(.secondary)
                     }
                 }
+            }
+
+            messagingSection
+
+            if kind == .agent {
                 Section("Initial task (optional)") {
                     TextField("What should the agent start with?", text: $initialTask, axis: .vertical)
                         .lineLimit(3...6)
@@ -196,33 +205,6 @@ struct LaunchView: View {
                 }
             }
 
-            Section {
-                if offersCoordination {
-                    Toggle(isOn: $coordination) {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("Enable Chauffeur messaging and delegation")
-                                .font(.subheadline.weight(.semibold))
-                            Text(coordination
-                                 ? "Experimental: CLI integration is under compatibility validation."
-                                 : "Basic terminal mode: messaging, delegation, and semantic status signals are unavailable.")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                    .accessibilityIdentifier("launch-coordination")
-                }
-                Picker("Group", selection: $groupID) {
-                    Text("Project default").tag(UUID?.none)
-                    ForEach(project?.groups ?? []) { group in
-                        Text(group.name).tag(Optional(group.id))
-                    }
-                }
-            } footer: {
-                Text(offersCoordination
-                     ? "Sessions message and delegate only within their group. Uses existing Mac configuration."
-                     : "Uses existing Mac configuration.")
-            }
-
             if let failure {
                 Section {
                     Label {
@@ -265,6 +247,17 @@ struct LaunchView: View {
             }
             .listRowBackground(Color.clear)
         }
+        .alert("New group", isPresented: $namingGroup) {
+            TextField("Group name", text: $newGroupName)
+                .accessibilityIdentifier("launch-new-group-name")
+            Button("Create") {
+                Task { await createGroup() }
+            }
+            .disabled(trimmed(newGroupName).isEmpty)
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Sessions in this group message and delegate only to each other.")
+        }
         .navigationTitle("Launch session")
         .navigationBarTitleDisplayMode(.inline)
         .onAppear(perform: applyDefaults)
@@ -286,6 +279,62 @@ struct LaunchView: View {
         }
     }
 
+    private var messagingSection: some View {
+        Section {
+            if offersCoordination {
+                Toggle(isOn: $coordination) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Enable Chauffeur messaging and delegation")
+                            .font(.subheadline.weight(.semibold))
+                        Text(coordination
+                             ? "Experimental: CLI integration is under compatibility validation."
+                             : "Basic terminal mode: messaging, delegation, and semantic status signals are unavailable.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .accessibilityIdentifier("launch-coordination")
+            }
+            Picker("Group", selection: $groupID) {
+                Text("Project default").tag(UUID?.none)
+                ForEach(project?.groups ?? []) { group in
+                    Text(group.name).tag(Optional(group.id))
+                }
+            }
+            if model.groupCreationIsSupported {
+                Button("New group…") {
+                    newGroupName = ""
+                    groupError = nil
+                    namingGroup = true
+                }
+                .disabled(!model.isConnected)
+                .accessibilityIdentifier("launch-new-group")
+            }
+            if let groupError {
+                Text(groupError)
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+            }
+        } footer: {
+            Text(offersCoordination
+                 ? "Sessions message and delegate only within their group. Each repository remembers these choices for its next agent."
+                 : "Uses existing Mac configuration.")
+        }
+    }
+
+    private func createGroup() async {
+        let name = trimmed(newGroupName)
+        guard !name.isEmpty else { return }
+        do {
+            groupID = try await model.createGroup(projectID: location.projectID, name: name).id
+            groupError = nil
+        } catch let error as RemoteClientError {
+            groupError = error.userMessage
+        } catch {
+            groupError = error.localizedDescription
+        }
+    }
+
     private var buttonTitle: String {
         if isLaunching { return "Launching…" }
         if failure != nil { return "Retry" }
@@ -299,6 +348,14 @@ struct LaunchView: View {
         if project?.presets.isEmpty == true {
             kind = .shell
         }
+        // The repository remembers the last agent's group and messaging choice. Applied once, so returning
+        // from a pushed picker keeps what the user changed.
+        guard !appliedRepositoryChoices else { return }
+        appliedRepositoryChoices = true
+        if let remembered = folder?.lastGroupID, project?.groups.contains(where: { $0.id == remembered }) == true {
+            groupID = remembered
+        }
+        coordination = folder?.lastCoordinationEnabled ?? false
     }
 
     /// Fills the branch from the title until the branch is edited by hand.

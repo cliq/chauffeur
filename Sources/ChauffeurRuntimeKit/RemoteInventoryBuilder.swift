@@ -42,7 +42,9 @@ public struct RemoteInventoryBuilder {
                     isRepository: inventory?.status == .available,
                     inventoryReady: inventory != nil,
                     availability: availability(folder.availability),
-                    checkouts: checkouts(folder: folder, project: project, records: worktrees, inventory: inventory)
+                    checkouts: checkouts(folder: folder, project: project, records: worktrees, inventory: inventory),
+                    lastGroupID: groups.contains { $0.id == folder.lastGroupID } ? folder.lastGroupID : nil,
+                    lastCoordinationEnabled: folder.lastCoordinationEnabled
                 )
             }
             summaries.append(ProjectSummary(id: project.id, name: project.name, archived: project.archived, groups: groups, presets: presets, folders: folders))

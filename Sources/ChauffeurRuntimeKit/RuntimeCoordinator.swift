@@ -1258,6 +1258,9 @@ public actor RuntimeCoordinator {
                 do { try await store.rememberPreset(preset.id, projectID: project.id, setID: set.id) }
                 catch let error as ChauffeurError { record(error) }
                 catch { record(ChauffeurError("preset_preference", "The session started, but its agent preset choice could not be saved")) }
+                do { try await store.rememberLaunchChoices(groupID: request.groupID, coordinationEnabled: coordination, projectID: project.id, folderID: request.folderID) }
+                catch let error as ChauffeurError { record(error) }
+                catch { record(ChauffeurError("launch_preference", "The session started, but its group and messaging choice could not be saved")) }
             }
             try Task.checkCancellation()
             return session

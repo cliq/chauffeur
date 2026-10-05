@@ -41,7 +41,11 @@ struct SessionLaunchView: View {
     @State private var shared = false
     @State private var coordination = false
     @State private var editingGroups = false
-    // Picker tag for the "Manage Groups…" item; never stored as a selection.
+    @State private var namingGroup = false
+    @State private var newGroupName = ""
+    @State private var groupFailure: String?
+    // Picker tags for the "New Group…" and "Manage Groups…" items; never stored as a selection.
+    private static let newGroupTag = UUID()
     private static let manageGroupsTag = UUID()
     @State private var modelOverride: String?
     @State private var reasoningOverride: String?
@@ -121,6 +125,7 @@ struct SessionLaunchView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
                     sessionFields
+                    messagingFields
                     checkoutFields
                     if !primaryPath.isEmpty {
                         if checkout == .newWorktree {
@@ -165,17 +170,6 @@ struct SessionLaunchView: View {
                         ArgumentEditor(text: $task, accessibilityLabel: "Initial task").frame(height: 84)
                             .overlay(RoundedRectangle(cornerRadius: 5).stroke(.separator))
                     }
-                    VStack(alignment: .leading, spacing: 6) {
-                        Toggle("Enable Chauffeur messaging and delegation", isOn: $coordination)
-                        Text(coordination ? "Experimental: CLI integration is under compatibility validation. Profile names identify configuration directories; they do not verify an account." : "Basic terminal mode (default): Chauffeur messaging, delegation, and semantic status signals are unavailable. Turn the experimental integration on for this launch to try them.").font(.caption).foregroundStyle(.secondary)
-                        Picker("Group", selection: Binding(get: { groupID }, set: { if $0 == Self.manageGroupsTag { editingGroups = true } else { groupID = $0 } })) {
-                            Text("Choose a group").tag(UUID?.none)
-                            ForEach(currentProject.groups.filter { !$0.archived }) { group in Text(group.name).tag(Optional(group.id)) }
-                            Divider()
-                            Text("Manage Groups…").tag(Optional(Self.manageGroupsTag))
-                        }.fixedSize().padding(.top, 4).accessibilityIdentifier("session.group")
-                        Text("Sessions message and delegate only within their group.").font(.caption).foregroundStyle(.secondary)
-                    }
                 }.padding(24).padding(.trailing, NSScroller.scrollerWidth(for: .regular, scrollerStyle: .legacy))
                     .background(PersistentScrollbars()).disabled(operation.isBusy)
             }.scrollIndicators(.visible)
@@ -204,11 +198,18 @@ struct SessionLaunchView: View {
                     else if !saved.contains(where: { $0.id == groupID && !$0.archived }) { groupID = saved.first(where: \.isDefault)?.id }
                 }
             }
+            .alert("New Group", isPresented: $namingGroup) {
+                TextField("Group name", text: $newGroupName).accessibilityIdentifier("session.new-group-name")
+                Button("Create") { createGroup() }.disabled(newGroupName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("Sessions in this group message and delegate only to each other.")
+            }
             .onAppear {
-                groupID = currentProject.groups.first { $0.id == initialGroupID && !$0.archived }?.id ?? currentProject.groups.first(where: \.isDefault)?.id
                 let choices = presets.map(\.id)
                 presetID = currentProject.lastPresetID.flatMap { choices.contains($0) ? $0 : nil } ?? presets.first?.id
                 folderID = currentProject.folders.first { $0.id == initialFolderID && $0.registered }?.id ?? currentProject.folders.first(where: \.registered)?.id
+                applyRepositoryChoices(folderID)
                 checkout = initialCheckout(in: folderID)
                 if let initialWorktreeID, worktrees.contains(where: { $0.id == initialWorktreeID }) { checkout = .existing(initialWorktreeID) }
                 #if DEBUG
@@ -278,6 +279,44 @@ struct SessionLaunchView: View {
             if let preset { LabeledContent("Configuration", value: preset.configurationDirectory).font(.caption).textSelection(.enabled) }
         }
     }
+    private var messagingFields: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Toggle("Enable Chauffeur messaging and delegation", isOn: $coordination).fontWeight(.medium).accessibilityIdentifier("session.coordination")
+            Text(coordination ? "Experimental: CLI integration is under compatibility validation. Profile names identify configuration directories; they do not verify an account." : "Basic terminal mode: Chauffeur messaging, delegation, and semantic status signals are unavailable. Turn the experimental integration on to try them.").font(.caption).foregroundStyle(.secondary)
+            Picker("Group", selection: Binding(get: { groupID }, set: { selected in
+                if selected == Self.newGroupTag { newGroupName = ""; groupFailure = nil; namingGroup = true }
+                else if selected == Self.manageGroupsTag { editingGroups = true }
+                else { groupID = selected }
+            })) {
+                Text("Choose a group").tag(UUID?.none)
+                ForEach(currentProject.groups.filter { !$0.archived }) { group in Text(group.name).tag(Optional(group.id)) }
+                Divider()
+                Text("New Group…").tag(Optional(Self.newGroupTag))
+                Text("Manage Groups…").tag(Optional(Self.manageGroupsTag))
+            }.fixedSize().padding(.top, 4).accessibilityIdentifier("session.group")
+            if let groupFailure { Text(groupFailure).font(.caption).foregroundStyle(.red).textSelection(.enabled) }
+            Text("Sessions message and delegate only within their group. Each repository remembers these choices for its next agent.").font(.caption).foregroundStyle(.secondary)
+        }.padding(12).frame(maxWidth: .infinity, alignment: .leading).background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 8))
+    }
+    /// The repository's last agent decides the group and messaging choice; the
+    /// sidebar's group filter only applies before the repository has one.
+    private func applyRepositoryChoices(_ folderID: UUID?) {
+        let folder = currentProject.folders.first { $0.id == folderID }
+        let active = currentProject.groups.filter { !$0.archived }
+        groupID = active.first { $0.id == folder?.lastGroupID }?.id ?? active.first { $0.id == initialGroupID }?.id ?? active.first(where: \.isDefault)?.id
+        coordination = folder?.lastCoordinationEnabled ?? false
+    }
+    private func createGroup() {
+        var value = currentProject
+        let id = value.addGroup(named: newGroupName)
+        guard value != currentProject else { groupID = id; return }
+        value.updatedAt = Date()
+        let version = model.projectVersion(project.id)
+        Task {
+            do { try await model.saveProject(value, version: version); groupID = id; groupFailure = nil }
+            catch { groupFailure = error.localizedDescription }
+        }
+    }
     private var checkoutFields: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Checkout").font(.headline)
@@ -285,6 +324,7 @@ struct SessionLaunchView: View {
                 Picker("Repository", selection: Binding(get: { folderID }, set: { selected in
                     guard selected != folderID else { return }
                     folderID = selected
+                    applyRepositoryChoices(selected)
                     baseRef = "HEAD"
                     existingBranch = ""
                     checkout = initialCheckout(in: selected)

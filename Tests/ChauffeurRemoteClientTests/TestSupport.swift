@@ -204,6 +204,8 @@ final class FakeHost: @unchecked Sendable {
             let ticket = query.text.hasSuffix("/browse/MBL-1")
                 ? TicketSuggestion(key: "MBL-1", number: "1", url: query.text, branch: "feat/mbl-1", title: "MBL-1", task: query.text) : nil
             return RemoteResponse(id: request.id, result: .ticketSuggestion(TicketSuggestionResult(ticket: ticket)))
+        case .createGroup(let create):
+            return RemoteResponse(id: request.id, result: .group(GroupSummary(id: UUID(), name: create.name)))
         case .terminalResize, .detachTerminal:
             return RemoteResponse(id: request.id, result: .ack)
         }

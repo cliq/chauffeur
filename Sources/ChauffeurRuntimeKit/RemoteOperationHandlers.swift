@@ -97,6 +97,19 @@ public actor RemoteOperationHandlers {
                     TicketSuggestion(key: $0.key, number: $0.number, url: $0.url, branch: $0.branch, title: $0.title, task: $0.task)
                 })))
             } catch { return .failure(Self.remoteError(error)) }
+        case .createGroup(let request):
+            do {
+                let stored = await runtime.store.reload().projects.first { $0.value.id == request.projectID && !$0.value.archived }
+                guard let stored else { throw ChauffeurError("missing_project", "This project no longer exists on the Mac") }
+                var project = stored.value
+                let groupID = project.addGroup(named: request.name)
+                if project != stored.value {
+                    project.updatedAt = Date()
+                    _ = try await runtime.handle(IPCRequest("saveProject", params: .object(["record": try .from(project), "version": .string(stored.version)])))
+                }
+                let group = project.groups.first { $0.id == groupID }!
+                return .success(.group(GroupSummary(id: group.id, name: group.name, isDefault: group.isDefault)))
+            } catch { return .failure(Self.remoteError(error)) }
         case .launch(let request):
             return .success(.operation(await launch(request, deviceID: deviceID)))
         case .getOperationStatus(let request):

@@ -132,6 +132,11 @@ public final class RemoteHostSession {
         return host.capabilities.contains(RemoteProtocol.launchCoordination)
     }
 
+    public var isGroupCreationSupported: Bool {
+        guard case .connected(let host) = connectionState else { return false }
+        return host.capabilities.contains(RemoteProtocol.groupCreation)
+    }
+
     @ObservationIgnored private let journal: any PendingOperationJournal
     @ObservationIgnored private let clientName: String
     @ObservationIgnored private let clientVersion: String
@@ -339,6 +344,17 @@ public final class RemoteHostSession {
             throw RemoteClientError.invalidResponse("resolveTicket returned \(result.kind)")
         }
         return suggestion.ticket
+    }
+
+    /// Adds a group to the project (or reopens the one with this name) and refreshes the inventory so pickers list it.
+    public func createGroup(projectID: UUID, name: String) async throws -> GroupSummary {
+        guard let connection else { throw RemoteClientError.disconnected }
+        let result = try await connection.request(.createGroup(CreateGroupRequest(projectID: projectID, name: name)))
+        guard case .group(let group) = result else {
+            throw RemoteClientError.invalidResponse("createGroup returned \(result.kind)")
+        }
+        await refreshInventory()
+        return group
     }
 
     public func setKeepAwakeSettings(_ settings: KeepAwakeSettings) async throws {

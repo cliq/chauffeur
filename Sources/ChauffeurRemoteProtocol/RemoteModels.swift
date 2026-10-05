@@ -124,6 +124,9 @@ public struct FolderSummary: Codable, Equatable, Sendable, Identifiable {
     public var inventoryReady: Bool
     public var availability: RemoteAvailability
     public var checkouts: [CheckoutSummary]
+    /// The group and messaging choice of the last agent launched here; nil from older Macs or before any launch.
+    public var lastGroupID: UUID?
+    public var lastCoordinationEnabled: Bool?
 
     public init(
         id: UUID,
@@ -132,7 +135,9 @@ public struct FolderSummary: Codable, Equatable, Sendable, Identifiable {
         isRepository: Bool,
         inventoryReady: Bool = false,
         availability: RemoteAvailability,
-        checkouts: [CheckoutSummary] = []
+        checkouts: [CheckoutSummary] = [],
+        lastGroupID: UUID? = nil,
+        lastCoordinationEnabled: Bool? = nil
     ) {
         self.id = id
         self.name = name
@@ -141,6 +146,8 @@ public struct FolderSummary: Codable, Equatable, Sendable, Identifiable {
         self.inventoryReady = inventoryReady
         self.availability = availability
         self.checkouts = checkouts
+        self.lastGroupID = lastGroupID
+        self.lastCoordinationEnabled = lastCoordinationEnabled
     }
 }
 

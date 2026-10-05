@@ -60,6 +60,41 @@ struct TeamAgentRuntimeTests {
 
     }
 
+    @Test func remoteNewGroupIsRememberedByTheRepositoryForTheNextAgent() async throws {
+        let fixture = try await LaunchFixture.make(); defer { fixture.cleanup() }
+        let stored = try #require(await fixture.runtime.store.reload().presetSets.first)
+        var team = stored.value; team.agentSelection = .allBase
+        try await fixture.runtime.store.save(team, expectedVersion: stored.version)
+        let base = BaseAgentPreset(name: "Remote base", kind: .claude, executable: fixture.root.appendingPathComponent("fixture.py").path)
+        try await fixture.runtime.store.save(base)
+        let handlers = RemoteOperationHandlers(runtime: fixture.runtime, root: fixture.root, hostName: "Fixture", isAttached: { _ in false })
+        let projectID = fixture.request.projectID, folderID = fixture.request.folderID
+
+        guard case .success(.group(let review)) = await handlers.handle(.createGroup(CreateGroupRequest(projectID: projectID, name: " Review ")), deviceID: UUID()) else {
+            Issue.record("Group was not created"); return
+        }
+        #expect(review.name == "Review" && !review.isDefault)
+        // A name that differs only in case reuses the group instead of adding a duplicate.
+        guard case .success(.group(let again)) = await handlers.handle(.createGroup(CreateGroupRequest(projectID: projectID, name: "review")), deviceID: UUID()) else {
+            Issue.record("Existing group was not returned"); return
+        }
+        #expect(again.id == review.id)
+        #expect(await fixture.runtime.store.reload().projects.first { $0.value.id == projectID }?.value.groups.filter { $0.name == "Review" }.count == 1)
+        guard case .failure(let missing) = await handlers.handle(.createGroup(CreateGroupRequest(projectID: UUID(), name: "Review")), deviceID: UUID()) else {
+            Issue.record("Unknown project was accepted"); return
+        }
+        #expect(missing.code == "missing_project")
+        #expect(try await handlers.inventory().projects.first { $0.id == projectID }?.folders.first { $0.id == folderID }?.lastGroupID == nil)
+
+        let spec = LaunchSpec(projectID: projectID, folderID: folderID, groupID: review.id, agentPresetID: base.id)
+        let result = await handlers.launch(LaunchOperationRequest(operationKey: UUID(), fingerprint: LaunchOperationRequest.computeFingerprint(newWorktree: nil, launch: spec), launch: spec), deviceID: UUID())
+        #expect(result.phase == .completed)
+        let folder = try #require(await fixture.runtime.store.reload().projects.first { $0.value.id == projectID }?.value.folders.first { $0.id == folderID })
+        #expect(folder.lastGroupID == review.id && folder.lastCoordinationEnabled == false)
+        let summary = try #require(try await handlers.inventory().projects.first { $0.id == projectID }?.folders.first { $0.id == folderID })
+        #expect(summary.lastGroupID == review.id && summary.lastCoordinationEnabled == false)
+    }
+
     @Test func remoteInventoryAndLaunchResolveGlobalPresets() async throws {
         let fixture = try await LaunchFixture.make(); defer { fixture.cleanup() }
         let stored = try #require(await fixture.runtime.store.reload().presetSets.first)

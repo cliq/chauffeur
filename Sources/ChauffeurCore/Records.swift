@@ -101,6 +101,9 @@ public struct ProjectFolder: Codable, Identifiable, Equatable, Sendable {
     /// nil puts a pasted ticket link in an empty initial task.
     public var ticketLinkInTask: Bool?
     public var putsTicketLinkInTask: Bool { ticketLinkInTask ?? true }
+    /// The group and messaging choice of the last agent the user launched here, preselected for the next one.
+    public var lastGroupID: UUID?
+    public var lastCoordinationEnabled: Bool?
     public init(path: String, name: String? = nil) {
         self.selectedPath = path; self.canonicalPath = Paths.canonical(path)
         self.name = name ?? URL(fileURLWithPath: path).lastPathComponent
@@ -133,6 +136,18 @@ public struct Project: Record, Equatable {
     public mutating func addFolder(_ folder: ProjectFolder) {
         if let index = folders.firstIndex(where: { $0.canonicalPath == folder.canonicalPath }) { folders[index].registered = true }
         else { folders.append(folder) }
+    }
+    /// Adds an active group with this name, or reopens one that already has it, and returns its ID.
+    public mutating func addGroup(named name: String) -> UUID {
+        let name = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let matches = groups.indices.filter { groups[$0].name.compare(name, options: .caseInsensitive) == .orderedSame }
+        if let index = matches.first(where: { !groups[$0].archived }) ?? matches.first {
+            if groups[index].archived { groups[index].archived = false; groups[index].updatedAt = Date() }
+            return groups[index].id
+        }
+        let group = AgentGroup(name: name)
+        groups.append(group)
+        return group.id
     }
     public func validate() throws {
         try Validation.name(name)
