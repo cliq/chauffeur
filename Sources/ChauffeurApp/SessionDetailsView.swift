@@ -57,7 +57,7 @@ struct SessionDetailsView: View {
                             Button("Stop Session…", role: .destructive) { confirmingStop = true }
                         }
                         Button("Force Stop…", role: .destructive) { confirmingForceStop = true }.font(.caption)
-                    } else if session.nativeConversationID != nil && session.closureOutcome == nil {
+                    } else if session.nativeConversationID != nil && session.closureOutcome == nil && session.launch.preset.kind.isAgent {
                         Button("Resume Conversation") { model.perform { _ = try await model.call("resume", .object(["sessionID": .string(session.id.uuidString)])) } }
                     }
                     Text(session.state.isLive ? "Closing the terminal view keeps this execution running. Stopping a parent preserves its children and their work." : "This execution has ended. Its launch settings and saved terminal history remain available.").font(.caption).foregroundStyle(.secondary)

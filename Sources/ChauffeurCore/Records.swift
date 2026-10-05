@@ -377,9 +377,12 @@ public struct RetentionSettings: Codable, Equatable, Sendable {
     /// Submit a short prompt to an idle Codex coordinator when a worker reports or
     /// stops. Codex has no other way to start a turn for a coordinator that ended its own.
     public var wakeIdleCoordinators = true
+    /// When off, an agent the user launched that quits on its own leaves a login shell in its terminal,
+    /// so the user can read its last output and resume the conversation by hand.
+    public var closeTabsWhenAgentsQuit = true
     public init() {}
     private enum CodingKeys: String, CodingKey {
-        case keepFinishedSessions, scrollbackLines, snapshotBudgetBytes, completedMessageDays, maxLiveChildren, wakeIdleCoordinators
+        case keepFinishedSessions, scrollbackLines, snapshotBudgetBytes, completedMessageDays, maxLiveChildren, wakeIdleCoordinators, closeTabsWhenAgentsQuit
     }
     public init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
@@ -389,6 +392,7 @@ public struct RetentionSettings: Codable, Equatable, Sendable {
         completedMessageDays = try values.decodeIfPresent(Int.self, forKey: .completedMessageDays) ?? 90
         maxLiveChildren = try values.decodeIfPresent(Int.self, forKey: .maxLiveChildren) ?? 4
         wakeIdleCoordinators = try values.decodeIfPresent(Bool.self, forKey: .wakeIdleCoordinators) ?? true
+        closeTabsWhenAgentsQuit = try values.decodeIfPresent(Bool.self, forKey: .closeTabsWhenAgentsQuit) ?? true
     }
     public func validate() throws {
         try Validation.require((100...100_000).contains(scrollbackLines), "Scrollback must be 100–100,000 lines")

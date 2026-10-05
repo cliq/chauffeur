@@ -369,6 +369,38 @@ public actor TmuxHost {
         }
         return result
     }
+    /// Starts `payload` in a session's dead pane, keeping the pane, its scrollback and attached clients.
+    /// tmux clears the visible screen on respawn, so the helper reprints it first.
+    public func respawnDead(session: Session, payload: ExecPayload) async throws -> PaneIdentity {
+        guard spawning.insert(session.id).inserted else { throw ChauffeurError("launch_pending", "Terminal creation is already in progress") }
+        defer { spawning.remove(session.id) }
+        let name = session.id.uuidString
+        let socket = try await socket(for: session.id)
+        guard let dead = try await inventory().first(where: { $0.sessionName == name }), dead.dead,
+              session.terminalIdentity == nil || dead.paneID == session.terminalIdentity,
+              session.processID == nil || dead.processID == session.processID else {
+            throw ChauffeurError("terminal_missing", "The ended terminal is no longer available")
+        }
+        var payload = payload
+        payload.replay = Self.replayableScreen(try await capturePane(name, socket: socket, options: []).output)
+        let payloadPath = runtimeDirectory.appendingPathComponent("launch-\(session.id).json")
+        guard FileManager.default.createFile(atPath: payloadPath.path, contents: try JSONCoding.encode(payload), attributes: [.posixPermissions: 0o600]) else { throw ChauffeurError("launch_file", "Cannot create private launch handoff") }
+        defer { try? FileManager.default.removeItem(at: payloadPath) }
+        let result = try await command(["respawn-pane", "-t", dead.paneID, "-c", payload.directory, ctlPath, "internal-exec", payloadPath.path], socket: socket)
+        guard result.status == 0 else { throw ChauffeurError("terminal_launch", "tmux could not restart the terminal", path: payload.directory) }
+        let handoffDeadline = ContinuousClock.now.advanced(by: .seconds(5))
+        while FileManager.default.fileExists(atPath: payloadPath.path) && ContinuousClock.now < handoffDeadline { try await Task.sleep(for: .milliseconds(20)) }
+        guard !FileManager.default.fileExists(atPath: payloadPath.path) else { throw ChauffeurError("launch_handoff_timeout", "Terminal helper did not consume its launch configuration") }
+        guard let pane = try await inventory().first(where: { $0.sessionName == name }), !pane.dead else { throw ChauffeurError("terminal_launch", "Restarted terminal could not be found") }
+        return pane
+    }
+    /// The visible screen without trailing blank lines or tmux's "Pane is dead" notice.
+    static func replayableScreen(_ screen: String) -> String {
+        var lines = screen.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        func blank(_ line: String) -> Bool { line.replacingOccurrences(of: #"\x1b\[[0-9;]*m"#, with: "", options: .regularExpression).trimmingCharacters(in: .whitespaces).isEmpty }
+        while let last = lines.last, blank(last) || last.contains("Pane is dead (") { lines.removeLast() }
+        return lines.joined(separator: "\n")
+    }
     public func retireDead(_ snapshot: TerminalSnapshot) async throws {
         try snapshot.validate()
         guard let socket = try await findSocket(for: snapshot.sessionID) else { return }

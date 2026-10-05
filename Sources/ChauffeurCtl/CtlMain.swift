@@ -188,6 +188,10 @@ import ChauffeurCore
         guard unlink(path) == 0 else { throw ChauffeurError("handoff_cleanup", "Cannot consume launch handoff") }
         _ = try Paths.directory(payload.directory)
         guard chdir(payload.directory) == 0 else { throw ChauffeurError("working_directory", "Cannot enter selected directory") }
+        if let replay = payload.replay, !replay.isEmpty {
+            let lines = replay.split(separator: "\n", omittingEmptySubsequences: false).map { "\($0)\r\n" }
+            FileHandle.standardOutput.write(Data((lines.joined() + "\u{1b}[0m").utf8))
+        }
         if let preamble = payload.preamble, !preamble.isEmpty {
             // Shown dimmed at the top of the terminal so the user sees what this session applied.
             let lines = preamble.split(separator: "\n", omittingEmptySubsequences: false).map { "\u{1b}[2m\($0)\u{1b}[0m\r\n" }

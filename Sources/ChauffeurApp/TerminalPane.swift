@@ -367,7 +367,7 @@ struct TerminalPane: View {
                     Text(session.state.label).font(.title2)
                     Text(session.error ?? (session.launch.preset.kind.isAgent ? "The agent has stopped. Open History to view saved terminal output." : "The shell has exited. Open History to view saved terminal output.")).foregroundStyle(.secondary).multilineTextAlignment(.center)
                     Button("Open History", systemImage: "clock.arrow.circlepath") { controller.find() }
-                    if session.nativeConversationID != nil {
+                    if session.nativeConversationID != nil && session.launch.preset.kind.isAgent {
                         Button("Resume Conversation") { model.perform { _ = try await model.call("resume", .object(["sessionID": .string(session.id.uuidString)])) } }.buttonStyle(.borderedProminent)
                     }
                     if let deleteWorktree {

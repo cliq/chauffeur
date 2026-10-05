@@ -121,6 +121,47 @@ struct LaunchCancellationTests {
         #expect(try await fixture.runtime.launch(request).state.isLive)
     }
 
+    @Test(arguments: [true, false])
+    func agentThatQuitsLeavesAShellWhenTabsStayOpen(closeTabs: Bool) async throws {
+        let fixture = try await LaunchFixture.make(); defer { fixture.cleanup() }
+        var settings = RetentionSettings(); settings.closeTabsWhenAgentsQuit = closeTabs
+        _ = try await fixture.runtime.handle(IPCRequest("saveSettings", params: .from(settings)))
+        try Data("Resume with: fixture --resume abc".utf8).write(to: fixture.path("unicode-output"))
+        let launched = try await fixture.runtime.launch(fixture.request)
+        try await fixture.wait { FileManager.default.fileExists(atPath: fixture.path("started").path) }
+        let pane = try #require(await fixture.runtime.terminals.inventory().first)
+        #expect(kill(try #require(launched.processID), SIGUSR1) == 0)
+        try await fixture.wait { try await fixture.runtime.terminals.inventory().first?.dead == true }
+        try await fixture.runtime.reconcile()
+        let sessions = try await fixture.runtime.snapshot()["sessions"].decode([Session].self)
+        guard !closeTabs else {
+            #expect(!sessions.contains { $0.id == launched.id })
+            return
+        }
+        let continued = try #require(sessions.first { $0.id == launched.id })
+        #expect(continued.state.isLive && continued.launch.preset.kind == .shell && !continued.coordinationEnabled)
+        #expect(continued.terminalIdentity == pane.paneID && continued.processID != launched.processID)
+        let live = try #require(await fixture.runtime.terminals.inventory().first { $0.sessionName == launched.id.uuidString })
+        #expect(!live.dead && live.processID == continued.processID)
+        // The agent's last screen is reprinted above the shell, and later passes keep owning the pane.
+        try await fixture.wait { let text = try fixture.capture(sessionID: launched.id); return text.contains("Resume with: fixture --resume abc") && text.contains("This tab is now a shell") }
+        try await fixture.runtime.reconcile()
+        #expect(try await fixture.runtime.snapshot()["sessions"].decode([Session].self).first { $0.id == launched.id }?.state.isLive == true)
+        // Like any shell, it no longer holds the checkout against a new agent, and it ends like a shell.
+        var next = fixture.request; next.retryKey = UUID()
+        #expect(try await fixture.runtime.launch(next).state.isLive)
+        try fixture.sendKeys(sessionID: launched.id, "exit 0")
+        try await fixture.wait { try await fixture.runtime.terminals.inventory().first { $0.sessionName == launched.id.uuidString }?.dead == true }
+        try await fixture.runtime.reconcile()
+        #expect(try await !fixture.runtime.snapshot()["sessions"].decode([Session].self).contains { $0.id == launched.id })
+    }
+
+    @Test func tabsCloseWhenAgentsQuitUnlessTurnedOff() throws {
+        #expect(RetentionSettings().closeTabsWhenAgentsQuit)
+        let legacy = Data(#"{"scrollbackLines":1234}"#.utf8)
+        #expect(try JSONCoding.decode(RetentionSettings.self, from: legacy).closeTabsWhenAgentsQuit)
+    }
+
     @Test(arguments: ["directory", "symlink", "missing"]) func rejectedResumePreservesEndedTerminalAndNonGitFolderIdentity(replacement: String) async throws {
         let fixture = try await LaunchFixture.make(); defer { fixture.cleanup() }
         var settings = RetentionSettings(); settings.keepFinishedSessions = true
@@ -520,6 +561,8 @@ struct LaunchFixture: Sendable {
             while (root / 'block-handoff').exists(): time.sleep(0.01)
             path = Path(sys.argv[2]); payload = json.loads(path.read_text()); path.unlink()
             os.chdir(payload['directory'])
+            if payload.get('replay'): print(payload['replay'], flush=True)
+            if payload.get('preamble'): print(payload['preamble'], flush=True)
             os.execve(payload['executable'], [payload['executable'], *payload['arguments']], payload['environment'])
         else:
             signal.signal(signal.SIGUSR1, lambda *_: sys.exit(0))
@@ -565,6 +608,14 @@ struct LaunchFixture: Sendable {
     }
     func activity(_ sessionID: UUID) async throws -> TerminalActivity {
         try await runtime.handle(IPCRequest("sessionActivity", params: .object(["sessionID": .string(sessionID.uuidString)]))).decode(TerminalActivity.self)
+    }
+    func capture(sessionID: UUID) throws -> String {
+        let process = Process(), output = Pipe()
+        process.executableURL = URL(fileURLWithPath: tmux)
+        process.arguments = ["-S", path("runtime/tmux.sock").path, "-f", "/dev/null", "capture-pane", "-p", "-S", "-", "-t", sessionID.uuidString]
+        process.standardOutput = output
+        try process.run(); process.waitUntilExit()
+        return String(decoding: output.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
     }
     func sendKeys(sessionID: UUID, _ keys: String) throws {
         let process = Process()

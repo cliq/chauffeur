@@ -405,7 +405,11 @@ public actor RuntimeCoordinator {
             let pane = inventory.first { $0.sessionName == session.id.uuidString }
             let sameOwner = pane != nil && (session.processID == nil || session.processID == pane?.processID) && (session.terminalIdentity == nil || session.terminalIdentity == pane?.paneID)
             if let pane, sameOwner {
-                if pane.dead && session.state.isLive {
+                if pane.dead && session.state.isLive, !stopping.contains(session.id), !stopRequests.contains(session.id),
+                   !settings.closeTabsWhenAgentsQuit, let continued = await continueInShell(session) {
+                    try await ledger.revoke(sessionID: session.id)
+                    session = continued
+                } else if pane.dead && session.state.isLive {
                     let stopped = stopping.remove(session.id) != nil
                     session.state = stopped ? .interrupted : (pane.exitStatus == 0 ? .exited : .failed)
                     session.error = stopped || pane.exitStatus == 0 ? nil : "CLI exited with status \(pane.exitStatus.map(String.init) ?? "unknown")"
@@ -1266,6 +1270,46 @@ public actor RuntimeCoordinator {
             return session
         } catch {
             throw try await finishFailedStartup(session, error: error)
+        }
+    }
+    /// An agent the user launched that quits on its own leaves a login shell in its pane, with
+    /// its configuration exported so the agent's own resume command finds the conversation.
+    /// nil leaves the exit to the usual handling: delegated workers must report as stopped.
+    private func continueInShell(_ agent: Session) async -> Session? {
+        guard agent.parentID == nil, agent.launch.preset.kind.isAgent, let provider = agent.launch.preset.kind.provider,
+              launching.insert(agent.id).inserted else { return nil }
+        defer { launching.remove(agent.id) }
+        do {
+            let directory = agent.launch.workingDirectory
+            var shell = AgentPreset(setID: agent.launch.preset.setID, name: "Shell", kind: .shell, executable: baseEnvironment["SHELL"].flatMap { $0.hasPrefix("/") ? $0 : nil } ?? "/bin/zsh", configurationDirectory: directory)
+            shell.arguments = ["-l"]; shell.integration = .unavailable
+            var exports = agent.launch.configurationEnvironment ?? [:]
+            exports.removeValue(forKey: provider.configurationEnvironmentKey)
+            exports.merge(provider.environment(configurationDirectory: agent.launch.configurationPath)) { _, own in own }
+            var environment = try LaunchPolicy.environment(base: baseEnvironment, preset: shell, projectID: agent.projectID, sessionID: agent.id, token: "", allowMissingConfiguration: true)
+            environment["CHAUFFEUR_SOCKET"] = root.appendingPathComponent("runtime/runtime.sock").path
+            environment["CHAUFFEUR_CTL"] = ctlPath
+            let checkout = await checkoutEnvironment(directory)
+            environment.merge(checkout) { _, checkout in checkout }
+            environment.merge(exports) { _, export in export }
+            let named = ShellStartup.isZsh(shell.executable) ? Self.namedDirectories(checkout) : [:]
+            environment = try ShellStartup.environment(executable: shell.executable, environment: environment, exports: exports, namedDirectories: named, directory: root.appendingPathComponent("runtime/shell-startup/\(agent.id)"))
+            let note = "# \(agent.launch.preset.kind.displayName) quit. This tab is now a shell in the same checkout."
+            let pane = try await terminals.respawnDead(session: agent, payload: ExecPayload(executable: shell.executable, arguments: shell.arguments, environment: environment, directory: directory, preamble: note))
+            var session = agent
+            session.launch.preset = shell
+            session.launch.executablePath = shell.executable; session.launch.executableVersion = "shell"
+            session.launch.configurationPath = directory; session.launch.configurationEnvironment = exports
+            session.launch.configurationUsesDefault = nil; session.launch.resolvedArguments = shell.arguments
+            session.launch.selectedModel = nil; session.launch.selectedReasoning = nil; session.launch.executionPolicy = nil
+            session.state = .activityUnknown; session.error = nil; session.failureCode = nil; session.exitStatus = nil
+            session.inboxReminders = nil; session.runtimeID = id
+            session.processID = pane.processID; session.terminalIdentity = pane.paneID
+            return session
+        } catch let error as ChauffeurError {
+            record(error); return nil
+        } catch {
+            record(ChauffeurError("shell_continuation", "The agent quit, but its terminal could not continue as a shell")); return nil
         }
     }
     /// Kimi's --prompt is noninteractive. Return the launched terminal to the
