@@ -541,7 +541,7 @@ private struct ProjectWindowContent: View, Equatable {
                     Divider()
                     if isRepository { Button("Manage Worktrees…") { showWorktrees(folderID: folder.id) }.disabled(readiness.isPending) }
                     Button("Repository Settings…") { settingsSheet = FolderSheet(id: folder.id) }
-                    Button("Relink / Edit Folder…") { editingProject = true }
+                    Button("Project Settings…") { editingProject = true }
                     Button("Reveal in Finder") { FilePanels.reveal(folder.selectedPath) }
                 }
         }.id(SidebarRowID.repository(folder.id))
