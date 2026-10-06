@@ -68,10 +68,17 @@ with the dead flag, protecting a newly resumed execution from delayed cleanup.
 
 Delegated workers protect their session record and captured history from launch,
 including natural exits, so the coordinator can review them before accepting or
-replacing the attempt. MCP closure retains that history independently of the
-**Keep finished sessions** setting. Session Details shows the accepted, replaced,
-or abandoned outcome and the reason. Closed attempts cannot be resumed in place;
-launch a fresh worker to continue their work.
+replacing the attempt. Session Details shows the accepted, replaced, or abandoned
+outcome and the reason. Closed attempts cannot be resumed in place; launch a fresh
+worker to continue their work.
+
+Protection lasts only while coordination needs the record: a finished worker stays
+while its coordinator is live, since status checks, stop reports and replacements
+read the worker's delegation; a finished or closed coordinator stays while any of
+its workers is live, so a new coordinator can recover them. After that, the group
+follows **Keep finished sessions**. With it off, exited sessions, workers closed by
+their coordinator and closed tabs are deleted; failed or interrupted tabs that are
+still open stay until closed.
 
 Protected captures are excluded from automatic eviction. Scrollback and
 per-file limits still apply, including when the user reduces those limits. Protected bytes count toward storage usage and can exceed the automatic

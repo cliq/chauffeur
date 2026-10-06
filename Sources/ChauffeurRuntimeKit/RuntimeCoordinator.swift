@@ -411,6 +411,7 @@ public actor RuntimeCoordinator {
             logs?.append(entry)
         }
         let observed = Array(sessions.values)
+        var delegations: [Delegation]?
         let inventory = try await terminals.inventory()
         for var session in observed where !launching.contains(session.id) && sessions[session.id] == session {
             let pane = inventory.first { $0.sessionName == session.id.uuidString }
@@ -445,14 +446,30 @@ public actor RuntimeCoordinator {
             if sessions[session.id] != session { session.updatedAt = Date(); try await persist(session) }
             // Natural successful exits follow the same retention policy as closing
             // a tab. Explicit stop/close requests own their cleanup; failures stay
-            // available so the user can inspect what went wrong.
-            if session.state == .exited, !settings.keepFinishedSessions, session.historyProtected != true,
-               !stopRequests.contains(session.id) {
-                try await deleteFinishedSession(session.id)
+            // available so the user can inspect what went wrong. A closed tab or a
+            // worker its coordinator closed waits only while coordination needs it.
+            if !settings.keepFinishedSessions, !session.state.isLive, !stopRequests.contains(session.id),
+               session.state == .exited || session.closureOutcome != nil || session.closedAt != nil {
+                if delegations == nil, session.historyProtected == true { delegations = try await ledger.allDelegations() }
+                if session.historyProtected != true || !coordinationNeedsRecord(session.id, delegations: delegations ?? []) {
+                    do { try await deleteFinishedSession(session.id) }
+                    catch let error as ChauffeurError where error.code == "active_session" { /* A worker is still starting. */ }
+                }
             }
         }
         await refreshPendingMessages()
         await wakeIdleCoordinators()
+    }
+    /// Whether a finished session's record still serves coordination. A live coordinator
+    /// reads its workers' delegations (status, stop reports, replacements), and a worker
+    /// that outlives its coordinator can still be recovered by a new one.
+    private func coordinationNeedsRecord(_ id: UUID, delegations: [Delegation]) -> Bool {
+        delegations.contains { item in
+            guard item.childID == id || item.controllingParentID == id else { return false }
+            if [.reserved, .launching].contains(item.state) { return true }
+            let other = item.childID == id ? item.controllingParentID : item.childID
+            return sessions[other]?.state.isLive == true
+        }
     }
     /// Brings each session's unread-mail count up to date. A call made while a count
     /// is running adds one more pass instead, so an older count never lands last.
@@ -716,7 +733,10 @@ public actor RuntimeCoordinator {
                 if sessions[sessionID]?.state.isLive != true { stopping.remove(sessionID) }
             }
             let closing = request.method == "closeSession"
-            let keepHistory = settings.keepFinishedSessions || sessions[sessionID]?.historyProtected == true
+            var keepHistory = settings.keepFinishedSessions
+            if !keepHistory, sessions[sessionID]?.historyProtected == true {
+                keepHistory = coordinationNeedsRecord(sessionID, delegations: try await ledger.allDelegations())
+            }
             if closing && keepHistory { _ = try? await captureHistory(sessionID) }
             stopGenerations[sessionID, default: 0] += 1
             stopping.insert(sessionID)
@@ -737,6 +757,8 @@ public actor RuntimeCoordinator {
             if closing {
                 if keepHistory, var session = sessions[sessionID] {
                     session.unread = false
+                    // Without Keep finished sessions, reconciliation deletes it once coordination is done.
+                    if !settings.keepFinishedSessions { session.closedAt = session.closedAt ?? Date() }
                     try await persist(session)
                 } else { try await deleteFinishedSession(sessionID) }
             }
@@ -1431,7 +1453,7 @@ public actor RuntimeCoordinator {
         do {
             try await terminals.stop(sessionID: sessionID, force: true)
             try Task.checkCancellation()
-            session.state = .starting; session.error = nil; session.failureCode = nil; session.exitStatus = nil; session.runtimeID = id; try await persist(session)
+            session.state = .starting; session.error = nil; session.failureCode = nil; session.exitStatus = nil; session.closedAt = nil; session.runtimeID = id; try await persist(session)
             try Task.checkCancellation()
             let token = try await ledger.issueGrant(sessionID: sessionID)
             try Task.checkCancellation()
