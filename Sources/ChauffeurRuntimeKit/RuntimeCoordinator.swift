@@ -24,6 +24,8 @@ public actor RuntimeCoordinator {
     private var controlRequests = Set<UUID>()
     private var reconciliation: Task<Void, Error>?
     private var messageCounting: Task<Void, Never>?
+    /// Finished sessions whose automatic deletion failed and was already reported.
+    private var cleanupFailures = Set<UUID>()
     private var countingMessages = false
     private var messageCountsStale = false
     /// Advances whenever a session changes, so a snapshot subscriber can push at once.
@@ -454,6 +456,12 @@ public actor RuntimeCoordinator {
                 if session.historyProtected != true || !coordinationNeedsRecord(session.id, delegations: delegations ?? []) {
                     do { try await deleteFinishedSession(session.id) }
                     catch let error as ChauffeurError where error.code == "active_session" { /* A worker is still starting. */ }
+                    catch {
+                        // Keep reconciling the other sessions, and report a stuck cleanup once.
+                        if cleanupFailures.insert(session.id).inserted {
+                            record(error as? ChauffeurError ?? ChauffeurError("cleanup_failed", "Could not delete a finished session's history"))
+                        }
+                    }
                 }
             }
         }

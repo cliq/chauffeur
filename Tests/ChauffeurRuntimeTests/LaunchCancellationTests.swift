@@ -471,6 +471,27 @@ struct ShellSessionTests {
         }
     }
 
+    @Test func aStuckCleanupDoesNotHoldBackTheOthers() async throws {
+        let fixture = try await LaunchFixture.make(); defer { fixture.cleanup() }
+        let request = { (title: String) in LaunchRequest.shell(projectID: fixture.request.projectID, groupID: fixture.request.groupID, folderID: fixture.request.folderID, title: title) }
+        let stuck = try await fixture.runtime.launch(request("Stuck"))
+        let other = try await fixture.runtime.launch(request("Other"))
+        // Saved history that is not a regular file is preserved, so its deletion fails.
+        let directory = fixture.path("runtime/snapshots/\(stuck.id.uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try FileManager.default.createSymbolicLink(atPath: directory.appendingPathComponent("latest.json").path, withDestinationPath: "/dev/null")
+        for session in [stuck, other] { try fixture.sendKeys(sessionID: session.id, "exit 0") }
+        try await fixture.wait { try await fixture.runtime.terminals.inventory().allSatisfy(\.dead) }
+        let errors = { try await fixture.runtime.snapshot()["errors"].decode([ChauffeurError].self).filter { $0.code == "snapshot_path" }.count }
+        try await fixture.runtime.reconcile()
+        let reported = try await errors()
+        try await fixture.runtime.reconcile()
+        let remaining = try await fixture.runtime.snapshot()["sessions"].decode([Session].self).map(\.id)
+        #expect(remaining == [stuck.id])
+        #expect(reported > 0)
+        #expect(try await errors() == reported, "Reported once, not on every pass")
+    }
+
     @Test func shellSessionsRunTheLoginShellWithoutClaimingTheCheckout() async throws {
         let fixture = try await LaunchFixture.make(); defer { fixture.cleanup() }
         let project = try #require(await fixture.runtime.store.current().projects.first).value
