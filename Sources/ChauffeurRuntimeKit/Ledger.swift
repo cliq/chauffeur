@@ -27,6 +27,10 @@ public actor Ledger {
     private var transactionCounter = 0
     private var inboxWaiters: [UUID: (UUID, AsyncStream<Bool>.Continuation)] = [:]
     var pendingInboxWaitCount: Int { inboxWaiters.count }
+    /// Yields after a write that can change a session's unread mail, so badges
+    /// update without waiting for reconciliation. A burst collapses into one element.
+    public nonisolated let messageChanges: AsyncStream<Void>
+    private let messageChanged: AsyncStream<Void>.Continuation
 
     private func wakeInbox(_ sessionID: UUID, healthCheck: Bool = false) {
         for (recipient, continuation) in inboxWaiters.values where recipient == sessionID {
@@ -168,6 +172,7 @@ public actor Ledger {
         return report
     }
     public init(path: String) throws {
+        (messageChanges, messageChanged) = AsyncStream.makeStream(bufferingPolicy: .bufferingNewest(1))
         connection = try SQLiteConnection(path: path)
         let schema = """
         PRAGMA journal_mode=WAL;
@@ -360,6 +365,7 @@ public actor Ledger {
             try execute("DELETE FROM grants WHERE session_id=?", [id])
             try execute("DELETE FROM message_tombstones WHERE sender_id=?", [id])
             try execute("DELETE FROM messages WHERE sender_id=? OR recipient_id=?", [id, id])
+            messageChanged.yield()
             // An original parent remains a hidden FK anchor for adopted workers.
             // Deleting its UI/history record must not destroy their control records.
             for item in try allDelegations() where item.childID == sessionID || (item.parentID == sessionID && item.controllerID == nil) {
@@ -427,6 +433,7 @@ public actor Ledger {
             try execute("INSERT INTO messages(id,project_id,group_id,sender_id,recipient_id,retry_key,request_hash,state,record) VALUES(?,?,?,?,?,?,?,?,?)", [message.id.uuidString] + scopeValues(caller) + [caller.sessionID.uuidString, recipientID.uuidString, retryKey, requestHash, message.state.rawValue, try encode(message)])
             try enqueueNotification(session: peer(recipientID, caller: caller), reason: delegationID == nil ? .message : .result)
             wakeInbox(recipientID)
+            messageChanged.yield()
             return message
         }
     }
@@ -507,7 +514,10 @@ public actor Ledger {
         try transaction { for id in ids { try execute("DELETE FROM inbox_hints WHERE message_id=?", [id.uuidString]) } }
     }
     func hintRowCount() throws -> Int { Int(try rows("SELECT COUNT(*) FROM inbox_hints").first?[0] ?? "") ?? 0 }
-    private func saveMessage(_ message: Message) throws { try execute("UPDATE messages SET state=?,record=? WHERE id=?", [message.state.rawValue, try encode(message), message.id.uuidString]) }
+    private func saveMessage(_ message: Message) throws {
+        try execute("UPDATE messages SET state=?,record=? WHERE id=?", [message.state.rawValue, try encode(message), message.id.uuidString])
+        messageChanged.yield()
+    }
     public func cancelMessage(_ id: UUID, caller: Caller) throws -> Message {
         try transaction {
             var item = try message(id, caller: caller)
@@ -676,6 +686,12 @@ public actor Ledger {
         }
     }
     public func allMessages() throws -> [Message] { try rows("SELECT record FROM messages ORDER BY rowid").map { try decode(Message.self, $0[0]) } }
+    /// Queued and received messages per recipient: the mail a session's badge counts.
+    public func pendingMessageCounts() throws -> [UUID: Int] {
+        Dictionary(uniqueKeysWithValues: try rows("SELECT recipient_id,COUNT(*) FROM messages WHERE state IN ('queued','received') GROUP BY recipient_id").compactMap { row in
+            UUID(uuidString: row[0]).map { ($0, Int(row[1]) ?? 0) }
+        })
+    }
     public func allDelegations() throws -> [Delegation] { try rows("SELECT record FROM delegations ORDER BY rowid").map { try decode(Delegation.self, $0[0]) } }
     public func allSessions() throws -> [Session] { try rows("SELECT record FROM sessions WHERE id NOT IN (SELECT id FROM deleted_sessions)").map { try decode(Session.self, $0[0]) } }
     public func pruneCompletedMessages(olderThan date: Date) throws -> Int {

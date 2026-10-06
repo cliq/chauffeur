@@ -23,6 +23,12 @@ public actor RuntimeCoordinator {
     private var stoppingAllSessions = false
     private var controlRequests = Set<UUID>()
     private var reconciliation: Task<Void, Error>?
+    private var messageCounting: Task<Void, Never>?
+    private var countingMessages = false
+    private var messageCountsStale = false
+    /// Advances whenever a session changes, so a snapshot subscriber can push at once.
+    public private(set) var changeGeneration = 0
+    private var changeWaiters: [UUID: CheckedContinuation<Void, Never>] = [:]
     private var checkoutClaims = CheckoutClaims()
     private var endpoint: String?
     private var settings = RetentionSettings()
@@ -131,6 +137,10 @@ public actor RuntimeCoordinator {
         refreshKeepAwake()
         for session in sessions.values where (session.launch.checkoutIdentityVersion ?? 0) < CheckoutIdentity.currentVersion {
             _ = await relinkCheckoutIdentities(session)
+        }
+        let messageChanges = ledger.messageChanges
+        messageCounting = Task { [weak self] in
+            for await _ in messageChanges { await self?.mailboxChanged() }
         }
         try await reconcile(startup: true)
         await maintainHistory(applySettings: true)
@@ -317,6 +327,7 @@ public actor RuntimeCoordinator {
             logs?.append(entry)
         }
         sessions[session.id] = session
+        announceChange()
         refreshKeepAwake()
         let snapshot = await store.current()
         guard snapshot.projects.contains(where: { $0.value.id == session.projectID }) else { return }
@@ -440,13 +451,46 @@ public actor RuntimeCoordinator {
                 try await deleteFinishedSession(session.id)
             }
         }
-        let pending = try await ledger.allMessages().filter { [.queued, .received].contains($0.state) }
-        for var session in Array(sessions.values) where !launching.contains(session.id) {
-            let count = pending.filter { $0.recipientID == session.id }.count
-            if session.pendingMessages != count { session.pendingMessages = count; try await persist(session) }
-        }
+        await refreshPendingMessages()
         await wakeIdleCoordinators()
     }
+    /// Brings each session's unread-mail count up to date. A call made while a count
+    /// is running adds one more pass instead, so an older count never lands last.
+    private func refreshPendingMessages() async {
+        messageCountsStale = true
+        guard !countingMessages else { return }
+        countingMessages = true; defer { countingMessages = false }
+        while messageCountsStale {
+            messageCountsStale = false
+            do {
+                let counts = try await ledger.pendingMessageCounts()
+                for id in Array(sessions.keys) where !launching.contains(id) {
+                    guard var session = sessions[id], session.pendingMessages != counts[id, default: 0] else { continue }
+                    session.pendingMessages = counts[id, default: 0]; try await persist(session)
+                }
+            } catch let error as ChauffeurError { record(error) }
+            catch { record(ChauffeurError("message_count_failed", "Could not count unread Chauffeur messages")) }
+        }
+    }
+    /// Mail arrived or changed state: update badges, and push the message list too.
+    private func mailboxChanged() async {
+        await refreshPendingMessages()
+        announceChange()
+    }
+    private func announceChange() {
+        changeGeneration += 1
+        let waiters = changeWaiters.values; changeWaiters = [:]
+        for waiter in waiters { waiter.resume() }
+    }
+    /// Returns once anything changed after `generation`, or after `timeout`.
+    public func waitForChange(after generation: Int, timeout: Duration) async {
+        guard changeGeneration == generation else { return }
+        let id = UUID()
+        let timer = Task { try? await Task.sleep(for: timeout); self.endChangeWait(id) }
+        await withCheckedContinuation { changeWaiters[id] = $0 }
+        timer.cancel()
+    }
+    private func endChangeWait(_ id: UUID) { changeWaiters.removeValue(forKey: id)?.resume() }
     /// An idle coordinator whose provider cannot wait by itself gets one short
     /// prompt when its workers report or stop.
     func resultWakeApplies(_ session: Session) -> Bool {

@@ -47,12 +47,16 @@ public final class IPCServer: @unchecked Sendable {
                     var last: String?
                     var heartbeat = ContinuousClock.now
                     while !Task.isCancelled {
+                        let generation = await runtime.changeGeneration
                         let snapshot = try await runtime.snapshot()
                         let hash = try SnapshotChange.key(snapshot)
                         if hash != last || ContinuousClock.now - heartbeat >= .seconds(5) {
                             try await connection.sendAsync(IPCResponse(id: request.id, result: snapshot)); last = hash; heartbeat = .now
                         }
-                        try await Task.sleep(for: .seconds(1))
+                        // Push a session change right away; still poll for everything else.
+                        await runtime.waitForChange(after: generation, timeout: .seconds(1))
+                        // Let a burst of changes settle into one snapshot.
+                        try await Task.sleep(for: .milliseconds(50))
                     }
                     return
                 }
