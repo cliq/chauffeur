@@ -44,27 +44,94 @@ You'll need:
 - macOS 15 or newer on Apple Silicon
 - Git and tmux available in your login shell
 - Codex and/or Claude Code installed (the setup wizard can help you sign in)
-- Xcode 26.3 (Swift 6.2) and XcodeGen
+- Full Xcode 26.3 (Swift 6.2), not just Command Line Tools, and XcodeGen
+- For certificate signing, a certificate **with its private key** in this macOS
+  user's keychain; ad-hoc local builds do not require one
 
-To build from source, copy the local signing configuration and set
-`DEVELOPMENT_TEAM` in it:
+Install Xcode, open it once to finish setup, and select it in **Xcode → Settings
+→ Locations → Command Line Tools**. Install XcodeGen and tmux if needed (with
+Homebrew: `brew install xcodegen tmux`). From the repository directory, check
+the selected tools and available signing identities:
+
+```sh
+xcode-select -p
+xcodebuild -version
+security find-identity -v -p codesigning
+```
+
+For a local install without an Apple account or signing certificate, run:
+
+```sh
+make install XCODEBUILD_ARGS='DEVELOPMENT_TEAM= CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY=-'
+```
+
+To keep using ad-hoc signing with plain `make install`, create
+`Configuration/LocalSigning.xcconfig` with:
+
+```xcconfig
+DEVELOPMENT_TEAM =
+CODE_SIGN_STYLE = Manual
+CODE_SIGN_IDENTITY = -
+```
+
+Ad-hoc builds are for local use. Their helper signatures change when rebuilt,
+which can require refreshing background-service registration; certificate
+signing provides a stable identity across updates.
+
+For certificate signing, if the identity check reports **0 valid identities**,
+set up signing before building. Add your Apple account in **Xcode → Settings
+→ Accounts**, select your team, and use **Manage Certificates…** to create an
+Apple Development certificate.
+
+When migrating to a new macOS user, certificates and private keys in the old
+user's login keychain are not available automatically. In the old account, open
+**Keychain Access → login → My Certificates**, select the identities you want
+to transfer, and export them as a password-protected `.p12`. Import that file
+into the new user's **login** keychain and enter the export password. Exporting
+only a `.cer` file does not transfer the private key. Run the identity check
+again, then delete the temporary export after a successful import. Enter
+passwords in local prompts, not in shell commands.
+
+Copy the local signing configuration and edit it with your team ID (shown in
+Xcode's account settings or the signing identity's name):
 
 ```sh
 cp Configuration/LocalSigning.xcconfig.example Configuration/LocalSigning.xcconfig
 ```
 
-Then build and open the app:
+Set `DEVELOPMENT_TEAM` to your actual team ID, replacing `YOUR_TEAM_ID`. The
+default is Apple Development signing. If you migrated a Developer ID Application
+identity, also uncomment and fill in `CODE_SIGN_STYLE = Manual` and
+`CODE_SIGN_IDENTITY = Developer ID Application: Your Name (YOUR_TEAM_ID)` in that
+file. Use the same certificate for subsequent builds so the background service
+keeps a stable signing identity. This configuration is gitignored and must be
+created separately for each checkout; copying certificates does not create it.
+
+Build and install the optimized app:
+
+```sh
+make install
+```
+
+This replaces `/Applications/Chauffeur.app`, launches it, and waits for its
+background runtime to become ready. If macOS requests background-service
+approval, allow Chauffeur in **System Settings → General → Login Items &
+Extensions** while installation waits. If verification times out, enable the
+service and rerun `make install`. To install in your own Applications folder,
+use `make install INSTALL_DIR="$HOME/Applications"`.
+
+For a development build:
 
 ```sh
 make build
 open 'build/Build/Products/Debug/Chauffeur Debug.app'
 ```
 
-For an optimized build, run `make release` and open
-`build/Build/Products/Release/Chauffeur.app`, or run `make install` to build it,
-replace `/Applications/Chauffeur.app`, relaunch, and verify that the bundled
-runtime is running with MCP ready. Debug and Release can run side
-by side with separate settings and sessions.
+To build Release without installing, run `make release` and open
+`build/Build/Products/Release/Chauffeur.app`. Debug and Release can run side by
+side with separate settings and sessions. If Xcode reports that signing requires
+a development team, check `Configuration/LocalSigning.xcconfig`; if it cannot
+find the certificate, check the current user's identities with the command above.
 
 See [building and verifying](docs/building.md) for signing options and tests.
 For signed, notarized GitHub releases, see [release setup](docs/notarization.md).
@@ -79,7 +146,8 @@ won't start.
    teams such as *Personal*, *Work*, or a client. Use existing configurations or
    create `~/.codex-<team>` / `~/.claude-<team>` folders with selected settings
    copied from an editable source. Source folders stay unchanged and login
-   credentials are excluded. The wizard opens each new profile's sign-in and
+   credentials are excluded. Previewing the copy is optional; creation uses the
+   current selections and source files. The wizard opens each new profile's sign-in and
    checks its CLI authentication status.
 2. Create a project and choose its team. Select a parent folder to discover
    repositories, or add repository folders individually.
