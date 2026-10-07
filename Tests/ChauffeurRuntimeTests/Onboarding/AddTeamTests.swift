@@ -62,11 +62,10 @@ struct AddTeamTests {
         try await f.assertExistingStateUnchanged()
     }
 
-    @Test func addsTeamUsingReviewedMigrationWithoutChangingOnboarding() async throws {
+    @Test func addsTeamWithoutPreviewOrChangingOnboarding() async throws {
         let f = try await Fixture()
         defer { try? FileManager.default.removeItem(at: f.root) }
-        var pair = f.pair()
-        pair.previewID = try await f.preview(pair).id
+        let pair = f.pair()
         var team = PresetSet(name: "Client", agentSelection: .allBase)
         team.configurationDirectories = ["codex": pair.destinationPath]
         let saved = try await f.add(team, pairs: [pair])
@@ -78,12 +77,13 @@ struct AddTeamTests {
         try await f.assertExistingStateUnchanged()
     }
 
-    @Test func invalidSecondPreviewDoesNotPublishFirstFolder() async throws {
+    @Test func invalidSecondSourceDoesNotPublishFirstFolder() async throws {
         let f = try await Fixture()
         defer { try? FileManager.default.removeItem(at: f.root) }
         var first = f.pair()
         first.previewID = try await f.preview(first).id
-        let second = f.pair("claude-new", kind: .claude)
+        var second = f.pair("claude-new", kind: .claude)
+        second.sourcePath = f.root.appendingPathComponent("missing-source").path
         var team = PresetSet(name: "Client", agentSelection: .allBase)
         team.configurationDirectories = ["codex": first.destinationPath, "claude": second.destinationPath]
         await #expect(throws: (any Error).self) { try await f.add(team, pairs: [first, second]) }
@@ -92,7 +92,7 @@ struct AddTeamTests {
         try await f.assertExistingStateUnchanged()
     }
 
-    @Test func changedSelectionRequiresNewPreview() async throws {
+    @Test func changedSelectionUsesCurrentSettingsWithoutNewPreview() async throws {
         let f = try await Fixture()
         defer { try? FileManager.default.removeItem(at: f.root) }
         var pair = f.pair()
@@ -100,8 +100,9 @@ struct AddTeamTests {
         pair.categories = []
         var team = PresetSet(name: "Client", agentSelection: .allBase)
         team.configurationDirectories = ["codex": pair.destinationPath]
-        await #expect(throws: (any Error).self) { try await f.add(team, pairs: [pair]) }
-        #expect(!FileManager.default.fileExists(atPath: pair.destinationPath))
+        _ = try await f.add(team, pairs: [pair])
+        #expect(FileManager.default.fileExists(atPath: pair.destinationPath))
+        #expect(!FileManager.default.fileExists(atPath: pair.destinationPath + "/config.toml"))
         try await f.assertExistingStateUnchanged()
     }
 
@@ -121,7 +122,11 @@ struct AddTeamTests {
         let marker = URL(fileURLWithPath: first.destinationPath).appendingPathComponent("keep.txt")
         try Data("keep".utf8).write(to: marker)
         try FileManager.default.createDirectory(at: f.root.appendingPathComponent("missing-parent"), withIntermediateDirectories: true)
-        let saved = try await f.add(team, pairs: [first, second])
+        try FileManager.default.removeItem(at: f.source)
+        let restarted = try OnboardingCoordinator(store: f.store, root: f.root, environment: ["HOME": f.root.path], home: f.root)
+        let saved = try await restarted.handle(IPCRequest("addTeam", params: .object([
+            "record": try .from(team), "configurations": try .from([first, second])
+        ]))).decode(Stored<PresetSet>.self)
         #expect(saved.value.id == team.id)
         #expect(try String(contentsOf: marker, encoding: .utf8) == "keep")
         try await f.assertExistingStateUnchanged()

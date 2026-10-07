@@ -12,7 +12,6 @@ public actor OnboardingCoordinator {
     let publisher: ConfigurationPublisher
     let migrations: [CLIKind: any ConfigurationMigration]
     let authentication: [CLIKind: any AgentAuthentication]
-    var previews: [UUID: CopyPreview] = [:]
     var mutating = false
     var activeLogin: (operationID: UUID, pairID: UUID, draftID: UUID)?
     var loginTask: Task<Void, Never>?
@@ -150,7 +149,6 @@ public actor OnboardingCoordinator {
         let reserved = saved.value.teams.flatMap(\.agents).filter { $0.id != pair.id && $0.choice == .create }.map(\.destinationPath)
         _ = try ConfigurationDiscovery(home: home, environment: environment, configuredPaths: [:]).validateDestination(source: pair.sourcePath, destination: pair.destinationPath, reserved: reserved)
         let preview = try adapter.preview(pair: pair)
-        previews[preview.id] = preview
         updatePair(&saved.value, id: pair.id) { $0.previewID = preview.id }
         _ = try await store.saveSetupDraft(saved.value, expectedVersion: saved.version)
         return preview
@@ -159,16 +157,16 @@ public actor OnboardingCoordinator {
     func createConfiguration(_ params: JSONValue) async throws -> CopyReceipt {
         var saved = try await requireDraft(params)
         let pair = try pair(in: saved.value, id: params.uuid("pairID"))
-        let previewID = try params.uuid("previewID")
-        guard pair.previewID == previewID, let preview = previews[previewID], preview.pairID == pair.id else { throw ChauffeurError("setup_preview_expired", "Preview this configuration again before copying.") }
+        guard pair.choice == .create else { throw ChauffeurError("setup_copy", "Choose a new configuration folder to create.") }
         let operations = try await store.setupOperations()
-        var operation = operations.first { $0.value.draftID == saved.value.id && $0.value.pairID == pair.id }?.value
-            ?? SetupOperation(draftID: saved.value.id, pairID: pair.id, destinationPath: pair.destinationPath, previewID: preview.id)
-        if operation.previewID != preview.id, ![.published, .teamSaved].contains(operation.phase) {
-            try await publisher.discardStaging(operation: operation)
-            operation.previewID = preview.id; operation.stagingPath = nil
-            operation.destinationPath = pair.destinationPath; operation.phase = .prepared
+        let supplied = operations.first { $0.value.draftID == saved.value.id && $0.value.pairID == pair.id }?.value
+            ?? SetupOperation(draftID: saved.value.id, pairID: pair.id, destinationPath: pair.destinationPath)
+        if !FileManager.default.fileExists(atPath: pair.destinationPath) {
+            let reserved = saved.value.teams.flatMap(\.agents).filter { $0.id != pair.id && $0.choice == .create }.map(\.destinationPath)
+            _ = try ConfigurationDiscovery(home: home, environment: environment, configuredPaths: [:])
+                .validateDestination(source: pair.sourcePath, destination: pair.destinationPath, reserved: reserved)
         }
+        let (operation, preview) = try await publisher.prepare(operation: supplied, pair: pair)
         let receipt = try await publisher.publish(operation: operation, preview: preview, pair: pair)
         updatePair(&saved.value, id: pair.id) { $0.operationID = receipt.operationID; $0.destinationPath = receipt.destinationPath; $0.auth = SetupAuthStatus(phase: .signInRequired) }
         _ = try await store.saveSetupDraft(saved.value, expectedVersion: saved.version)

@@ -60,6 +60,39 @@ struct OnboardingReviewRegressionTests {
         return pair
     }
 
+    @Test func createsConfigurationWithoutPreview() async throws {
+        let f = try fixture(); defer { try? FileManager.default.removeItem(at: f.root) }
+        let pair = SetupAgentPair(kind: .codex, choice: .create,
+            destinationPath: f.root.appendingPathComponent("new-config").path)
+        _ = try await save(SetupDraft(teams: [SetupTeam(name: "Work", agents: [pair])]), f)
+        let receipt = try await call("createSetupConfiguration", pair: pair, f).decode(CopyReceipt.self)
+        #expect(FileManager.default.fileExists(atPath: receipt.destinationPath))
+    }
+
+    @Test func stalePreviewAndRuntimeRestartDoNotBlockCurrentCopy() async throws {
+        let f = try fixture(); defer { try? FileManager.default.removeItem(at: f.root) }
+        let source = f.root.appendingPathComponent("source")
+        try FileManager.default.createDirectory(at: source, withIntermediateDirectories: true)
+        let config = source.appendingPathComponent("config.toml")
+        try Data("model = \"old\"\n".utf8).write(to: config)
+        let pair = SetupAgentPair(kind: .codex, choice: .create, sourcePath: source.path,
+            destinationPath: f.root.appendingPathComponent("new-config").path, categories: [.preferences])
+        _ = try await save(SetupDraft(teams: [SetupTeam(name: "Work", agents: [pair])]), f)
+        let preview = try await call("previewSetupCopy", pair: pair, f).decode(CopyPreview.self)
+        try Data("model = \"current\"\n".utf8).write(to: config)
+        try Data("secret".utf8).write(to: source.appendingPathComponent("auth.json"))
+        let restarted = try OnboardingCoordinator(store: f.store, root: f.root.appendingPathComponent("store"),
+            environment: f.environment, home: f.root)
+        let draft = try #require(try await f.store.setupDraft())
+        let receipt = try await restarted.handle(IPCRequest("createSetupConfiguration", params: .object([
+            "draftID": .string(draft.value.id.uuidString), "expectedVersion": .string(draft.version),
+            "pairID": .string(pair.id.uuidString), "previewID": .string(preview.id.uuidString)
+        ]))).decode(CopyReceipt.self)
+        #expect(try String(contentsOf: URL(fileURLWithPath: receipt.destinationPath).appendingPathComponent("config.toml"), encoding: .utf8).contains("current"))
+        #expect(!FileManager.default.fileExists(atPath: receipt.destinationPath + "/auth.json"))
+        #expect(try String(contentsOf: config, encoding: .utf8).contains("current"))
+    }
+
     private func updateBinary(_ f: Fixture) throws -> URL {
         let next = f.root.appendingPathComponent("codex-v2")
         try Data("#!/bin/sh\nexit 0\n".utf8).write(to: next)

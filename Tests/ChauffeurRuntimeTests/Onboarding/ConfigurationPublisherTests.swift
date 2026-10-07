@@ -62,6 +62,26 @@ struct ConfigurationPublisherTests {
         #expect(journal?.value.message?.contains("preserved") == true)
     }
 
+    @Test func retryReplansInterruptedStagingWithCurrentSourceAndDestination() async throws {
+        let root = try fixture("replan"); defer { try? FileManager.default.removeItem(at: root) }
+        let (store, originalPair, preview, operation) = try values(root: root)
+        enum Stop: Error { case afterStaging }
+        let interrupted = ConfigurationPublisher(store: store) { point in if case .staged = point { throw Stop.afterStaging } }
+        await #expect(throws: Stop.self) { _ = try await interrupted.publish(operation: operation, preview: preview, pair: originalPair) }
+        let journal = try #require(try await store.setupOperations().first { $0.value.id == operation.id }).value
+        var pair = originalPair
+        pair.destinationPath = root.appendingPathComponent("changed-destination").path
+        let sourceFile = URL(fileURLWithPath: pair.sourcePath!).appendingPathComponent("config.toml")
+        try Data("model = \"current\"".utf8).write(to: sourceFile)
+        let publisher = ConfigurationPublisher(store: store)
+        let (freshOperation, current) = try await publisher.prepare(operation: journal, pair: pair)
+        let receipt = try await publisher.publish(operation: freshOperation, preview: current, pair: pair)
+        #expect(receipt.operationID == operation.id)
+        #expect(try String(contentsOf: URL(fileURLWithPath: receipt.destinationPath).appendingPathComponent("config.toml"), encoding: .utf8).contains("current"))
+        #expect(!FileManager.default.fileExists(atPath: originalPair.destinationPath))
+        #expect(!FileManager.default.fileExists(atPath: try #require(journal.stagingPath)))
+    }
+
     @Test func destinationCreatedDuringStagingIsNeverReplaced() async throws {
         let root = try fixture("race"); defer { try? FileManager.default.removeItem(at: root) }
         let (store, pair, preview, operation) = try values(root: root)

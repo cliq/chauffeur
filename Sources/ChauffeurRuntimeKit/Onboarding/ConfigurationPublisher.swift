@@ -37,6 +37,36 @@ public actor ConfigurationPublisher {
         self.interruptionHook = interruptionHook
     }
 
+    /// Plan from current selections. Published copies are resumed from their ownership
+    /// marker so retries never need the source or an in-memory UI preview.
+    func prepare(operation supplied: SetupOperation, pair: SetupAgentPair) throws -> (SetupOperation, CopyPreview) {
+        guard supplied.pairID == pair.id, let migration = migrations[pair.kind] else {
+            throw ConfigurationMigrationError.invalidPair("The copy operation no longer matches this team configuration.")
+        }
+        var operation = supplied
+        let destination = URL(fileURLWithPath: pair.destinationPath).standardizedFileURL
+        if Paths.canonical(operation.destinationPath) != Paths.canonical(pair.destinationPath),
+           FileManager.default.fileExists(atPath: operation.destinationPath) {
+            throw ConfigurationMigrationError.invalidPair("A configuration was already created. Keep its folder to retry, or use it as an existing folder.")
+        }
+        if FileManager.default.fileExists(atPath: destination.path) {
+            guard let marker = try marker(at: destination), marker.operationID == operation.id,
+                  marker.pairID == pair.id, marker.complete else {
+                throw ConfigurationMigrationError.unsafePath("The destination already exists. Use that folder or choose another destination; setup will not merge or replace it.")
+            }
+            operation.previewID = marker.previewID
+            return (operation, CopyPreview(id: marker.previewID, pairID: pair.id,
+                destinationPath: destination.path, selectionDigest: marker.selectionDigest))
+        }
+        let preview = try migration.preview(pair: pair)
+        try discardStaging(operation: operation)
+        operation.destinationPath = pair.destinationPath
+        operation.previewID = preview.id
+        operation.stagingPath = nil
+        operation.phase = .prepared
+        return (operation, preview)
+    }
+
     public func publish(operation supplied: SetupOperation, preview: CopyPreview, pair: SetupAgentPair) async throws -> CopyReceipt {
         let pairDestination = Paths.canonical(pair.destinationPath)
         guard supplied.pairID == pair.id, preview.pairID == pair.id,
@@ -55,6 +85,7 @@ public actor ConfigurationPublisher {
         try validateDestination(destination)
         let journal = try await store.setupOperations().first { $0.value.id == supplied.id }
         var operation = journal?.value ?? supplied
+        if operation.previewID != supplied.previewID { operation = supplied }
 
         if FileManager.default.fileExists(atPath: destination.path) {
             return try await receiptForPublishedDestination(operation: operation, preview: preview, pair: pair, destination: destination)

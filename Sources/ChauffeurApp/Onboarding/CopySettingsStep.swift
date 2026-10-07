@@ -5,7 +5,7 @@ struct CopySettingsStep: View {
     @ObservedObject var setup: OnboardingModel
     var body: some View {
         Text("Copy settings").font(.headline)
-        Text("Your source folders stay unchanged. Each new configuration signs in separately; credentials aren't copied.").foregroundStyle(.secondary)
+        Text("Your source folders stay unchanged. Each new configuration signs in separately; credentials aren't copied. Preview is optional; creating configurations copies the current settings.").foregroundStyle(.secondary)
         ForEach($setup.draft.teams) { $team in
             ForEach($team.agents) { $pair in
                 if pair.choice == .create && pair.operationID == nil {
@@ -66,10 +66,14 @@ struct ConfigurationCopyOptions: View {
                 }
             }
             Text("New folder: \(pair.destinationPath)").font(.caption).textSelection(.enabled)
-            Button("Preview settings") { requestPreview() }.accessibilityIdentifier("onboarding.preview.\(pair.kind.rawValue)")
+            Button("Preview settings (optional)") { requestPreview() }.accessibilityIdentifier("onboarding.preview.\(pair.kind.rawValue)")
             if let preview {
                 Text("\(preview.entries.count) items · \(ByteCountFormatter.string(fromByteCount: preview.entries.reduce(0) { $0 + $1.size }, countStyle: .file))").font(.caption)
-                ForEach(preview.warnings, id: \.self) { Text($0).font(.caption).foregroundStyle(.orange) }
+                if !preview.warnings.isEmpty {
+                    DisclosureGroup("Copy details (\(preview.warnings.count))") {
+                        ForEach(preview.warnings, id: \.self) { Text($0).font(.caption).foregroundStyle(.secondary) }
+                    }
+                }
                 DisclosureGroup("Files to copy") {
                     ForEach(preview.entries, id: \.destinationRelativePath) { entry in Text(entry.destinationRelativePath).font(.caption.monospaced()) }
                 }

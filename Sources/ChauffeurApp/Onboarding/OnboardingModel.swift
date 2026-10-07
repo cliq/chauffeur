@@ -157,8 +157,7 @@ import ChauffeurCore
                 try await self.save()
                 let creating = self.pairs.filter { $0.choice == .create && $0.operationID == nil }
                 for pair in creating {
-                    guard let preview = self.previews[pair.id] else { throw ChauffeurError("setup_preview", "Preview the settings for every new folder before creating it.") }
-                    _ = try await self.call("createSetupConfiguration", pairID: pair.id, extras: ["previewID": .string(preview.id.uuidString)])
+                    _ = try await self.call("createSetupConfiguration", pairID: pair.id)
                     try await self.reload()
                 }
                 self.draft.step = .login
