@@ -45,6 +45,7 @@ release:
 # quit any copy running from $(INSTALL_DIR), replace it, and relaunch. The app
 # refreshes its background runtime registration on launch when the embedded
 # helper changed. Verify the running helper before reporting installation complete.
+# Ad-hoc updates unload the old job to clear launchd's cached code-hash constraint.
 install: release
 	@set -euo pipefail; \
 	  running="$$(pgrep -f '^$(INSTALLED_APP)/Contents/MacOS/Chauffeur$$' || true)"; \
@@ -59,6 +60,12 @@ install: release
 	  rm -rf "$(INSTALLED_APP)"; \
 	  ditto "$(RELEASE_APP)" "$(INSTALLED_APP)"; \
 	  /usr/bin/codesign --verify --deep --strict "$(INSTALLED_APP)"; \
+	  if [ "$$(cat "$(DERIVED_DATA_PATH)/Build/Products/Release/Chauffeur.signing-identity")" = "-" ]; then \
+	    task_service_label="$$(/usr/libexec/PlistBuddy -c 'Print :Label' "$(INSTALLED_APP)/Contents/Library/LaunchAgents/dev.chauffeur.runtime.plist")"; \
+	    launchctl bootout "gui/$$(id -u)/$$task_service_label" 2>/dev/null || true; \
+	    task_bundle_id="$$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$(INSTALLED_APP)/Contents/Info.plist")"; \
+	    defaults delete "$$task_bundle_id" registeredRuntimeBuild >/dev/null 2>&1 || true; \
+	  fi; \
 	  env -u CHAUFFEUR_SOCKET -u CHAUFFEUR_SESSION_TOKEN -u CHAUFFEUR_SERVICE_PROBE_SOCKET open "$(INSTALLED_APP)"; \
 	  python3 Scripts/verify-installed-runtime.py "$(INSTALLED_APP)"; \
 	  printf '\nInstalled: %s\n' "$(INSTALLED_APP)"

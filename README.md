@@ -74,9 +74,10 @@ CODE_SIGN_STYLE = Manual
 CODE_SIGN_IDENTITY = -
 ```
 
-Ad-hoc builds are for local use. Their helper signatures change when rebuilt,
-which can require refreshing background-service registration; certificate
-signing provides a stable identity across updates.
+Ad-hoc builds are for local use. Their helper signatures change when rebuilt;
+`make install` unloads the old background job before relaunching so registration
+uses the updated signature. Certificate signing provides a stable identity
+across updates.
 
 For certificate signing, if the identity check reports **0 valid identities**,
 set up signing before building. Add your Apple account in **Xcode → Settings
