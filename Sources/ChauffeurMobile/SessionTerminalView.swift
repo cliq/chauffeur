@@ -8,10 +8,13 @@ import ChauffeurTerminalTesting
 /// 03 / Terminal for the session picked in the list, with 03b (connection lost) as a banner. Taking control is immediate:
 /// the other side loses input but the session keeps running, so there is nothing worth confirming.
 ///
-/// The key bar sits below the surface and the view does not ignore the keyboard safe area, so the
+/// The key bar sits below the surface and the screen lifts both above the keyboard itself, so the
 /// surface shrinks when the keyboard appears and the engine reports the new cell size itself.
+/// SwiftUI's own keyboard avoidance is off here: the terminal takes focus while the navigation push
+/// is still animating, and SwiftUI never applied that keyboard's inset, leaving it over the terminal.
 struct SessionTerminalView: View {
     var model: MobileAppModel
+    @State private var keyboardOverlap: CGFloat = 0
 
     var body: some View {
         VStack(spacing: 0) {
@@ -43,6 +46,14 @@ struct SessionTerminalView: View {
                 }
                 .frame(maxHeight: .infinity)
             }
+        }
+        .padding(.bottom, keyboardOverlap)
+        .ignoresSafeArea(.keyboard, edges: .bottom)
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillChangeFrameNotification)) { note in
+            updateKeyboardOverlap(note)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { note in
+            updateKeyboardOverlap(note, hidden: true)
         }
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
@@ -76,6 +87,29 @@ struct SessionTerminalView: View {
         .task(id: model.selectedTab) {
             await model.attachSelectedTerminalIfNeeded()
         }
+    }
+
+    /// How far the keyboard reaches above the bottom safe area, which the screen already keeps clear.
+    private func updateKeyboardOverlap(_ note: Notification, hidden: Bool = false) {
+        var overlap: CGFloat = 0
+        if !hidden,
+           let frame = note.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect,
+           let window = Self.keyWindow {
+            let keyboard = window.convert(frame, from: window.screen.coordinateSpace)
+            overlap = max(0, window.bounds.maxY - keyboard.minY - window.safeAreaInsets.bottom)
+        }
+        guard overlap != keyboardOverlap else { return }
+        let duration = note.userInfo?[UIResponder.keyboardAnimationDurationUserInfoKey] as? Double ?? 0.25
+        withAnimation(.easeOut(duration: duration)) {
+            keyboardOverlap = overlap
+        }
+    }
+
+    private static var keyWindow: UIWindow? {
+        UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .flatMap(\.windows)
+            .first(where: \.isKeyWindow)
     }
 
     private func takeControl() {

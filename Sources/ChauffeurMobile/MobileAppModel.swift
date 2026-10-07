@@ -419,8 +419,8 @@ final class MobileAppModel {
         if !openTabs.contains(id) {
             openTabs.append(id)
         }
-        // A keyboard left up by the launch form would otherwise cover the terminal: SwiftUI only
-        // re-measures for a keyboard that appears while the terminal is on screen.
+        // A keyboard left up by the launch form would otherwise cover the terminal: the terminal only
+        // learns the keyboard's height from frame changes that happen while it is on screen.
         Self.dismissKeyboard()
         if path.last != .terminal {
             path = [.sessions, .terminal]
