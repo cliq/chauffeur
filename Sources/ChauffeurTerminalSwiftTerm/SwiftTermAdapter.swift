@@ -22,9 +22,13 @@
 //  6. `printf '\e]0;title\a'` triggers `didChangeTitle("title")`; `printf '\a'` triggers
 //     `terminalDidRingBell`; `printf '\e]52;c;aGVsbG8=\a'` triggers `didCopyToClipboard("hello")`
 //     and the pasteboard is untouched until the app writes to it.
-//  7. Tapping / clicking `https://example.com` calls `didRequestOpenLink`; a `file://` or custom
-//     scheme link does not (macOS must not open it through SwiftTerm's default handler either).
-//     On iOS the tap first shows Open Link and Copy Link, and Copy Link copies an OSC 8 link's
+//  7. Tapping / clicking `https://example.com` calls `didRequestOpenLink`; a custom scheme link
+//     (`vscode://`, `javascript:`) does not call any delegate method (macOS must not open it
+//     through SwiftTerm's default handler either). A `file://` link or a path such as `docs/x.md`
+//     or `/abs/x.md:12` calls `didRequestOpenFile` with the percent-decoded path and no
+//     `:line:col`; `example.com` is neither. On iOS the tap first shows Open Link and Copy Link
+//     for web links, Open Document and Copy Path for file links (Copy Path copies the path, not
+//     the `file://` URL) and only Copy Link for anything else; Copy Link copies an OSC 8 link's
 //     target rather than its label.
 //  8. `reset()` blanks the screen and scrollback; the following tmux redraw repaints it.
 //  9. On iOS the keyboard shows no SwiftTerm accessory bar, and autocorrection, smart quotes and

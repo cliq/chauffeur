@@ -57,6 +57,41 @@ struct RemoteHostSessionTests {
         session.disconnect()
     }
 
+    @Test func documentsUseSessionIdentityAndConditionalReads() async throws {
+        let (session, factory) = makeSession()
+        await session.connect()
+        defer { session.disconnect() }
+        #expect(session.isDocumentsSupported)
+        let id = UUID()
+        let list = try await session.sessionDocuments(sessionID: id)
+        #expect(list.sessionID == id && list.documents.count == 1)
+        let first = try await session.readDocument(sessionID: id, path: "plan.md", knownVersion: nil)
+        #expect(first.text == "# Plan\n")
+        let second = try await session.readDocument(sessionID: nil, path: "plan.md", knownVersion: first.version)
+        #expect(second.text == nil && second.version == first.version)
+        #expect(factory.hosts[0].requests(ofKind: "readDocument").count == 2)
+    }
+
+    @Test func olderHostsGetAnUpdateMessageForDocuments() async throws {
+        let (session, factory) = makeSession()
+        factory.configure = { host in
+            host.responder = { request in
+                if case .hello = request.operation {
+                    var info = FakeHost.hostInfo(); info.capabilities = ["inventory.v1"]
+                    return RemoteResponse(id: request.id, result: .hostInfo(info))
+                }
+                return FakeHost.defaultResponse(for: request)
+            }
+        }
+        await session.connect()
+        defer { session.disconnect() }
+        #expect(!session.isDocumentsSupported)
+        await #expect(throws: RemoteClientError.self) { try await session.sessionDocuments(sessionID: UUID()) }
+        await #expect(throws: RemoteClientError.self) { try await session.readDocument(sessionID: nil, path: "a.md", knownVersion: nil) }
+        #expect(factory.hosts[0].requests(ofKind: "listSessionDocuments").isEmpty)
+        #expect(factory.hosts[0].requests(ofKind: "readDocument").isEmpty)
+    }
+
     @Test func olderHostsGetAnUpdateMessageWithoutUnsupportedRequests() async throws {
         let (session, factory) = makeSession()
         factory.configure = { host in

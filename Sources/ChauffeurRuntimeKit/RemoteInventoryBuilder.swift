@@ -17,6 +17,7 @@ public struct RemoteInventoryBuilder {
         var sessions: [Session]
         var repositoryInventories: [RepositoryInventory]?
         var keepAwake: KeepAwakeStatus?
+        var settings: RetentionSettings?
     }
 
     public static func build(snapshot: JSONValue, hostName: String, revision: UInt64, isAttached: (UUID) -> Bool) throws -> InventorySnapshot {

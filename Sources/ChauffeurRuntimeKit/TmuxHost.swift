@@ -379,8 +379,28 @@ public actor TmuxHost {
         guard fields.count == 2, fields[0] == "0", !fields[1].isEmpty else { return nil }
         return fields[1]
     }
-    private func capturePane(_ name: String, socket socketPath: String, options: [String]) async throws -> CommandResult {
-        var result = try await ProcessRunner.run(executable, ["-S", socketPath, "capture-pane", "-p", "-e", "-t", name] + options, environment: environment, timeout: 3, outputLimit: TerminalSnapshot.maximumFileBytes, keepOutputTail: true)
+    /// Escape-free scrollback and screen text with wrapped rows joined (`capture-pane -J`), for finding paths in it.
+    /// Applies the same alternate-screen handling and pane-ownership check as `capture(sessionID:lines:)`.
+    public func captureJoinedText(sessionID: UUID, lines: Int) async throws -> String {
+        let name = sessionID.uuidString
+        let socketPath = try await socket(for: sessionID)
+        let metadata = try await command(["display-message", "-p", "-t", name, "#{pane_id}|#{pane_pid}|#{pane_height}|#{alternate_on}|#{history_size}"], socket: socketPath)
+        let fields = metadata.output.trimmingCharacters(in: .newlines).split(separator: "|").map(String.init)
+        guard metadata.status == 0, fields.count == 5, let pid = Int32(fields[1]), let rows = Int(fields[2]), let historySize = Int(fields[4]) else { throw ChauffeurError("snapshot_unavailable", "Terminal history is unavailable") }
+        var text = ""
+        if historySize > 0 {
+            text += try await capturePane(name, socket: socketPath, options: ["-S", "-\(min(lines, historySize))", "-E", "-1"], escapes: false, joined: true).output
+        }
+        if fields[3] == "1" {
+            text += try await capturePane(name, socket: socketPath, options: ["-a"], escapes: false, joined: true).output
+        }
+        text += try await capturePane(name, socket: socketPath, options: ["-S", "0", "-E", String(rows - 1)], escapes: false, joined: true).output
+        guard let owner = try await inventory().first(where: { $0.sessionName == name }), owner.paneID == fields[0], owner.processID == pid else { throw ChauffeurError("snapshot_unavailable", "Terminal changed while its text was captured") }
+        return text
+    }
+    private func capturePane(_ name: String, socket socketPath: String, options: [String], escapes: Bool = true, joined: Bool = false) async throws -> CommandResult {
+        let flags = ["-p"] + (escapes ? ["-e"] : []) + (joined ? ["-J"] : [])
+        var result = try await ProcessRunner.run(executable, ["-S", socketPath, "capture-pane"] + flags + ["-t", name] + options, environment: environment, timeout: 3, outputLimit: TerminalSnapshot.maximumFileBytes, keepOutputTail: true)
         guard result.status == 0 else { throw ChauffeurError("snapshot_unavailable", "Terminal history is unavailable") }
         if result.outputTruncated {
             // A bounded byte tail may start inside UTF-8 or an escape sequence.

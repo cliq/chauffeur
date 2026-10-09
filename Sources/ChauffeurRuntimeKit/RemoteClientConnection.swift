@@ -161,7 +161,8 @@ actor RemoteClientConnection: RemoteConnectionHandle {
         case .detachTerminal(let detach):
             result = await self.detach(detach)
         case .listInventory, .listWorktreeBranches, .getSessionProgress, .previewWorktreeDestination, .launch, .getOperationStatus,
-             .getKeepAwake, .setKeepAwakeSettings, .setKeepAwakeTimer, .uploadFileChunk, .resolveTicket, .createGroup, .stopSession:
+             .getKeepAwake, .setKeepAwakeSettings, .setKeepAwakeTimer, .uploadFileChunk, .resolveTicket, .createGroup, .stopSession,
+             .listSessionDocuments, .readDocument:
             result = await dispatcher.handle(request.operation, deviceID: deviceID)
         }
         let capabilities = clientCapabilities

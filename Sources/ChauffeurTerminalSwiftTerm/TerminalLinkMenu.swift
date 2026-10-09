@@ -1,8 +1,9 @@
 #if canImport(UIKit)
 import UIKit
 @preconcurrency import SwiftTerm
+import ChauffeurTerminalInterface
 
-/// Tapping a link offers Open Link and Copy Link in the system edit menu.
+/// Tapping a link offers Open Link / Copy Link (web), Open Document / Copy Path (file) or Copy Link in the system edit menu.
 ///
 /// SwiftTerm's iOS view opens a tapped link only while a pointer hovers over it, so on a touch
 /// screen links do nothing. This tap recognizer begins only when the touch lands on a link, an
@@ -45,14 +46,20 @@ final class TerminalLinkMenu: NSObject, UIGestureRecognizerDelegate, @preconcurr
     func editMenuInteraction(_ interaction: UIEditMenuInteraction, menuFor configuration: UIEditMenuConfiguration, suggestedActions: [UIMenuElement]) -> UIMenu? {
         guard let link else { return nil }
         var actions: [UIMenuElement] = []
-        if let scheme = URL(string: link)?.scheme?.lowercased(), ["http", "https", "mailto"].contains(scheme) {
+        switch TerminalLinkTarget.classify(link) {
+        case .web:
             actions.append(UIAction(title: "Open Link", image: UIImage(systemName: "safari")) { [weak self] _ in self?.open(link) })
+            actions.append(UIAction(title: "Copy Link", image: UIImage(systemName: "link")) { _ in UIPasteboard.general.string = link })
+        case .file(let path):
+            actions.append(UIAction(title: "Open Document", image: UIImage(systemName: "doc.text")) { [weak self] _ in self?.open(link) })
+            actions.append(UIAction(title: "Copy Path", image: UIImage(systemName: "doc.on.doc")) { _ in UIPasteboard.general.string = path })
+        case .other:
+            actions.append(UIAction(title: "Copy Link", image: UIImage(systemName: "link")) { _ in UIPasteboard.general.string = link })
         }
-        actions.append(UIAction(title: "Copy Link", image: UIImage(systemName: "link")) { _ in UIPasteboard.general.string = link })
         return UIMenu(children: actions)
     }
 
-    /// Through the terminal delegate, which keeps the adapter's scheme filter.
+    /// Through the terminal delegate, which keeps the adapter's link routing.
     private func open(_ link: String) {
         guard let view else { return }
         view.terminalDelegate?.requestOpenLink(source: view, link: link, params: [:])

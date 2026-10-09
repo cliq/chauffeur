@@ -206,6 +206,14 @@ final class FakeHost: @unchecked Sendable {
             return RemoteResponse(id: request.id, result: .ticketSuggestion(TicketSuggestionResult(ticket: ticket)))
         case .createGroup(let create):
             return RemoteResponse(id: request.id, result: .group(GroupSummary(id: UUID(), name: create.name)))
+        case .listSessionDocuments(let list):
+            let document = SessionDocument(path: "/Users/test/plan.md", displayPath: "plan.md", sources: [.mentioned], modifiedAt: Date(timeIntervalSince1970: 1_000), size: 12)
+            return RemoteResponse(id: request.id, result: .sessionDocuments(SessionDocumentList(sessionID: list.sessionID, documents: [document])))
+        case .readDocument(let read):
+            let version = "v1"
+            let content = DocumentContent(requestedPath: read.path, path: "/Users/test/\(read.path)", version: version, modifiedAt: Date(timeIntervalSince1970: 1_000), size: 12,
+                                          text: read.knownVersion == version ? nil : "# Plan\n")
+            return RemoteResponse(id: request.id, result: .document(content))
         case .terminalResize, .detachTerminal, .stopSession:
             return RemoteResponse(id: request.id, result: .ack)
         }

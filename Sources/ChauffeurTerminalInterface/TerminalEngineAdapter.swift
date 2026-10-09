@@ -80,6 +80,8 @@ public protocol TerminalEngineAdapterDelegate: AnyObject {
     func terminalDidRingBell(_ adapter: any TerminalEngineAdapter)
     func terminal(_ adapter: any TerminalEngineAdapter, didCopyToClipboard text: String)
     func terminal(_ adapter: any TerminalEngineAdapter, didRequestOpenLink link: String)
+    /// A file path link (already classified and stripped of `file://` and `:line:col`) was tapped.
+    func terminal(_ adapter: any TerminalEngineAdapter, didRequestOpenFile path: String)
     /// Match count and the 1-based current match of an active `search`; `nil` while unknown.
     func terminal(_ adapter: any TerminalEngineAdapter, didUpdateSearchTotal total: Int?, selected: Int?)
 }
@@ -89,6 +91,7 @@ public extension TerminalEngineAdapterDelegate {
     func terminalDidRingBell(_ adapter: any TerminalEngineAdapter) {}
     func terminal(_ adapter: any TerminalEngineAdapter, didCopyToClipboard text: String) {}
     func terminal(_ adapter: any TerminalEngineAdapter, didRequestOpenLink link: String) {}
+    func terminal(_ adapter: any TerminalEngineAdapter, didRequestOpenFile path: String) {}
     func terminal(_ adapter: any TerminalEngineAdapter, didUpdateSearchTotal total: Int?, selected: Int?) {}
 }
 

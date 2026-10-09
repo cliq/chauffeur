@@ -104,6 +104,50 @@ struct RemoteOperationHandlersTests {
         #expect(error.code == "missing_session")
     }
 
+    @Test func documentsReadResolveAndAnswerConditionally() async throws {
+        let fixture = try await Fixture.make(); defer { fixture.cleanup() }
+        let session = fixture.shellSession(worktreeID: nil, path: fixture.repo.path, title: "Docs worker")
+        try await fixture.runtime.store.save(session)
+        let runtime = try fixture.reopen(); try await runtime.start()
+        let handlers = RemoteOperationHandlers(runtime: runtime, root: fixture.root, hostName: "Mac")
+        let deviceID = UUID()
+        let file = fixture.repo.appendingPathComponent("notes.md")
+        try "# One\n".write(to: file, atomically: true, encoding: .utf8)
+
+        func read(_ path: String, session: UUID? = session.id, known: String? = nil) async -> Result<DocumentContent, RemoteError> {
+            switch await handlers.handle(.readDocument(DocumentReadRequest(sessionID: session, path: path, knownVersion: known)), deviceID: deviceID) {
+            case .success(.document(let content)): return .success(content)
+            case .success: return .failure(RemoteError(code: "unexpected", message: "Unexpected result"))
+            case .failure(let error): return .failure(error)
+            }
+        }
+        // Absolute paths need no session; relative ones resolve against the session's working directory.
+        let absolute = try await read(file.path, session: nil).get()
+        #expect(absolute.text == "# One\n" && absolute.requestedPath == file.path)
+        let relative = try await read("notes.md").get()
+        #expect(relative.text == "# One\n" && relative.requestedPath == "notes.md")
+        #expect(relative.path == (file.path as NSString).standardizingPath && relative.version == absolute.version)
+        // The returned version yields an unchanged answer; a rewrite yields the new text.
+        let unchanged = try await read("notes.md", known: relative.version).get()
+        #expect(unchanged.text == nil && unchanged.version == relative.version)
+        try "# Two, longer\n".write(to: file, atomically: true, encoding: .utf8)
+        let changed = try await read("notes.md", known: relative.version).get()
+        #expect(changed.text == "# Two, longer\n" && changed.version != relative.version)
+
+        guard case .failure(let missingFile) = await read("absent.md") else { Issue.record("Missing file was read"); return }
+        #expect(missingFile.code == "document_not_found")
+        guard case .failure(let missingSession) = await read("notes.md", session: UUID()) else { Issue.record("Unknown session was accepted"); return }
+        #expect(missingSession.code == "missing_session")
+        guard case .failure(let unknownList) = await handlers.handle(.listSessionDocuments(SessionDocumentsRequest(sessionID: UUID())), deviceID: deviceID) else { Issue.record("Unknown session listed"); return }
+        #expect(unknownList.code == "missing_session")
+        // A session whose terminal is not running still lists changed documents from git.
+        guard case .success(.sessionDocuments(let list)) = await handlers.handle(.listSessionDocuments(SessionDocumentsRequest(sessionID: session.id)), deviceID: deviceID) else {
+            Issue.record("Missing document list"); return
+        }
+        #expect(list.sessionID == session.id)
+        #expect(list.documents.first { $0.displayPath == "notes.md" }?.sources == [.changed])
+    }
+
     @Test func inventoryMapsProjectsFoldersCheckoutsAndSessions() async throws {
         let fixture = try await Fixture.make(); defer { fixture.cleanup() }
         // An archived preset in the same set, and an archived set with a live preset, are both hidden.

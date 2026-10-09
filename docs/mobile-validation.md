@@ -6,8 +6,8 @@ The sessions list now carries optional progress summaries. Terminal **… → Pr
 opens the registered HTML panel, refreshed with its JSON while the screen is active.
 Missing HTML falls back to the summary; disconnection preserves the last panel with
 an offline banner. This uses the existing authenticated connection and advertises
-`progress.v1`; older hosts produce an update message. No arbitrary file paths can
-be requested by the phone, and HTML has a private origin without credentials or
+`progress.v1`; older hosts produce an update message. The progress panel cannot
+request arbitrary file paths (document reads are a separate capability, see below), and HTML has a private origin without credentials or
 host filesystem access. The implementation-progress template's `progress.js` is
 synthesized from the registered JSON.
 
@@ -24,6 +24,27 @@ Verified on an isolated iPhone 17 / iOS 26.3 simulator:
 Run the renderer check with `xcodebuild -project Chauffeur.xcodeproj -scheme
 ChauffeurMobile -destination 'platform=iOS Simulator,id=<simulator-id>'
 -derivedDataPath build-mobile -skipPackagePluginValidation CODE_SIGNING_ALLOWED=NO test`.
+
+## Document reader — manual checklist
+
+Automated coverage lives in `ModelTests`, `DocumentFilesTests`, `DocumentPathHarvesterTests`,
+`RemoteOperationHandlersTests`, `RemoteHostSessionTests`, `TerminalLinkTargetTests` and `ChauffeurMobileTests`.
+Run the Mac build that advertises `documents.v1`, then drive the iOS app (booted simulator, not the unit-test one,
+or the paired iPhone) against a Claude Code session. Status: **open** until run.
+
+- [ ] Ask the agent to write `planning/test-reader.md`; tap the path in the Write row (OSC 8 `file://`) → Open
+  Document → rendered view.
+- [ ] Tap a bare relative path printed by the agent (e.g. `echo docs/mobile-remote.md`) and a soft-wrapped long path
+  in portrait.
+- [ ] In a Codex session, tap a printed `.md` path (bare-path route).
+- [ ] **More → Documents** shows mentioned and changed entries with badges and opens the reader.
+- [ ] Toggle Rendered/Source; use Find in Source; Copy Path; Share.
+- [ ] Scroll down, ask the agent to edit the file: content updates within about 2 s and the scroll position is kept.
+- [ ] In a rendered document, a relative `.md` link pushes the linked document, a `#heading` link scrolls, and an
+  https link opens Safari.
+- [ ] Open a `.swift` path: Source-only view. Open a directory, a binary and a file over 2 MiB: each shows a clear
+  error.
+- [ ] Against a Mac build without `documents.v1`: Documents shows the update message and the connection stays up.
 
 ## Original remote-access validation
 

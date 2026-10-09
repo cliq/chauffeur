@@ -54,6 +54,8 @@ public final class RemoteSessionController: TerminalEngineAdapterDelegate {
     @ObservationIgnored public var onClipboardCopy: ((String) -> Void)?
     /// Called when the user taps a web or mail link in the terminal. The app decides whether to open it.
     @ObservationIgnored public var onOpenLink: ((String) -> Void)?
+    /// Called when the user taps a file path in the terminal. The app opens it in the document reader.
+    @ObservationIgnored public var onOpenFile: ((String) -> Void)?
 
     private struct PendingInput: Sendable {
         var generation: UInt64
@@ -328,5 +330,9 @@ public final class RemoteSessionController: TerminalEngineAdapterDelegate {
 
     public func terminal(_ adapter: any TerminalEngineAdapter, didRequestOpenLink link: String) {
         onOpenLink?(link)
+    }
+
+    public func terminal(_ adapter: any TerminalEngineAdapter, didRequestOpenFile path: String) {
+        onOpenFile?(path)
     }
 }

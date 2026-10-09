@@ -220,6 +220,8 @@ public enum RemoteOperation: Equatable, Sendable, Codable {
     case resolveTicket(ResolveTicketRequest)
     case createGroup(CreateGroupRequest)
     case stopSession(StopSessionRequest)
+    case listSessionDocuments(SessionDocumentsRequest)
+    case readDocument(DocumentReadRequest)
 
     public var kind: String {
         switch self {
@@ -241,6 +243,8 @@ public enum RemoteOperation: Equatable, Sendable, Codable {
         case .resolveTicket: return "resolveTicket"
         case .createGroup: return "createGroup"
         case .stopSession: return "stopSession"
+        case .listSessionDocuments: return "listSessionDocuments"
+        case .readDocument: return "readDocument"
         }
     }
 
@@ -284,6 +288,10 @@ public enum RemoteOperation: Equatable, Sendable, Codable {
             self = .createGroup(try container.decode(CreateGroupRequest.self, forKey: .payload))
         case "stopSession":
             self = .stopSession(try container.decode(StopSessionRequest.self, forKey: .payload))
+        case "listSessionDocuments":
+            self = .listSessionDocuments(try container.decode(SessionDocumentsRequest.self, forKey: .payload))
+        case "readDocument":
+            self = .readDocument(try container.decode(DocumentReadRequest.self, forKey: .payload))
         default:
             throw DecodingError.dataCorrupted(
                 DecodingError.Context(
@@ -334,6 +342,10 @@ public enum RemoteOperation: Equatable, Sendable, Codable {
             try container.encode(payload, forKey: .payload)
         case .stopSession(let payload):
             try container.encode(payload, forKey: .payload)
+        case .listSessionDocuments(let payload):
+            try container.encode(payload, forKey: .payload)
+        case .readDocument(let payload):
+            try container.encode(payload, forKey: .payload)
         }
     }
 }
@@ -353,6 +365,8 @@ public enum RemoteResult: Equatable, Sendable, Codable {
     case uploadedFile(UploadedFileStatus)
     case ticketSuggestion(TicketSuggestionResult)
     case group(GroupSummary)
+    case sessionDocuments(SessionDocumentList)
+    case document(DocumentContent)
     case ack
 
     public var kind: String {
@@ -369,6 +383,8 @@ public enum RemoteResult: Equatable, Sendable, Codable {
         case .uploadedFile: return "uploadedFile"
         case .ticketSuggestion: return "ticketSuggestion"
         case .group: return "group"
+        case .sessionDocuments: return "sessionDocuments"
+        case .document: return "document"
         case .ack: return "ack"
         }
     }
@@ -401,6 +417,10 @@ public enum RemoteResult: Equatable, Sendable, Codable {
             self = .ticketSuggestion(try container.decode(TicketSuggestionResult.self, forKey: .payload))
         case "group":
             self = .group(try container.decode(GroupSummary.self, forKey: .payload))
+        case "sessionDocuments":
+            self = .sessionDocuments(try container.decode(SessionDocumentList.self, forKey: .payload))
+        case "document":
+            self = .document(try container.decode(DocumentContent.self, forKey: .payload))
         case "ack":
             self = .ack
         default:
@@ -440,6 +460,10 @@ public enum RemoteResult: Equatable, Sendable, Codable {
         case .ticketSuggestion(let payload):
             try container.encode(payload, forKey: .payload)
         case .group(let payload):
+            try container.encode(payload, forKey: .payload)
+        case .sessionDocuments(let payload):
+            try container.encode(payload, forKey: .payload)
+        case .document(let payload):
             try container.encode(payload, forKey: .payload)
         case .ack:
             break

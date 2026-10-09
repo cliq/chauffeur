@@ -58,6 +58,42 @@ public actor RemoteOperationHandlers {
                 let panel = try await Task.detached(priority: .utility) { try RemoteProgressReader.panel(session: session) }.value
                 return .success(.sessionProgress(panel))
             } catch { return .failure(Self.remoteError(error)) }
+        case .listSessionDocuments(let request):
+            do {
+                let view = try await runtime.snapshot().decode(RemoteInventoryBuilder.RuntimeSnapshotView.self)
+                guard let session = view.sessions.first(where: { $0.id == request.sessionID }) else {
+                    throw ChauffeurError("missing_session", "This session no longer exists on the Mac")
+                }
+                let documents = await SessionDocumentInventory.build(session: session, terminals: runtime.terminals, scrollbackLines: view.settings?.scrollbackLines ?? RetentionSettings().scrollbackLines)
+                return .success(.sessionDocuments(SessionDocumentList(sessionID: session.id, documents: documents)))
+            } catch { return .failure(Self.remoteError(error)) }
+        case .readDocument(let request):
+            do {
+                var session: Session?
+                if let sessionID = request.sessionID {
+                    let view = try await runtime.snapshot().decode(RemoteInventoryBuilder.RuntimeSnapshotView.self)
+                    guard let found = view.sessions.first(where: { $0.id == sessionID }) else {
+                        throw ChauffeurError("missing_session", "This session no longer exists on the Mac")
+                    }
+                    session = found
+                }
+                let workingDirectory = session?.launch.workingDirectory, additionalPaths = session?.launch.additionalPaths ?? []
+                let content = try await Task.detached(priority: .utility) { () throws -> DocumentContent in
+                    let path = DocumentFiles.resolve(request.path, workingDirectory: workingDirectory, additionalPaths: additionalPaths)
+                    let stat = try DocumentFiles.stat(path: path)
+                    if request.knownVersion == stat.version {
+                        return DocumentContent(requestedPath: request.path, path: path, version: stat.version, modifiedAt: stat.modifiedAt, size: stat.size, text: nil)
+                    }
+                    let (text, read) = try DocumentFiles.read(path: path)
+                    let content = DocumentContent(requestedPath: request.path, path: path, version: read.version, modifiedAt: read.modifiedAt, size: read.size, text: text)
+                    // JSON escaping can expand file contents. Leave room for the response envelope.
+                    guard try RemoteJSON.encode(RemoteResult.document(content)).count < Int(RemoteFraming.maxPayloadBytes) - 4096 else {
+                        throw ChauffeurError("document_too_large", "The document is too large to send to this device.", path: path)
+                    }
+                    return content
+                }.value
+                return .success(.document(content))
+            } catch { return .failure(Self.remoteError(error)) }
         case .listWorktreeBranches(let request):
             do {
                 let params: JSONValue = .object(["projectID": .string(request.projectID.uuidString), "folderID": .string(request.folderID.uuidString)])
@@ -284,7 +320,9 @@ public actor RemoteOperationHandlers {
 
     private static func remoteError(_ error: Error) -> RemoteError {
         if let error = error as? ChauffeurError {
-            return RemoteError(code: error.code, message: error.message, retryable: ["launch_pending", "worktree_pending"].contains(error.code))
+            // Document errors name the resolved host path so the reader can show what was tried.
+            let message = error.code.hasPrefix("document_") ? error.errorDescription ?? error.message : error.message
+            return RemoteError(code: error.code, message: message, retryable: ["launch_pending", "worktree_pending"].contains(error.code))
         }
         if let error = error as? RemoteError { return error }
         return RemoteError(code: "internal_error", message: error.localizedDescription)

@@ -24,6 +24,8 @@ enum MobileRoute: Hashable {
     case sessions
     case terminal
     case progress(sessionID: UUID)
+    case documents(sessionID: UUID)
+    case document(sessionID: UUID, path: String)
     /// `projectID` optionally preselects the project for a new session.
     case location(projectID: UUID?)
     case launch(LaunchLocation)
@@ -178,6 +180,11 @@ final class MobileAppModel {
             return host.capabilities.contains(RemoteProtocol.launchCoordination)
         }
         return false
+    }
+
+    var documentsAreSupported: Bool {
+        guard isConnected else { return false }
+        return session?.isDocumentsSupported ?? false
     }
 
     var groupCreationIsSupported: Bool {
@@ -497,6 +504,9 @@ final class MobileAppModel {
         controller.onOpenLink = { link in
             guard let url = URL(string: link) else { return }
             UIApplication.shared.open(url)
+        }
+        controller.onOpenFile = { [weak self] path in
+            self?.path.append(.document(sessionID: sessionID, path: path))
         }
         terminals[sessionID] = controller
         return controller

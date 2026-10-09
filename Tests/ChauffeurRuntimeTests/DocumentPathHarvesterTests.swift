@@ -1,0 +1,35 @@
+import Testing
+@testable import ChauffeurRuntimeKit
+
+struct DocumentPathHarvesterTests {
+    @Test func extractsClaudeAndCodexStylePathsMostRecentFirst() {
+        let text = """
+        ⏺ Write(planning/implementation/foo-plan.md)
+        See `docs/mobile-remote.md` for details.
+        Opened /Users/x/notes.md:12 and /Users/x/other.MD:3:4
+        see [plan](./a/b.md).
+        ref <../up/c.markdown>, "~/home/d.mdx";
+        file:///Users/a/b%20c.md
+        """
+        #expect(DocumentPathHarvester.paths(in: text) == [
+            "/Users/a/b c.md", "~/home/d.mdx", "../up/c.markdown", "./a/b.md",
+            "/Users/x/other.MD", "/Users/x/notes.md", "docs/mobile-remote.md", "planning/implementation/foo-plan.md"
+        ])
+    }
+
+    @Test func ignoresWebURLsAndDeduplicatesWithLatestMentionWinning() {
+        let text = """
+        https://github.com/o/r/blob/main/README.md
+        a.md
+        b.md
+        a.md
+        """
+        #expect(DocumentPathHarvester.paths(in: text) == ["a.md", "b.md"])
+    }
+
+    @Test func pathsWithSpacesAreNotMatchedWholeAndOtherExtensionsAreIgnored() {
+        let paths = DocumentPathHarvester.paths(in: "my notes/plan one.md and src/main.swift and v1.2")
+        #expect(!paths.contains("my notes/plan one.md"))
+        #expect(!paths.contains("src/main.swift"))
+    }
+}

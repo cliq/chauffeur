@@ -1,0 +1,85 @@
+:root {
+  color-scheme: light dark;
+  --fg: #1c1c1e;
+  --muted: #6c6c70;
+  --link: #007aff;
+  --border: #d1d1d6;
+  --code-bg: rgba(120, 120, 128, 0.12);
+  --quote-bar: #c7c7cc;
+  --th-bg: rgba(120, 120, 128, 0.08);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --fg: #f2f2f7;
+    --muted: #98989d;
+    --link: #0a84ff;
+    --border: #48484a;
+    --code-bg: rgba(120, 120, 128, 0.28);
+    --quote-bar: #636366;
+    --th-bg: rgba(120, 120, 128, 0.18);
+  }
+}
+
+html { -webkit-text-size-adjust: 100%; }
+
+body {
+  font: -apple-system-body;
+  -webkit-text-size-adjust: 100%;
+  margin: 0;
+  padding: 16px;
+  line-height: 1.5;
+  color: var(--fg);
+  background: transparent;
+  overflow-wrap: break-word;
+}
+
+h1, h2, h3, h4, h5, h6 { line-height: 1.25; margin: 1.4em 0 0.5em; font-weight: 600; }
+h1 { font-size: 1.8em; padding-bottom: 0.3em; border-bottom: 1px solid var(--border); }
+h2 { font-size: 1.45em; padding-bottom: 0.25em; border-bottom: 1px solid var(--border); }
+h3 { font-size: 1.2em; }
+h4 { font-size: 1em; }
+h5 { font-size: 0.9em; }
+h6 { font-size: 0.85em; color: var(--muted); }
+#doc > :first-child { margin-top: 0; }
+
+p, ul, ol, blockquote, pre, table { margin: 0 0 1em; }
+
+a { color: var(--link); text-decoration: none; }
+
+blockquote {
+  margin-left: 0;
+  padding: 0 1em;
+  color: var(--muted);
+  border-left: 4px solid var(--quote-bar);
+}
+
+hr { border: 0; border-top: 1px solid var(--border); margin: 1.5em 0; }
+
+ul, ol { padding-left: 1.6em; }
+li + li { margin-top: 0.25em; }
+li > ul, li > ol { margin: 0.25em 0 0; }
+li.task-list-item { list-style: none; margin-left: -1.4em; }
+li.task-list-item input[type="checkbox"] { margin: 0 0.5em 0 0; vertical-align: middle; }
+
+code, pre {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.85em;
+}
+code { background: var(--code-bg); padding: 0.15em 0.35em; border-radius: 4px; }
+pre {
+  background: var(--code-bg);
+  padding: 12px;
+  border-radius: 8px;
+  overflow-x: auto;
+  white-space: pre;
+}
+pre code { background: transparent; padding: 0; font-size: inherit; }
+
+.table-scroll { overflow-x: auto; margin: 0 0 1em; }
+.table-scroll table { margin: 0; }
+table { border-collapse: collapse; }
+th, td { border: 1px solid var(--border); padding: 6px 12px; }
+th { background: var(--th-bg); font-weight: 600; text-align: left; }
+
+img { max-width: 100%; height: auto; }

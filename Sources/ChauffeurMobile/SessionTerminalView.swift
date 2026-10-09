@@ -77,6 +77,12 @@ struct SessionTerminalView: View {
                             model.path.append(.progress(sessionID: sessionID))
                         }
                         .accessibilityIdentifier("terminal-progress")
+                        if model.documentsAreSupported {
+                            Button("Documents", systemImage: "doc.text") {
+                                model.path.append(.documents(sessionID: sessionID))
+                            }
+                            .accessibilityIdentifier("terminal-documents")
+                        }
                         Button("Close", systemImage: "xmark.rectangle") {
                             close(sessionID)
                         }

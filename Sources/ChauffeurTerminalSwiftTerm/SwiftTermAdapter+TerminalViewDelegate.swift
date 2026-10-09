@@ -38,13 +38,15 @@ extension SwiftTermAdapter: @preconcurrency TerminalViewDelegate {
         nil
     }
 
-    /// Only web and mail links are surfaced. Implementing this also replaces SwiftTerm's macOS
-    /// default, which would otherwise open any scheme through `NSWorkspace`.
+    /// Web and mail links and file paths are surfaced, each on its own delegate channel; any other
+    /// scheme is dropped. Implementing this also replaces SwiftTerm's macOS default, which would
+    /// otherwise open any scheme through `NSWorkspace`.
     public func requestOpenLink(source: TerminalView, link: String, params: [String: String]) {
-        guard let url = URL(string: link),
-              let scheme = url.scheme?.lowercased(),
-              ["http", "https", "mailto"].contains(scheme) else { return }
-        delegate?.terminal(self, didRequestOpenLink: link)
+        switch TerminalLinkTarget.classify(link) {
+        case .web: delegate?.terminal(self, didRequestOpenLink: link)
+        case .file(let path): delegate?.terminal(self, didRequestOpenFile: path)
+        case .other: break
+        }
     }
 
     public func scrolled(source: TerminalView, position: Double) {}

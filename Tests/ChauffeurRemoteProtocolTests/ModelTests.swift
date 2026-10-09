@@ -65,6 +65,28 @@ struct ModelTests {
     }
 
 
+    @Test func documentOperationsAndResultsRoundTrip() throws {
+        let sessionID = UUID()
+        let list = RemoteOperation.listSessionDocuments(SessionDocumentsRequest(sessionID: sessionID))
+        #expect(list.kind == "listSessionDocuments")
+        #expect(try RemoteJSON.decode(RemoteOperation.self, from: RemoteJSON.encode(list)) == list)
+        let read = RemoteOperation.readDocument(DocumentReadRequest(sessionID: nil, path: "~/notes.md", knownVersion: "1-2-3-4"))
+        #expect(read.kind == "readDocument")
+        #expect(try RemoteJSON.decode(RemoteOperation.self, from: RemoteJSON.encode(read)) == read)
+        let documents = RemoteResult.sessionDocuments(SessionDocumentList(sessionID: sessionID, documents: [
+            SessionDocument(path: "/repo/plan.md", displayPath: "plan.md", sources: [.mentioned, .changed], modifiedAt: Date(timeIntervalSince1970: 100), size: 42)
+        ]))
+        #expect(documents.kind == "sessionDocuments")
+        #expect(try RemoteJSON.decode(RemoteResult.self, from: RemoteJSON.encode(documents)) == documents)
+        for text in [Optional("# Title"), nil] {
+            let content = RemoteResult.document(DocumentContent(requestedPath: "plan.md", path: "/repo/plan.md", version: "1-2-3-4", modifiedAt: Date(timeIntervalSince1970: 100), size: 7, text: text))
+            #expect(content.kind == "document")
+            #expect(try RemoteJSON.decode(RemoteResult.self, from: RemoteJSON.encode(content)) == content)
+        }
+        #expect(RemoteProtocol.capabilities.contains(RemoteProtocol.documents))
+        #expect(RemoteProtocol.documents == "documents.v1")
+    }
+
     @Test(arguments: [
         (RemoteSessionState.starting, true),
         (.running, true),

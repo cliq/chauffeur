@@ -142,6 +142,11 @@ public final class RemoteHostSession {
         return host.capabilities.contains(RemoteProtocol.sessionStop)
     }
 
+    public var isDocumentsSupported: Bool {
+        guard case .connected(let host) = connectionState else { return false }
+        return host.capabilities.contains(RemoteProtocol.documents)
+    }
+
     @ObservationIgnored private let journal: any PendingOperationJournal
     @ObservationIgnored private let clientName: String
     @ObservationIgnored private let clientVersion: String
@@ -315,6 +320,30 @@ public final class RemoteHostSession {
             throw RemoteClientError.invalidResponse("The Mac returned progress for a different session.")
         }
         return panel
+    }
+
+    public func sessionDocuments(sessionID: UUID) async throws -> SessionDocumentList {
+        guard case .connected(let host) = connectionState, let connection else { throw RemoteClientError.disconnected }
+        guard host.capabilities.contains(RemoteProtocol.documents) else {
+            throw RemoteClientError.invalidResponse("Update Chauffeur on your Mac to read documents on this device.")
+        }
+        let result = try await connection.request(.listSessionDocuments(SessionDocumentsRequest(sessionID: sessionID)))
+        guard case .sessionDocuments(let list) = result, list.sessionID == sessionID else {
+            throw RemoteClientError.invalidResponse("The Mac returned documents for a different session.")
+        }
+        return list
+    }
+
+    public func readDocument(sessionID: UUID?, path: String, knownVersion: String?) async throws -> DocumentContent {
+        guard case .connected(let host) = connectionState, let connection else { throw RemoteClientError.disconnected }
+        guard host.capabilities.contains(RemoteProtocol.documents) else {
+            throw RemoteClientError.invalidResponse("Update Chauffeur on your Mac to read documents on this device.")
+        }
+        let result = try await connection.request(.readDocument(DocumentReadRequest(sessionID: sessionID, path: path, knownVersion: knownVersion)))
+        guard case .document(let content) = result else {
+            throw RemoteClientError.invalidResponse("The Mac returned an unexpected response for this document.")
+        }
+        return content
     }
 
     public func worktreeBranches(projectID: UUID, folderID: UUID) async throws -> [WorktreeBranchOption] {

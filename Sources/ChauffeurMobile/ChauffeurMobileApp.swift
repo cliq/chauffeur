@@ -39,6 +39,10 @@ struct RootView: View {
                         SessionTerminalView(model: model)
                     case .progress(let sessionID):
                         SessionProgressView(model: model, sessionID: sessionID)
+                    case .documents(let sessionID):
+                        SessionDocumentsView(model: model, sessionID: sessionID)
+                    case .document(let sessionID, let path):
+                        DocumentReaderView(model: model, sessionID: sessionID, path: path)
                     case .location(let projectID):
                         LocationView(model: model, preselectedProjectID: projectID)
                     case .launch(let location):

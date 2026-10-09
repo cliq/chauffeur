@@ -164,6 +164,24 @@ title only changes the suggested branch. The Mac resolves the ticket, so the
 template and the link-in-task toggle come from **Repository Settings → Tickets**
 on the Mac. Macs without `ticket.resolve.v1` leave both fields as typed.
 
+**Reading documents**: markdown and other text files an agent mentions can be
+read on the phone without leaving the app. Tap a file path in the terminal — a
+bare path, or Claude Code's `file://` link — and choose **Open Document** (or
+**Copy Path**). **More → Documents** lists the files mentioned in the session's
+recent terminal output plus markdown files git reports as changed or untracked
+(existing files only, up to 100). The reader renders markdown (raw HTML is
+disabled); relative links to other documents open another reader, `http(s)`
+links open Safari, and `#heading` links scroll. The **Rendered/Source** toggle
+switches to selectable monospaced text with Find; non-markdown files open in
+Source only. While the reader is visible it checks for changes every 2 seconds
+and updates in place, keeping the scroll position. The Mac resolves `~` and
+relative paths against the session's launch working directory, so a relative
+path after the agent has `cd`'d elsewhere may not be found; the error shows the
+resolved path. Files over 2 MiB, directories, binaries and non-UTF-8 files show
+an error. The feature uses the `documents.v1` capability (operations
+`listSessionDocuments` and `readDocument`); with an older Mac the phone shows
+"Update Chauffeur on your Mac" and never sends the request.
+
 On disconnect (Wi-Fi loss, backgrounding, or the Mac becoming unreachable),
 terminal input is disabled and the screen shows the last known state as not
 live. Reconnecting reattaches to the same process and refreshes the current
@@ -220,8 +238,16 @@ fails on a supported OS.
 Remote access never exposes the local Unix-socket IPC interface or an
 unauthenticated shell to the network. It's a separate, authenticated listener
 with an explicit operation allowlist (inventory, worktree preview, launch,
-operation status, terminal attach/resize/detach); remote clients cannot
-dispatch arbitrary local IPC methods or reach arbitrary filesystem paths.
+operation status, terminal attach/resize/detach, session document list and
+read); remote clients cannot dispatch arbitrary local IPC methods.
+
+**Document reads are not path-contained.** `readDocument` (capability
+`documents.v1`) reads any regular file the Mac user can read, not only files
+inside a project. This is intentional: a paired device already has
+shell-equivalent access, because it can launch shell sessions. Reads are
+limited to regular files (opened without blocking), at most 2 MiB, valid UTF-8,
+and small enough that the encoded result fits the 4 MiB frame. Treat pairing a
+phone as granting read access to everything your Mac account can read.
 
 The main listener rate-limits connections: 8 concurrent connections, 5 failed
 `hello` attempts per source address per minute, and a 10-second handshake
