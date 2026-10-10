@@ -77,6 +77,10 @@ struct AppSnapshot: Decodable, Sendable {
         for run in snapshot.worktreeSetups ?? [] where watchedSetupRuns.remove(run.id) != nil { openSetupWindow?(run.id) }
     }
     var openWelcomeWindow: (() -> Void)?
+    /// Opens a paired remote server's window, or the Remote Servers window for nil.
+    var openRemoteHostWindow: ((UUID?) -> Void)?
+    /// A remote server route from the menu bar, waiting for a window that can open it.
+    private var pendingRemoteHostRoute: RemoteHostRoute?
     private var openedRouteID: UUID?
     func openSessionURL(_ url: URL) {
         historyDestination = nil
@@ -85,6 +89,13 @@ struct AppSnapshot: Decodable, Sendable {
             pendingSessionRoute = nil; pendingProjectRoute = nil; pendingFolderRoute = nil
             folderSelection = nil; projectCreation = nil
             pendingWelcomeRoute = true
+            processPendingRoute()
+            return
+        }
+        if let route = RemoteHostRoute(url: url) {
+            // Remote windows don't need this Mac's projects; leave its windows as they are.
+            skipAutomaticWindowRestore = true
+            pendingRemoteHostRoute = route
             processPendingRoute()
             return
         }
@@ -108,6 +119,11 @@ struct AppSnapshot: Decodable, Sendable {
             pendingWelcomeRoute = false
             welcomePresentationID = UUID()
             openWelcomeWindow()
+            NSApp.activate(ignoringOtherApps: true)
+        }
+        if let route = pendingRemoteHostRoute, let openRemoteHostWindow {
+            pendingRemoteHostRoute = nil
+            openRemoteHostWindow(route.hostID)
             NSApp.activate(ignoringOtherApps: true)
         }
         processFolderRoute()

@@ -1,6 +1,7 @@
 import SwiftUI
 import AppKit
 import ChauffeurCore
+import ChauffeurTerminalGhostty
 
 @main struct ChauffeurApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
@@ -25,6 +26,7 @@ import ChauffeurCore
             CommandGroup(replacing: .newItem) {
                 Button("Open Project…") { openWindow(id: "welcome") }.keyboardShortcut("o", modifiers: [.command, .shift])
                 RecentProjectsMenu(model: model)
+                RemoteServersMenu(store: delegate.remote)
                 Button("New Tab…") { command("new-tab") }.keyboardShortcut("t")
                 Button("New Session…") { NotificationCenter.default.post(name: .chauffeurCommand, object: "new-session") }.keyboardShortcut("n")
             }
@@ -58,6 +60,20 @@ import ChauffeurCore
                 Button("Chauffeur Help") { openWindow(id: "help") }
             }
         }
+        Window("Remote Servers", id: "remote-servers") {
+            RemoteServersView(store: delegate.remote).modifier(AppWindowSetup()).environmentObject(model)
+        }
+        .defaultSize(width: 560, height: 520)
+        .defaultLaunchBehavior(.suppressed)
+        .restorationBehavior(.disabled)
+        WindowGroup("Remote Server", id: "remote-host", for: UUID.self) { $hostID in
+            if let hostID {
+                RemoteHostWindow(store: delegate.remote, hostID: hostID).modifier(AppWindowSetup()).environmentObject(model)
+            }
+        }
+        .defaultSize(width: 1100, height: 720)
+        .defaultLaunchBehavior(.suppressed)
+        .restorationBehavior(.disabled)
         Settings { SettingsView().modifier(AppWindowSetup()).environmentObject(model) }
             .defaultSize(width: 830, height: 550)
             .windowResizability(.contentMinSize)
@@ -81,6 +97,10 @@ import ChauffeurCore
 
 @MainActor final class AppDelegate: NSObject, NSApplicationDelegate {
     let model = AppModel()
+    /// Paired remote servers and their windows' clients.
+    lazy var remote = RemoteHostStore { [model] in
+        GhosttyTerminalAdapter(appearance: model.terminalStyle.opaque.appearance(scrollback: model.snapshot.settings.scrollbackLines), acceptsFileDrops: false)
+    }
     private var errors: AppErrorPresenter?
     private var preparingToQuit = false
     private var quitConfirmation: QuitConfirmation?
@@ -203,6 +223,9 @@ struct AppWindowSetup: ViewModifier {
             model.openProjectWindow = { id in openWindow(id: "project", value: id) }
             model.openSetupWindow = { id in openWindow(id: "worktree-setup", value: id) }
             model.openWelcomeWindow = { openWindow(id: "welcome") }
+            model.openRemoteHostWindow = { id in
+                if let id { openWindow(id: "remote-host", value: id) } else { openWindow(id: "remote-servers") }
+            }
             model.processPendingRoute()
         }
     }

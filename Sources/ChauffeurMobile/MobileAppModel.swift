@@ -45,9 +45,9 @@ final class MobileAppModel {
     /// The Mac runtime's main port for this build; pairing listens on the next port.
     static let defaultPort: Int = {
         #if DEBUG
-        51848
+        RemoteProtocol.debugPort
         #else
-        51847
+        RemoteProtocol.releasePort
         #endif
     }()
 

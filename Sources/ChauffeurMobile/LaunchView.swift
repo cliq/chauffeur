@@ -265,7 +265,7 @@ struct LaunchView: View {
             if let ticketBranch, ticketBranch.title == newTitle {
                 suggestBranch(ticketBranch.branch)
             } else {
-                suggestBranch(Self.branchSlug(from: newTitle))
+                suggestBranch(WorktreeCreationSpec.branchSlug(from: newTitle))
             }
         }
         .task(id: title) {
@@ -473,25 +473,6 @@ struct LaunchView: View {
     private func optional(_ text: String) -> String? {
         let value = trimmed(text)
         return value.isEmpty ? nil : value
-    }
-
-    /// Lowercase slug: letters and digits kept, everything else collapsed to a single hyphen.
-    static func branchSlug(from title: String) -> String {
-        var slug = ""
-        var previousWasHyphen = true
-        for scalar in title.lowercased().unicodeScalars {
-            if CharacterSet.alphanumerics.contains(scalar), scalar.isASCII {
-                slug.unicodeScalars.append(scalar)
-                previousWasHyphen = false
-            } else if !previousWasHyphen {
-                slug.append("-")
-                previousWasHyphen = true
-            }
-        }
-        while slug.hasSuffix("-") {
-            slug.removeLast()
-        }
-        return slug
     }
 }
 

@@ -96,4 +96,10 @@ struct ModelTests {
         )
         #expect(checkout.id == checkout.path)
     }
+
+    @Test func branchSlugsKeepASCIILettersAndDigitsJoinedBySingleHyphens() {
+        #expect(WorktreeCreationSpec.branchSlug(from: "Fix: the Login  flow!") == "fix-the-login-flow")
+        #expect(WorktreeCreationSpec.branchSlug(from: "  Café 2.0 ") == "caf-2-0")
+        #expect(WorktreeCreationSpec.branchSlug(from: "---") == "")
+    }
 }

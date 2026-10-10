@@ -61,6 +61,11 @@ import ChauffeurCore
         let heading = menu.addItem(withTitle: "\(AppBuild.current.displayName) · Service running", action: nil, keyEquivalent: "")
         heading.isEnabled = false
         menu.addItem(.separator())
+        let chooser = menu.addItem(withTitle: "Open Project…", action: #selector(openProjectChooser), keyEquivalent: "")
+        chooser.target = self
+        let open = menu.addItem(withTitle: "Open \(AppBuild.current.displayName)…", action: #selector(openApp), keyEquivalent: "")
+        open.target = self
+        menu.addItem(.separator())
         if entries.isEmpty {
             menu.addItem(withTitle: "No active sessions", action: nil, keyEquivalent: "").isEnabled = false
         }
@@ -69,11 +74,16 @@ import ChauffeurCore
             item.target = self
             item.representedObject = entry.route.url
         }
+        // Paired remote servers, read by name only; the app owns their credentials.
+        let servers = RemoteHostListing.load()
+        if !servers.isEmpty { menu.addItem(.separator()) }
+        for server in servers {
+            let item = menu.addItem(withTitle: "\(server.name) — remote server", action: #selector(openProject(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = RemoteHostRoute(hostID: server.hostID).url
+            item.toolTip = "\(server.host):\(server.port)"
+        }
         menu.addItem(.separator())
-        let chooser = menu.addItem(withTitle: "Open Project…", action: #selector(openProjectChooser), keyEquivalent: "")
-        chooser.target = self
-        let open = menu.addItem(withTitle: "Open \(AppBuild.current.displayName)…", action: #selector(openApp), keyEquivalent: "")
-        open.target = self
         let quit = menu.addItem(withTitle: "Quit Chauffeur...", action: #selector(quitApp), keyEquivalent: "")
         quit.target = self
         quit.toolTip = "Quit the app and background service."

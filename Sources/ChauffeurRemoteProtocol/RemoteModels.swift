@@ -1,4 +1,8 @@
+#if canImport(CryptoKit)
 import CryptoKit
+#else
+import Crypto
+#endif
 import Foundation
 
 // MARK: - Sessions
@@ -332,6 +336,24 @@ public struct WorktreeCreationSpec: Codable, Equatable, Sendable {
         self.reuseExistingBranch = reuseExistingBranch ? true : nil
         self.branch = branch
         self.baseRef = baseRef
+    }
+
+    /// The branch clients suggest for a session title: lowercase ASCII letters and digits
+    /// kept, everything else collapsed to one hyphen.
+    public static func branchSlug(from title: String) -> String {
+        var slug = ""
+        var previousWasHyphen = true
+        for scalar in title.lowercased().unicodeScalars {
+            if CharacterSet.alphanumerics.contains(scalar), scalar.isASCII {
+                slug.unicodeScalars.append(scalar)
+                previousWasHyphen = false
+            } else if !previousWasHyphen {
+                slug.append("-")
+                previousWasHyphen = true
+            }
+        }
+        while slug.hasSuffix("-") { slug.removeLast() }
+        return slug
     }
 }
 
