@@ -50,7 +50,11 @@ enum SessionDocumentInventory {
         let standardized = (workingDirectory as NSString).standardizingPath
         let base = standardized.hasSuffix("/") ? standardized : standardized + "/"
         if !workingDirectory.isEmpty, path.hasPrefix(base) { return String(path.dropFirst(base.count)) }
-        return (path as NSString).abbreviatingWithTildeInPath
+        // `abbreviatingWithTildeInPath`, which swift-corelibs-foundation lacks.
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        if path == home { return "~" }
+        if path.hasPrefix(home + "/") { return "~" + path.dropFirst(home.count) }
+        return path
     }
 
     /// Paths from `git status --porcelain=v1 -z`: renames and copies yield the new path, deletions are skipped.

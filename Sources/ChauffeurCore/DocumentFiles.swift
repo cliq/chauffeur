@@ -55,7 +55,7 @@ public enum DocumentFiles {
     private static func open(_ path: String) throws -> (FileHandle, FileStatus, URL) {
         let url = URL(fileURLWithPath: path).standardizedFileURL
         // Nonblocking open plus fstat avoids hanging on FIFOs or reading device files.
-        let descriptor = Darwin.open(url.path, O_RDONLY | O_NONBLOCK | O_CLOEXEC)
+        let descriptor = POSIX.open(url.path, O_RDONLY | O_NONBLOCK | O_CLOEXEC)
         guard descriptor >= 0 else { throw ChauffeurError("document_not_found", "Cannot open the document", path: url.path) }
         let handle = FileHandle(fileDescriptor: descriptor, closeOnDealloc: true)
         var info = FileStatus()
