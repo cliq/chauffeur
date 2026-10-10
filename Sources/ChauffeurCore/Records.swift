@@ -331,6 +331,9 @@ public struct WindowState: Record, Equatable {
     /// Canonical paths of worktrees the user set aside. The Repositories sidebar
     /// lists them in a separate Hidden section instead of under their repository.
     public var hiddenWorktreePaths: [String] = []
+    /// The tab last selected in each checkout, keyed by canonical checkout path,
+    /// so returning to a checkout shows the tab the user left there.
+    public var lastSelectedSessionByCheckout: [String: UUID] = [:]
     /// Legacy tab layout fields. Older records still carry them; new writes
     /// leave them empty.
     public var tabs: [UUID] = []
@@ -353,6 +356,7 @@ public struct WindowState: Record, Equatable {
         sessionTabOrder = try container.decodeIfPresent([UUID].self, forKey: .sessionTabOrder) ?? []
         closedSessionTabs = try container.decodeIfPresent([UUID].self, forKey: .closedSessionTabs) ?? []
         hiddenWorktreePaths = try container.decodeIfPresent([String].self, forKey: .hiddenWorktreePaths) ?? []
+        lastSelectedSessionByCheckout = try container.decodeIfPresent([String: UUID].self, forKey: .lastSelectedSessionByCheckout) ?? [:]
         tabs = try container.decodeIfPresent([UUID].self, forKey: .tabs) ?? []
         splitSessionID = try container.decodeIfPresent(UUID.self, forKey: .splitSessionID)
         sidebarVisible = try container.decodeIfPresent(Bool.self, forKey: .sidebarVisible) ?? true
@@ -364,6 +368,7 @@ public struct WindowState: Record, Equatable {
         try Validation.unique(closedSessionTabs, field: "closed session tab")
         try Validation.unique(hiddenWorktreePaths, field: "hidden worktree path")
         for path in hiddenWorktreePaths { try Validation.absolutePath(path) }
+        for path in lastSelectedSessionByCheckout.keys { try Validation.absolutePath(path) }
         if let selectedWorktreePath { try Validation.absolutePath(selectedWorktreePath) }
     }
 }

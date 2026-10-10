@@ -35,12 +35,30 @@ struct WorktreeNavigationTests {
     @Test func olderWindowRecordsDefaultToUnsortedTabs() throws {
         var value = try JSONCoding.decode(JSONValue.self, from: JSONCoding.encode(WindowState(projectID: UUID())))
         if case .object(var fields) = value {
-            fields.removeValue(forKey: "sessionTabOrder"); fields.removeValue(forKey: "closedSessionTabs"); fields.removeValue(forKey: "hiddenWorktreePaths"); value = .object(fields)
+            fields.removeValue(forKey: "sessionTabOrder"); fields.removeValue(forKey: "closedSessionTabs"); fields.removeValue(forKey: "hiddenWorktreePaths"); fields.removeValue(forKey: "lastSelectedSessionByCheckout"); value = .object(fields)
         }
         let restored = try value.decode(WindowState.self)
         #expect(restored.sessionTabOrder.isEmpty)
         #expect(restored.closedSessionTabs.isEmpty)
         #expect(restored.hiddenWorktreePaths.isEmpty)
+        #expect(restored.lastSelectedSessionByCheckout.isEmpty)
+    }
+
+    @Test func lastSelectedTabPerCheckoutSurvivesARestart() throws {
+        let project = Project(name: "P", presetSetID: UUID())
+        let folder = ProjectFolder(path: "/tmp/repo")
+        let first = session(folder: folder, project: project, directory: "/tmp/worktrees/feature")
+        let second = session(folder: folder, project: project, directory: "/tmp/worktrees/feature")
+        var state = WindowState(projectID: project.id)
+        state.lastSelectedSessionByCheckout = ["/tmp/worktrees/feature": second.id]
+        let restored = try JSONCoding.decode(WindowState.self, from: JSONCoding.encode(state))
+        let remembered = restored.lastSelectedSessionByCheckout["/tmp/worktrees/feature"]
+        #expect(remembered == second.id)
+        #expect(WorktreeSessions.selection(in: [first, second], selectedID: remembered) == second.id)
+        // A remembered tab that has since closed falls back to the first live tab.
+        #expect(WorktreeSessions.selection(in: [first], selectedID: remembered) == first.id)
+        state.lastSelectedSessionByCheckout = ["relative/path": first.id]
+        #expect(throws: (any Error).self) { try state.validate() }
     }
 
     @Test func hiddenWorktreesSurviveARestart() throws {

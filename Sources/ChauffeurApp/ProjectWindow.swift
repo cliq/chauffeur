@@ -39,12 +39,12 @@ struct PendingTerminalTab: Identifiable {
     }
     /// Selects a checkout. A `nil` path shows the repository overview. The
     /// current session stays selected when it already runs in that checkout;
-    /// otherwise the first live session there is shown.
-    func selectCheckout(folderID: UUID, path: String?, sessions: [Session]) {
+    /// otherwise the tab last selected there is shown, then the first live session.
+    func selectCheckout(folderID: UUID, path: String?, sessions: [Session], remembered: UUID? = nil) {
         state.selectedFolderID = folderID
         state.selectedWorktreePath = path
         if let current = state.selectedSessionID, sessions.contains(where: { $0.id == current }) { requestFocus(current); return }
-        state.selectedSessionID = path == nil ? nil : WorktreeSessions.selection(in: sessions, selectedID: nil)
+        state.selectedSessionID = path == nil ? nil : WorktreeSessions.selection(in: sessions, selectedID: remembered)
         requestFocus(state.selectedSessionID)
     }
     func selectSession(_ id: UUID, folderID: UUID?, path: String?) {
@@ -1000,13 +1000,15 @@ private struct ProjectWindowContent: View, Equatable {
     private func selectCheckout(folderID: UUID, path: String?) {
         guard let project, let folder = project.folders.first(where: { $0.id == folderID && $0.registered }) else { return }
         expandSidebar(folderID: folderID, path: path)
-        layout.selectCheckout(folderID: folderID, path: path, sessions: path.map { openSessions(in: folder, path: $0) } ?? [])
+        let remembered = path.flatMap { layout.state.lastSelectedSessionByCheckout[projectModel.canonical($0)] }
+        layout.selectCheckout(folderID: folderID, path: path, sessions: path.map { openSessions(in: folder, path: $0) } ?? [], remembered: remembered)
         if let id = layout.state.selectedSessionID { markRead(id) }
     }
     private func selectSession(_ id: UUID) {
         guard let session = projectSession(id), session.projectID == projectID else { return }
         let location = checkout(of: session)
         layout.selectSession(id, folderID: location.folderID, path: location.path)
+        if let path = location.path { layout.state.lastSelectedSessionByCheckout[projectModel.canonical(path)] = id }
         if layout.state.sidebarMode == .sessions, let group = layout.state.selectedGroupID, group != session.groupID { layout.state.selectedGroupID = nil }
         if let folderID = location.folderID {
             expandSidebar(folderID: folderID, path: location.path)
@@ -1091,7 +1093,10 @@ private struct ProjectWindowContent: View, Equatable {
                 }
                 let stillSelected = layout.state.selectedSessionID == pending.id
                 layout.pendingTabs.removeAll { $0.id == pending.id }
-                if stillSelected { layout.selectSession(session.id, folderID: folder.id, path: row.path) }
+                if stillSelected {
+                    layout.selectSession(session.id, folderID: folder.id, path: row.path)
+                    layout.state.lastSelectedSessionByCheckout[projectModel.canonical(row.path)] = session.id
+                }
             } catch {
                 layout.pendingTabs.removeAll { $0.id == pending.id }
                 if layout.state.selectedSessionID == pending.id {
@@ -1125,6 +1130,7 @@ private struct ProjectWindowContent: View, Equatable {
             // Pick up the shortened inventory before the row stops showing its progress.
             try await model.refresh()
             setHidden(row, false)
+            layout.state.lastSelectedSessionByCheckout[path] = nil
             if layout.selectedWorktreePath.map({ projectModel.canonical($0) == projectModel.canonical(row.path) }) == true {
                 layout.selectCheckout(folderID: row.folderID, path: nil, sessions: [])
             }
