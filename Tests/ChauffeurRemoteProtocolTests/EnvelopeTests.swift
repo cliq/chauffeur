@@ -42,7 +42,8 @@ struct EnvelopeTests {
             .setKeepAwakeSettings(KeepAwakeSettings(automatic: true, waitingMinutes: 45)),
             .setKeepAwakeTimer(KeepAwakeTimerRequest(until: Date(timeIntervalSince1970: 9_000))),
             .resolveTicket(ResolveTicketRequest(projectID: UUID(), folderID: UUID(), text: "https://acme.atlassian.net/browse/MBL-1")),
-            .createGroup(CreateGroupRequest(projectID: UUID(), name: "Review"))
+            .createGroup(CreateGroupRequest(projectID: UUID(), name: "Review")),
+            .stopSession(StopSessionRequest(sessionID: UUID(), force: true))
         ]
     }
 
@@ -109,7 +110,7 @@ struct EnvelopeTests {
         [
             "hello", "pair", "listInventory", "listWorktreeBranches", "previewWorktreeDestination", "launch",
             "getOperationStatus", "attachTerminal", "terminalResize", "detachTerminal", "getKeepAwake",
-            "setKeepAwakeSettings", "setKeepAwakeTimer", "resolveTicket", "createGroup"
+            "setKeepAwakeSettings", "setKeepAwakeTimer", "resolveTicket", "createGroup", "stopSession"
         ]
     ))
     func remoteOperationKindStrings(operation: RemoteOperation, expectedKind: String) throws {

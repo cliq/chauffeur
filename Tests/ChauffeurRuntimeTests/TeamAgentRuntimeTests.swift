@@ -60,6 +60,21 @@ struct TeamAgentRuntimeTests {
 
     }
 
+    @Test func remoteStopEndsTheSessionAndRejectsUnknownSessions() async throws {
+        let fixture = try await LaunchFixture.make(); defer { fixture.cleanup() }
+        let handlers = RemoteOperationHandlers(runtime: fixture.runtime, root: fixture.root, hostName: "Fixture", isAttached: { _ in false })
+        let shell = try await fixture.runtime.launch(LaunchRequest.shell(projectID: fixture.request.projectID, groupID: fixture.request.groupID, folderID: fixture.request.folderID, title: "Remote Stop"))
+        guard case .success(.ack) = await handlers.handle(.stopSession(StopSessionRequest(sessionID: shell.id, force: true)), deviceID: UUID()) else {
+            Issue.record("Stop was not acknowledged"); return
+        }
+        try await fixture.runtime.reconcile()
+        #expect(try await handlers.inventory().sessions.first { $0.id == shell.id }?.state.isLive != true)
+        guard case .failure(let missing) = await handlers.handle(.stopSession(StopSessionRequest(sessionID: UUID())), deviceID: UUID()) else {
+            Issue.record("Unknown session was accepted"); return
+        }
+        #expect(missing.code == "missing_session")
+    }
+
     @Test func remoteNewGroupIsRememberedByTheRepositoryForTheNextAgent() async throws {
         let fixture = try await LaunchFixture.make(); defer { fixture.cleanup() }
         let stored = try #require(await fixture.runtime.store.reload().presetSets.first)

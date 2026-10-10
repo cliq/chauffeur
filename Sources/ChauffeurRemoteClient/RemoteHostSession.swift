@@ -137,6 +137,11 @@ public final class RemoteHostSession {
         return host.capabilities.contains(RemoteProtocol.groupCreation)
     }
 
+    public var isSessionStopSupported: Bool {
+        guard case .connected(let host) = connectionState else { return false }
+        return host.capabilities.contains(RemoteProtocol.sessionStop)
+    }
+
     @ObservationIgnored private let journal: any PendingOperationJournal
     @ObservationIgnored private let clientName: String
     @ObservationIgnored private let clientVersion: String
@@ -355,6 +360,19 @@ public final class RemoteHostSession {
         }
         await refreshInventory()
         return group
+    }
+
+    /// Stops a live session and refreshes the inventory so the list shows it stopped.
+    public func stopSession(_ sessionID: UUID, force: Bool = false) async throws {
+        guard isSessionStopSupported else {
+            throw RemoteClientError.invalidResponse("Update Chauffeur on the host to stop sessions remotely.")
+        }
+        guard let connection else { throw RemoteClientError.disconnected }
+        let result = try await connection.request(.stopSession(StopSessionRequest(sessionID: sessionID, force: force)))
+        guard case .ack = result else {
+            throw RemoteClientError.invalidResponse("stopSession returned \(result.kind)")
+        }
+        await refreshInventory()
     }
 
     public func setKeepAwakeSettings(_ settings: KeepAwakeSettings) async throws {

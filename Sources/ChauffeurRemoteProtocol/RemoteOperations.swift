@@ -160,6 +160,17 @@ public struct OperationStatusRequest: Codable, Equatable, Sendable {
     }
 }
 
+/// Stops a live session on the host. `force` ends it immediately instead of asking it to exit.
+public struct StopSessionRequest: Codable, Equatable, Sendable {
+    public var sessionID: UUID
+    public var force: Bool
+
+    public init(sessionID: UUID, force: Bool = false) {
+        self.sessionID = sessionID
+        self.force = force
+    }
+}
+
 /// One piece of a file the phone sends to the Mac. Chunks arrive in order; `offset` is where
 /// `data` starts, and the upload finishes when `offset + data.count == totalBytes`. Resending a
 /// chunk the Mac already has is accepted, so a retry after a lost response is safe.
@@ -208,6 +219,7 @@ public enum RemoteOperation: Equatable, Sendable, Codable {
     case uploadFileChunk(UploadFileChunkRequest)
     case resolveTicket(ResolveTicketRequest)
     case createGroup(CreateGroupRequest)
+    case stopSession(StopSessionRequest)
 
     public var kind: String {
         switch self {
@@ -228,6 +240,7 @@ public enum RemoteOperation: Equatable, Sendable, Codable {
         case .uploadFileChunk: return "uploadFileChunk"
         case .resolveTicket: return "resolveTicket"
         case .createGroup: return "createGroup"
+        case .stopSession: return "stopSession"
         }
     }
 
@@ -269,6 +282,8 @@ public enum RemoteOperation: Equatable, Sendable, Codable {
             self = .resolveTicket(try container.decode(ResolveTicketRequest.self, forKey: .payload))
         case "createGroup":
             self = .createGroup(try container.decode(CreateGroupRequest.self, forKey: .payload))
+        case "stopSession":
+            self = .stopSession(try container.decode(StopSessionRequest.self, forKey: .payload))
         default:
             throw DecodingError.dataCorrupted(
                 DecodingError.Context(
@@ -316,6 +331,8 @@ public enum RemoteOperation: Equatable, Sendable, Codable {
         case .resolveTicket(let payload):
             try container.encode(payload, forKey: .payload)
         case .createGroup(let payload):
+            try container.encode(payload, forKey: .payload)
+        case .stopSession(let payload):
             try container.encode(payload, forKey: .payload)
         }
     }

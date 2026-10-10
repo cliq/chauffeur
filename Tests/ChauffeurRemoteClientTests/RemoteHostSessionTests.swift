@@ -82,7 +82,23 @@ struct RemoteHostSessionTests {
         #expect(!session.isTicketResolutionSupported)
         #expect(try await session.resolveTicket(projectID: UUID(), folderID: UUID(), text: "https://acme.atlassian.net/browse/MBL-1") == nil)
         #expect(factory.hosts[0].requests(ofKind: "resolveTicket").isEmpty)
+        #expect(!session.isSessionStopSupported)
+        await #expect(throws: RemoteClientError.self) { try await session.stopSession(UUID()) }
+        #expect(factory.hosts[0].requests(ofKind: "stopSession").isEmpty)
         session.disconnect()
+    }
+
+    @Test func stopSessionSendsTheSessionAndRefreshesInventory() async throws {
+        let (session, factory) = makeSession()
+        await session.connect()
+        defer { session.disconnect() }
+        let id = UUID()
+        let inventoryRequests = factory.hosts[0].requests(ofKind: "listInventory").count
+        try await session.stopSession(id, force: true)
+        let request = try #require(factory.hosts[0].requests(ofKind: "stopSession").first)
+        guard case .stopSession(let stop) = request.operation else { Issue.record("Missing stopSession"); return }
+        #expect(stop.sessionID == id && stop.force)
+        #expect(factory.hosts[0].requests(ofKind: "listInventory").count > inventoryRequests)
     }
 
     @Test func ticketsResolveOnTheMac() async throws {

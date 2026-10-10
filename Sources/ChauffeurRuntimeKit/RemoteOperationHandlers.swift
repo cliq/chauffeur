@@ -110,6 +110,12 @@ public actor RemoteOperationHandlers {
                 let group = project.groups.first { $0.id == groupID }!
                 return .success(.group(GroupSummary(id: group.id, name: group.name, isDefault: group.isDefault)))
             } catch { return .failure(Self.remoteError(error)) }
+        case .stopSession(let request):
+            do {
+                let params: JSONValue = .object(["sessionID": .string(request.sessionID.uuidString), "force": .bool(request.force)])
+                _ = try await runtime.handle(IPCRequest("stop", params: params))
+                return .success(.ack)
+            } catch { return .failure(Self.remoteError(error)) }
         case .launch(let request):
             return .success(.operation(await launch(request, deviceID: deviceID)))
         case .getOperationStatus(let request):

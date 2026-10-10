@@ -206,7 +206,7 @@ final class FakeHost: @unchecked Sendable {
             return RemoteResponse(id: request.id, result: .ticketSuggestion(TicketSuggestionResult(ticket: ticket)))
         case .createGroup(let create):
             return RemoteResponse(id: request.id, result: .group(GroupSummary(id: UUID(), name: create.name)))
-        case .terminalResize, .detachTerminal:
+        case .terminalResize, .detachTerminal, .stopSession:
             return RemoteResponse(id: request.id, result: .ack)
         }
     }
