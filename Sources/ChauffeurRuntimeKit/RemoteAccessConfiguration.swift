@@ -1,6 +1,14 @@
 import Foundation
+#if canImport(CryptoKit)
 import CryptoKit
+#else
+import Crypto
+#endif
+#if canImport(Darwin)
 import Darwin
+#else
+import Glibc
+#endif
 import ChauffeurCore
 import ChauffeurRemoteProtocol
 
@@ -41,7 +49,7 @@ public struct RemoteAccessConfiguration: Codable, Equatable, Sendable {
     }
 
     public static func defaultPort(for build: AppBuild) -> Int {
-        build == .release ? 51847 : 51848
+        build == .release ? RemoteProtocol.releasePort : RemoteProtocol.debugPort
     }
 
     /// Random key + hostID, disabled.
@@ -87,7 +95,7 @@ public struct RemoteAccessStore: Sendable {
         guard FileManager.default.createFile(atPath: temp.path, contents: data, attributes: [.posixPermissions: 0o600]) else {
             throw ChauffeurError("remote_access_write_failed", "Could not persist remote access configuration", path: url.path)
         }
-        guard Darwin.rename(temp.path, url.path) == 0 else {
+        guard POSIX.rename(temp.path, url.path) == 0 else {
             try? FileManager.default.removeItem(at: temp)
             throw ChauffeurError("remote_access_write_failed", "Could not persist remote access configuration", path: url.path)
         }

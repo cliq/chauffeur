@@ -1,5 +1,9 @@
 import Foundation
+#if canImport(Darwin)
 import Darwin
+#else
+import Glibc
+#endif
 import CChauffeur
 import ChauffeurCore
 
@@ -77,18 +81,33 @@ public actor TmuxHost {
     private func inventory(socket: String) async throws -> [PaneIdentity] {
         // tmux replaces control characters such as tabs under the C locale.
         // All these generated identity/status fields have a printable delimiter.
-        let result = try await command(["list-panes", "-a", "-F", "#{session_name}|#{pane_id}|#{pane_pid}|#{pane_dead}|#{pane_dead_status}"], socket: socket)
-        if result.status != 0 {
-            if result.error.contains("no server running") || result.error.contains("no sessions") || result.error.contains("no current target") || result.error.contains("No such file") || result.error.contains("Connection refused") { return [] }
-            throw ChauffeurError("terminal_inventory", "Cannot inspect terminal service")
-        }
-        return try result.output.split(separator: "\n").map { line in
-            let fields = line.split(separator: "|", omittingEmptySubsequences: false).map(String.init)
-            guard fields.count == 5, let pid = Int32(fields[2]), ["0", "1"].contains(fields[3]), fields[4].isEmpty || Int32(fields[4]) != nil else {
-                throw ChauffeurError("terminal_inventory", "Terminal service returned an unreadable inventory")
+        func list() async throws -> [(pane: PaneIdentity, unreaped: Bool, server: Int32)] {
+            let result = try await command(["list-panes", "-a", "-F", "#{session_name}|#{pane_id}|#{pane_pid}|#{pane_dead}|#{pane_dead_status}|#{pane_dead_signal}|#{pid}"], socket: socket)
+            if result.status != 0 {
+                if result.error.contains("no server running") || result.error.contains("no sessions") || result.error.contains("no current target") || result.error.contains("No such file") || result.error.contains("Connection refused") { return [] }
+                throw ChauffeurError("terminal_inventory", "Cannot inspect terminal service")
             }
-            return PaneIdentity(sessionName: fields[0], paneID: fields[1], processID: pid, dead: fields[3] == "1", exitStatus: Int32(fields[4]))
+            return try result.output.split(separator: "\n").map { line in
+                let fields = line.split(separator: "|", omittingEmptySubsequences: false).map(String.init)
+                guard fields.count == 7, let pid = Int32(fields[2]), ["0", "1"].contains(fields[3]), fields[4].isEmpty || Int32(fields[4]) != nil, let server = Int32(fields[6]) else {
+                    throw ChauffeurError("terminal_inventory", "Terminal service returned an unreadable inventory")
+                }
+                // tmux marks a pane dead at its terminal's end of file but learns how the
+                // process ended only by reaping it, and tmux 3.4 on Linux can miss the
+                // SIGCHLD, leaving an exit 0 without a status indefinitely. Until the status,
+                // the signal, or (on a tmux without `pane_dead_signal`) the process being
+                // gone says it ended, it is not dead yet.
+                let unreaped = fields[3] == "1" && fields[4].isEmpty && fields[5].isEmpty && !(kill(pid, 0) != 0 && errno == ESRCH)
+                return (PaneIdentity(sessionName: fields[0], paneID: fields[1], processID: pid, dead: fields[3] == "1" && !unreaped, exitStatus: Int32(fields[4])), unreaped, server)
+            }
         }
+        var panes = try await list()
+        // Another SIGCHLD only makes tmux run its reaping loop again.
+        if let server = panes.first(where: \.unreaped)?.server, server > 0, kill(server, SIGCHLD) == 0 {
+            try await Task.sleep(for: .milliseconds(20))
+            panes = try await list()
+        }
+        return panes.map(\.pane)
     }
     public func spawn(session: Session, payload: ExecPayload, scrollback: Int) async throws -> PaneIdentity {
         try Task.checkCancellation()
@@ -457,7 +476,7 @@ private final class PTYAttachment: @unchecked Sendable {
         guard pid > 0 else { throw ChauffeurError("pty_failed", "Could not allocate terminal attachment") }
         descriptor = master
     }
-    deinit { Darwin.close(descriptor) }
+    deinit { POSIX.close(descriptor) }
     /// Reads the tmux client's output on a blocking thread into `pump`. The
     /// thread only ever cleans up this attachment's own process.
     func startOutput(into pump: AttachmentPump) {
@@ -465,7 +484,7 @@ private final class PTYAttachment: @unchecked Sendable {
             defer { close(); var status: Int32 = 0; waitpid(pid, &status, 0) }
             var buffer = [UInt8](repeating: 0, count: 16_384)
             while true {
-                let count = Darwin.read(descriptor, &buffer, buffer.count)
+                let count = POSIX.read(descriptor, &buffer, buffer.count)
                 if count < 0 && errno == EINTR { continue }
                 guard count > 0 else { pump.finish(); return }
                 pump.enqueue(Data(buffer[..<count]))
@@ -479,7 +498,7 @@ private final class PTYAttachment: @unchecked Sendable {
         try data.withUnsafeBytes { raw in
             var offset = 0
             while offset < data.count {
-                let count = Darwin.write(descriptor, raw.baseAddress!.advanced(by: offset), raw.count - offset)
+                let count = POSIX.write(descriptor, raw.baseAddress!.advanced(by: offset), raw.count - offset)
                 if count < 0 && errno == EINTR { continue }
                 guard count > 0 else { throw ChauffeurError("input_failed", "Terminal input failed") }
                 offset += count

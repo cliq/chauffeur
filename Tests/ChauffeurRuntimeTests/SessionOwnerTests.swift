@@ -1,5 +1,9 @@
 import Foundation
+#if canImport(Darwin)
 import Darwin
+#else
+import Glibc
+#endif
 import Testing
 import ChauffeurCore
 @testable import ChauffeurRuntimeKit
@@ -17,7 +21,10 @@ struct SessionOwnerTests {
         let socket = runtimeDirectory.appendingPathComponent("second.sock").path
         let manifest = SessionOwnerManifest(id: ownerID, appPath: "/missing/old-owner.app", tmuxPath: fixture.tmux, socketPath: socket, environment: [:])
         try SessionOwnerManifest.write(manifest, to: directory.appendingPathComponent("manifest.json"))
-        let created = try await ProcessRunner.run(fixture.tmux, ["-S", socket, "-f", "/dev/null", "new-session", "-d", "-s", sessionID.uuidString, "/bin/cat"])
+        // tmux runs a lone command string through its default shell. Without a
+        // SHELL or passwd entry that is dash, which keeps itself as the foreground
+        // process instead of exec-ing its last command as bash and zsh do.
+        let created = try await ProcessRunner.run(fixture.tmux, ["-S", socket, "-f", "/dev/null", "new-session", "-d", "-s", sessionID.uuidString, "exec /bin/cat"])
         #expect(created.status == 0)
         let host = try TmuxHost(runtimeDirectory: runtimeDirectory, ctlPath: "/bin/false", environment: ["PATH": "/opt/homebrew/bin:/usr/bin:/bin"])
         do {
@@ -45,7 +52,7 @@ struct SessionOwnerTests {
     }
 
     @Test func missingPackagedHelperFailsWithoutStartingDirectServer() async throws {
-        let root = URL(fileURLWithPath: "/private/tmp/ch-owner-\(UUID())")
+        let root = URL(fileURLWithPath: Paths.canonical("/tmp")).appendingPathComponent("ch-owner-\(UUID())")
         try SessionOwnerManifest.privateDirectory(root)
         defer { try? FileManager.default.removeItem(at: root) }
         let owner = SessionOwnerHost(runtimeDirectory: root, embeddedApp: root.appendingPathComponent("missing.app"), executable: "/opt/homebrew/bin/tmux", environment: [:])
@@ -54,7 +61,7 @@ struct SessionOwnerTests {
     }
 
     @Test func ownerLockLivenessDoesNotDependOnStalePIDFiles() throws {
-        let root = URL(fileURLWithPath: "/private/tmp/ch-owner-\(UUID())")
+        let root = URL(fileURLWithPath: Paths.canonical("/tmp")).appendingPathComponent("ch-owner-\(UUID())")
         try SessionOwnerManifest.privateDirectory(root)
         defer { try? FileManager.default.removeItem(at: root) }
         let path = root.appendingPathComponent("owner.lock")

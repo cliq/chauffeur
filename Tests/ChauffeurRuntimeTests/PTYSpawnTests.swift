@@ -9,7 +9,12 @@ struct PTYSpawnTests {
     @Test func spawnedTerminalDoesNotInheritOtherPipes() throws {
         let unrelated = Pipe()
         let writer = unrelated.fileHandleForWriting.fileDescriptor
-        let script = "if { printf x >&\(writer); } 2>/dev/null; then echo INHERITED; else echo CLOSED; fi"
+        defer { withExtendedLifetime(unrelated) {} }
+        // dash, Linux's /bin/sh, rejects a multi-digit `>&N` as a syntax error and prints
+        // nothing at all; opening the descriptor's /dev/fd path works in any shell. Open
+        // it before any other redirection: shells save a redirected descriptor at 10 or
+        // above, which could take the number being probed.
+        let script = "if printf x > /dev/fd/\(writer); then echo INHERITED; else echo CLOSED; fi"
         let arguments: [String] = ["/bin/sh", "-c", script]
         var argv = arguments.map { strdup($0) } + [nil]
         var envp: [UnsafeMutablePointer<CChar>?] = [nil]

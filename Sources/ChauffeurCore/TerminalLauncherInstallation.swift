@@ -1,5 +1,9 @@
 import Foundation
+#if canImport(Darwin)
 import Darwin
+#else
+import Glibc
+#endif
 
 public enum TerminalLauncherInstallation {
     public static let destination = URL(fileURLWithPath: "/usr/local/bin/\(AppBuild.current.commandName)")

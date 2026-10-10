@@ -1,5 +1,9 @@
 import Foundation
+#if canImport(Darwin)
 import Darwin
+#else
+import Glibc
+#endif
 import CChauffeur
 
 /// Exactly one reader and serialized writers. shutdown wakes pending reads;
@@ -11,8 +15,7 @@ public final class SocketConnection: @unchecked Sendable {
     private var stopped = false
     public init(descriptor: Int32) {
         self.descriptor = descriptor
-        var enabled: Int32 = 1
-        setsockopt(descriptor, SOL_SOCKET, SO_NOSIGPIPE, &enabled, socklen_t(MemoryLayout<Int32>.size))
+        POSIX.disableSIGPIPE(on: descriptor)
         _ = fcntl(descriptor, F_SETFD, FD_CLOEXEC)
     }
     public convenience init(path: String) throws {
@@ -20,10 +23,10 @@ public final class SocketConnection: @unchecked Sendable {
         guard descriptor >= 0 else { throw ChauffeurError("service_unavailable", "Chauffeur background service is stopped or unavailable. Start or restart it", path: path) }
         self.init(descriptor: descriptor)
     }
-    deinit { Darwin.close(descriptor) }
+    deinit { POSIX.close(descriptor) }
     public func close() {
         stateLock.lock(); defer { stateLock.unlock() }
-        if !stopped { stopped = true; shutdown(descriptor, SHUT_RDWR) }
+        if !stopped { stopped = true; POSIX.shutdown(descriptor) }
     }
     public func send<T: Encodable>(_ value: T) throws { try sendFrameData(WireProtocol.frame(value)) }
     private func sendFrameData(_ data: Data) throws {
@@ -31,7 +34,7 @@ public final class SocketConnection: @unchecked Sendable {
         try data.withUnsafeBytes { raw in
             var offset = 0
             while offset < raw.count {
-                let written = Darwin.write(descriptor, raw.baseAddress!.advanced(by: offset), raw.count - offset)
+                let written = POSIX.send(descriptor, raw.baseAddress!.advanced(by: offset), raw.count - offset)
                 if written < 0 && errno == EINTR { continue }
                 guard written > 0 else { throw ChauffeurError("connection_closed", "Runtime connection closed") }
                 offset += written
@@ -66,7 +69,7 @@ public final class SocketConnection: @unchecked Sendable {
         try data.withUnsafeMutableBytes { raw in
             var offset = 0
             while offset < count {
-                let received = Darwin.read(descriptor, raw.baseAddress!.advanced(by: offset), count - offset)
+                let received = POSIX.read(descriptor, raw.baseAddress!.advanced(by: offset), count - offset)
                 if received < 0 && errno == EINTR { continue }
                 guard received > 0 else { throw ChauffeurError("connection_closed", "Runtime connection closed") }
                 offset += received

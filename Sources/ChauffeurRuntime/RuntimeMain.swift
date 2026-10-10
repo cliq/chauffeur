@@ -1,6 +1,12 @@
 import Foundation
+#if canImport(Darwin)
 import Darwin
+#else
+import Glibc
+#endif
+#if canImport(OSLog)
 import OSLog
+#endif
 import ChauffeurCore
 import ChauffeurRuntimeKit
 
@@ -17,19 +23,13 @@ import ChauffeurRuntimeKit
                 switch option {
                 case "--data-dir": guard !args.isEmpty else { throw ChauffeurError("usage", "--data-dir requires a path") }; root = URL(fileURLWithPath: args.removeFirst())
                 case "--mcp-port": guard !args.isEmpty, let value = Int(args.removeFirst()), (0...65535).contains(value) else { throw ChauffeurError("usage", "--mcp-port requires 0–65535") }; port = value
-                case "--help": print("ChauffeurRuntime [--data-dir PATH] [--mcp-port PORT]\nNormally started by Chauffeur's per-user LaunchAgent."); return
+                case "--help": print("ChauffeurRuntime [--data-dir PATH] [--mcp-port PORT]\nNormally started by Chauffeur's per-user LaunchAgent (systemd user unit on Linux)."); return
                 default: throw ChauffeurError("usage", "Unknown runtime option")
                 }
             }
             logs = try? RuntimeLogStore(root: RuntimeLogStore.directory(for: root))
-            // launchd may supply the bundle-relative BundleProgram as argv[0].
-            // Resolve the loaded executable, independently of that argument and cwd.
-            var executableSize: UInt32 = 0
-            _NSGetExecutablePath(nil, &executableSize)
-            var executableBytes = [CChar](repeating: 0, count: Int(executableSize))
-            guard _NSGetExecutablePath(&executableBytes, &executableSize) == 0 else { throw ChauffeurError("missing_helper", "Cannot locate the running runtime executable") }
-            let executablePath = String(decoding: executableBytes.prefix { $0 != 0 }.map { UInt8(bitPattern: $0) }, as: UTF8.self)
-            let executable = URL(fileURLWithPath: executablePath).resolvingSymlinksInPath()
+            Platform.installNoOpSIGPIPEHandler()
+            let executable = try Platform.currentExecutable()
             let identity = try RuntimeIdentity(executable: executable, dataRoot: root)
             let ctl = executable.deletingLastPathComponent().appendingPathComponent("chauffeurctl").path
             guard FileManager.default.isExecutableFile(atPath: ctl) else { throw ChauffeurError("missing_helper", "Install chauffeurctl beside ChauffeurRuntime", path: ctl) }
@@ -37,7 +37,9 @@ import ChauffeurRuntimeKit
             var loginEnvironmentLoaded = false
             // launchd has a minimal PATH. Query the user's login shell once;
             // per-child filtering still removes inherited profile/auth values.
-            let shell = environment["SHELL"] ?? "/bin/zsh"
+            let shell = Platform.loginShell(environment: environment)
+            // Shell sessions and helpers read SHELL from this environment.
+            environment["SHELL"] = shell
             if let login = try? await ProcessRunner.run(shell, ["-lic", "/usr/bin/env -0"], timeout: 10), login.status == 0 {
                 loginEnvironmentLoaded = true
                 for entry in login.output.split(separator: "\0") {
@@ -64,7 +66,7 @@ import ChauffeurRuntimeKit
             server.start()
             // The LAN listener only opens when the user enabled remote access;
             // the real operation handlers replace the default dispatcher later.
-            let hostName = Host.current().localizedName ?? ProcessInfo.processInfo.hostName
+            let hostName = Platform.hostDisplayName
             let terminals = await runtime.terminals
             let remoteOperations = RemoteOperationHandlers(runtime: runtime, root: root, hostName: hostName) { sessionID in
                 await terminals.currentGeneration(sessionID: sessionID) != nil

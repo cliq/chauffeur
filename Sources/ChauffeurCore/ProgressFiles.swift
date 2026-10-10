@@ -1,5 +1,9 @@
 import Foundation
+#if canImport(Darwin)
 import Darwin
+#else
+import Glibc
+#endif
 
 /// Poll by path, rather than holding an inode, because the skill atomically replaces files.
 public enum ProgressFiles {
@@ -19,7 +23,7 @@ public enum ProgressFiles {
     public static func readData(path: String) throws -> Data {
         let url = try fileURL(path)
         // Nonblocking open plus fstat avoids hanging on FIFOs or reading device files.
-        let descriptor = Darwin.open(url.path, O_RDONLY | O_NONBLOCK | O_CLOEXEC)
+        let descriptor = POSIX.open(url.path, O_RDONLY | O_NONBLOCK | O_CLOEXEC)
         guard descriptor >= 0 else { throw ChauffeurError("progress_unavailable", "Cannot open the progress file", path: url.path) }
         let handle = FileHandle(fileDescriptor: descriptor, closeOnDealloc: true)
         defer { try? handle.close() }

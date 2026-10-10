@@ -1,5 +1,9 @@
 import Foundation
+#if canImport(Darwin)
 import Darwin
+#else
+import Glibc
+#endif
 import ChauffeurCore
 
 /// Owns only runtime/snapshots/<session UUID>/latest.json. No provider paths or

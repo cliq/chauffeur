@@ -1,9 +1,13 @@
 import Foundation
+#if canImport(CoreServices)
 import CoreServices
+#else
+import Glibc
+#endif
 import ChauffeurCore
 
-/// Watches the containing directory so atomic replacement does not orphan the watch.
-/// FSEvents coalesces writes; only a valid document whose milestones changed wakes
+/// Watches the containing directory so atomic replacement does not orphan the watch, with
+/// FSEvents on macOS and inotify on Linux. FSEvents coalesces writes; only a valid document whose milestones changed wakes
 /// the agent, so frequent "now doing" updates do not re-enter a waiting coordinator.
 final class ProgressWatcher: @unchecked Sendable {
     private final class Buffer: @unchecked Sendable {
@@ -24,6 +28,7 @@ final class ProgressWatcher: @unchecked Sendable {
     }
     private let buffer: Buffer
     private let queue = DispatchQueue(label: "dev.chauffeur.progress-events", qos: .utility)
+    #if canImport(CoreServices)
     private var stream: FSEventStreamRef?
 
     init?(path: String, changed: @escaping @Sendable () -> Void) {
@@ -60,4 +65,50 @@ final class ProgressWatcher: @unchecked Sendable {
     deinit {
         if let stream { FSEventStreamStop(stream); FSEventStreamInvalidate(stream); FSEventStreamRelease(stream) }
     }
+    #else
+    private let source: DispatchSourceRead
+
+    /// The containing directory's watch, confined to the watcher's queue. Replacing or
+    /// removing the directory ends the watch; it is renewed at the path, retrying each
+    /// second until the directory exists again.
+    private final class DirectoryWatch: @unchecked Sendable {
+        let inotify: Inotify
+        let directory: String
+        let queue: DispatchQueue
+        let buffer: Buffer
+        var watch: Int32?
+        init(inotify: Inotify, directory: String, queue: DispatchQueue, buffer: Buffer) {
+            self.inotify = inotify; self.directory = directory; self.queue = queue; self.buffer = buffer
+            watch = inotify.watch(directory)
+        }
+        func handleEvents(file: String) {
+            let events = inotify.read()
+            if events.contains(where: { $0.watch == watch && $0.contains(Int32(IN_DELETE_SELF | IN_MOVE_SELF | IN_IGNORED)) }) { renew() }
+            if events.contains(where: { $0.name == file || $0.contains(Int32(IN_Q_OVERFLOW)) }) { buffer.refresh() }
+        }
+        private func renew() {
+            if let watch { inotify.remove(watch) }
+            watch = inotify.watch(directory)
+            if watch == nil { queue.asyncAfter(deadline: .now() + 1) { [weak self] in self?.renew() } }
+            else { buffer.refresh() }
+        }
+    }
+
+    init?(path: String, changed: @escaping @Sendable () -> Void) {
+        let url = URL(fileURLWithPath: Paths.canonical(path))
+        buffer = Buffer(path: url.path, changed: changed)
+        guard let inotify = Inotify() else { return nil }
+        let watch = DirectoryWatch(inotify: inotify, directory: url.deletingLastPathComponent().path, queue: queue, buffer: buffer)
+        guard watch.watch != nil else { return nil }
+        let file = url.lastPathComponent
+        source = DispatchSource.makeReadSource(fileDescriptor: inotify.descriptor, queue: queue)
+        // The handler owns the watch and its inotify instance, so the descriptor closes only after cancellation.
+        source.setEventHandler { watch.handleEvents(file: file) }
+        source.resume()
+        // Catch writes between the baseline read and the watch.
+        let buffer = buffer
+        queue.async { buffer.refresh() }
+    }
+    deinit { source.cancel() }
+    #endif
 }

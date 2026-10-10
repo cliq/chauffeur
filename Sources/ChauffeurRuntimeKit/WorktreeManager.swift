@@ -1,7 +1,16 @@
 import Foundation
+#if canImport(CryptoKit)
 import CryptoKit
+#else
+import Crypto
+#endif
+#if canImport(Darwin)
 import Darwin
+#else
+import Glibc
+#endif
 import ChauffeurCore
+import CChauffeur
 
 public actor WorktreeManager {
     private let root: URL
@@ -60,7 +69,13 @@ public actor WorktreeManager {
         // The administrative directory survives `git worktree move`. Its inode
         // also distinguishes a removed/recreated worktree with the same name.
         // The device number is left out: macOS reassigns it across restarts.
-        return Self.identifier("\(info.st_ino):\(info.st_birthtimespec.tv_sec):\(info.st_birthtimespec.tv_nsec)")
+        var seconds: Int64 = 0, nanoseconds = 0
+        guard chauffeur_birth_time(directory, &seconds, &nanoseconds) == 0 else {
+            // Some Linux file systems record no creation time; a reused inode can then
+            // be mistaken for the removed worktree.
+            return Self.identifier("\(info.st_ino)")
+        }
+        return Self.identifier("\(info.st_ino):\(seconds):\(nanoseconds)")
     }
     private static func hasGitMetadata(above path: String) -> Bool {
         var directory = URL(fileURLWithPath: path), initial = stat()

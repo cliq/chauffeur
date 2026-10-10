@@ -1,5 +1,9 @@
 import Foundation
+#if canImport(Darwin)
 import Darwin
+#else
+import Glibc
+#endif
 import ChauffeurCore
 
 /// Starts only fresh servers through LaunchServices. No shutdown hook: ownership
@@ -90,9 +94,7 @@ actor SessionOwnerHost {
               SessionOwnerLock.isHeld(directory.appendingPathComponent("owner.lock")),
               let data = try? Data(contentsOf: directory.appendingPathComponent("ready.json")),
               let pid = try? JSONCoding.decode(Int32.self, from: data), pid > 0 else { return false }
-        var path = [CChar](repeating: 0, count: 4 * Int(MAXPATHLEN))
-        guard proc_pidpath(pid, &path, UInt32(path.count)) > 0 else { return false }
-        let loadedPath = String(decoding: path.prefix { $0 != 0 }.map { UInt8(bitPattern: $0) }, as: UTF8.self)
+        guard let loadedPath = Platform.executablePath(processID: pid) else { return false }
         guard Paths.canonical(loadedPath) == Paths.canonical(manifest.appPath + "/Contents/MacOS/ChauffeurSessions") else { return false }
         let result = try await ProcessRunner.run(executable, ["-N", "-S", manifest.socketPath, "show-options", "-gqv", "@chauffeur-owner"], environment: environment, timeout: 3)
         return result.status == 0 && result.output.trimmingCharacters(in: .whitespacesAndNewlines) == manifest.id.uuidString

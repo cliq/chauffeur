@@ -6,11 +6,11 @@ struct KimiProviderTests {
     @Test func sharedHomeAndExplicitTeamOverride() throws {
         let kind = try #require(CLIKind(rawValue: "kimi"))
         var team = PresetSet(name: "Personal", agentSelection: .allBase)
-        #expect(team.configurationDirectory(for: kind, home: "/tmp/person") == "/private/tmp/person/.kimi-code")
+        #expect(team.configurationDirectory(for: kind, home: "/tmp/person") == Paths.canonical("/tmp") + "/person/.kimi-code")
         team.configurationDirectories = ["kimi": "/tmp/team-kimi"]
-        #expect(team.configurationDirectory(for: kind) == "/private/tmp/team-kimi")
+        #expect(team.configurationDirectory(for: kind) == Paths.canonical("/tmp") + "/team-kimi")
         let env = SetupEnvironment.make(base: ["KIMI_CODE_HOME": "/other", "KIMI_MODEL_NAME": "other", "PATH": "/bin"], kind: kind, directory: "/tmp/team-kimi")
-        #expect(env["KIMI_CODE_HOME"] == "/private/tmp/team-kimi")
+        #expect(env["KIMI_CODE_HOME"] == Paths.canonical("/tmp") + "/team-kimi")
         #expect(env["KIMI_MODEL_NAME"] == nil)
     }
     @Test func nativeSessionIdentitySurvivesHooks() throws {

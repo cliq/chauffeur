@@ -1,5 +1,9 @@
 import ChauffeurCore
+#if canImport(CryptoKit)
 import CryptoKit
+#else
+import Crypto
+#endif
 import Foundation
 
 public protocol ConfigurationMigration: Sendable {

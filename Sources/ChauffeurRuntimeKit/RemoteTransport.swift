@@ -1,3 +1,4 @@
+#if canImport(Network)
 import Foundation
 import Network
 import Security
@@ -203,3 +204,4 @@ final class RemoteListener: @unchecked Sendable {
 
     func cancel() { listener.cancel() }
 }
+#endif

@@ -1,5 +1,9 @@
 import Foundation
+#if canImport(Darwin)
 import Darwin
+#else
+import Glibc
+#endif
 
 /// One immutable handoff per owner lifetime. It contains no session commands or secrets.
 public struct SessionOwnerManifest: Codable, Sendable {
@@ -41,19 +45,19 @@ public struct SessionOwnerManifest: Codable, Sendable {
 public final class SessionOwnerLock: @unchecked Sendable {
     private let descriptor: Int32
     public init(_ url: URL) throws {
-        descriptor = Darwin.open(url.path, O_CREAT | O_RDWR | O_CLOEXEC | O_NOFOLLOW, 0o600)
+        descriptor = POSIX.open(url.path, O_CREAT | O_RDWR | O_CLOEXEC | O_NOFOLLOW, 0o600)
         guard descriptor >= 0 else { throw ChauffeurError("session_owner_lock", "Cannot open Sessions helper lock") }
         guard flock(descriptor, LOCK_EX | LOCK_NB) == 0 else {
-            Darwin.close(descriptor)
+            POSIX.close(descriptor)
             throw ChauffeurError("session_owner_busy", "Sessions helper is already running")
         }
     }
-    deinit { Darwin.close(descriptor) }
+    deinit { POSIX.close(descriptor) }
 
     public static func isHeld(_ url: URL) -> Bool {
-        let fd = Darwin.open(url.path, O_RDWR | O_CLOEXEC | O_NOFOLLOW)
+        let fd = POSIX.open(url.path, O_RDWR | O_CLOEXEC | O_NOFOLLOW)
         guard fd >= 0 else { return false }
-        defer { Darwin.close(fd) }
+        defer { POSIX.close(fd) }
         if flock(fd, LOCK_EX | LOCK_NB) == 0 { return false }
         return errno == EWOULDBLOCK
     }

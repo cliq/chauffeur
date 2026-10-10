@@ -1,3 +1,4 @@
+#if canImport(AppKit)
 import AppKit
 import ChauffeurCore
 import ChauffeurRuntimeKit
@@ -40,3 +41,12 @@ enum NotificationHelper {
         }
     }
 }
+#else
+import Foundation
+import ChauffeurRuntimeKit
+
+/// Linux hosts are headless servers: there is no desktop notification helper to keep running.
+enum NotificationHelper {
+    @MainActor static func maintain(runtime: RuntimeCoordinator, executable: URL, root: URL) async {}
+}
+#endif

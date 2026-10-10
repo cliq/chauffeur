@@ -6,9 +6,8 @@ import ChauffeurCore
 /// A coordinator that ends its turn with `chauffeurctl wait-for-work` running is
 /// waiting, not finished, until its workers give it something to do.
 struct WaitForWorkRuntimeTests {
-    private final class Marker {}
     private var ctl: URL? {
-        let url = Bundle(for: Marker.self).bundleURL.deletingLastPathComponent().appendingPathComponent("chauffeurctl")
+        let url = BuiltProducts.url("chauffeurctl")
         return FileManager.default.isExecutableFile(atPath: url.path) ? url : nil
     }
     /// Runs a process without blocking a Swift concurrency thread: the runtime under

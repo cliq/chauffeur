@@ -66,8 +66,13 @@ public struct PiAuthentication: AgentAuthentication {
             return validKey && validEnvironment
         case "oauth":
             guard credential["access"] is String, credential["refresh"] is String,
-                  let expires = credential["expires"] as? NSNumber,
-                  CFGetTypeID(expires) != CFBooleanGetTypeID() else { return false }
+                  let expires = credential["expires"] as? NSNumber else { return false }
+            #if canImport(Darwin)
+            guard CFGetTypeID(expires) != CFBooleanGetTypeID() else { return false }
+            #else
+            // swift-corelibs-foundation has no CFBoolean; JSON booleans are NSNumbers of type "c".
+            guard String(cString: expires.objCType) != "c" else { return false }
+            #endif
             return expires.doubleValue.isFinite
         default:
             return false

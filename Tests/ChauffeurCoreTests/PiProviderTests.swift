@@ -17,9 +17,9 @@ struct PiProviderTests {
     @Test func teamHomeAndEnvironmentAreIsolated() throws {
         let kind = try #require(CLIKind(rawValue: "pi"))
         let team = PresetSet(name: "Personal", agentSelection: .allBase)
-        #expect(team.configurationDirectory(for: kind, home: "/tmp/person") == "/private/tmp/person/.pi/agent")
+        #expect(team.configurationDirectory(for: kind, home: "/tmp/person") == Paths.canonical("/tmp") + "/person/.pi/agent")
         let env = SetupEnvironment.make(base: ["PI_CODING_AGENT_DIR": "/other", "PI_CODING_AGENT_SESSION_DIR": "/other/sessions", "PI_PACKAGE_DIR": "/other/package", "PATH": "/bin"], kind: kind, directory: "/tmp/team-pi")
-        #expect(env["PI_CODING_AGENT_DIR"] == "/private/tmp/team-pi")
+        #expect(env["PI_CODING_AGENT_DIR"] == Paths.canonical("/tmp") + "/team-pi")
         #expect(env["PI_CODING_AGENT_SESSION_DIR"] == nil)
         #expect(env["PI_PACKAGE_DIR"] == nil)
         #expect(env["PATH"] == "/bin")

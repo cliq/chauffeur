@@ -13,7 +13,13 @@ struct ShellHistoryTests {
             try Data("export ZDOTDIR=\(ShellAgentEnvironment.shellQuoted(dotDirectory.path))\n".utf8).write(to: fixture.path(".zshenv"))
         }
         let history = dotDirectory.appendingPathComponent(customHistory ? "custom-history" : ".zsh_history")
-        let rc = customHistory ? "HISTFILE=\(ShellAgentEnvironment.shellQuoted(history.path))\n" : ""
+        var rc = customHistory ? "HISTFILE=\(ShellAgentEnvironment.shellQuoted(history.path))\n" : ""
+        #if os(Linux)
+        // macOS's /etc/zshrc sets this default, which the wrapper repairs; Linux
+        // distributions set none, so zsh keeps no history unless the user's own
+        // .zshrc does. Do what such a .zshrc does, after ZDOTDIR is restored.
+        if !customHistory { rc = "HISTFILE=\"${ZDOTDIR:-$HOME}/.zsh_history\"\n" }
+        #endif
         try Data(rc.utf8).write(to: dotDirectory.appendingPathComponent(".zshrc"))
         // Pressing Up in the newly opened shell must retrieve and execute this command.
         try Data("printf recalled > \(ShellAgentEnvironment.shellQuoted(fixture.path("recalled").path))\n".utf8).write(to: history)

@@ -199,9 +199,8 @@ struct OpenCodeIntegrationTests {
 
 /// Drives the built `chauffeurctl` the way the OpenCode plugin does.
 struct OpenCodeHookCommandTests {
-    private final class Marker {}
     private var ctl: URL? {
-        let url = Bundle(for: Marker.self).bundleURL.deletingLastPathComponent().appendingPathComponent("chauffeurctl")
+        let url = BuiltProducts.url("chauffeurctl")
         return FileManager.default.isExecutableFile(atPath: url.path) ? url : nil
     }
     private func run(_ ctl: URL, _ arguments: [String], input: String, environment: [String: String]) throws -> (status: Int32, output: String) {

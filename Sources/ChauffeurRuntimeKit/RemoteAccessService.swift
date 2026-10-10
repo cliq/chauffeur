@@ -1,6 +1,12 @@
 import Foundation
+#if canImport(Darwin)
 import Darwin
+#else
+import Glibc
+#endif
+#if canImport(OSLog)
 import OSLog
+#endif
 import ChauffeurCore
 import ChauffeurRemoteProtocol
 
@@ -10,6 +16,8 @@ import ChauffeurRemoteProtocol
 public actor RemoteAccessService {
     public static let maxConnections = 8
     public static let pairingFailureLimit = 5
+    /// Handshakes in progress on the pairing port; further connections are refused.
+    public static let maxPendingPairings = 4
     static let pairingHandshakeTimeout: TimeInterval = 10
 
     private let store: RemoteAccessStore
@@ -45,7 +53,7 @@ public actor RemoteAccessService {
     }
 
     public init(root: URL, runtime: RuntimeCoordinator, dispatcher: any RemoteOperationDispatching = UnavailableDispatcher(),
-                hostName: String = Host.current().localizedName ?? ProcessInfo.processInfo.hostName,
+                hostName: String = Platform.hostDisplayName,
                 build: AppBuild = AppBuild.current, pairingTimeout: TimeInterval = 120) {
         self.store = RemoteAccessStore(root: root)
         self.runtime = runtime
@@ -344,7 +352,7 @@ public actor RemoteAccessService {
     }
 
     private func acceptPairing(_ transport: RemoteTransport) async {
-        guard pairing != nil else { transport.cancel(); return }
+        guard let state = pairing, state.transports.count < Self.maxPendingPairings else { transport.cancel(); return }
         pairing?.transports.append(transport)
         defer { pairing?.transports.removeAll { $0 === transport } }
         let deadline = Task {
@@ -424,8 +432,12 @@ public actor RemoteAccessService {
         return difference == 0
     }
 
-    /// IPv4 addresses of the Mac's up, non-loopback interfaces, excluding VPN
-    /// tunnels, peer-to-peer links and self-assigned addresses.
+    /// Interfaces a phone on the LAN can't reach the host through: macOS VPN tunnels,
+    /// peer-to-peer links and bridges; Linux container, VM and VPN interfaces.
+    nonisolated static let nonLANInterfacePrefixes = ["utun", "awdl", "llw", "bridge", "docker", "veth", "br-", "virbr", "tailscale", "wg"]
+
+    /// IPv4 addresses of the host's up, non-loopback interfaces, excluding VPN
+    /// tunnels, peer-to-peer links, container bridges and self-assigned addresses.
     nonisolated static func lanAddresses() -> [String] {
         var head: UnsafeMutablePointer<ifaddrs>?
         guard getifaddrs(&head) == 0, let head else { return [] }
@@ -434,13 +446,13 @@ public actor RemoteAccessService {
         var cursor: UnsafeMutablePointer<ifaddrs>? = head
         while let entry = cursor?.pointee {
             cursor = entry.ifa_next
-            guard let address = entry.ifa_addr, address.pointee.sa_family == UInt8(AF_INET) else { continue }
+            guard let address = entry.ifa_addr, address.pointee.sa_family == sa_family_t(AF_INET) else { continue }
             let flags = Int32(bitPattern: entry.ifa_flags)
-            guard flags & IFF_UP != 0, flags & IFF_RUNNING != 0, flags & IFF_LOOPBACK == 0 else { continue }
+            guard flags & Int32(IFF_UP) != 0, flags & Int32(IFF_RUNNING) != 0, flags & Int32(IFF_LOOPBACK) == 0 else { continue }
             let name = String(cString: entry.ifa_name)
-            guard !name.hasPrefix("utun"), !name.hasPrefix("awdl"), !name.hasPrefix("llw"), !name.hasPrefix("bridge") else { continue }
+            guard !nonLANInterfacePrefixes.contains(where: name.hasPrefix) else { continue }
             var buffer = [CChar](repeating: 0, count: Int(NI_MAXHOST))
-            guard getnameinfo(address, socklen_t(address.pointee.sa_len), &buffer, socklen_t(buffer.count), nil, 0, NI_NUMERICHOST) == 0 else { continue }
+            guard getnameinfo(address, socklen_t(MemoryLayout<sockaddr_in>.size), &buffer, socklen_t(buffer.count), nil, 0, NI_NUMERICHOST) == 0 else { continue }
             let text = String(decoding: buffer.prefix { $0 != 0 }.map { UInt8(bitPattern: $0) }, as: UTF8.self)
             guard !text.hasPrefix("169.254."), !addresses.contains(text) else { continue }
             addresses.append(text)

@@ -54,7 +54,11 @@ struct RuntimeIdentityTests {
     }
 
     @Test func debugAndReleaseKeepDistinctStoresAndRouting() throws {
+        #if os(Linux)
+        #expect(AppBuild.release.applicationSupport.lastPathComponent == "chauffeur")
+        #else
         #expect(AppBuild.release.applicationSupport.lastPathComponent == "Chauffeur")
+        #endif
         #expect(AppBuild.debug.applicationSupport != AppBuild.release.applicationSupport)
         #expect(AppBuild.debug.serviceLabel != AppBuild.release.serviceLabel)
         #expect(AppBuild.debug.notificationIdentifier != AppBuild.release.notificationIdentifier)

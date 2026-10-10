@@ -1,5 +1,9 @@
 import Foundation
+#if canImport(Darwin)
 import Darwin
+#else
+import Glibc
+#endif
 
 /// A closed vocabulary: neither provider output nor arbitrary error text can
 /// become a log field, even when supplied as an error's code.
@@ -187,7 +191,7 @@ public struct DiagnosticsReport: Codable, Sendable {
     public func write(to destination: URL) throws {
         let data = try JSONCoding.encode(self)
         let temporary = destination.deletingLastPathComponent().appendingPathComponent(".chauffeur-diagnostics-\(UUID()).tmp")
-        let fd = Darwin.open(temporary.path, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0o600)
+        let fd = POSIX.open(temporary.path, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0o600)
         guard fd >= 0 else { throw ChauffeurError("diagnostics_export_failed", "Cannot create the diagnostics file in this folder") }
         defer { unlink(temporary.path) }
         let handle = FileHandle(fileDescriptor: fd, closeOnDealloc: true)

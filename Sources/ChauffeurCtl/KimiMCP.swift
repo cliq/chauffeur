@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
 import ChauffeurCore
 
 /// Kimi persists MCP registrations in its shared home. Without a Chauffeur

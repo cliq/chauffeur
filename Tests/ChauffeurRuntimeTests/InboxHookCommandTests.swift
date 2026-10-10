@@ -6,10 +6,9 @@ import ChauffeurCore
 /// Drives the built `chauffeurctl inbox-hook` the way Claude and Codex do:
 /// payload on stdin, reminder JSON on stdout, and exit 0 whatever happens.
 struct InboxHookCommandTests {
-    private final class Marker {}
     /// `swift test` builds every product next to the test bundle.
     private var ctl: URL? {
-        let url = Bundle(for: Marker.self).bundleURL.deletingLastPathComponent().appendingPathComponent("chauffeurctl")
+        let url = BuiltProducts.url("chauffeurctl")
         return FileManager.default.isExecutableFile(atPath: url.path) ? url : nil
     }
     private func run(_ ctl: URL, input: Data, token: String, socket: String, provider: String = "claude", arguments: [String]? = nil, closeInput: Bool = true) throws -> (status: Int32, output: Data, elapsed: Duration) {

@@ -24,7 +24,14 @@ public enum AppBuild: String, Codable, Sendable, CaseIterable {
     public var urlScheme: String { self == .debug ? "chauffeur-debug" : "chauffeur" }
     public var commandName: String { urlScheme }
     public var applicationSupport: URL {
+        #if os(Linux)
+        // The XDG data directory; there is no ~/Library on Linux.
+        let base = ProcessInfo.processInfo.environment["XDG_DATA_HOME"].map { URL(fileURLWithPath: $0, isDirectory: true) }
+            ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".local/share", isDirectory: true)
+        return base.appendingPathComponent(self == .debug ? "chauffeur-debug" : "chauffeur", isDirectory: true)
+        #else
         FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/\(displayName)", isDirectory: true)
+        #endif
     }
     /// Where new managed Git checkouts are created. A dot directory in the home
     /// folder keeps the path free of spaces, which tools launched inside a

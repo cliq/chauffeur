@@ -1,5 +1,9 @@
 import Foundation
+#if canImport(Darwin)
 import Darwin
+#else
+import Glibc
+#endif
 import CChauffeur
 import ChauffeurCore
 
@@ -36,16 +40,22 @@ public actor SetupLoginHost {
         }
         let process = try SetupLoginProcess(command: command, cols: cols, rows: rows)
         state = State(operationID: operationID, process: process)
+        // One task applies output and exit in the order the reader saw them. A task per
+        // event has no order: exit could land first and a waiter read truncated output.
+        let (events, continuation) = AsyncStream.makeStream(of: SetupLoginEvent.self, bufferingPolicy: .unbounded)
         process.start(
-            onOutput: { [weak self] data in
-                guard let self else { return }
-                Task { await self.receive(data, operationID: operationID) }
-            },
-            onExit: { [weak self] status in
-                guard let self else { return }
-                Task { await self.finished(status, operationID: operationID) }
-            }
+            onOutput: { continuation.yield(.output($0)) },
+            onExit: { continuation.yield(.exit($0)); continuation.finish() }
         )
+        Task { [weak self] in
+            for await event in events {
+                guard let self else { return }
+                switch event {
+                case .output(let data): await self.receive(data, operationID: operationID)
+                case .exit(let status): await self.finished(status, operationID: operationID)
+                }
+            }
+        }
         return SetupLoginHandle(operationID: operationID, generation: 0, phase: .signingIn)
     }
 
@@ -171,6 +181,11 @@ public actor SetupLoginHost {
     }
 }
 
+private enum SetupLoginEvent: Sendable {
+    case output(Data)
+    case exit(Int32)
+}
+
 private final class SetupLoginProcess: @unchecked Sendable {
     private let descriptor: Int32
     private let pid: Int32
@@ -191,7 +206,7 @@ private final class SetupLoginProcess: @unchecked Sendable {
         if flags >= 0 { _ = fcntl(descriptor, F_SETFL, flags | O_NONBLOCK) }
     }
 
-    deinit { Darwin.close(descriptor) }
+    deinit { POSIX.close(descriptor) }
 
     func start(onOutput: @escaping @Sendable (Data) -> Void, onExit: @escaping @Sendable (Int32) -> Void) {
         lock.lock()
@@ -202,12 +217,12 @@ private final class SetupLoginProcess: @unchecked Sendable {
             var buffer = [UInt8](repeating: 0, count: 16_384)
             var pollDescriptor = pollfd(fd: descriptor, events: Int16(POLLIN | POLLHUP), revents: 0)
             while true {
-                let ready = Darwin.poll(&pollDescriptor, 1, 250)
+                let ready = POSIX.poll(&pollDescriptor, 1, 250)
                 if ready < 0 && errno == EINTR { continue }
                 if ready < 0 { break }
                 if ready > 0, pollDescriptor.revents & Int16(POLLIN) != 0 {
                     while true {
-                        let count = Darwin.read(descriptor, &buffer, buffer.count)
+                        let count = POSIX.read(descriptor, &buffer, buffer.count)
                         if count > 0 { onOutput(Data(buffer[..<count])); continue }
                         if count < 0 && errno == EINTR { continue }
                         if count < 0 && (errno == EAGAIN || errno == EWOULDBLOCK) { break }
@@ -218,7 +233,7 @@ private final class SetupLoginProcess: @unchecked Sendable {
             }
             // Drain bytes queued with the final hangup notification.
             while true {
-                let count = Darwin.read(descriptor, &buffer, buffer.count)
+                let count = POSIX.read(descriptor, &buffer, buffer.count)
                 guard count > 0 else { break }
                 onOutput(Data(buffer[..<count]))
             }
@@ -236,7 +251,7 @@ private final class SetupLoginProcess: @unchecked Sendable {
             guard let base = raw.baseAddress else { return }
             var offset = 0
             while offset < raw.count {
-                let count = Darwin.write(descriptor, base.advanced(by: offset), raw.count - offset)
+                let count = POSIX.write(descriptor, base.advanced(by: offset), raw.count - offset)
                 if count < 0 && errno == EINTR { continue }
                 guard count > 0 else { throw ChauffeurError("setup_login_input", "Could not send input to setup sign-in") }
                 offset += count

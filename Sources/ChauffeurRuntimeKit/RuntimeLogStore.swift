@@ -1,5 +1,9 @@
 import Foundation
+#if canImport(Darwin)
 import Darwin
+#else
+import Glibc
+#endif
 import ChauffeurCore
 
 /// Bounded, private JSONL with a schema that has no arbitrary text fields.
@@ -22,22 +26,22 @@ public final class RuntimeLogStore: @unchecked Sendable {
     public init(root: URL, maximumBytes: Int = RuntimeLogStore.maximumFileBytes) throws {
         self.maximumBytes = min(Self.maximumFileBytes, max(1024, maximumBytes))
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
-        let directory = Darwin.open(root.path, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
+        let directory = POSIX.open(root.path, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
         guard directory >= 0 else { throw Self.failure }
         var info = stat()
-        guard fstat(directory, &info) == 0, info.st_uid == getuid(), fchmod(directory, 0o700) == 0 else { Darwin.close(directory); throw Self.failure }
+        guard fstat(directory, &info) == 0, info.st_uid == getuid(), fchmod(directory, 0o700) == 0 else { POSIX.close(directory); throw Self.failure }
         self.directory = directory
         do { lockFile = try Self.openFile(directory: directory, name: ".runtime-log.lock", flags: O_RDWR | O_CREAT) }
-        catch { Darwin.close(directory); throw error }
+        catch { POSIX.close(directory); throw error }
     }
-    deinit { Darwin.close(lockFile); Darwin.close(directory) }
+    deinit { POSIX.close(lockFile); POSIX.close(directory) }
     private static var failure: ChauffeurError { ChauffeurError("log_unavailable", "Structured runtime logs are unavailable") }
     private static func openFile(directory: Int32, name: String, flags: Int32) throws -> Int32 {
         let fd = openat(directory, name, flags | O_NOFOLLOW | O_CLOEXEC | O_NONBLOCK, 0o600)
         guard fd >= 0 else { throw failure }
         var info = stat()
         guard fstat(fd, &info) == 0, info.st_mode & S_IFMT == S_IFREG, info.st_uid == getuid(), info.st_nlink == 1,
-              fchmod(fd, 0o600) == 0 else { Darwin.close(fd); throw failure }
+              fchmod(fd, 0o600) == 0 else { POSIX.close(fd); throw failure }
         return fd
     }
     private func fileInfo(_ name: String) throws -> stat? {
@@ -66,18 +70,18 @@ public final class RuntimeLogStore: @unchecked Sendable {
                 // Validate every managed destination before deleting or renaming.
                 let inventory = try Self.names.map { try fileInfo($0) }
                 guard inventory.allSatisfy({ ($0?.st_size ?? 0) <= maximumBytes }) else { throw Self.failure }
-                if (inventory[0]?.st_size ?? 0) + Int64(line.count) > maximumBytes {
+                if Int64(inventory[0]?.st_size ?? 0) + Int64(line.count) > maximumBytes {
                     if inventory[3] != nil, unlinkat(directory, Self.names[3], 0) != 0 { throw Self.failure }
                     for index in stride(from: 2, through: 0, by: -1) where inventory[index] != nil {
                         guard renameat(directory, Self.names[index], directory, Self.names[index + 1]) == 0 else { throw Self.failure }
                     }
                 }
                 let fd = try Self.openFile(directory: directory, name: Self.names[0], flags: O_WRONLY | O_APPEND | O_CREAT)
-                defer { Darwin.close(fd) }
+                defer { POSIX.close(fd) }
                 try line.withUnsafeBytes { bytes in
                     var offset = 0
                     while offset < bytes.count {
-                        let count = Darwin.write(fd, bytes.baseAddress!.advanced(by: offset), bytes.count - offset)
+                        let count = POSIX.write(fd, bytes.baseAddress!.advanced(by: offset), bytes.count - offset)
                         if count < 0 && errno == EINTR { continue }
                         guard count > 0 else { throw Self.failure }
                         offset += count

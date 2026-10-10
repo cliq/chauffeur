@@ -1,5 +1,9 @@
 import AppKit
+#if canImport(Darwin)
 import Darwin
+#else
+import Glibc
+#endif
 import ChauffeurCore
 
 @main struct ChauffeurLauncher {

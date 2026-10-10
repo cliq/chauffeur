@@ -1,5 +1,9 @@
 import Foundation
+#if canImport(Darwin)
 import Darwin
+#else
+import Glibc
+#endif
 import Testing
 import ChauffeurCore
 @testable import ChauffeurRuntimeKit
@@ -66,7 +70,12 @@ struct LaunchCancellationTests {
             try await fixture.runtime.terminals.capture(sessionID: session.id, lines: 100).screen.contains(expected)
         }
         var descriptors: [Int32] = [-1, -1]
-        try #require(socketpair(AF_UNIX, SOCK_STREAM, 0, &descriptors) == 0)
+        #if os(Linux)
+        let stream = Int32(SOCK_STREAM.rawValue)
+        #else
+        let stream = SOCK_STREAM
+        #endif
+        try #require(socketpair(AF_UNIX, stream, 0, &descriptors) == 0)
         let writer = SocketConnection(descriptor: descriptors[0]), reader = SocketConnection(descriptor: descriptors[1])
         defer { writer.close(); reader.close() }
         var timeout = timeval(tv_sec: 3, tv_usec: 0)

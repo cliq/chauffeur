@@ -1,3 +1,6 @@
+#ifdef __linux__
+#define _GNU_SOURCE
+#endif
 #include "CChauffeur.h"
 #include <sys/socket.h>
 #include <sys/un.h>
@@ -5,13 +8,18 @@
 #include <sys/ioctl.h>
 #include <sys/stat.h>
 #include <spawn.h>
+#ifdef __linux__
+#include <pty.h>
+#else
 #include <util.h>
+#endif
 #include <fcntl.h>
 #include <unistd.h>
 #include <errno.h>
 #include <string.h>
 #include <signal.h>
 #include <stdlib.h>
+#include <stdio.h>
 
 static int unix_socket(const char *path, int listening) {
     struct sockaddr_un address = { .sun_family = AF_UNIX };
@@ -21,7 +29,11 @@ static int unix_socket(const char *path, int listening) {
     if (fd < 0) return -1;
     fcntl(fd, F_SETFD, FD_CLOEXEC);
     int yes = 1;
+#ifdef SO_NOSIGPIPE
     setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &yes, sizeof(yes));
+#else
+    (void)yes; // Linux has no per-socket option; writers pass MSG_NOSIGNAL instead.
+#endif
     int result = listening ? bind(fd, (struct sockaddr *)&address, sizeof(address)) : connect(fd, (struct sockaddr *)&address, sizeof(address));
     if (!result && listening) { chmod(path, 0600); result = listen(fd, 32); }
     if (result < 0) { int saved = errno; close(fd); errno = saved; return -1; }
@@ -30,8 +42,13 @@ static int unix_socket(const char *path, int listening) {
 int chauffeur_unix_listen(const char *path) { return unix_socket(path, 1); }
 int chauffeur_unix_connect(const char *path) { return unix_socket(path, 0); }
 int chauffeur_peer_is_current_user(int fd) {
+#ifdef __linux__
+    struct ucred credentials; socklen_t length = sizeof credentials;
+    return getsockopt(fd, SOL_SOCKET, SO_PEERCRED, &credentials, &length) == 0 && credentials.uid == getuid();
+#else
     uid_t uid; gid_t gid;
     return getpeereid(fd, &uid, &gid) == 0 && uid == getuid();
+#endif
 }
 int chauffeur_lock(const char *path) {
     int fd = open(path, O_CREAT | O_RDWR | O_CLOEXEC | O_NOFOLLOW, 0600);
@@ -74,4 +91,79 @@ pid_t chauffeur_spawn_pty(const char *executable, char *const argv[], char *cons
 int chauffeur_resize(int fd, unsigned short cols, unsigned short rows) {
     struct winsize size = { .ws_row = rows, .ws_col = cols };
     return ioctl(fd, TIOCSWINSZ, &size);
+}
+
+int chauffeur_rename_exclusive(const char *from, const char *to) {
+    return chauffeur_renameat_exclusive(AT_FDCWD, from, AT_FDCWD, to);
+}
+int chauffeur_renameat_exclusive(int from_fd, const char *from, int to_fd, const char *to) {
+#ifdef __linux__
+    return renameat2(from_fd, from, to_fd, to, RENAME_NOREPLACE);
+#else
+    return renameatx_np(from_fd, from, to_fd, to, RENAME_EXCL);
+#endif
+}
+
+pid_t chauffeur_spawn(const char *executable, char *const argv[], char *const envp[], const char *cwd, int stdin_fd, int stdout_fd, int stderr_fd) {
+    posix_spawn_file_actions_t actions;
+    posix_spawnattr_t attributes;
+    int error = posix_spawn_file_actions_init(&actions);
+    if (error) { errno = error; return -1; }
+    if ((error = posix_spawnattr_init(&attributes))) { posix_spawn_file_actions_destroy(&actions); errno = error; return -1; }
+    short flags = POSIX_SPAWN_SETSIGMASK | POSIX_SPAWN_SETSIGDEF;
+    // Only the three standard descriptors reach the child, whatever other threads
+    // have open without FD_CLOEXEC at this moment.
+    if (!error) error = posix_spawn_file_actions_adddup2(&actions, stdin_fd, STDIN_FILENO);
+    if (!error) error = posix_spawn_file_actions_adddup2(&actions, stdout_fd, STDOUT_FILENO);
+    if (!error) error = posix_spawn_file_actions_adddup2(&actions, stderr_fd, STDERR_FILENO);
+#ifdef __APPLE__
+    flags |= POSIX_SPAWN_CLOEXEC_DEFAULT;
+#else
+    if (!error) error = posix_spawn_file_actions_addclosefrom_np(&actions, STDERR_FILENO + 1);
+#endif
+    if (!error && cwd) error = posix_spawn_file_actions_addchdir_np(&actions, cwd);
+    // Threads of the calling process block most signals, and the mask survives exec:
+    // a tmux server started with SIGCHLD blocked never reaps its panes. Start the
+    // child with nothing blocked and every catchable signal at its default action.
+    sigset_t unblocked, defaults;
+    sigemptyset(&unblocked);
+    sigfillset(&defaults);
+    sigdelset(&defaults, SIGKILL);
+    sigdelset(&defaults, SIGSTOP);
+    if (!error) error = posix_spawnattr_setsigmask(&attributes, &unblocked);
+    if (!error) error = posix_spawnattr_setsigdefault(&attributes, &defaults);
+    if (!error) error = posix_spawnattr_setflags(&attributes, flags);
+    pid_t pid = -1;
+    if (!error) error = posix_spawn(&pid, executable, &actions, &attributes, argv, envp);
+    posix_spawnattr_destroy(&attributes);
+    posix_spawn_file_actions_destroy(&actions);
+    if (error) { errno = error; return -1; }
+    return pid;
+}
+
+int chauffeur_birth_time(const char *path, long long *seconds, long *nanoseconds) {
+#ifdef __linux__
+    struct statx info;
+    if (statx(AT_FDCWD, path, 0, STATX_BTIME, &info) != 0) return -1;
+    if (!(info.stx_mask & STATX_BTIME)) { errno = ENOTSUP; return -1; }
+    *seconds = info.stx_btime.tv_sec;
+    *nanoseconds = info.stx_btime.tv_nsec;
+#else
+    struct stat info;
+    if (stat(path, &info) != 0) return -1;
+    *seconds = info.st_birthtimespec.tv_sec;
+    *nanoseconds = info.st_birthtimespec.tv_nsec;
+#endif
+    return 0;
+}
+
+int chauffeur_pipe(int descriptors[2]) {
+#ifdef __linux__
+    return pipe2(descriptors, O_CLOEXEC);
+#else
+    if (pipe(descriptors) != 0) return -1;
+    fcntl(descriptors[0], F_SETFD, FD_CLOEXEC);
+    fcntl(descriptors[1], F_SETFD, FD_CLOEXEC);
+    return 0;
+#endif
 }

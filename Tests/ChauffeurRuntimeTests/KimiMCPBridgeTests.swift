@@ -3,9 +3,8 @@ import Testing
 import ChauffeurCore
 
 struct KimiMCPBridgeTests {
-    private final class Marker {}
     @Test func ordinaryKimiLaunchGetsAnEmptyMCPServerWithoutCredentials() throws {
-        let ctl = Bundle(for: Marker.self).bundleURL.deletingLastPathComponent().appendingPathComponent("chauffeurctl")
+        let ctl = BuiltProducts.url("chauffeurctl")
         let process = Process(); process.executableURL = ctl; process.arguments = ["kimi-mcp"]
         process.environment = [:]
         let input = Pipe(), output = Pipe()
@@ -57,7 +56,7 @@ struct KimiMCPBridgeTests {
         defer { if server.isRunning { server.terminate() } }
         for _ in 0..<200 where !FileManager.default.fileExists(atPath: portFile.path) { try await Task.sleep(for: .milliseconds(20)) }
         let port = try String(contentsOf: portFile, encoding: .utf8)
-        let ctl = Bundle(for: Marker.self).bundleURL.deletingLastPathComponent().appendingPathComponent("chauffeurctl")
+        let ctl = BuiltProducts.url("chauffeurctl")
         let process = Process(); process.executableURL = ctl; process.arguments = ["kimi-mcp"]
         process.environment = ["CHAUFFEUR_KIMI_TOKEN": "fixture", "CHAUFFEUR_KIMI_ENDPOINT": "http://127.0.0.1:\(port)/mcp"]
         let input = Pipe(), output = Pipe()

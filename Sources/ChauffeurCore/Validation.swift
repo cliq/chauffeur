@@ -1,5 +1,9 @@
 import Foundation
+#if canImport(Darwin)
 import Darwin
+#else
+import Glibc
+#endif
 
 public struct ChauffeurError: Error, Codable, Equatable, Sendable, LocalizedError {
     public var code: String

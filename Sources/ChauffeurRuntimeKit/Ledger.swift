@@ -1,7 +1,14 @@
 import Foundation
+#if canImport(Darwin)
 import Darwin
+#else
+import Glibc
+#endif
+#if canImport(CryptoKit)
 import CryptoKit
-import Security
+#else
+import Crypto
+#endif
 import CSQLite
 import ChauffeurCore
 
@@ -340,8 +347,9 @@ public actor Ledger {
         try execute("UPDATE attention_notices SET delivered=1 WHERE notice_id=?", [id.uuidString])
     }
     public func issueGrant(sessionID: UUID) throws -> String {
-        var random = [UInt8](repeating: 0, count: 32)
-        guard SecRandomCopyBytes(kSecRandomDefault, random.count, &random) == errSecSuccess else { throw ChauffeurError("random_failure", "Cannot generate session credential") }
+        // The system generator is the platform's cryptographically secure source on macOS and Linux.
+        var generator = SystemRandomNumberGenerator()
+        let random = (0..<32).map { _ in UInt8.random(in: .min ... .max, using: &generator) }
         let token = Data(random).base64EncodedString()
         try transaction {
             try execute("UPDATE grants SET revoked=1 WHERE session_id=?", [sessionID.uuidString])

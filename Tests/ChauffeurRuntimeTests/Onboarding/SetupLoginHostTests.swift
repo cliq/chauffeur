@@ -1,5 +1,9 @@
 import Foundation
+#if canImport(Darwin)
 import Darwin
+#else
+import Glibc
+#endif
 import Testing
 @testable import ChauffeurCore
 @testable import ChauffeurRuntimeKit
@@ -57,10 +61,10 @@ import Testing
         try await host.cancel(operationID: firstID)
         let handle = await host.status(operationID: firstID)
         #expect(handle?.phase == .failed)
-        for _ in 0..<100 where kill(childPID, 0) == 0 {
+        for _ in 0..<100 where isRunning(childPID) {
             try await Task.sleep(for: .milliseconds(10))
         }
-        #expect(kill(childPID, 0) != 0)
+        #expect(!isRunning(childPID))
     }
 
     @Test func boundedOutputReportsOldestAvailableCursor() async throws {
@@ -75,6 +79,17 @@ import Testing
         let second = try await host.read(operationID: operationID, generation: attached.generation, cursor: first.nextCursor)
         #expect(second.bytes.count <= 16)
     }
+}
+
+/// `kill(pid, 0)` also succeeds for a zombie. The killed child is an orphan, and in a
+/// container whose PID 1 never reaps (`swift test` itself) it stays one, though it ended.
+private func isRunning(_ pid: Int32) -> Bool {
+    guard kill(pid, 0) == 0 else { return false }
+    #if os(Linux)
+    if let stat = try? String(contentsOfFile: "/proc/\(pid)/stat", encoding: .utf8),
+       let state = stat.split(separator: ")").last?.split(separator: " ").first { return state != "Z" }
+    #endif
+    return true
 }
 
 private func shellCommand(_ source: String) -> SetupCommand {

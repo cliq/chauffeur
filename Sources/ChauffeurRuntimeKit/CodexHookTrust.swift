@@ -1,5 +1,9 @@
 import Foundation
+#if canImport(Darwin)
 import Darwin
+#else
+import Glibc
+#endif
 import ChauffeurCore
 
 /// Codex skips hooks it does not trust. Chauffeur trusts exactly its own
@@ -76,7 +80,7 @@ public enum CodexHookTrust {
         process.environment = environment
         let input = Pipe(), output = Pipe()
         process.standardInput = input; process.standardOutput = output; process.standardError = FileHandle.nullDevice
-        guard (try? process.run()) != nil else { return nil }
+        guard (try? Platform.withDefaultSignalMask { try process.run() }) != nil else { return nil }
         defer {
             if process.isRunning { process.terminate() }
             let stopDeadline = Date().addingTimeInterval(1)

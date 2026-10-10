@@ -1,5 +1,9 @@
 import Foundation
+#if canImport(Darwin)
 import Darwin
+#else
+import Glibc
+#endif
 import ChauffeurCore
 
 public struct CommandResult: Sendable {
@@ -24,6 +28,8 @@ public enum ProcessRunner {
             }
         } onCancel: { cancellation.cancel() }
     }
+    #if !os(Linux)
+    // Linux starts commands without Foundation's `Process`; see ProcessRunner+Linux.swift.
     private static func runSync(_ executable: String, _ arguments: [String], directory: String?, environment: [String: String]?, timeout: TimeInterval, outputLimit: Int, keepOutputTail: Bool, cancellation: CommandCancellation) throws -> CommandResult {
         if cancellation.isCancelled { throw CancellationError() }
         let process = Process()
@@ -71,14 +77,15 @@ public enum ProcessRunner {
         }
         return CommandResult(status: process.terminationStatus, output: outputReader.text, error: errorReader.text, outputTruncated: outputReader.truncated)
     }
+    #endif
 }
-private final class CommandCancellation: @unchecked Sendable {
+final class CommandCancellation: @unchecked Sendable {
     private let lock = NSLock()
     private var cancelled = false
     var isCancelled: Bool { lock.lock(); defer { lock.unlock() }; return cancelled }
     func cancel() { lock.lock(); cancelled = true; lock.unlock() }
 }
-private final class BoundedReader: @unchecked Sendable {
+final class BoundedReader: @unchecked Sendable {
     private let lock = NSLock()
     private var data = Data()
     private let limit: Int
@@ -88,14 +95,15 @@ private final class BoundedReader: @unchecked Sendable {
     var truncated: Bool { lock.lock(); defer { lock.unlock() }; return wasTruncated }
     var text: String { lock.lock(); defer { lock.unlock() }; return String(decoding: data, as: UTF8.self) }
     func read(_ file: FileHandle) {
-        while let chunk = try? file.read(upToCount: 65_536), !chunk.isEmpty {
-            lock.lock()
-            if data.count + chunk.count > limit { wasTruncated = true }
-            if keepTail {
-                data.append(chunk)
-                if data.count > limit { data.removeFirst(data.count - limit) }
-            } else if data.count < limit { data.append(chunk.prefix(limit - data.count)) }
-            lock.unlock()
-        }
+        while let chunk = try? file.read(upToCount: 65_536), !chunk.isEmpty { append(chunk) }
+    }
+    func append(_ chunk: Data) {
+        lock.lock()
+        if data.count + chunk.count > limit { wasTruncated = true }
+        if keepTail {
+            data.append(chunk)
+            if data.count > limit { data.removeFirst(data.count - limit) }
+        } else if data.count < limit { data.append(chunk.prefix(limit - data.count)) }
+        lock.unlock()
     }
 }

@@ -24,6 +24,8 @@ Use macOS 15+, Apple Silicon, Xcode 26.3 / Swift 6.2, XcodeGen, Git, and tmux. C
 
 Edit `project.yml` for Xcode configuration; regenerate with `make gen`. See `docs/building.md` for integration probes.
 
+The runtime and `chauffeurctl` also build on Linux (Swift 6.2+, libssl-dev, libsqlite3-dev). `docs/linux.md` covers installing a server and running the Linux tests in a container. Keep platform differences in `Platform`, `POSIX`, `Inotify` and the C helpers rather than inline `#if os(Linux)` blocks.
+
 ## Coding Style & Naming Conventions
 
 Follow nearby Swift code: four-space indentation, `UpperCamelCase` types, and `lowerCamelCase` members. Name files after their primary type or responsibility. Preserve actor isolation and module boundaries. No repository-wide formatter or linter configuration is provided.

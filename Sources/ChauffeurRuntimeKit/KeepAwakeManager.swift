@@ -1,5 +1,7 @@
 import Foundation
+#if canImport(IOKit)
 import IOKit.pwr_mgt
+#endif
 import ChauffeurCore
 import ChauffeurRemoteProtocol
 
@@ -8,8 +10,15 @@ import ChauffeurRemoteProtocol
 protocol PowerAssertionDriver: Sendable {
     func acquire() throws
     func release() throws
+    /// False once an acquired assertion ended on its own, so it is acquired again.
+    var isHeld: Bool { get }
 }
 
+extension PowerAssertionDriver {
+    var isHeld: Bool { true }
+}
+
+#if canImport(IOKit)
 final class SystemPowerAssertion: PowerAssertionDriver, @unchecked Sendable {
     private var assertion: IOPMAssertionID?
     func acquire() throws {
@@ -33,6 +42,49 @@ final class SystemPowerAssertion: PowerAssertionDriver, @unchecked Sendable {
     }
     deinit { if let assertion { IOPMAssertionRelease(assertion) } }
 }
+#else
+/// Holds a `systemd-inhibit` lock for as long as the assertion is held. The inhibitor runs
+/// `cat` on a pipe only this object writes to: closing it ends both, and so does the runtime
+/// exiting for any reason, so no inhibitor outlives the runtime.
+final class SystemPowerAssertion: PowerAssertionDriver, @unchecked Sendable {
+    private var process: Process?
+    private var input: Pipe?
+
+    func acquire() throws {
+        if let process, process.isRunning { return }
+        guard let inhibit = ["/usr/bin/systemd-inhibit", "/bin/systemd-inhibit"].first(where: FileManager.default.isExecutableFile) else {
+            throw ChauffeurError("keep_awake_failed", "systemd-inhibit is unavailable, so this host may sleep.")
+        }
+        let child = Process(), input = Pipe()
+        child.executableURL = URL(fileURLWithPath: inhibit)
+        child.arguments = ["--what=idle:sleep", "--who=Chauffeur", "--why=Agents are working", "--mode=block", "cat"]
+        child.standardInput = input
+        child.standardOutput = FileHandle.nullDevice
+        child.standardError = FileHandle.nullDevice
+        try Platform.withDefaultSignalMask { try child.run() }
+        // logind refuses the lock straight away when policy denies it.
+        let deadline = Date().addingTimeInterval(0.3)
+        while child.isRunning && Date() < deadline { Thread.sleep(forTimeInterval: 0.02) }
+        guard child.isRunning else {
+            try? input.fileHandleForWriting.close()
+            throw ChauffeurError("keep_awake_failed", "systemd could not prevent sleep (\(child.terminationStatus)).")
+        }
+        process = child
+        self.input = input
+    }
+
+    func release() throws {
+        try? input?.fileHandleForWriting.close()
+        input = nil
+        process = nil
+    }
+
+    /// logind can end the lock after it was granted, or the inhibitor can be killed.
+    var isHeld: Bool { process?.isRunning == true }
+
+    deinit { try? input?.fileHandleForWriting.close() }
+}
+#endif
 
 struct KeepAwakeAgent: Sendable {
     enum Activity: Sendable { case working, waiting }
@@ -167,6 +219,7 @@ struct KeepAwakeManager {
             }
         }.count : 0
         let requested = qualifyingAgents > 0 || saved.manualUntil != nil
+        if held && !driver.isHeld { held = false }
         do {
             if requested && !held { try driver.acquire(); held = true }
             else if !requested && held { try driver.release(); held = false }

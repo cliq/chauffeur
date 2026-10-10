@@ -1,5 +1,10 @@
 import ChauffeurCore
+import CChauffeur
+#if canImport(Darwin)
 import Darwin
+#else
+import Glibc
+#endif
 import Foundation
 
 public actor ConfigurationPublisher {
@@ -119,7 +124,7 @@ public actor ConfigurationPublisher {
             }
         }
         if needsWriting {
-            guard Darwin.mkdir(stage.path, 0o700) == 0 else {
+            guard POSIX.mkdir(stage.path, 0o700) == 0 else {
                 throw ConfigurationMigrationError.unsafePath("Cannot create the private staging folder.")
             }
             do {
@@ -136,7 +141,7 @@ public actor ConfigurationPublisher {
         }
         try interruptionHook?(.staged)
 
-        guard renameatx_np(AT_FDCWD, stage.path, AT_FDCWD, destination.path, UInt32(RENAME_EXCL)) == 0 else {
+        guard chauffeur_rename_exclusive(stage.path, destination.path) == 0 else {
             if errno == EEXIST, FileManager.default.fileExists(atPath: destination.path) {
                 return try await receiptForPublishedDestination(operation: operation, preview: preview, pair: pair, destination: destination)
             }

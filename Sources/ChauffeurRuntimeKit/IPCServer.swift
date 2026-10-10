@@ -1,5 +1,9 @@
 import Foundation
+#if canImport(Darwin)
 import Darwin
+#else
+import Glibc
+#endif
 import CChauffeur
 import ChauffeurCore
 
@@ -16,17 +20,17 @@ public final class IPCServer: @unchecked Sendable {
         path = directory.appendingPathComponent("runtime.sock").path
         unlink(path)
         descriptor = chauffeur_unix_listen(path)
-        guard descriptor >= 0 else { Darwin.close(lockDescriptor); throw ChauffeurError("socket_failed", "Cannot open runtime socket; check path length and permissions", path: path) }
+        guard descriptor >= 0 else { POSIX.close(lockDescriptor); throw ChauffeurError("socket_failed", "Cannot open runtime socket; check path length and permissions", path: path) }
         self.runtime = runtime
     }
-    deinit { Darwin.close(descriptor); unlink(path); Darwin.close(lockDescriptor) }
+    deinit { POSIX.close(descriptor); unlink(path); POSIX.close(lockDescriptor) }
     public func start() {
         DispatchQueue.global(qos: .userInitiated).async { [self] in
             while true {
-                let accepted = Darwin.accept(descriptor, nil, nil)
+                let accepted = POSIX.accept(descriptor)
                 if accepted < 0 && errno == EINTR { continue }
                 guard accepted >= 0 else { return }
-                guard chauffeur_peer_is_current_user(accepted) != 0 else { Darwin.close(accepted); continue }
+                guard chauffeur_peer_is_current_user(accepted) != 0 else { POSIX.close(accepted); continue }
                 let connection = SocketConnection(descriptor: accepted)
                 var timeout = timeval(tv_sec: 5, tv_usec: 0)
                 setsockopt(accepted, SOL_SOCKET, SO_SNDTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size))

@@ -1,6 +1,11 @@
 import Foundation
+#if canImport(Darwin)
 import Darwin
+#else
+import Glibc
+#endif
 import ChauffeurCore
+import CChauffeur
 
 /// Publishes one bundled catalog and links it into CLI discovery directories.
 /// Existing files and links owned by other tools are never replaced.
@@ -228,7 +233,7 @@ private final class Directory {
         guard fstat(file, &info) == 0, info.st_mode & S_IFMT == S_IFREG, info.st_uid == getuid(), info.st_nlink == 1,
               info.st_size >= 0, info.st_size <= limit else { throw conflict("Skill files must be private, bounded regular files with no links") }
         var data = Data(count: limit + 1)
-        let count = data.withUnsafeMutableBytes { Darwin.read(file, $0.baseAddress, $0.count) }
+        let count = data.withUnsafeMutableBytes { POSIX.read(file, $0.baseAddress, $0.count) }
         guard count >= 0, count <= limit, count == info.st_size else { throw conflict("The skill changed while it was being read") }
         data.count = count
         return data
@@ -237,7 +242,7 @@ private final class Directory {
         let file = openat(fd, name, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0o600)
         guard file >= 0 else { throw ChauffeurError("skill_unavailable", "Cannot write the coordination skill") }
         defer { close(file) }
-        let count = data.withUnsafeBytes { Darwin.write(file, $0.baseAddress, $0.count) }
+        let count = data.withUnsafeBytes { POSIX.write(file, $0.baseAddress, $0.count) }
         guard count == data.count, fsync(file) == 0 else { throw ChauffeurError("skill_unavailable", "Cannot save the coordination skill") }
     }
     func writePath(_ path: String, data: Data) throws {
@@ -259,7 +264,7 @@ private final class Directory {
         return file
     }
     func move(_ source: String, to destination: String, in target: Directory? = nil) throws {
-        guard renameatx_np(fd, source, target?.fd ?? fd, destination, UInt32(RENAME_EXCL)) == 0 else { throw conflict("The skill path changed or cannot be replaced. Existing files are preserved.") }
+        guard chauffeur_renameat_exclusive(fd, source, target?.fd ?? fd, destination) == 0 else { throw conflict("The skill path changed or cannot be replaced. Existing files are preserved.") }
         _ = fsync(fd)
         if let target { _ = fsync(target.fd) }
     }
