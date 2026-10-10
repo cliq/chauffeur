@@ -1121,7 +1121,7 @@ private struct ProjectWindowContent: View, Equatable {
     }
     private func deleteWorktree(_ row: CheckoutRow) {
         guard let project else { return }
-        let discardChanges = deletionPreview.hasChanges
+        let discardChanges = deletionPreview.requiresDiscard
         let path = projectModel.canonical(row.path)
         guard deletingWorktrees.insert(path).inserted else { return }
         model.perform {

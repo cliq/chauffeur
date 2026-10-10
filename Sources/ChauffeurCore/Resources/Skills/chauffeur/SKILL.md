@@ -113,7 +113,8 @@ defaults to the main checkout's `HEAD`, so pass your branch to build on your
 work. Launch into it with its `worktreeID`, or delegate into it with its
 `worktreeID` and `shareCheckout: true`.
 `chauffeur_remove_worktree` cleans up a worktree Chauffeur created; pass
-`discardChanges: true` only when the user agreed to lose uncommitted files.
+`discardChanges: true` only when the user agreed to lose uncommitted files
+or submodule commits that exist only in that worktree.
 
 ## Follow-up, closure, and recovery
 

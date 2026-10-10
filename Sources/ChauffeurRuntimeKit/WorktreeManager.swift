@@ -283,25 +283,58 @@ public actor WorktreeManager {
         guard discardChanges || !dirty else {
             throw ChauffeurError("dirty_worktree", "Worktree has uncommitted or untracked files. Confirm deletion to discard them", path: path)
         }
-        // Git still enforces locks and refuses to remove the main checkout.
-        _ = try await git(worktree.repositoryPath, ["worktree", "remove"] + (discardChanges ? ["--force"] : []) + ["--", path])
+        let submodules = try await self.submodules(at: path, mainCheckout: worktree.repositoryPath)
+        guard discardChanges || !submodules.contains(where: { $0.localCommits > 0 }) else {
+            throw ChauffeurError("submodule_work", "Submodules have commits found only in this worktree. Confirm deletion to discard them", path: path)
+        }
+        // Git refuses any checkout holding submodule repositories unless forced;
+        // the checks above stand in for its own. It still enforces locks and
+        // refuses to remove the main checkout.
+        let modules = Self.line(try await git(path, ["rev-parse", "--path-format=absolute", "--git-path", "modules"]))
+        let force = discardChanges || !submodules.isEmpty || FileManager.default.fileExists(atPath: modules)
+        _ = try await git(worktree.repositoryPath, ["worktree", "remove"] + (force ? ["--force"] : []) + ["--", path])
         await deleteBranchIfUnused(entry.branch, repository: worktree.repositoryPath)
     }
     public func hasChanges(at path: String) async throws -> Bool {
         try await hasUncommittedChanges(at: path)
     }
+    /// Initialized submodules, recursively, each with the commits that vanish
+    /// along with the checkout's copy of its repository: those its HEAD or
+    /// branches reach that neither its remotes nor a ref in the main checkout's
+    /// copy of the same submodule hold.
+    public func submodules(at path: String, mainCheckout: String) async throws -> [WorktreeDeletionPreview.Submodule] {
+        let listing = try await git(path, ["submodule", "foreach", "--recursive", "--quiet", #"printf '%s\0' "$displaypath""#])
+        var result: [WorktreeDeletionPreview.Submodule] = []
+        for displayPath in listing.split(separator: "\0").map(String.init) {
+            let submodule = URL(fileURLWithPath: path).appendingPathComponent(displayPath).path
+            let copy = URL(fileURLWithPath: mainCheckout).appendingPathComponent(displayPath).path
+            let hasCopy = FileManager.default.fileExists(atPath: URL(fileURLWithPath: copy).appendingPathComponent(".git").path)
+            let heads = try await git(submodule, ["for-each-ref", "--format=%(objectname)", "refs/heads"]).split(separator: "\n").map(String.init)
+            let head = (try? await git(submodule, ["rev-parse", "--verify", "--quiet", "HEAD"])).map(Self.line)
+            var lost: [String] = []
+            for tip in Set(heads + [head].compactMap { $0 }).sorted() where !tip.isEmpty {
+                guard let count = Int(Self.line(try await git(submodule, ["rev-list", "--count", tip, "--not", "--remotes"]))), count > 0 else { continue }
+                let kept = hasCopy ? (try? await git(copy, ["for-each-ref", "--count=1", "--format=kept", "--contains", tip]))?.isEmpty == false : false
+                if !kept { lost.append(tip) }
+            }
+            let count = lost.isEmpty ? 0 : Int(Self.line(try await git(submodule, ["rev-list", "--count"] + lost + ["--not", "--remotes"]))) ?? 0
+            result.append(.init(path: displayPath, localCommits: count))
+        }
+        return result
+    }
     public func changedFiles(at path: String) async throws -> [WorktreeDeletionPreview.ChangedFile] {
         // Disable rename folding so every affected path is shown, including both
         // sides of a rename. NUL delimiters preserve spaces and newlines in names.
-        let output = try await git(path, ["status", "--porcelain=v1", "-z", "--untracked-files=all", "--no-renames"])
+        let output = try await git(path, ["status", "--porcelain=v1", "-z", "--untracked-files=all", "--no-renames", "--ignore-submodules=none"])
         return output.split(separator: "\0").map { record in
             WorktreeDeletionPreview.ChangedFile(path: String(record.dropFirst(3)), status: String(record.prefix(2)))
         }
     }
     /// Whether the checkout has work to commit: tracked modifications or
-    /// untracked files. Ignored files are build output, not pending work.
+    /// untracked files, including inside submodules whatever `.gitmodules`
+    /// says to ignore. Ignored files are build output, not pending work.
     public func hasUncommittedChanges(at path: String) async throws -> Bool {
-        try await !git(path, ["status", "--porcelain=v1", "-z", "--untracked-files=normal"]).isEmpty
+        try await !git(path, ["status", "--porcelain=v1", "-z", "--untracked-files=normal", "--ignore-submodules=none"]).isEmpty
     }
     /// The local branch a ref names (`HEAD` resolves to the checked-out branch),
     /// or `nil` for a detached commit, tag, or remote ref.

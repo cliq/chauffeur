@@ -79,11 +79,23 @@ public struct WorktreeDeletionPreview: Codable, Equatable, Sendable {
     public var unpushedCommits: Int?
     /// The remote branch the push state was measured against.
     public var remoteBranch: String?
-    public init(hasChanges: Bool, unmergedCommits: Int? = nil, baseBranch: String? = nil, unpushedCommits: Int? = nil, remoteBranch: String? = nil, changedFiles: [ChangedFile]? = nil) {
+    /// Initialized submodules, whose repositories are deleted with the checkout;
+    /// `nil` when there are none.
+    public var submodules: [Submodule]?
+    public init(hasChanges: Bool, unmergedCommits: Int? = nil, baseBranch: String? = nil, unpushedCommits: Int? = nil, remoteBranch: String? = nil, changedFiles: [ChangedFile]? = nil, submodules: [Submodule]? = nil) {
         self.hasChanges = hasChanges; self.unmergedCommits = unmergedCommits; self.baseBranch = baseBranch
         self.unpushedCommits = unpushedCommits; self.remoteBranch = remoteBranch
-        self.changedFiles = changedFiles
+        self.changedFiles = changedFiles; self.submodules = submodules
     }
+    /// A submodule checked out in the worktree. `localCommits` counts commits
+    /// found neither on its remotes nor in the main checkout's copy of it.
+    public struct Submodule: Codable, Equatable, Sendable {
+        public var path: String
+        public var localCommits: Int
+        public init(path: String, localCommits: Int) { self.path = path; self.localCommits = localCommits }
+    }
+    /// Removal would discard files or submodule commits, so it needs `discardChanges`.
+    public var requiresDiscard: Bool { hasChanges || submodules?.contains { $0.localCommits > 0 } == true }
     public struct ChangedFile: Codable, Equatable, Sendable, Identifiable {
         public var path: String
         public var status: String
@@ -141,6 +153,16 @@ public struct WorktreeDeletionPreview: Codable, Equatable, Sendable {
                     items.append(Item(.loss, "\(commits), \(unpushedCommits) not pushed to \(remoteBranch)"))
                 } else {
                     items.append(Item(.loss, "\(commits), not pushed to any remote"))
+                }
+            }
+            if let submodules, !submodules.isEmpty {
+                let lossy = submodules.filter { $0.localCommits > 0 }
+                if lossy.isEmpty {
+                    items.append(Item(.safe, "Submodule commits exist outside this worktree"))
+                }
+                for submodule in lossy {
+                    let count = submodule.localCommits
+                    items.append(Item(.loss, "Submodule \(submodule.path) has \(count) commit\(count == 1 ? "" : "s") only in this worktree"))
                 }
             }
             if !branch.isEmpty, let unmergedCommits {

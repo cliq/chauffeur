@@ -376,6 +376,43 @@ struct WorktreeCreationTests {
         await #expect(throws: ChauffeurError.self) { _ = try await fixture.runtime.handle(IPCRequest("deleteWorktree", params: main)) }
     }
 
+    @Test func deletingAWorktreeWithSubmodulesGuardsCommitsOnlyItHolds() async throws {
+        let fixture = try await Fixture.make(); defer { fixture.cleanup() }
+        func git(_ directory: String, _ arguments: [String]) async throws {
+            let options = ["-c", "protocol.file.allow=always", "-c", "commit.gpgsign=false", "-c", "core.hooksPath=/dev/null", "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid"]
+            let result = try await ProcessRunner.run("/usr/bin/git", ["-C", directory] + options + arguments)
+            try #require(result.status == 0, Comment(rawValue: result.error))
+        }
+        let library = fixture.root.appendingPathComponent("library").path
+        try FileManager.default.createDirectory(atPath: library, withIntermediateDirectories: true)
+        try await git(library, ["init", "-b", "main"])
+        try await git(library, ["commit", "--allow-empty", "-m", "Library"])
+        try await git(fixture.repo.path, ["submodule", "add", library, "library"])
+        try await git(fixture.repo.path, ["commit", "-m", "Add library"])
+        let tree = try await fixture.runtime.createWorktree(fixture.request).value
+        try await git(tree.path, ["submodule", "update", "--init"])
+        let params: JSONValue = .object(["projectID": .string(fixture.project.id.uuidString), "folderID": .string(fixture.project.folders[0].id.uuidString), "path": .string(tree.path)])
+        func preview() async throws -> WorktreeDeletionPreview {
+            try await fixture.runtime.handle(IPCRequest("previewWorktreeDeletion", params: params)).decode(WorktreeDeletionPreview.self)
+        }
+        #expect(try await preview().submodules == [.init(path: "library", localCommits: 0)])
+        // A commit made and recorded in the worktree's submodule exists nowhere else.
+        let submodule = URL(fileURLWithPath: tree.path).appendingPathComponent("library").path
+        try await git(submodule, ["commit", "--allow-empty", "-m", "Local"])
+        try await git(tree.path, ["commit", "-am", "Bump library"])
+        var current = try await preview()
+        #expect(!current.hasChanges && current.requiresDiscard && current.submodules == [.init(path: "library", localCommits: 1)])
+        var code: String?
+        do { _ = try await fixture.runtime.handle(IPCRequest("deleteWorktree", params: params)) } catch let error as ChauffeurError { code = error.code }
+        #expect(code == "submodule_work" && FileManager.default.fileExists(atPath: tree.path))
+        // Once the main checkout's copy holds it, a clean worktree deletes despite Git's submodule refusal.
+        try await git(fixture.repo.appendingPathComponent("library").path, ["fetch", submodule, "HEAD:refs/heads/kept"])
+        current = try await preview()
+        #expect(!current.requiresDiscard && current.submodules == [.init(path: "library", localCommits: 0)])
+        let result = try await fixture.runtime.handle(IPCRequest("deleteWorktree", params: params))
+        #expect(result["deletedCheckout"].bool == true && !FileManager.default.fileExists(atPath: tree.path))
+    }
+
     @Test func vanishedCheckoutsKeepRecordsOnlyWhileSessionsReferToThem() async throws {
         let fixture = try await Fixture.make(); defer { fixture.cleanup() }
         let folder = fixture.project.folders[0]
