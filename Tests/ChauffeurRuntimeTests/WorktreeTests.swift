@@ -203,6 +203,41 @@ struct WorktreeGitStatusTests {
         }
     }
 
+    @Test func reuseRemoteOnlyBranchChecksOutATrackingBranch() async throws {
+        let root = URL(fileURLWithPath: "/tmp/chauffeur-reuse-remote-\(UUID())").resolvingSymlinksInPath()
+        let origin = root.appendingPathComponent("origin.git")
+        let fork = root.appendingPathComponent("fork.git")
+        let repo = root.appendingPathComponent("repo")
+        try FileManager.default.createDirectory(at: repo, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try await Self.git(root, ["init", "--bare", "-b", "main", origin.path])
+        try await Self.git(root, ["init", "--bare", "-b", "main", fork.path])
+        try await Self.git(repo, ["init", "-b", "main"])
+        try await Self.git(repo, ["commit", "--allow-empty", "-m", "Initial"])
+        try await Self.git(repo, ["remote", "add", "origin", origin.path])
+        try await Self.git(repo, ["remote", "add", "fork", fork.path])
+        try await Self.git(repo, ["checkout", "-b", "feature"])
+        try await Self.git(repo, ["commit", "--allow-empty", "-m", "Feature"])
+        try await Self.git(repo, ["push", "origin", "feature"])
+        try await Self.git(repo, ["push", "fork", "feature"])
+        try await Self.git(repo, ["checkout", "-b", "solo"])
+        try await Self.git(repo, ["commit", "--allow-empty", "-m", "Solo"])
+        try await Self.git(repo, ["push", "fork", "solo"])
+        try await Self.git(repo, ["checkout", "main"])
+        try await Self.git(repo, ["branch", "-D", "feature", "solo"])
+        let manager = WorktreeManager(root: root.appendingPathComponent("managed"))
+        let folder = ProjectFolder(path: repo.path)
+        for (branch, upstream, subject) in [("feature", "origin/feature", "Feature"), ("solo", "fork/solo", "Solo")] {
+            let tree = try await manager.create(projectID: UUID(), folder: folder, branch: branch, baseRef: "HEAD", reuseExistingBranch: true)
+            #expect(tree.branch == branch)
+            #expect(URL(fileURLWithPath: tree.path).lastPathComponent == branch)
+            let tracking = try await ProcessRunner.run("/usr/bin/git", ["-C", tree.path, "rev-parse", "--abbrev-ref", "@{upstream}"])
+            #expect(tracking.output.trimmingCharacters(in: .whitespacesAndNewlines) == upstream)
+            let log = try await ProcessRunner.run("/usr/bin/git", ["-C", tree.path, "log", "-1", "--format=%s"])
+            #expect(log.output.trimmingCharacters(in: .whitespacesAndNewlines) == subject)
+        }
+    }
+
     @Test func createdWorktreesRememberTheirStartingBranch() async throws {
         let root = URL(fileURLWithPath: "/tmp/chauffeur-base-branch-\(UUID())").resolvingSymlinksInPath()
         let repo = root.appendingPathComponent("repo")

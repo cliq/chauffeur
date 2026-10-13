@@ -36,13 +36,13 @@ public struct GitRef: Codable, Equatable, Identifiable, Sendable {
         (4...40).contains(query.utf8.count) && query.utf8.allSatisfy { (48...57).contains($0) || (65...70).contains($0) || (97...102).contains($0) }
     }
 
-    public static func filtered(_ refs: [GitRef], query: String) -> [GitRef] {
+    public static func filtered(_ refs: [GitRef], query: String, name: (GitRef) -> String = \.name) -> [GitRef] {
         let query = query.lowercased()
         func rank(_ ref: GitRef) -> Int {
-            let name = ref.name.lowercased()
+            let name = name(ref).lowercased()
             return name == query ? 0 : name.hasPrefix(query) ? 1 : 2
         }
-        return refs.filter { query.isEmpty || $0.name.lowercased().contains(query) }.sorted {
+        return refs.filter { query.isEmpty || name($0).lowercased().contains(query) }.sorted {
             if rank($0) != rank($1) { return rank($0) < rank($1) }
             if $0.lastCommitDate != $1.lastCommitDate { return ($0.lastCommitDate ?? .distantPast) > ($1.lastCommitDate ?? .distantPast) }
             return $0.fullName < $1.fullName

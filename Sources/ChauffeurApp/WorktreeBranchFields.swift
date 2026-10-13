@@ -14,6 +14,9 @@ struct WorktreeBranchFields: View {
     @State private var query = ""
     @State private var refs: [GitRef]?
     @State private var failure: String?
+    @State private var fetchedAt: Date?
+    @State private var fetching = false
+    @State private var fetchFailure: String?
     @State private var listHeight: CGFloat = 0
     @FocusState private var branchFocused: Bool
 
@@ -41,23 +44,33 @@ struct WorktreeBranchFields: View {
                     .accessibilityIdentifier(accessibilityPrefix + ".existing-branch")
                     .popover(isPresented: $choosingBranch) {
                         VStack(alignment: .leading, spacing: 12) {
-                            TextField("Search local branches", text: $query)
+                            HStack(spacing: 8) {
+                                TextField("Search branches", text: $query)
+                                if fetching { ProgressView().controlSize(.small) }
+                                Button("Fetch") { Task { await loadRefs(fetching: true) } }
+                                    .disabled(fetching || refs == nil)
+                                    .help(fetchStatus)
+                                    .accessibilityIdentifier(accessibilityPrefix + ".fetch-branches")
+                            }
+                            if let fetchFailure { Text(fetchFailure).font(.caption).foregroundStyle(.red).textSelection(.enabled) }
                             if let failure {
                                 Text(failure).foregroundStyle(.red)
                             } else if let refs {
-                                let matches = GitRef.filtered(refs, query: query)
-                                if matches.isEmpty { Text("No matching local branches.").foregroundStyle(.secondary) }
+                                let matches = GitRef.filtered(refs, query: query, name: Self.localName)
+                                if matches.isEmpty { Text("No matching branches.").foregroundStyle(.secondary) }
                                 ScrollView {
                                     VStack(alignment: .leading, spacing: 6) {
                                         ForEach(matches) { ref in
-                                            let path = occupied[ref.name]
+                                            let name = Self.localName(ref)
+                                            let path = occupied[name]
                                             Button {
-                                                branch = ref.name
+                                                branch = name
                                                 choosingBranch = false
                                             } label: {
                                                 VStack(alignment: .leading, spacing: 3) {
-                                                    Text(ref.name)
-                                                    if let path { Text("Checked out at " + path).font(.caption).textSelection(.enabled) }
+                                                    Text(name)
+                                                    if ref.kind == .remote { Text("Creates a local branch tracking " + ref.name).font(.caption).foregroundStyle(.secondary) }
+                                                    else if let path { Text("Checked out at " + path).font(.caption).textSelection(.enabled) }
                                                     else if ref.isCheckedOutInWorktree || ref.isHEAD { Text("Already checked out").font(.caption) }
                                                 }.frame(maxWidth: .infinity, alignment: .leading)
                                             }
@@ -71,13 +84,8 @@ struct WorktreeBranchFields: View {
                             } else { ProgressView() }
                         }.padding(16).frame(width: 440)
                             .task {
-                                refs = nil; failure = nil
-                                guard let folderID else { return }
-                                do {
-                                    let snapshot = try await model.call("listGitRefs", .object(["projectID": .string(projectID.uuidString), "folderID": .string(folderID.uuidString)])).decode(GitRefSnapshot.self)
-                                    guard !Task.isCancelled else { return }
-                                    refs = snapshot.refs.filter { $0.kind == .local }
-                                } catch { failure = error.localizedDescription }
+                                refs = nil; failure = nil; fetchFailure = nil
+                                await loadRefs(fetching: false)
                             }
                     }
                 }
@@ -97,6 +105,46 @@ struct WorktreeBranchFields: View {
 }
 
 extension WorktreeBranchFields {
+    /// Local branches, plus remote branches under the local name a worktree would
+    /// check them out as when no local branch has it. `origin` wins a name several remotes share.
+    static func branchChoices(_ refs: [GitRef]) -> [GitRef] {
+        let locals = refs.filter { $0.kind == .local }
+        var taken = Set(locals.map(\.name))
+        let remotes = refs.filter { $0.kind == .remote && !localName($0).isEmpty }
+            .sorted { ($0.name.hasPrefix("origin/") ? 0 : 1, $0.name) < ($1.name.hasPrefix("origin/") ? 0 : 1, $1.name) }
+            .filter { taken.insert(localName($0)).inserted }
+        return locals + remotes
+    }
+
+    private var fetchStatus: String {
+        guard let fetchedAt else { return "Fetch branches from all remotes. Not fetched yet." }
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .abbreviated
+        return "Fetch branches from all remotes. Fetched " + formatter.localizedString(for: fetchedAt, relativeTo: Date()) + "."
+    }
+
+    /// Lists the repository's branches, fetching every remote first when asked.
+    /// A failed fetch keeps the current list.
+    private func loadRefs(fetching: Bool) async {
+        guard let folderID else { return }
+        if fetching { self.fetching = true; fetchFailure = nil }
+        defer { if fetching { self.fetching = false } }
+        do {
+            let snapshot = try await model.call(fetching ? "fetchGitRefs" : "listGitRefs", .object(["projectID": .string(projectID.uuidString), "folderID": .string(folderID.uuidString)]),
+                                          responseTimeout: fetching ? 130 : 30).decode(GitRefSnapshot.self)
+            guard !Task.isCancelled else { return }
+            refs = Self.branchChoices(snapshot.refs)
+            fetchedAt = snapshot.fetchedAt
+        } catch {
+            if fetching { fetchFailure = error.localizedDescription } else { failure = error.localizedDescription }
+        }
+    }
+
+    /// A remote branch's name without its remote, as the runtime checks it out.
+    static func localName(_ ref: GitRef) -> String {
+        ref.kind == .remote ? ref.name.split(separator: "/", maxSplits: 1).dropFirst().joined() : ref.name
+    }
+
     /// A pasted ticket link becomes the repository's branch name for it. Keys are left as typed,
     /// since a key typed by hand would match before it is finished.
     private func resolvePastedTicket() async {

@@ -63,6 +63,24 @@ struct GitRefReaderTests {
         }
     }
 
+    @Test func fetchAddsNewRemoteBranchesAndDropsDeletedOnes() async throws {
+        let fixture = try await RefFixture.make()
+        defer { fixture.cleanup() }
+        let origin = fixture.root.appendingPathComponent("origin.git").path
+        try await fixture.git(["init", "--bare", "-b", "main", origin])
+        try await fixture.git(["remote", "add", "origin", origin])
+        try await fixture.git(["branch", "stale"])
+        try await fixture.git(["push", "origin", "main", "stale"])
+        try await fixture.git(["-C", origin, "branch", "fresh", "main"])
+        try await fixture.git(["-C", origin, "branch", "-D", "stale"])
+        let reader = GitRefReader()
+        try await reader.fetch(at: fixture.repo.path, environment: ProcessInfo.processInfo.environment)
+        let snapshot = try await reader.list(at: fixture.repo.path)
+        let remotes = Set(snapshot.refs.filter { $0.kind == .remote }.map(\.name))
+        #expect(remotes == ["origin/main", "origin/fresh"])
+        #expect(snapshot.fetchedAt != nil)
+    }
+
     @Test func unbornRepositoryHasNoInventedHeadAndBrokenRepositoryThrows() async throws {
         let fixture = try await RefFixture.make(commit: false)
         defer { fixture.cleanup() }

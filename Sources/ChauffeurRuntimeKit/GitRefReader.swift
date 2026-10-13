@@ -5,11 +5,12 @@ import ChauffeurCore
 public actor GitRefReader {
     public init() {}
 
-    private func git(_ path: String, _ arguments: [String], allowFailure: Bool = false) async throws -> String? {
+    private func git(_ path: String, _ arguments: [String], allowFailure: Bool = false,
+                     environment: [String: String]? = nil, timeout: TimeInterval = 30) async throws -> String? {
         try Task.checkCancellation()
         let result = try await ProcessRunner.run("/usr/bin/git", ["-C", path] + arguments,
-            environment: ["PATH": "/usr/bin:/bin", "HOME": FileManager.default.homeDirectoryForCurrentUser.path,
-                          "LC_ALL": "en_US.UTF-8", "GIT_TERMINAL_PROMPT": "0"], timeout: 30)
+            environment: environment ?? ["PATH": "/usr/bin:/bin", "HOME": FileManager.default.homeDirectoryForCurrentUser.path,
+                          "LC_ALL": "en_US.UTF-8", "GIT_TERMINAL_PROMPT": "0"], timeout: timeout)
         try Task.checkCancellation()
         guard !result.outputTruncated else { throw ChauffeurError("git_failed", "Git returned too much data. Narrow the repository's refs.", path: path) }
         guard result.status == 0 else {
@@ -65,6 +66,15 @@ public actor GitRefReader {
         }
         let attributes = try? FileManager.default.attributesOfItem(atPath: URL(fileURLWithPath: common).appendingPathComponent("FETCH_HEAD").path)
         return GitRefSnapshot(repositoryKey: Paths.canonical(common), refs: refs, head: head, defaultBranch: defaultBranch, fetchedAt: attributes?[.modificationDate] as? Date)
+    }
+
+    /// Updates every remote's branches, dropping those deleted upstream. Runs with the
+    /// user's environment so SSH agents and credential helpers work, but never prompts.
+    public func fetch(at path: String, environment: [String: String]) async throws {
+        var environment = environment
+        environment["GIT_TERMINAL_PROMPT"] = "0"
+        environment["LC_ALL"] = "en_US.UTF-8"
+        _ = try await git(path, ["fetch", "--all", "--prune", "--quiet"], environment: environment, timeout: 120)
     }
 
     public func resolve(_ query: String, at path: String) async throws -> GitRef? {

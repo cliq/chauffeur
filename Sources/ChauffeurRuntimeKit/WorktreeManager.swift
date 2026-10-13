@@ -242,7 +242,9 @@ public actor WorktreeManager {
         let repository = try Paths.directory(folder.canonicalPath)
         try Validation.require(!baseRef.isEmpty && !baseRef.hasPrefix("-") && !baseRef.contains("\0"), "Base ref is required and cannot begin with '-' or contain NUL")
         try await validateBranch(branch, repository: repository)
-        let startRef = reuseExistingBranch ? "refs/heads/\(branch)" : baseRef
+        // An existing branch only a remote holds is checked out as a new branch tracking it.
+        let remoteRef = reuseExistingBranch ? try await remoteBranch(for: branch, repository: repository) : nil
+        let startRef = reuseExistingBranch ? remoteRef ?? "refs/heads/\(branch)" : baseRef
         if reuseExistingBranch, let occupied = try await inventory(at: repository).first(where: { $0.branch == branch }) {
             throw ChauffeurError("branch_in_use", "This branch is already checked out at \(occupied.path). Select that checkout instead.", path: occupied.path)
         }
@@ -252,11 +254,29 @@ public actor WorktreeManager {
         let destination = destination(repositoryID: repoID, branch: branch)
         reservations.insert(destination.path); defer { reservations.remove(destination.path) }
         try FileManager.default.createDirectory(at: destination.deletingLastPathComponent(), withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
-        _ = try await git(repository, ["worktree", "add"] + (reuseExistingBranch ? ["--", destination.path, branch] : ["-b", branch, "--", destination.path, baseCommit]), timeout: 600)  // checkout filters (LFS) may download
+        let arguments = remoteRef.map { ["--track", "-b", branch, "--", destination.path, $0] }
+            ?? (reuseExistingBranch ? ["--", destination.path, branch] : ["-b", branch, "--", destination.path, baseCommit])
+        _ = try await git(repository, ["worktree", "add"] + arguments, timeout: 600)  // checkout filters (LFS) may download
         var result = Worktree(projectID: projectID, folderID: folder.id, repositoryID: repoID, path: Paths.canonical(destination.path), repositoryPath: repository, branch: branch, baseCommit: baseCommit, managed: true)
         result.baseBranch = baseBranchName
         result.gitIdentity = try? await identity(at: result.path)
         return result
+    }
+    /// The remote branch to check out `branch` from when no local branch has that
+    /// name: `origin`'s when it has one, otherwise the only remote's that does.
+    private func remoteBranch(for branch: String, repository: String) async throws -> String? {
+        guard (try? await git(repository, ["rev-parse", "--verify", "--quiet", "refs/heads/\(branch)^{commit}"])) == nil else { return nil }
+        let remotes = try await git(repository, ["remote"]).split(separator: "\n").map(String.init)
+        var matches: [String] = []
+        for remote in remotes where (try? await git(repository, ["rev-parse", "--verify", "--quiet", "refs/remotes/\(remote)/\(branch)^{commit}"])) != nil {
+            matches.append(remote)
+        }
+        let remote = matches.contains("origin") ? "origin" : matches.count == 1 ? matches[0] : nil
+        guard let remote else {
+            if matches.isEmpty { return nil }
+            throw ChauffeurError("ambiguous_remote_branch", "Remotes \(matches.joined(separator: ", ")) each have a branch named \(branch). Create a local branch from the one you want")
+        }
+        return "refs/remotes/\(remote)/\(branch)"
     }
     /// Removes a checkout with `git worktree remove`. External checkouts are
     /// only deleted when the caller explicitly asks for it.

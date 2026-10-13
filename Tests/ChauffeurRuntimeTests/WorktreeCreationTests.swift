@@ -101,7 +101,7 @@ struct WorktreeCreationTests {
         let params: JSONValue = .object(["projectID": .string(fixture.project.id.uuidString), "folderID": .string(fixture.project.folders[0].id.uuidString)])
         let refs = try await fixture.runtime.handle(IPCRequest("listGitRefs", params: params)).decode(GitRefSnapshot.self)
         #expect(refs.head != nil)
-        for method in ["listGitRefs", "resolveGitCommit"] {
+        for method in ["listGitRefs", "fetchGitRefs", "resolveGitCommit"] {
             let invalid: JSONValue = .object(["projectID": .string(fixture.project.id.uuidString), "folderID": .string(UUID().uuidString), "query": .string("abcd")])
             do {
                 _ = try await fixture.runtime.handle(IPCRequest(method, params: invalid))
