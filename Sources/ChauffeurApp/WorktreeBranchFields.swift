@@ -14,6 +14,7 @@ struct WorktreeBranchFields: View {
     @State private var query = ""
     @State private var refs: [GitRef]?
     @State private var failure: String?
+    @State private var listHeight: CGFloat = 0
     @FocusState private var branchFocused: Bool
 
     private var occupied: [String: String] {
@@ -63,7 +64,10 @@ struct WorktreeBranchFields: View {
                                             .disabled(path != nil || ref.isCheckedOutInWorktree || ref.isHEAD)
                                         }
                                     }
-                                }.frame(maxHeight: 280)
+                                    .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { listHeight = $0 }
+                                }
+                                // A popover sizes to ideal height, which collapses a scroll view; fit the rows instead.
+                                .frame(height: min(listHeight, 280))
                             } else { ProgressView() }
                         }.padding(16).frame(width: 440)
                             .task {
