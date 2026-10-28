@@ -1,6 +1,7 @@
 import SwiftUI
 import AppKit
 import Combine
+import UniformTypeIdentifiers
 import ChauffeurCore
 
 struct PendingTerminalTab: Identifiable {
@@ -73,6 +74,66 @@ struct PendingTerminalTab: Identifiable {
     }
 }
 
+extension UTType {
+    /// Only sidebar rows offer it, so drags from elsewhere, such as text from another app, never reach a sidebar drop.
+    static let chauffeurSidebarItem = UTType(exportedAs: "dev.chauffeur.sidebar-item")
+}
+
+/// Accepts sidebar drags on a row. Where the pointer sits on the row picks
+/// the destination, shown as a line above or below it, or an outline for into.
+private struct SidebarDropModifier: ViewModifier {
+    /// The destination for a pointer at a fraction of the row's height.
+    let destination: (CGFloat) -> RepositoryDestination
+    /// Whether a sidebar drag is under way; when it ends, every row drops its indicator,
+    /// as a late hover update can follow the drop.
+    let dragging: Bool
+    /// Whether the item being dragged may land there; false when nothing from the sidebar is.
+    let accepts: (RepositoryDestination) -> Bool
+    let drop: (String, RepositoryDestination) -> Void
+    @State private var height: CGFloat = 0
+    @State private var hovered: RepositoryDestination?
+    /// How far the drop area reaches into the gaps between sidebar rows, so no pointer position falls between targets.
+    private let reach: CGFloat = 5
+    func body(content: Content) -> some View {
+        content
+            .padding(.vertical, reach).contentShape(Rectangle())
+            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height = $0 }
+            .onDrop(of: [.chauffeurSidebarItem], delegate: Delegate(destination: { destination(height > 0 ? $0 / height : 0.5) }, accepts: accepts, drop: drop, hovered: $hovered))
+            .onChange(of: dragging) { _, dragging in if !dragging { hovered = nil } }
+            .overlay(alignment: hovered.map { if case .after = $0 { .bottom } else { .top } } ?? .top) {
+                switch dragging ? hovered : nil {
+                case .into: RoundedRectangle(cornerRadius: 6).stroke(Color.accentColor, lineWidth: 2).padding(.vertical, reach - 1).allowsHitTesting(false)
+                case .after, .before, .end: Rectangle().fill(Color.accentColor).frame(height: 2).allowsHitTesting(false)
+                case nil: EmptyView()
+                }
+            }
+            .padding(.vertical, -reach)
+    }
+    private struct Delegate: DropDelegate {
+        let destination: (CGFloat) -> RepositoryDestination
+        let accepts: (RepositoryDestination) -> Bool
+        let drop: (String, RepositoryDestination) -> Void
+        @Binding var hovered: RepositoryDestination?
+        func dropUpdated(info: DropInfo) -> DropProposal? {
+            let candidate = destination(info.location.y)
+            hovered = accepts(candidate) ? candidate : nil
+            return DropProposal(operation: hovered == nil ? .forbidden : .move)
+        }
+        func dropExited(info: DropInfo) { hovered = nil }
+        func performDrop(info: DropInfo) -> Bool {
+            defer { hovered = nil }
+            guard let destination = hovered, let provider = info.itemProviders(for: [.chauffeurSidebarItem]).first else { return false }
+            // The payload, not the drag the sidebar last started, names the item: a cancelled drag leaves that behind.
+            nonisolated(unsafe) let drop = drop
+            _ = provider.loadDataRepresentation(for: .chauffeurSidebarItem) { data, _ in
+                guard let payload = data.map({ String(decoding: $0, as: UTF8.self) }) else { return }
+                Task { @MainActor in drop(payload, destination) }
+            }
+            return true
+        }
+    }
+}
+
 /// Observes the whole app model but hands the window content only its
 /// project's model, so the content redraws only when that project changes.
 struct ProjectWindow: View {
@@ -107,12 +168,25 @@ private struct ProjectWindowContent: View, Equatable {
     @State private var settingsSheet: FolderSheet?
     /// Checkouts whose setup script is running after Run Setup Script.
     @State private var runningSetup = Set<String>()
+    /// Collapsed repositories and repository groups, by ID.
     @State private var collapsedRepositories = Set<UUID>()
     @State private var hiddenSectionExpanded = false
     private enum SidebarRowID: Hashable {
+        case group(UUID)
         case repository(UUID)
         case worktree(UUID, String)
     }
+    /// The sidebar item being dragged, so rows can show where it may land.
+    @State private var draggedSidebarItem: UUID?
+    /// The group name prompt: renames `groupID`, or creates a group, inside
+    /// `parentID` or in place of `itemID`, which then moves into it.
+    private struct GroupNaming {
+        var groupID: UUID?
+        var parentID: UUID?
+        var itemID: UUID?
+    }
+    @State private var groupNaming: GroupNaming?
+    @State private var groupName = ""
     private struct SidebarReveal: Identifiable {
         let id = UUID()
         let row: SidebarRowID
@@ -353,10 +427,30 @@ private struct ProjectWindowContent: View, Equatable {
             return !listedCheckouts(for: folder, project: project).isEmpty
         }
     }
-    /// Keeps a checkout's row on screen: its repository expands, or the Hidden section for a hidden worktree.
+    /// Keeps a checkout's row on screen: its repository and group expand, or the Hidden section for a hidden worktree.
     private func expandSidebar(folderID: UUID, path: String?) {
-        collapsedRepositories.remove(folderID)
+        expandRepository(folderID)
         if let path, isHidden(path: path) { hiddenSectionExpanded = true }
+    }
+    private func expandRepository(_ folderID: UUID) {
+        collapsedRepositories.remove(folderID)
+        project?.repositoryGroupPath(to: folderID).forEach { collapsedRepositories.remove($0) }
+    }
+    /// The sidebar's groups and repositories, narrowed like `listedFolders`.
+    /// The active-agents filter drops groups left without a listed repository.
+    private func listedItems(_ project: Project) -> [RepositoryLayoutItem] {
+        let listed = Set(listedFolders(project).map(\.id))
+        func narrowed(_ items: [RepositoryLayoutItem]) -> [RepositoryLayoutItem] {
+            items.compactMap { item in
+                switch item {
+                case .repository(let folder): return listed.contains(folder.id) ? item : nil
+                case .group(let id, let name, let items):
+                    let shown = narrowed(items)
+                    return shown.isEmpty && layout.state.showsOnlyActiveAgents ? nil : .group(id: id, name: name, items: shown)
+                }
+            }
+        }
+        return narrowed(project.repositoryLayout)
     }
     private var canLaunch: Bool { online && project?.archived == false }
     private func canLaunch(in checkout: CheckoutRow) -> Bool { canLaunch && checkout.availability == .available }
@@ -381,16 +475,20 @@ private struct ProjectWindowContent: View, Equatable {
             ScrollViewReader { proxy in
                 List {
                     Section("Repositories") {
-                        let folders = listedFolders(project)
-                        if folders.isEmpty, layout.state.showsOnlyActiveAgents {
+                        let items = listedItems(project)
+                        if items.isEmpty, layout.state.showsOnlyActiveAgents {
                             Text("No active agents").font(.caption).foregroundStyle(.secondary)
                         }
-                        ForEach(folders) { folder in
-                            repositoryRow(folder, project: project)
-                        }
-                        Button("Add Folder…", systemImage: "folder.badge.plus") {
-                            if let path = FilePanels.directory(startingAt: addFolderStart(project)) { let version = model.projectVersion(project.id); var changed = project; changed.addFolder(ProjectFolder(path: path)); model.perform { try await model.saveProject(changed, version: version) } }
-                        }.buttonStyle(.plain)
+                        layoutRows(items, project: project)
+                        // Also the drop target that moves an item to the end, out of any group.
+                        VStack(alignment: .leading, spacing: 6) {
+                            Button("Add Folder…", systemImage: "folder.badge.plus") {
+                                if let path = FilePanels.directory(startingAt: addFolderStart(project)) { updateProject { $0.addFolder(ProjectFolder(path: path)) } }
+                            }.buttonStyle(.plain)
+                            Button("New Group…", systemImage: "rectangle.stack.badge.plus") { nameGroup(GroupNaming()) }
+                                .buttonStyle(.plain).accessibilityIdentifier("sidebar.repositories.newGroup")
+                        }.frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
+                            .modifier(sidebarDrop(project) { _ in .end })
                     }
                     let hidden = hiddenCheckouts(project)
                     if !hidden.isEmpty {
@@ -413,6 +511,12 @@ private struct ProjectWindowContent: View, Equatable {
                 .help("List only checkouts with a live agent session; open shells alone do not count")
                 .accessibilityIdentifier("sidebar.repositories.activeAgentsOnly")
                 .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 12).padding(.top, 8)
+        }
+        .alert(groupNaming?.groupID == nil ? "New Group" : "Rename Group", isPresented: Binding(get: { groupNaming != nil }, set: { if !$0 { groupNaming = nil } })) {
+            TextField("Name", text: $groupName)
+            Button(groupNaming?.groupID == nil ? "Create" : "Rename") { if let naming = groupNaming { applyGroupName(naming) }; groupNaming = nil }
+                .disabled(groupName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            Button("Cancel", role: .cancel) { groupNaming = nil }
         }
     }
     /// Where Add Folder opens: the selected repository's main checkout, else the project's parent folder.
@@ -531,6 +635,8 @@ private struct ProjectWindowContent: View, Equatable {
                 badge(allSessions.filter { $0.folderID == folder.id })
             }.contentShape(Rectangle())
                 .onTapGesture { selectCheckout(folderID: folder.id, path: nil) }
+                .onDrag { sidebarDragProvider(folder.id, project: project) }
+                .modifier(sidebarDrop(project) { $0 < 0.5 || !collapsedRepositories.contains(folder.id) ? .before(folder.id) : .after(folder.id) })
                 .contextMenu {
                     Button("Launch Agent…") { showLaunch(folderID: folder.id) }.disabled(!canLaunch || readiness.isPending)
                     Button("Open Shell") { openShell(in: rows[0], folder: folder) }.disabled(!canLaunch(in: rows[0]) || readiness.isPending)
@@ -543,8 +649,118 @@ private struct ProjectWindowContent: View, Equatable {
                     Button("Repository Settings…") { settingsSheet = FolderSheet(id: folder.id) }
                     Button("Project Settings…") { editingProject = true }
                     Button("Reveal in Finder") { FilePanels.reveal(folder.selectedPath) }
+                    Divider()
+                    moveToGroupMenu(folder.id, project: project)
                 }
         }.id(SidebarRowID.repository(folder.id))
+    }
+    /// Moves a repository or group without dragging it.
+    private func moveToGroupMenu(_ id: UUID, project: Project) -> some View {
+        let path = project.repositoryGroupPath(to: id)
+        // A group cannot move into itself or anything it holds.
+        let groups = project.repositoryGroups.filter { $0.id != id && !project.repositoryGroupPath(to: $0.id).contains(id) }
+        return Menu("Move to Group") {
+            if !path.isEmpty {
+                Button("Top Level") { updateProject { $0.moveRepositoryItem(id, to: .end) } }
+                Divider()
+            }
+            ForEach(groups) { group in
+                Button(String(repeating: "    ", count: group.depth) + group.name) { updateProject { $0.moveRepositoryItem(id, to: .into(group.id)) } }
+                    .disabled(group.id == path.last)
+            }
+            if !groups.isEmpty { Divider() }
+            Button("New Group…") { nameGroup(GroupNaming(itemID: id)) }
+        }
+    }
+    /// Repositories and groups, nesting groups' contents. Type-erased because groups recurse.
+    private func layoutRows(_ items: [RepositoryLayoutItem], project: Project) -> AnyView {
+        AnyView(ForEach(items) { item in
+            switch item {
+            case .repository(let folder): repositoryRow(folder, project: project)
+            case .group(let id, let name, let items): groupRow(id: id, name: name, items: items, project: project)
+            }
+        })
+    }
+    private func groupRow(id: UUID, name: String, items: [RepositoryLayoutItem], project: Project) -> some View {
+        let expanded = Binding(get: { !collapsedRepositories.contains(id) }, set: { if $0 { collapsedRepositories.remove(id) } else { collapsedRepositories.insert(id) } })
+        return DisclosureGroup(isExpanded: expanded) {
+            if items.isEmpty {
+                Text("Drag repositories here").font(.caption).foregroundStyle(.secondary).padding(.horizontal, 6)
+                    .frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
+                    .modifier(sidebarDrop(project) { _ in .into(id) })
+            }
+            layoutRows(items, project: project)
+        } label: {
+            Label { Text(name).fontWeight(.medium) } icon: { Image(systemName: "rectangle.stack").foregroundStyle(.secondary) }
+                .frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
+                .accessibilityIdentifier("repository.group.\(id)")
+                .onTapGesture { expanded.wrappedValue.toggle() }
+                .onDrag { sidebarDragProvider(id, project: project) }
+                // The edges place the item beside the group; the middle files it inside.
+                .modifier(sidebarDrop(project) { fraction in
+                    if fraction < 0.3 { return .before(id) }
+                    if fraction > 0.7 && !expanded.wrappedValue { return .after(id) }
+                    return .into(id)
+                })
+                .contextMenu {
+                    Button("New Group Inside…") { nameGroup(GroupNaming(parentID: id)) }
+                    Button("Rename Group…") { nameGroup(GroupNaming(groupID: id), name: name) }
+                    Divider()
+                    moveToGroupMenu(id, project: project)
+                    Button("Remove Group") { updateProject { $0.removeRepositoryGroup(id) } }
+                        .help("Removes the group; what it holds stays in its place")
+                }
+        }.id(SidebarRowID.group(id))
+    }
+    /// Applies a change to the project as stored now and saves it under that
+    /// version, so an action from a stale view cannot overwrite newer edits.
+    private func updateProject(_ change: (inout Project) -> Void) {
+        guard let stored = model.snapshot.store.projects.first(where: { $0.value.id == projectID }) else { return }
+        var changed = stored.value
+        change(&changed)
+        guard changed != stored.value else { return }
+        model.perform { try await model.saveProject(changed, version: stored.version) }
+    }
+    private func nameGroup(_ naming: GroupNaming, name: String = "") {
+        groupName = name
+        groupNaming = naming
+    }
+    private func applyGroupName(_ naming: GroupNaming) {
+        updateProject { project in
+            if let id = naming.groupID { project.renameRepositoryGroup(id, to: groupName); return }
+            guard let itemID = naming.itemID else { project.addRepositoryGroup(named: groupName, in: naming.parentID); return }
+            // The new group takes the item's place, then holds it.
+            let id = project.addRepositoryGroup(named: groupName, in: project.repositoryGroupPath(to: itemID).last)
+            project.moveRepositoryItem(id, to: .before(itemID))
+            project.moveRepositoryItem(itemID, to: .into(id))
+        }
+    }
+    private static let sidebarDragPrefix = "chauffeur-sidebar:"
+    private func sidebarDragProvider(_ id: UUID, project: Project) -> NSItemProvider {
+        draggedSidebarItem = id
+        let payload = Data("\(Self.sidebarDragPrefix)\(project.id):\(id)".utf8)
+        let provider = NSItemProvider()
+        provider.registerDataRepresentation(for: .chauffeurSidebarItem, visibility: .ownProcess) { completion in
+            completion(payload, nil)
+            return nil
+        }
+        return provider
+    }
+    private func sidebarDrop(_ project: Project, destination: @escaping (CGFloat) -> RepositoryDestination) -> SidebarDropModifier {
+        let dragged = draggedSidebarItem
+        return SidebarDropModifier(destination: destination, dragging: dragged != nil) { destination in
+            guard let dragged else { return false }
+            switch destination {
+            case .before(let target), .after(let target), .into(let target):
+                return target != dragged && !project.repositoryGroupPath(to: target).contains(dragged)
+            case .end: return true
+            }
+        } drop: { payload, destination in
+            draggedSidebarItem = nil
+            let prefix = "\(Self.sidebarDragPrefix)\(project.id):"
+            guard payload.hasPrefix(prefix), let id = UUID(uuidString: String(payload.dropFirst(prefix.count))) else { return }
+            updateProject { $0.moveRepositoryItem(id, to: destination) }
+        }
     }
     private func inventoryPendingRow(_ folder: ProjectFolder) -> some View {
         HStack(spacing: 8) {
@@ -1075,7 +1291,7 @@ private struct ProjectWindowContent: View, Equatable {
         let pending = PendingTerminalTab(folderID: folder.id, path: row.path, title: "Shell · \(row.branch.isEmpty ? folder.name : row.branch)")
         layout.pendingTabs.append(pending)
         layout.selectSession(pending.id, folderID: folder.id, path: row.path)
-        collapsedRepositories.remove(folder.id)
+        expandRepository(folder.id)
         model.perform {
             do {
                 let worktreeID = try await model.worktreeID(for: row, project: project)
@@ -1145,10 +1361,20 @@ private struct ProjectWindowContent: View, Equatable {
         selectSession(ordered[((current + offset) % ordered.count + ordered.count) % ordered.count].id)
     }
     /// The sidebar rows ⌘↑/⌘↓ moves through in Repositories mode: every
-    /// listed repository followed by its listed checkouts, collapsed ones aside,
-    /// then the Hidden section's worktrees when it is expanded.
+    /// listed repository outside a collapsed group, followed by its listed
+    /// checkouts unless it is collapsed, then the Hidden section's worktrees
+    /// when it is expanded.
     private func sidebarRows(_ project: Project) -> [(folderID: UUID, path: String?)] {
-        let repositories = listedFolders(project).flatMap { folder -> [(folderID: UUID, path: String?)] in
+        func visible(_ items: [RepositoryLayoutItem]) -> [ProjectFolder] {
+            items.flatMap { item -> [ProjectFolder] in
+                switch item {
+                case .repository(let folder): [folder]
+                case .group(let id, _, let items): collapsedRepositories.contains(id) ? [] : visible(items)
+                }
+            }
+        }
+        let folders = visible(listedItems(project))
+        let repositories = folders.flatMap { folder -> [(folderID: UUID, path: String?)] in
             let repository = [(folderID: folder.id, path: String?.none)]
             guard !collapsedRepositories.contains(folder.id) else { return repository }
             return repository + listedCheckouts(for: folder, project: project).map { (folderID: folder.id, path: String?($0.path)) }
@@ -1212,7 +1438,7 @@ private struct ProjectWindowContent: View, Equatable {
             let location = checkout(of: session)
             layout.state.selectedFolderID = location.folderID; layout.state.selectedWorktreePath = location.path
         }
-        if let folderID = layout.state.selectedFolderID { collapsedRepositories.remove(folderID) }
+        if let folderID = layout.state.selectedFolderID { expandRepository(folderID) }
         reconcileSelection()
         layout.state.wasOpen = true; model.projectOpened(projectID); saveLayout()
         layout.synchronizeTerminals(model: model)

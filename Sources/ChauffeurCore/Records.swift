@@ -127,6 +127,9 @@ public struct Project: Record, Equatable {
     public var discoveryFolder: String?
     public var folders: [ProjectFolder] = []
     public var groups = [AgentGroup(name: "Default", isDefault: true)]
+    /// The Repositories sidebar's groups and order. Optional so projects saved
+    /// before groups existed still decode; see `repositoryLayout`.
+    public var repositoryTree: [RepositoryNode]?
     public var archived = false
     public var createdAt = Date()
     public var updatedAt = Date()
@@ -157,6 +160,7 @@ public struct Project: Record, Equatable {
         try Validation.unique(folders.map(\.id), field: "folder ID")
         try Validation.unique(folders.filter(\.registered).map(\.canonicalPath), field: "canonical folder path")
         for group in groups { try Validation.name(group.name) }
+        try validateRepositoryTree()
         for folder in folders { try Validation.absolutePath(folder.selectedPath); try Validation.absolutePath(folder.canonicalPath) }
     }
 }

@@ -55,6 +55,11 @@ targets:
         CFBundleURLTypes:
           - CFBundleURLName: dev.chauffeur.session
             CFBundleURLSchemes: ["$(CHAUFFEUR_URL_SCHEME)"]
+        # Private drag payload for reordering the Repositories sidebar.
+        UTExportedTypeDeclarations:
+          - UTTypeIdentifier: dev.chauffeur.sidebar-item
+            UTTypeDescription: Chauffeur sidebar item
+            UTTypeConformsTo: [public.data]
     settings:
       base:
         PRODUCT_NAME: Chauffeur
