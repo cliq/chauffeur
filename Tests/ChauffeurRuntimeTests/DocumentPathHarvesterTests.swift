@@ -2,6 +2,37 @@ import Testing
 @testable import ChauffeurRuntimeKit
 
 struct DocumentPathHarvesterTests {
+    @Test func recoversPathsHardWrappedByClaudeWithIndentedContinuations() {
+        let text = """
+        ⏺ /Users/leolobato/Documents/Projetos/Personal/pla
+          yden/ps5/playden-ps5/build/release-v0.7.1-beta.1
+          /RELEASE_NOTES.md
+
+          The GitHub release body is the same text without
+          the top heading: /Users/leolobato/Documents/Pro
+          jetos/Personal/playden/ps5/playden-ps5/build/rel
+          ease-v0.7.1-beta.1/release-body.md
+        """
+        #expect(DocumentPathHarvester.paths(in: text) == [
+            "/Users/leolobato/Documents/Projetos/Personal/playden/ps5/playden-ps5/build/release-v0.7.1-beta.1/release-body.md",
+            "/Users/leolobato/Documents/Projetos/Personal/playden/ps5/playden-ps5/build/release-v0.7.1-beta.1/RELEASE_NOTES.md"
+        ])
+    }
+
+    @Test func keepsSeparatePathsAndDoesNotJoinAcrossProseOrBlankLines() {
+        let text = """
+        /work/first.md
+          /work/second.md
+        /work/incomplete
+          prose with spaces
+          final.md
+        /work/another
+
+          separate.md
+        """
+        #expect(DocumentPathHarvester.paths(in: text) == ["separate.md", "final.md", "/work/second.md", "/work/first.md"])
+    }
+
     @Test func extractsClaudeAndCodexStylePathsMostRecentFirst() {
         let text = """
         ⏺ Write(planning/implementation/foo-plan.md)
