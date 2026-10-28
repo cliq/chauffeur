@@ -12,6 +12,7 @@
 #include <pty.h>
 #else
 #include <util.h>
+#include <libproc.h>
 #endif
 #include <fcntl.h>
 #include <unistd.h>
@@ -62,6 +63,16 @@ pid_t chauffeur_spawn_pty(const char *executable, char *const argv[], char *cons
     struct winsize size = { .ws_row = rows, .ws_col = cols };
     // Read the descriptor limit before fork; the child may only make syscalls.
     int descriptor_limit = getdtablesize();
+#ifdef __APPLE__
+    // The limit can be raised to about two billion (launchctl limit maxfiles), and
+    // closing every number up to it delays the attach by minutes. The child lists
+    // its open descriptors instead, into a buffer allocated here with headroom for
+    // descriptors other threads open before fork.
+    int listing_size = proc_pidinfo(getpid(), PROC_PIDLISTFDS, 0, NULL, 0);
+    if (listing_size < 0) listing_size = 0;
+    listing_size += 256 * (int)sizeof(struct proc_fdinfo);
+    struct proc_fdinfo *listing = malloc(listing_size);
+#endif
     pid_t pid = forkpty(master, NULL, NULL, &size);
     if (pid == 0) {
         // Dispatch/NIO worker threads can block signals. exec preserves that
@@ -80,11 +91,30 @@ pid_t chauffeur_spawn_pty(const char *executable, char *const argv[], char *cons
         // lacks FD_CLOEXEC, including pipes other threads are handing to their
         // own commands. A long-lived tmux client holding such a pipe's write end
         // keeps that command's output from ever reaching EOF.
-        for (int fd = STDERR_FILENO + 1; fd < descriptor_limit; fd++) close(fd);
+        int first_unlisted = STDERR_FILENO + 1;
+#ifdef __APPLE__
+        // After fork this thread is the only one, so the listing is complete unless
+        // it filled the buffer; then close everything above the last listed number.
+        // proc_pidinfo returns 0 on failure, and a successful listing always has the
+        // terminal on 0-2, so 0 keeps the full loop.
+        int listed = listing ? proc_pidinfo(getpid(), PROC_PIDLISTFDS, 0, listing, listing_size) : 0;
+        if (listed > 0) {
+            int count = listed / (int)sizeof(struct proc_fdinfo);
+            for (int index = 0; index < count; index++) {
+                if (listing[index].proc_fd > STDERR_FILENO) close(listing[index].proc_fd);
+            }
+            first_unlisted = listed + (int)sizeof(struct proc_fdinfo) > listing_size && count > 0
+                ? listing[count - 1].proc_fd + 1 : descriptor_limit;
+        }
+#endif
+        for (int fd = first_unlisted; fd < descriptor_limit; fd++) close(fd);
         if (chdir(cwd) < 0) _exit(126);
         execve(executable, argv, envp);
         _exit(127);
     }
+#ifdef __APPLE__
+    free(listing);
+#endif
     if (pid > 0) fcntl(*master, F_SETFD, FD_CLOEXEC);
     return pid;
 }
