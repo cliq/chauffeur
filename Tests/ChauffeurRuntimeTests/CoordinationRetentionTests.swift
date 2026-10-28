@@ -50,6 +50,9 @@ struct CoordinationRetentionTests {
         try await group.runtime.reconcile()
         let worker = try #require(try await group.sessions().first { $0.id == group.workerID }, "The live coordinator can still inspect its worker")
         #expect(!worker.state.isLive && worker.closureOutcome == "accepted")
+        #expect(worker.closedBySessionID == group.coordinator.id)
+        #expect(worker.closedBySessionTitle == group.coordinator.title)
+        #expect(worker.statusLabel == "Closed by agent")
         let status = try await group.runtime.callTool(token: group.token, name: "chauffeur_delegation_status", arguments: .object(["delegationID": group.delegation["id"]]))
         #expect(status["closureOutcome"].string == "accepted")
 
@@ -61,6 +64,28 @@ struct CoordinationRetentionTests {
             #expect(remaining.isDisjoint(with: [group.coordinator.id, group.workerID]))
             #expect(try await group.runtime.snapshots.read(group.workerID) == nil)
         }
+    }
+
+    @Test func closureAttributionSurvivesRestartWithStaleSessionMetadata() async throws {
+        let group = try await group(keepFinishedSessions: true); defer { group.fixture.cleanup() }
+        let receipt = try await group.runtime.callTool(token: group.token, name: "chauffeur_close_session", arguments: .object([
+            "delegationID": group.delegation["id"], "outcome": .string("accepted"),
+            "reason": .string("Handoff received"), "retryKey": .string("close")]))
+        #expect(receipt["state"].string == "completed")
+        var stale = try #require(try await group.sessions().first { $0.id == group.workerID })
+        stale.closedBySessionID = nil; stale.closedBySessionTitle = nil
+        let stored = try #require(await group.runtime.store.current().sessions.first { $0.value.id == group.workerID })
+        try await group.runtime.store.save(stale, expectedVersion: stored.version)
+
+        let restored = try RuntimeCoordinator(root: group.fixture.root,
+            ctlPath: group.fixture.path("fixture.py").path,
+            environment: ["PATH": "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin", "HOME": group.fixture.root.path])
+        try await restored.start()
+        let worker = try #require(try await restored.snapshot()["sessions"].decode([Session].self).first { $0.id == group.workerID })
+        #expect(worker.closedBySessionID == group.coordinator.id)
+        #expect(worker.closedBySessionTitle == group.coordinator.title)
+        #expect(worker.closureReason == "Handoff received")
+        #expect(worker.statusLabel == "Closed by agent")
     }
 
     @Test func aClosedCoordinatorWaitsForItsLiveWorker() async throws {

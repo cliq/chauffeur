@@ -25,7 +25,7 @@ struct SessionDetailsView: View {
                             .accessibilityIdentifier("session.details.title")
                     }
                     if session.state != .activityUnknown {
-                        detail("State", session.state.label)
+                        detail("State", session.statusLabel)
                     }
                     detail("Group", project.groups.first { $0.id == session.groupID }?.name ?? "Unavailable")
                     detail(session.launch.preset.kind.isAgent ? "Agent" : "Kind", session.launch.preset.kind.displayName)
@@ -39,6 +39,7 @@ struct SessionDetailsView: View {
                         detail("Reasoning", session.launch.displayedReasoning ?? "Provider default")
                         if session.launch.executionPolicy == .delegatedYOLO { detail("Worker permissions", "YOLO — provider approvals bypassed") }
                     }
+                    if let actor = session.closedBySessionTitle ?? session.closedBySessionID?.uuidString { detail("Closed by agent", actor) }
                     if let outcome = session.closureOutcome { detail("Outcome", outcome.capitalized) }
                     if let reason = session.closureReason { detail("Closure reason", reason) }
                     if session.historyProtected == true { Text("Saved history is kept until this session is deleted.").font(.caption).foregroundStyle(.secondary) }

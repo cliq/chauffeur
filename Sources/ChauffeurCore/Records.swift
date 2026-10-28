@@ -260,6 +260,9 @@ public struct Session: Record, Equatable {
     public var progress: ProgressRegistration?
     public var closureOutcome: String?
     public var closureReason: String?
+    /// Snapshot the caller's identity so attribution survives renames and deletion.
+    public var closedBySessionID: UUID?
+    public var closedBySessionTitle: String?
     public var closedAt: Date?
     public var initialTask: String?
     public var launchRequestFingerprint: String?
@@ -272,6 +275,12 @@ public struct Session: Record, Equatable {
     public var updatedAt = Date()
     /// Launched with Chauffeur's MCP server and lifecycle hooks, not basic terminal mode.
     public var coordinationEnabled: Bool { launch.preset.kind.isAgent && launch.preset.integration != .unavailable }
+    public var statusLabel: String { closureOutcome != nil ? "Closed by agent" : state.label }
+    public var closureSummary: String? {
+        guard let closureOutcome else { return nil }
+        let actor = closedBySessionTitle ?? closedBySessionID?.uuidString
+        return "\(actor.map { "Closed by agent “\($0)”" } ?? "Closed by agent") · \(closureOutcome.capitalized)"
+    }
     public var needsAttention: Bool { pendingMessages > 0 || state == .needsAttention || state == .failed || (state == .turnFinished && unread) }
     public init(projectID: UUID, groupID: UUID, title: String, launch: LaunchSnapshot, folderID: UUID) {
         self.projectID = projectID; self.groupID = groupID; self.title = title; self.launch = launch; self.folderID = folderID

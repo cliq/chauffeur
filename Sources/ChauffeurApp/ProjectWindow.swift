@@ -1744,7 +1744,7 @@ private extension Session {
     var visibleStatus: String? {
         var parts: [String] = []
         if state == .turnFinished, let waiting { parts.append(waiting.label) }
-        else if state != .activityUnknown { parts.append(state.label) }
+        else if state != .activityUnknown { parts.append(statusLabel) }
         if pendingMessages > 0 { parts.append("\(pendingMessages) messages") }
         return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }

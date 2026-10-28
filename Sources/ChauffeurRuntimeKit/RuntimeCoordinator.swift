@@ -127,6 +127,8 @@ public actor RuntimeCoordinator {
             if let durable = sessions[restored.id], durable.historyProtected == true {
                 restored.historyProtected = true
                 restored.closureOutcome = durable.closureOutcome; restored.closureReason = durable.closureReason
+                restored.closedBySessionID = durable.closedBySessionID
+                restored.closedBySessionTitle = durable.closedBySessionTitle
                 restored.closedAt = durable.closedAt
             }
             sessions[restored.id] = restored
@@ -1803,6 +1805,8 @@ public actor RuntimeCoordinator {
                 throw ChauffeurError("stop_failed", "Worker has not confirmed termination; do not start its replacement")
             }
             ended.closureOutcome = outcome; ended.closureReason = reason; ended.closedAt = Date()
+            ended.closedBySessionID = caller.sessionID
+            ended.closedBySessionTitle = sessions[caller.sessionID]?.title
             try await persist(ended)
             // Refresh after awaits so a result or recovery cannot be overwritten.
             item = try await ledger.ownedDelegation(delegationID, caller: caller)

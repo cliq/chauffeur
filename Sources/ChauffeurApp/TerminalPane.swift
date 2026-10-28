@@ -338,7 +338,7 @@ struct TerminalPane: View {
                 Text(session.title).fontWeight(.medium).lineLimit(1).help(session.title)
                 Spacer()
                 if session.state != .activityUnknown {
-                    Text(session.state.label).font(.caption).foregroundStyle(session.needsAttention ? .orange : .secondary)
+                    Text(session.statusLabel).font(.caption).foregroundStyle(session.needsAttention ? .orange : .secondary)
                 }
                 Button { controller.find() } label: { Label("History and Search", systemImage: "clock.arrow.circlepath") }.labelStyle(.iconOnly).help("View and search saved terminal history")
                 if case .controlLost = controller.controlState, session.state.isLive {
@@ -350,7 +350,7 @@ struct TerminalPane: View {
             }.padding(.horizontal, 12).padding(.vertical, 7).background(.bar)
             if case .controlLost(let message) = controller.controlState, session.state.isLive {
                 Text(message).font(.caption).padding(8).frame(maxWidth: .infinity, alignment: .leading).background(.orange.opacity(0.12))
-            } else if let status = controller.status, !controller.connected { Text(status).font(.caption).padding(8).frame(maxWidth: .infinity, alignment: .leading).background(.orange.opacity(0.12)) }
+            } else if let status = controller.status, !controller.connected, session.state.isLive { Text(status).font(.caption).padding(8).frame(maxWidth: .infinity, alignment: .leading).background(.orange.opacity(0.12)) }
             if session.state.isLive {
                 TerminalHost(controller: controller)
                     .terminalArea()
@@ -367,7 +367,8 @@ struct TerminalPane: View {
             } else {
                 VStack(spacing: 16) {
                     Image(systemName: session.state == .failed ? "exclamationmark.triangle" : "terminal").font(.largeTitle)
-                    Text(session.state.label).font(.title2)
+                    Text(session.statusLabel).font(.title2)
+                    SessionClosureNotice(session: session)
                     Text(session.error ?? (session.launch.preset.kind.isAgent ? "The agent has stopped. Open History to view saved terminal output." : "The shell has exited. Open History to view saved terminal output.")).foregroundStyle(.secondary).multilineTextAlignment(.center)
                     Button("Open History", systemImage: "clock.arrow.circlepath") { controller.find() }
                     // A worker its coordinator closed cannot resume; a fresh worker continues its work.
@@ -384,6 +385,26 @@ struct TerminalPane: View {
             .sheet(isPresented: $controller.historyPresented, onDismiss: { if !controller.historyPresented { controller.historyController = nil } }) {
                 if let history = controller.historyController { TerminalHistoryView(session: session, controller: history).environmentObject(model) }
             }
+    }
+}
+
+private struct SessionClosureNotice: View {
+    let session: Session
+
+    var body: some View {
+        if let summary = session.closureSummary {
+            VStack(alignment: .leading, spacing: 4) {
+                Label(summary, systemImage: "person.crop.circle.badge.checkmark")
+                    .font(.callout).fontWeight(.medium)
+                if let reason = session.closureReason {
+                    Text(reason).font(.callout).foregroundStyle(.secondary)
+                }
+            }
+            .textSelection(.enabled)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(10)
+            .background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
+        }
     }
 }
 
@@ -404,6 +425,7 @@ private struct TerminalHistoryView: View {
                 Button("Find") { controller.find() }.disabled(snapshot == nil).keyboardShortcut("f", modifiers: .command)
                 Button("Done") { dismiss() }.keyboardShortcut(.cancelAction)
             }
+            SessionClosureNotice(session: model.snapshot.sessions.first { $0.id == session.id } ?? session)
             if let snapshot {
                 Text("Read-only capture from \(snapshot.capturedAt.formatted(date: .abbreviated, time: .standard)). \(snapshot.truncated ? "Older output was trimmed to the retention limits." : "")")
                     .font(.caption).foregroundStyle(.secondary)
