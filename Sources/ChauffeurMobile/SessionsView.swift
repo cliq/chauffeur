@@ -8,8 +8,9 @@ struct SessionsView: View {
     @State private var showingSettings = false
     /// Mirrors the desktop sidebar's "Show terminal sessions"; off leaves only agents.
     @AppStorage("sessions.showsTerminalSessions") private var showsTerminalSessions = true
-    /// Comma-separated IDs of the projects the user collapsed.
+    /// Comma-separated IDs of the projects and sidebar groups the user collapsed.
     @AppStorage("sessions.collapsedProjects") private var collapsedProjects = ""
+    @AppStorage("sessions.collapsedGroups") private var collapsedGroups = ""
 
     private var visibleSessions: [SessionSummary] {
         showsTerminalSessions ? model.liveSessions : model.liveSessions.filter { $0.kind != .shell }
@@ -78,7 +79,9 @@ struct SessionsView: View {
                     }
                 } else {
                     ForEach(projects) { project in
-                        ProjectSection(model: model, inventory: inventory, project: project, liveSessions: sessions, isExpanded: isExpanded(project.id))
+                        ProjectSections(model: model, inventory: inventory, project: project, liveSessions: sessions,
+                                       isExpanded: CollapsedIDs(storage: $collapsedProjects).isExpanded(project.id),
+                                       collapsedGroups: CollapsedIDs(storage: $collapsedGroups))
                     }
                 }
             } else if model.isConnecting {
@@ -92,6 +95,8 @@ struct SessionsView: View {
             }
         }
         .accessibilityIdentifier("sessions-list")
+        // Projects open on an empty titled section; keep their group cards close beneath.
+        .listSectionSpacing(.compact)
         .navigationTitle("Sessions")
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
@@ -143,17 +148,6 @@ struct SessionsView: View {
         }
     }
 
-    private func isExpanded(_ id: UUID) -> Binding<Bool> {
-        let collapsed = Set(collapsedProjects.split(separator: ",").map(String.init))
-        return Binding {
-            !collapsed.contains(id.uuidString)
-        } set: { expanded in
-            var ids = collapsed
-            if expanded { ids.remove(id.uuidString) } else { ids.insert(id.uuidString) }
-            collapsedProjects = ids.sorted().joined(separator: ",")
-        }
-    }
-
     private var keepAwakeAvailability: KeepAwakeAvailability {
         guard model.isConnected, !model.inventoryIsStale else { return .disconnected }
         return model.keepAwakeIsSupported ? .available : .unsupported
@@ -169,158 +163,203 @@ struct SessionsView: View {
     }
 }
 
-/// A project's live sessions under their repository and checkout. The header
-/// collapses the project to a single line with its session count.
-private struct ProjectSection: View {
+/// A comma-separated set of IDs in app storage: the projects or groups the user collapsed.
+private struct CollapsedIDs {
+    var storage: Binding<String>
+
+    private var ids: Set<String> { Set(storage.wrappedValue.split(separator: ",").map(String.init)) }
+
+    func isExpanded(_ id: UUID) -> Binding<Bool> {
+        Binding {
+            !ids.contains(id.uuidString)
+        } set: { expanded in
+            var updated = ids
+            if expanded { updated.remove(id.uuidString) } else { updated.insert(id.uuidString) }
+            storage.wrappedValue = updated.sorted().joined(separator: ",")
+        }
+    }
+}
+
+/// A project's live sessions without nesting: a collapsible project title, then
+/// a card per run of repositories that share a sidebar group, under that group's
+/// collapsible breadcrumb. Each session names its own repository and checkout,
+/// since most checkouts hold a single session.
+private struct ProjectSections: View {
     var model: MobileAppModel
     let inventory: InventorySnapshot
     let project: ProjectSummary
     let liveSessions: [SessionSummary]
     @Binding var isExpanded: Bool
+    let collapsedGroups: CollapsedIDs
 
     private var sessions: [SessionSummary] {
         liveSessions.filter { $0.projectID == project.id }
     }
 
-    /// Repositories with live sessions, in the Mac sidebar's order, each with
-    /// its checkouts in the order the inventory lists them. Checkouts and
-    /// folders the inventory no longer lists come last.
-    private var repositories: [RepositoryEntry] {
-        var remaining = sessions
-        var entries: [RepositoryEntry] = []
-        for folder in project.folders {
-            var checkouts: [CheckoutEntry] = []
-            for checkout in folder.checkouts {
-                let matching = remaining.filter { $0.checkoutPath == checkout.path }
-                guard !matching.isEmpty else { continue }
-                remaining.removeAll { $0.checkoutPath == checkout.path }
-                checkouts.append(CheckoutEntry(path: checkout.path, kind: checkout.kind, branch: checkout.branch, sessions: matching))
-            }
-            checkouts += CheckoutEntry.unlisted(remaining.filter { $0.folderID == folder.id })
-            remaining.removeAll { $0.folderID == folder.id }
-            guard !checkouts.isEmpty else { continue }
-            entries.append(RepositoryEntry(id: folder.id, name: folder.name, isRepository: folder.isRepository,
-                                           groupPath: project.groupPath(of: folder).map(\.name), checkouts: checkouts))
-        }
-        while let orphan = remaining.first {
-            let matching = remaining.filter { $0.folderID == orphan.folderID }
-            remaining.removeAll { $0.folderID == orphan.folderID }
-            let name = inventory.folder(orphan.folderID)?.name ?? URL(fileURLWithPath: orphan.checkoutPath).lastPathComponent
-            entries.append(RepositoryEntry(id: orphan.folderID, name: name, isRepository: true, groupPath: [], checkouts: CheckoutEntry.unlisted(matching)))
-        }
-        return entries
-    }
-
     var body: some View {
-        Section {
-            if isExpanded {
-                ForEach(repositories) { repository in
-                    RepositoryLabel(name: repository.name, isRepository: repository.isRepository, groupPath: repository.groupPath)
-                        .listRowSeparator(.hidden, edges: .bottom)
-                    ForEach(repository.checkouts) { checkout in
-                        CheckoutLabel(kind: checkout.kind, branch: checkout.branch, isRepository: repository.isRepository)
-                            .padding(.leading, 20)
-                            .listRowSeparator(.hidden)
-                        ForEach(checkout.sessions) { session in
-                            // The checkout line already names the branch.
-                            SessionRow(session: session, showsBranch: session.branch != checkout.branch) {
-                                model.openSession(session.id)
+        Section {} header: {
+            CollapsingHeader(isExpanded: $isExpanded, count: sessions.count, needsAttention: sessions.contains(where: \.needsAttention)) {
+                Text(project.name)
+                    .font(.headline)
+                    .foregroundStyle(.primary)
+            }
+            .textCase(nil)
+            .accessibilityIdentifier("sessions.project.\(project.id)")
+        }
+        .headerProminence(.increased)
+        if isExpanded {
+            ForEach(SessionRun.runs(project: project, inventory: inventory, sessions: sessions)) { run in
+                let expanded = run.group.map { collapsedGroups.isExpanded($0.id) }
+                Section {
+                    if expanded?.wrappedValue ?? true {
+                        ForEach(run.entries) { entry in
+                            SessionRow(session: entry.session, location: entry.location) {
+                                model.openSession(entry.session.id)
                             }
-                            .padding(.leading, 40)
                             .disabled(!model.isConnected)
                         }
                     }
-                }
-            }
-        } header: {
-            Button {
-                withAnimation { isExpanded.toggle() }
-            } label: {
-                HStack(spacing: 8) {
-                    Image(systemName: "chevron.right")
-                        .font(.caption.weight(.semibold))
-                        .rotationEffect(.degrees(isExpanded ? 90 : 0))
-                    Text(project.name)
-                        .font(.headline)
-                        .foregroundStyle(.primary)
-                    Spacer()
-                    if sessions.contains(where: \.needsAttention) {
-                        Circle()
-                            .fill(.orange)
-                            .frame(width: 8, height: 8)
-                            .accessibilityLabel("Needs attention")
+                } header: {
+                    if let group = run.group, let expanded {
+                        CollapsingHeader(isExpanded: expanded, count: run.entries.count, needsAttention: run.entries.contains { $0.session.needsAttention }) {
+                            Label {
+                                Text(run.path.map(\.name).joined(separator: " › "))
+                                    .font(.subheadline.weight(.semibold))
+                                    .foregroundStyle(.primary)
+                            } icon: {
+                                Image(systemName: "rectangle.stack").foregroundStyle(.secondary)
+                            }
+                        }
+                        .textCase(nil)
+                        .accessibilityIdentifier("sessions.group.\(group.id)")
                     }
-                    Text("\(sessions.count) active")
                 }
-                .textCase(nil)
-                .contentShape(Rectangle())
+                .headerProminence(.increased)
             }
-            .buttonStyle(.plain)
-            .accessibilityValue(isExpanded ? "Expanded" : "Collapsed")
-            .accessibilityHint(isExpanded ? "Collapses the project" : "Expands the project")
-            .accessibilityIdentifier("sessions.project.\(project.id)")
         }
     }
 }
 
-private struct RepositoryEntry: Identifiable {
-    var id: UUID
-    var name: String
-    var isRepository: Bool
-    var groupPath: [String]
-    var checkouts: [CheckoutEntry]
+/// A tappable project or group title that folds its content away, keeping the
+/// session count and whether any of them needs attention.
+private struct CollapsingHeader<Title: View>: View {
+    @Binding var isExpanded: Bool
+    let count: Int
+    let needsAttention: Bool
+    @ViewBuilder var title: Title
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        Button {
+            withAnimation(reduceMotion ? nil : .snappy(duration: 0.25)) { isExpanded.toggle() }
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .rotationEffect(.degrees(isExpanded ? 90 : 0))
+                title
+                Spacer(minLength: 8)
+                if needsAttention {
+                    Image(systemName: "exclamationmark.circle.fill")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                }
+                Text("\(count)")
+                    .font(.caption.weight(.medium).monospacedDigit())
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 2)
+                    .background(Color.secondary.opacity(0.12), in: Capsule())
+            }
+            .frame(minHeight: 44)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(.isHeader)
+        .accessibilityValue("\(count) active\(needsAttention ? ", needs attention" : ""), \(isExpanded ? "expanded" : "collapsed")")
+        .accessibilityHint(isExpanded ? "Collapses" : "Expands")
+    }
 }
 
-private struct CheckoutEntry: Identifiable {
-    var path: String
+/// Where a session runs: its repository and checkout.
+struct SessionLocation {
+    var repository: String
+    var branch: String?
     var kind: CheckoutKind
-    var branch: String
-    var sessions: [SessionSummary]
+    var isRepository: Bool
+}
 
-    var id: String { path }
+/// Consecutive repositories in the same sidebar group, with their live sessions.
+private struct SessionRun: Identifiable {
+    struct Entry: Identifiable {
+        var session: SessionSummary
+        var location: SessionLocation
+        var id: UUID { session.id }
+    }
+    let id: String
+    /// The enclosing groups, outermost first; empty for repositories outside any group.
+    let path: [RepositoryGroupSummary]
+    var entries: [Entry]
 
-    /// Checkouts for sessions whose path the inventory does not list, one per path.
-    static func unlisted(_ sessions: [SessionSummary]) -> [CheckoutEntry] {
-        var entries: [CheckoutEntry] = []
+    var group: RepositoryGroupSummary? { path.last }
+
+    /// Runs in the Mac sidebar's order, sessions in each folder in its checkouts'
+    /// order; sessions in folders the inventory no longer lists come last.
+    static func runs(project: ProjectSummary, inventory: InventorySnapshot, sessions: [SessionSummary]) -> [SessionRun] {
         var remaining = sessions
-        while let first = remaining.first {
-            let matching = remaining.filter { $0.checkoutPath == first.checkoutPath }
-            remaining.removeAll { $0.checkoutPath == first.checkoutPath }
-            entries.append(CheckoutEntry(path: first.checkoutPath, kind: first.worktreeID == nil ? .main : .worktree,
-                                         branch: first.branch ?? URL(fileURLWithPath: first.checkoutPath).lastPathComponent, sessions: matching))
+        var runs: [SessionRun] = []
+        func append(_ entries: [Entry], path: [RepositoryGroupSummary]) {
+            guard !entries.isEmpty else { return }
+            if let last = runs.last, last.path.map(\.id) == path.map(\.id) { runs[runs.count - 1].entries += entries; return }
+            runs.append(SessionRun(id: path.last.map { "group:\($0.id)" } ?? "ungrouped:\(runs.count)", path: path, entries: entries))
         }
-        return entries
+        for folder in project.folders {
+            var entries: [Entry] = []
+            for checkout in folder.checkouts {
+                let matching = remaining.filter { $0.checkoutPath == checkout.path }
+                remaining.removeAll { $0.checkoutPath == checkout.path }
+                entries += matching.map { Entry(session: $0, location: SessionLocation(repository: folder.name, branch: checkout.branch, kind: checkout.kind, isRepository: folder.isRepository)) }
+            }
+            // Sessions in checkouts the inventory no longer lists.
+            entries += remaining.filter { $0.folderID == folder.id }.map {
+                Entry(session: $0, location: SessionLocation(repository: folder.name, branch: $0.branch, kind: $0.worktreeID == nil ? .main : .worktree, isRepository: folder.isRepository))
+            }
+            remaining.removeAll { $0.folderID == folder.id }
+            append(entries, path: project.groupPath(of: folder))
+        }
+        append(remaining.map { session in
+            let name = inventory.folder(session.folderID)?.name ?? URL(fileURLWithPath: session.checkoutPath).lastPathComponent
+            return Entry(session: session, location: SessionLocation(repository: name, branch: session.branch, kind: session.worktreeID == nil ? .main : .worktree, isRepository: true))
+        }, path: [])
+        return runs
     }
 }
 
+/// A session: its state as an icon and words, its title and agent, where it runs,
+/// and progress when it reports some.
 struct SessionRow: View {
     let session: SessionSummary
-    var showsBranch = true
+    var location: SessionLocation?
     var onOpen: () -> Void
 
     var body: some View {
         Button(action: onOpen) {
-            HStack(alignment: .top, spacing: 12) {
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                SessionStateIcon(session: session)
                 VStack(alignment: .leading, spacing: 4) {
-                    HStack(spacing: 8) {
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
                         Text(session.title)
                             .font(.body.weight(.medium))
+                            .lineLimit(2)
+                        Spacer(minLength: 4)
                         KindBadge(kind: session.kind)
-                        if session.attached {
-                            Text("In use")
-                                .font(.caption2.weight(.semibold))
-                                .padding(.horizontal, 6)
-                                .padding(.vertical, 2)
-                                .background(Color.secondary.opacity(0.15), in: Capsule())
-                                .foregroundStyle(.secondary)
-                                .accessibilityLabel("In use on another device")
-                        }
                     }
-                    if !detail.isEmpty {
-                        Text(detail)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                    if let location {
+                        SessionLocationLine(repository: location.repository, branch: location.branch, kind: location.kind, isRepository: location.isRepository)
                     }
+                    statusLine
                     if let progress = session.progress {
                         if let percent = progress.percentComplete {
                             ProgressView(value: Double(percent), total: 100) {
@@ -338,34 +377,68 @@ struct SessionRow: View {
                         }
                     }
                 }
-                Spacer()
-                if session.needsAttention {
-                    Circle()
-                        .fill(.orange)
-                        .frame(width: 8, height: 8)
-                        .padding(.top, 6)
-                        .accessibilityLabel("Needs attention")
-                }
                 Image(systemName: "chevron.right")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.tertiary)
-                    .padding(.top, 4)
             }
+            .padding(.vertical, 2)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .accessibilityIdentifier("session-row")
     }
 
-    private var detail: String {
-        var parts: [String] = []
-        if showsBranch, let branch = session.branch {
-            parts.append(branch)
+    @ViewBuilder private var statusLine: some View {
+        let state = stateText
+        if state != nil || session.attached {
+            HStack(spacing: 6) {
+                if let state {
+                    Text(state).foregroundStyle(session.needsAttention ? Color.orange : .secondary)
+                }
+                if state != nil, session.attached {
+                    Text("·").foregroundStyle(.tertiary)
+                }
+                if session.attached {
+                    Text("In use")
+                        .foregroundStyle(.secondary)
+                        .accessibilityLabel("In use on another device")
+                }
+            }
+            .font(.caption)
+            .lineLimit(1)
         }
-        if session.state != .activityUnknown {
-            parts.append(session.state.label)
+    }
+
+    private var stateText: String? {
+        guard session.state != .activityUnknown else { return session.needsAttention ? "Needs attention" : nil }
+        if session.needsAttention, session.state != .needsAttention { return "\(session.state.label) · Needs attention" }
+        return session.state.label
+    }
+}
+
+/// The session state's shape and color; the row spells the state out beside it.
+private struct SessionStateIcon: View {
+    let session: SessionSummary
+
+    var body: some View {
+        let (symbol, color) = appearance
+        Image(systemName: symbol)
+            .font(.subheadline)
+            .foregroundStyle(color)
+            .frame(width: 20)
+            .accessibilityHidden(true)
+    }
+
+    private var appearance: (String, Color) {
+        if session.state == .failed { return ("xmark.circle.fill", .red) }
+        if session.needsAttention || session.state == .needsAttention { return ("exclamationmark.circle.fill", .orange) }
+        switch session.state {
+        case .running: return ("play.circle.fill", .green)
+        case .starting: return ("circle.dotted", .secondary)
+        case .turnFinished: return ("checkmark.circle.fill", .blue)
+        case .exited, .interrupted: return ("stop.circle", .secondary)
+        default: return ("circle", .secondary)
         }
-        return parts.joined(separator: " · ")
     }
 }
 

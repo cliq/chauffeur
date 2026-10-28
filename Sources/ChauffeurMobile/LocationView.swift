@@ -79,7 +79,7 @@ struct LocationView: View {
                         SelectableRow(isSelected: checkout == .existing(path: existing.path)) {
                             checkout = .existing(path: existing.path)
                         } label: {
-                            CheckoutLabel(kind: existing.kind, branch: existing.branch, isRepository: folder.isRepository,
+                            CheckoutLabel(kind: existing.kind, branch: existing.branch, path: existing.path, isRepository: folder.isRepository,
                                           unavailable: existing.availability != .available)
                         }
                         .disabled(existing.availability != .available)

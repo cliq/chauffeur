@@ -689,7 +689,8 @@ final class MobileAppModel {
         )
     }
 
-    /// Two projects (one without sessions), three sessions across two checkouts.
+    /// Two projects (one without sessions); the first files its app under nested
+    /// sidebar groups beside an ungrouped site repository, with sessions across three checkouts.
     static func fixtureInventory(hostName: String) -> InventorySnapshot {
         let chauffeurProject = UUID()
         let chauffeurFolder = UUID()
@@ -698,6 +699,9 @@ final class MobileAppModel {
         let notesFolder = UUID()
         let mainPath = "/Users/leo/Chauffeur"
         let mobilePath = "/Users/leo/Chauffeur/.worktrees/feature-mobile"
+        let siteFolder = UUID()
+        let sitePath = "/Users/leo/chauffeur-site"
+        let sitePreviewPath = "/Users/leo/.chauffeur/worktrees/site-preview"
         let notesPath = "/Users/leo/Documents/notes"
         let now = Date()
 
@@ -706,6 +710,7 @@ final class MobileAppModel {
         let defaultGroup = GroupSummary(id: UUID(), name: "Default", isDefault: true)
         let reviewGroup = GroupSummary(id: UUID(), name: "Review")
         let workGroup = RepositoryGroupSummary(id: UUID(), name: "Work")
+        let appsGroup = RepositoryGroupSummary(id: UUID(), name: "Apps", parentID: workGroup.id)
 
         return InventorySnapshot(
             revision: 1,
@@ -728,10 +733,22 @@ final class MobileAppModel {
                                 CheckoutSummary(kind: .main, branch: "main", path: mainPath, availability: .available),
                                 CheckoutSummary(kind: .worktree, worktreeID: mobileWorktree, branch: "feature/mobile", path: mobilePath, availability: .available, managed: true)
                             ],
-                            repositoryGroupID: workGroup.id
+                            repositoryGroupID: appsGroup.id
+                        ),
+                        FolderSummary(
+                            id: siteFolder,
+                            name: "chauffeur-site",
+                            path: sitePath,
+                            isRepository: true,
+                            inventoryReady: true,
+                            availability: .available,
+                            checkouts: [
+                                CheckoutSummary(kind: .main, branch: "main", path: sitePath, availability: .available),
+                                CheckoutSummary(kind: .worktree, worktreeID: UUID(), branch: "copy/pricing-page", path: sitePreviewPath, availability: .available, managed: true)
+                            ]
                         )
                     ],
-                    repositoryGroups: [workGroup]
+                    repositoryGroups: [workGroup, appsGroup]
                 ),
                 ProjectSummary(
                     id: notesProject,
@@ -768,6 +785,11 @@ final class MobileAppModel {
                     id: UUID(), projectID: chauffeurProject, folderID: chauffeurFolder,
                     title: "Shell", kind: .shell, state: .running,
                     branch: "main", checkoutPath: mainPath, createdAt: now, updatedAt: now
+                ),
+                SessionSummary(
+                    id: UUID(), projectID: chauffeurProject, folderID: siteFolder,
+                    title: "Rewrite the pricing page copy for the launch announcement", kind: .claude, state: .turnFinished,
+                    branch: "copy/pricing-page", checkoutPath: sitePreviewPath, createdAt: now, updatedAt: now
                 ),
                 SessionSummary(
                     id: UUID(), projectID: chauffeurProject, folderID: chauffeurFolder,
