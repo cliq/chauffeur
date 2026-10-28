@@ -25,6 +25,16 @@ public struct RemoteInventoryBuilder {
         return build(view: view, hostName: hostName, revision: revision, isAttached: isAttached)
     }
 
+    /// Registered folders in the desktop sidebar's order, which keeps each group's folders together.
+    private static func sidebarFolders(_ items: [RepositoryLayoutItem]) -> [ProjectFolder] {
+        items.flatMap { item -> [ProjectFolder] in
+            switch item {
+            case .repository(let folder): [folder]
+            case .group(_, _, let items): sidebarFolders(items)
+            }
+        }
+    }
+
     static func build(view: RuntimeSnapshotView, hostName: String, revision: UInt64, isAttached: (UUID) -> Bool) -> InventorySnapshot {
         let store = view.store
         let inventories = view.repositoryInventories ?? []
@@ -38,7 +48,7 @@ public struct RemoteInventoryBuilder {
             let presets: [PresetSummary] = set?.archived == false
                 ? store.agents(teamID: project.presetSetID).map { PresetSummary(id: $0.id, name: $0.name, kind: kind($0.kind)) }
                 : []
-            let folders = project.folders.filter(\.registered).map { folder -> FolderSummary in
+            let folders = sidebarFolders(project.repositoryLayout).map { folder -> FolderSummary in
                 let inventory = inventories.observation(for: folder.canonicalPath)
                 return FolderSummary(
                     id: folder.id,
@@ -49,10 +59,15 @@ public struct RemoteInventoryBuilder {
                     availability: availability(folder.availability),
                     checkouts: checkouts(folder: folder, project: project, records: worktrees, inventory: inventory),
                     lastGroupID: groups.contains { $0.id == folder.lastGroupID } ? folder.lastGroupID : nil,
-                    lastCoordinationEnabled: folder.lastCoordinationEnabled
+                    lastCoordinationEnabled: folder.lastCoordinationEnabled,
+                    repositoryGroupID: project.repositoryGroupPath(to: folder.id).last
                 )
             }
-            summaries.append(ProjectSummary(id: project.id, name: project.name, archived: project.archived, groups: groups, presets: presets, folders: folders))
+            let filed = Set(folders.flatMap { project.repositoryGroupPath(to: $0.id) })
+            let repositoryGroups = project.repositoryGroups.filter { filed.contains($0.id) }.map {
+                RepositoryGroupSummary(id: $0.id, name: $0.name, parentID: project.repositoryGroupPath(to: $0.id).last)
+            }
+            summaries.append(ProjectSummary(id: project.id, name: project.name, archived: project.archived, groups: groups, presets: presets, folders: folders, repositoryGroups: repositoryGroups))
         }
         summaries.sort { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
 

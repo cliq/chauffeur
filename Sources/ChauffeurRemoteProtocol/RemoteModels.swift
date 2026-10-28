@@ -131,6 +131,8 @@ public struct FolderSummary: Codable, Equatable, Sendable, Identifiable {
     /// The group and messaging choice of the last agent launched here; nil from older Macs or before any launch.
     public var lastGroupID: UUID?
     public var lastCoordinationEnabled: Bool?
+    /// The Mac sidebar group holding this folder; nil at the top level or from older Macs.
+    public var repositoryGroupID: UUID?
 
     public init(
         id: UUID,
@@ -141,7 +143,8 @@ public struct FolderSummary: Codable, Equatable, Sendable, Identifiable {
         availability: RemoteAvailability,
         checkouts: [CheckoutSummary] = [],
         lastGroupID: UUID? = nil,
-        lastCoordinationEnabled: Bool? = nil
+        lastCoordinationEnabled: Bool? = nil,
+        repositoryGroupID: UUID? = nil
     ) {
         self.id = id
         self.name = name
@@ -152,6 +155,34 @@ public struct FolderSummary: Codable, Equatable, Sendable, Identifiable {
         self.checkouts = checkouts
         self.lastGroupID = lastGroupID
         self.lastCoordinationEnabled = lastCoordinationEnabled
+        self.repositoryGroupID = repositoryGroupID
+    }
+}
+
+/// A group the Mac's Repositories sidebar files folders under. Read-only on the phone.
+public struct RepositoryGroupSummary: Codable, Equatable, Sendable, Identifiable {
+    public var id: UUID
+    public var name: String
+    /// The enclosing group; nil at the top level.
+    public var parentID: UUID?
+
+    public init(id: UUID, name: String, parentID: UUID? = nil) {
+        self.id = id
+        self.name = name
+        self.parentID = parentID
+    }
+}
+
+/// A project's folders nested in their sidebar groups.
+public enum FolderOutlineItem: Equatable, Sendable, Identifiable {
+    case folder(FolderSummary)
+    case group(RepositoryGroupSummary, [FolderOutlineItem])
+
+    public var id: UUID {
+        switch self {
+        case .folder(let folder): folder.id
+        case .group(let group, _): group.id
+        }
     }
 }
 
@@ -161,7 +192,10 @@ public struct ProjectSummary: Codable, Equatable, Sendable, Identifiable {
     public var archived: Bool
     public var groups: [GroupSummary]
     public var presets: [PresetSummary]
+    /// In the Mac sidebar's order, so each group's folders are contiguous.
     public var folders: [FolderSummary]
+    /// Groups holding at least one folder; nil from older Macs.
+    public var repositoryGroups: [RepositoryGroupSummary]?
 
     public init(
         id: UUID,
@@ -169,7 +203,8 @@ public struct ProjectSummary: Codable, Equatable, Sendable, Identifiable {
         archived: Bool = false,
         groups: [GroupSummary] = [],
         presets: [PresetSummary] = [],
-        folders: [FolderSummary] = []
+        folders: [FolderSummary] = [],
+        repositoryGroups: [RepositoryGroupSummary]? = nil
     ) {
         self.id = id
         self.name = name
@@ -177,6 +212,41 @@ public struct ProjectSummary: Codable, Equatable, Sendable, Identifiable {
         self.groups = groups
         self.presets = presets
         self.folders = folders
+        self.repositoryGroups = repositoryGroups
+    }
+
+    /// The groups enclosing a folder, outermost first.
+    public func groupPath(of folder: FolderSummary) -> [RepositoryGroupSummary] {
+        let groups = Dictionary((repositoryGroups ?? []).map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        var path: [RepositoryGroupSummary] = []
+        var next = folder.repositoryGroupID
+        // Bounded so a malformed parent cycle cannot loop.
+        while let id = next, let group = groups[id], path.count < groups.count {
+            path.insert(group, at: 0)
+            next = group.parentID
+        }
+        return path
+    }
+
+    /// Folders nested in their groups, in sidebar order.
+    public var folderOutline: [FolderOutlineItem] {
+        var outline: [FolderOutlineItem] = []
+        for folder in folders { outline.insert(folder, along: groupPath(of: folder)[...]) }
+        return outline
+    }
+}
+
+private extension Array where Element == FolderOutlineItem {
+    /// Appends a folder, reusing the last group at each level when it matches the path.
+    mutating func insert(_ folder: FolderSummary, along path: ArraySlice<RepositoryGroupSummary>) {
+        guard let group = path.first else { append(.folder(folder)); return }
+        var items: [FolderOutlineItem] = []
+        if case .group(let last, let existing) = last, last.id == group.id {
+            items = existing
+            removeLast()
+        }
+        items.insert(folder, along: path.dropFirst())
+        append(.group(group, items))
     }
 }
 

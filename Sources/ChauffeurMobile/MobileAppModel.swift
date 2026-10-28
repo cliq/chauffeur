@@ -705,6 +705,7 @@ final class MobileAppModel {
         let claudePreset = PresetSummary(id: UUID(), name: "Claude · Personal", kind: .claude)
         let defaultGroup = GroupSummary(id: UUID(), name: "Default", isDefault: true)
         let reviewGroup = GroupSummary(id: UUID(), name: "Review")
+        let workGroup = RepositoryGroupSummary(id: UUID(), name: "Work")
 
         return InventorySnapshot(
             revision: 1,
@@ -726,9 +727,11 @@ final class MobileAppModel {
                             checkouts: [
                                 CheckoutSummary(kind: .main, branch: "main", path: mainPath, availability: .available),
                                 CheckoutSummary(kind: .worktree, worktreeID: mobileWorktree, branch: "feature/mobile", path: mobilePath, availability: .available, managed: true)
-                            ]
+                            ],
+                            repositoryGroupID: workGroup.id
                         )
-                    ]
+                    ],
+                    repositoryGroups: [workGroup]
                 ),
                 ProjectSummary(
                     id: notesProject,

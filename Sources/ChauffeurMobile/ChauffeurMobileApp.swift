@@ -3,7 +3,7 @@ import ChauffeurRemoteClient
 
 @main
 struct ChauffeurMobileApp: App {
-    @State private var model = MobileAppModel(makeTerminalAdapter: MobileAppModel.defaultTerminalAdapterFactory())
+    @State private var model = Self.makeModel()
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some Scene {
@@ -22,6 +22,21 @@ struct ChauffeurMobileApp: App {
                 break
             }
         }
+    }
+}
+
+extension ChauffeurMobileApp {
+    static func makeModel() -> MobileAppModel {
+        #if DEBUG
+        // Opens on the preview inventory, for checking layouts on a simulator without
+        // pairing; `--preview-location` continues to the new-session location step.
+        if CommandLine.arguments.contains("--preview-fixture") {
+            let model = MobileAppModel.preview()
+            if CommandLine.arguments.contains("--preview-location") { model.path.append(.location(projectID: nil)) }
+            return model
+        }
+        #endif
+        return MobileAppModel(makeTerminalAdapter: MobileAppModel.defaultTerminalAdapterFactory())
     }
 }
 

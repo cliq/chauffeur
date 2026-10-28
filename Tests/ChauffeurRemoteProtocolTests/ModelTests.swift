@@ -124,4 +124,21 @@ struct ModelTests {
         #expect(WorktreeCreationSpec.branchSlug(from: "  Café 2.0 ") == "caf-2-0")
         #expect(WorktreeCreationSpec.branchSlug(from: "---") == "")
     }
+
+    @Test func foldersNestInTheirSidebarGroupsAndOlderMacsStayFlat() throws {
+        let work = RepositoryGroupSummary(id: UUID(), name: "Work")
+        let clients = RepositoryGroupSummary(id: UUID(), name: "Clients", parentID: work.id)
+        func folder(_ name: String, in group: RepositoryGroupSummary? = nil) -> FolderSummary {
+            FolderSummary(id: UUID(), name: name, path: "/\(name)", isRepository: true, availability: .available, repositoryGroupID: group?.id)
+        }
+        let a = folder("a"), b = folder("b", in: clients), c = folder("c", in: work), d = folder("d")
+        let project = ProjectSummary(id: UUID(), name: "P", folders: [a, b, c, d], repositoryGroups: [work, clients])
+        #expect(project.folderOutline == [.folder(a), .group(work, [.group(clients, [.folder(b)]), .folder(c)]), .folder(d)])
+        #expect(project.groupPath(of: b) == [work, clients])
+
+        var json = try JSONSerialization.jsonObject(with: RemoteJSON.encode(project)) as! [String: Any]
+        json.removeValue(forKey: "repositoryGroups")
+        let older = try RemoteJSON.decode(ProjectSummary.self, from: JSONSerialization.data(withJSONObject: json))
+        #expect(older.folderOutline.map(\.id) == [a, b, c, d].map(\.id))
+    }
 }

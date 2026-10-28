@@ -164,6 +164,11 @@ struct RemoteOperationHandlersTests {
         try FileManager.default.createDirectory(at: extra, withIntermediateDirectories: true)
         var folder = ProjectFolder(path: extra.path); folder.registered = false
         project.folders.append(folder)
+        // The sidebar group holding the repository travels with it; an empty one does not.
+        let work = project.addRepositoryGroup(named: "Work")
+        let clients = project.addRepositoryGroup(named: "Clients", in: work)
+        project.addRepositoryGroup(named: "Empty")
+        project.moveRepositoryItem(fixture.folder.id, to: .into(clients))
         try await fixture.runtime.store.save(project, expectedVersion: stored.version)
         try await fixture.runtime.start()
         let worktree = try await fixture.runtime.createWorktree(fixture.creation).value
@@ -184,6 +189,8 @@ struct RemoteOperationHandlersTests {
         let folderSummary = try #require(summary.folders.first)
         #expect(summary.folders.count == 1 && folderSummary.id == fixture.folder.id && folderSummary.path == fixture.folder.canonicalPath)
         #expect(folderSummary.isRepository && folderSummary.inventoryReady && folderSummary.availability == .available)
+        #expect(folderSummary.repositoryGroupID == clients)
+        #expect(summary.repositoryGroups == [RepositoryGroupSummary(id: work, name: "Work"), RepositoryGroupSummary(id: clients, name: "Clients", parentID: work)])
         #expect(folderSummary.checkouts == [
             CheckoutSummary(kind: .main, worktreeID: nil, branch: "main", path: fixture.folder.canonicalPath, availability: .available, managed: false),
             CheckoutSummary(kind: .worktree, worktreeID: worktree.id, branch: "task/fixture", path: worktree.path, availability: .available, managed: true)

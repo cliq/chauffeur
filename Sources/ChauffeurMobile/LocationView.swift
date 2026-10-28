@@ -43,43 +43,61 @@ struct LocationView: View {
 
             if let project {
                 Section("Repository / folder") {
-                    Picker("Repository / folder", selection: $folderID) {
-                        ForEach(project.folders) { folder in
-                            VStack(alignment: .leading) {
-                                Text(folder.name)
-                                Text(folder.availability == .available ? folder.path : "\(folder.path) · unavailable")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
+                    // Nested in the Mac sidebar's groups, which the phone only shows.
+                    ForEach(OutlineRow.rows(project.folderOutline)) { row in
+                        switch row.item {
+                        case .group(let group, _):
+                            Label(group.name, systemImage: "rectangle.stack")
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                                .padding(.leading, CGFloat(row.depth) * 20)
+                                .accessibilityAddTraits(.isHeader)
+                        case .folder(let folder):
+                            SelectableRow(isSelected: folderID == folder.id) {
+                                folderID = folder.id
+                            } label: {
+                                Label {
+                                    VStack(alignment: .leading) {
+                                        Text(folder.name)
+                                        Text(folder.availability == .available ? folder.path : "\(folder.path) · unavailable")
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                } icon: {
+                                    Image(systemName: "folder")
+                                }
                             }
-                            .tag(Optional(folder.id))
+                            .padding(.leading, CGFloat(row.depth) * 20)
                         }
                     }
-                    .pickerStyle(.inline)
-                    .labelsHidden()
                 }
             }
 
             if let folder {
                 Section {
                     ForEach(folder.checkouts) { existing in
-                        CheckoutRow(
-                            title: existing.kind == .main ? "Main checkout" : "Existing worktree",
-                            subtitle: existing.availability == .available ? existing.branch : "\(existing.branch) · unavailable on the Mac",
-                            systemImage: existing.kind == .main ? "arrow.triangle.branch" : "arrow.triangle.pull",
-                            isSelected: checkout == .existing(path: existing.path)
-                        ) {
+                        SelectableRow(isSelected: checkout == .existing(path: existing.path)) {
                             checkout = .existing(path: existing.path)
+                        } label: {
+                            CheckoutLabel(kind: existing.kind, branch: existing.branch, isRepository: folder.isRepository,
+                                          unavailable: existing.availability != .available)
                         }
                         .disabled(existing.availability != .available)
                     }
                     if folder.isRepository {
-                        CheckoutRow(
-                            title: "New worktree…",
-                            subtitle: "Branch and base ref on the next step",
-                            systemImage: "plus",
-                            isSelected: checkout == .newWorktree
-                        ) {
+                        SelectableRow(isSelected: checkout == .newWorktree) {
                             checkout = .newWorktree
+                        } label: {
+                            Label {
+                                VStack(alignment: .leading) {
+                                    Text("New worktree…")
+                                    Text("Branch and base ref on the next step")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                            } icon: {
+                                Image(systemName: "plus")
+                            }
                         }
                     }
                 } header: {
@@ -133,26 +151,32 @@ struct LocationView: View {
     }
 }
 
-private struct CheckoutRow: View {
-    let title: String
-    let subtitle: String
-    let systemImage: String
+/// A folder outline entry with how deeply it is nested.
+private struct OutlineRow: Identifiable {
+    let item: FolderOutlineItem
+    let depth: Int
+
+    var id: UUID { item.id }
+
+    static func rows(_ items: [FolderOutlineItem], depth: Int = 0) -> [OutlineRow] {
+        items.flatMap { item -> [OutlineRow] in
+            switch item {
+            case .folder: [OutlineRow(item: item, depth: depth)]
+            case .group(_, let items): [OutlineRow(item: item, depth: depth)] + rows(items, depth: depth + 1)
+            }
+        }
+    }
+}
+
+private struct SelectableRow<Content: View>: View {
     let isSelected: Bool
     var onSelect: () -> Void
+    @ViewBuilder var label: Content
 
     var body: some View {
         Button(action: onSelect) {
             HStack {
-                Label {
-                    VStack(alignment: .leading) {
-                        Text(title)
-                        Text(subtitle)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                } icon: {
-                    Image(systemName: systemImage)
-                }
+                label
                 Spacer()
                 if isSelected {
                     Image(systemName: "checkmark")
@@ -162,6 +186,7 @@ private struct CheckoutRow: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 }
 
