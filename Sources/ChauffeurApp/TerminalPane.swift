@@ -27,6 +27,8 @@ enum TerminalControlState: Equatable { case detached, connecting, connected, con
     @Published var findQuery = ""
     @Published private(set) var searchTotal: Int?
     @Published private(set) var searchSelected: Int?
+    /// The browser the session's team opens web links in, read when a link opens.
+    var linkBrowser: () -> LinkBrowser? = { nil }
     private let readOnly: Bool
     private var scrollback: Int
     private(set) var style: TerminalStyle
@@ -197,6 +199,7 @@ enum TerminalControlState: Equatable { case detached, connecting, connected, con
         else if historyPresented, let historyController { historyController.find() }
         else {
             historyController = TerminalController(sessionID: sessionID, scrollback: 10_000, style: style, readOnly: true)
+            historyController?.linkBrowser = linkBrowser
             historyPresented = true
         }
     }
@@ -281,7 +284,7 @@ enum TerminalControlState: Equatable { case detached, connecting, connected, con
     /// keeps its historical allowance for `file` URLs.
     func terminal(_ adapter: any TerminalEngineAdapter, didRequestOpenLink link: String) {
         guard let url = URL(string: link), ["http", "https", "mailto", "file"].contains(url.scheme?.lowercased() ?? "") else { return }
-        NSWorkspace.shared.open(url)
+        LinkOpener.open(url, in: linkBrowser())
     }
 }
 

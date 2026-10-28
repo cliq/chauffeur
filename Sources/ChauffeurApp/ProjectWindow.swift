@@ -26,6 +26,8 @@ struct PendingTerminalTab: Identifiable {
     @Published var newTabPresented = false
     @Published var pendingTabs: [PendingTerminalTab] = []
     var controllers: [UUID: TerminalController] = [:]
+    /// The browser a session's team opens links in; the window supplies it from the app model.
+    var linkBrowser: (UUID) -> LinkBrowser? = { _ in nil }
     weak var window: NSWindow?
     var loaded = false
     /// The session whose terminal should take the keyboard after a tab change,
@@ -36,7 +38,9 @@ struct PendingTerminalTab: Identifiable {
     var selectedWorktreePath: String? { state.selectedWorktreePath }
     func controller(for id: UUID, scrollback: Int, style: TerminalStyle) -> TerminalController {
         if let controller = controllers[id] { return controller }
-        let controller = TerminalController(sessionID: id, scrollback: scrollback, style: style); controllers[id] = controller; return controller
+        let controller = TerminalController(sessionID: id, scrollback: scrollback, style: style); controllers[id] = controller
+        controller.linkBrowser = { [weak self] in self?.linkBrowser(id) }
+        return controller
     }
     /// Selects a checkout. A `nil` path shows the repository overview. The
     /// current session stays selected when it already runs in that checkout;
@@ -308,7 +312,7 @@ private struct ProjectWindowContent: View, Equatable {
                 layout.state.wasOpen = false; model.saveWindow(layout.state); model.openProjects.remove(projectID)
                 layout.loaded = false
             }))
-            .onAppear { restore(); consumeSessionRoute(); consumeProjectRoute(); terminalOpacity = model.terminalStyle.backgroundOpacity }
+            .onAppear { layout.linkBrowser = { [model] in model.linkBrowser(forSession: $0) }; restore(); consumeSessionRoute(); consumeProjectRoute(); terminalOpacity = model.terminalStyle.backgroundOpacity }
             .onChange(of: projectModel.slice.pendingSessionRoute) { _, _ in consumeSessionRoute() }
             .onChange(of: projectModel.slice.pendingProjectRoute) { _, _ in consumeProjectRoute() }
             .onChange(of: online) { _, online in if online { restore(); layout.synchronizeTerminals(model: model) } }

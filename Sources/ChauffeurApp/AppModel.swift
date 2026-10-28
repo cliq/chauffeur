@@ -315,6 +315,12 @@ struct AppSnapshot: Decodable, Sendable {
     func sessions(in projectID: UUID) -> [Session] { snapshot.sessions.filter { $0.projectID == projectID } }
     func setName(_ id: UUID) -> String { presetSets.first { $0.id == id }?.name ?? "Unresolved team" }
     func session(_ id: UUID?) -> Session? { snapshot.sessions.first { $0.id == id } }
+    /// Where a session's links open: its team's browser, by the team it launched with, else its project's.
+    func linkBrowser(forSession id: UUID) -> LinkBrowser? {
+        guard let session = session(id) else { return nil }
+        let teamID = session.launch.teamID ?? project(session.projectID)?.presetSetID
+        return presetSets.first { $0.id == teamID }?.linkBrowser
+    }
 
     func start() {
         guard observation == nil else { return }

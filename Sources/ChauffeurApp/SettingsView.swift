@@ -376,6 +376,11 @@ struct PresetSetEditor: View {
     @State private var directories: [CLIKind: String] = [:]
     @State private var archived = false
     @State private var isDefault = false
+    /// The link browser's bundle ID and Chromium profile directory; empty for the default browser or profile.
+    @State private var browserID = ""
+    @State private var profileDirectory = ""
+    @State private var browsers: [InstalledBrowser] = []
+    @State private var profiles: [ChromiumProfiles.Profile] = []
     @State private var version: String?
     @State private var failure: String?
     @State private var saving = false
@@ -409,6 +414,7 @@ struct PresetSetEditor: View {
                         }
                     }
                     Text("Leave a directory blank to use the agent’s normal default. These values also apply to new shell terminals.").font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    linkBrowserFields
                     if presetSet != nil {
                         Toggle("Archived", isOn: $archived).disabled(isDefault)
                     }
@@ -426,9 +432,9 @@ struct PresetSetEditor: View {
                     .disabled(busy || !model.online || name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                     .accessibilityIdentifier("preset-set.save")
             }
-        }.frame(width: 552, height: presetSet == nil ? 610 : 440, alignment: .leading).padding(24)
+        }.frame(width: 552, height: presetSet == nil ? 610 : 520, alignment: .leading).padding(24)
             .interactiveDismissDisabled(busy)
-            .onAppear { selection = presetSet?.agentSelection ?? .allBase; directories = Dictionary(uniqueKeysWithValues: Self.kinds.map { ($0, presetSet?.configurationDirectories?[$0.rawValue] ?? "") }); name = presetSet?.name ?? ""; archived = presetSet?.archived ?? false; isDefault = presetSet?.isDefault ?? model.presetSets.allSatisfy(\.archived); version = model.snapshot.store.presetSets.first { $0.value.id == presetSet?.id }?.version }
+            .onAppear { selection = presetSet?.agentSelection ?? .allBase; directories = Dictionary(uniqueKeysWithValues: Self.kinds.map { ($0, presetSet?.configurationDirectories?[$0.rawValue] ?? "") }); name = presetSet?.name ?? ""; archived = presetSet?.archived ?? false; isDefault = presetSet?.isDefault ?? model.presetSets.allSatisfy(\.archived); browsers = InstalledBrowser.all(); browserID = presetSet?.linkBrowser?.bundleID ?? ""; profileDirectory = presetSet?.linkBrowser?.profileDirectory ?? ""; profiles = InstalledBrowser.profiles(browserID); version = model.snapshot.store.presetSets.first { $0.value.id == presetSet?.id }?.version }
     }
     private func save() {
         guard !busy else { return }
@@ -441,6 +447,7 @@ struct PresetSetEditor: View {
         for (kind, directory) in directories { configured[kind.rawValue] = (directory as NSString).expandingTildeInPath }
         value.configurationDirectories = configured
         value.name = name; value.archived = archived; value.isDefault = isDefault
+        value.linkBrowser = browserID.isEmpty ? nil : LinkBrowser(bundleID: browserID, profileDirectory: profileDirectory.isEmpty ? nil : profileDirectory)
         Task {
             defer { saving = false }
             do {
@@ -459,6 +466,30 @@ struct PresetSetEditor: View {
                     ? " Any configuration folders already created are preserved. Retry with the same settings, or use those folders as existing configurations." : ""
                 failure = error.localizedDescription + copyNote
             }
+        }
+    }
+
+    private var linkBrowserFields: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Links").fontWeight(.medium)
+            Picker("Open links in", selection: $browserID) {
+                Text("Default Browser").tag("")
+                ForEach(browsers) { Text($0.name).tag($0.bundleID) }
+                if !browserID.isEmpty, !browsers.contains(where: { $0.bundleID == browserID }) {
+                    Text("\(browserID) (not installed)").tag(browserID)
+                }
+            }.accessibilityIdentifier("team.link-browser")
+            if !profiles.isEmpty {
+                Picker("Profile", selection: $profileDirectory) {
+                    Text("Last Used").tag("")
+                    ForEach(profiles) { Text($0.label).tag($0.directory) }
+                }.accessibilityIdentifier("team.link-browser-profile")
+            }
+            Text("Web links opened from this team’s terminals go to this browser. Other links open in their usual app.").font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+        }
+        .onChange(of: browserID) { _, id in
+            profiles = InstalledBrowser.profiles(id)
+            if !profiles.contains(where: { $0.directory == profileDirectory }) { profileDirectory = "" }
         }
     }
 

@@ -32,6 +32,12 @@ struct TeamDetailView: View {
                     .help("\(variable)=\(set.configurationDirectory(for: kind))")
                 }
             }
+            if let browser = set.linkBrowser {
+                let name = InstalledBrowser.named(browser.bundleID) ?? browser.bundleID
+                let profile = browser.profileDirectory.map { directory in InstalledBrowser.profiles(browser.bundleID).first { $0.directory == directory }?.label ?? directory }
+                Label("Links open in \(name)\(profile.map { " · \($0)" } ?? "")", systemImage: "safari").font(.callout).foregroundStyle(.secondary)
+                    .accessibilityIdentifier("team-detail.link-browser")
+            }
             AgentPresetList(set: set, revealedPresetID: $revealedPresetID, edit: { agent in
                 if set.agentSelection == .allBase { editedBase = model.snapshot.store.baseAgentPresets.first { $0.value.id == agent.id }?.value }
                 else { editedPreset = agent }

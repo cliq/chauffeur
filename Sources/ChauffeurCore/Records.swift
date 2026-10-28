@@ -28,6 +28,8 @@ public struct PresetSet: Record, Equatable {
     /// The default team: preselected for new projects and used when nothing names a team.
     /// The runtime keeps exactly one non-archived team flagged whenever any exists.
     public var isDefault = false
+    /// Where terminal links to web pages open; nil uses the system's default browser.
+    public var linkBrowser: LinkBrowser?
     public init(name: String, agentSelection: AgentSelection? = nil) {
         self.name = name; self.agentSelection = agentSelection
         self.configurationDirectories = agentSelection == nil ? nil : [:]
@@ -42,6 +44,7 @@ public struct PresetSet: Record, Equatable {
         revision = try container.decodeIfPresent(Int.self, forKey: .revision) ?? 1
         archived = try container.decodeIfPresent(Bool.self, forKey: .archived) ?? false
         isDefault = try container.decodeIfPresent(Bool.self, forKey: .isDefault) ?? false
+        linkBrowser = try container.decodeIfPresent(LinkBrowser.self, forKey: .linkBrowser)
     }
     public func validate() throws {
         try Validation.name(name)
@@ -51,6 +54,7 @@ public struct PresetSet: Record, Equatable {
         }
         try Validation.require(revision > 0, "Revision must be positive")
         try Validation.require(!(isDefault && archived), "The default team cannot be archived")
+        try linkBrowser?.validate()
     }
 }
 
