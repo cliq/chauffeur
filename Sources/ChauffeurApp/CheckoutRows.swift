@@ -19,6 +19,7 @@ struct CheckoutRow: Identifiable {
     var baseBranch: String? = nil
     /// False for the main row of a folder Git does not track: it has no branch or worktrees.
     var isRepository = true
+    var note: CheckoutNote? = nil
     var id: String { path }
     var title: String {
         guard isRepository else { return URL(fileURLWithPath: path).lastPathComponent }
@@ -60,7 +61,7 @@ enum CheckoutRows {
     /// Every worktree Git lists for the folder, plus records whose checkout is
     /// gone but still referenced by sessions. Git entries whose directory is
     /// gone appear only when sessions refer to them.
-    static func rows(folder: ProjectFolder, project: Project, records: [Worktree], inventory: RepositoryInventory?, sessions: [Session], pending: Worktree? = nil, canonicalize: (String) -> String = Paths.canonical) -> [CheckoutRow] {
+    static func rows(folder: ProjectFolder, project: Project, records: [Worktree], inventory: RepositoryInventory?, sessions: [Session], notes: [CheckoutNote] = [], pending: Worktree? = nil, canonicalize: (String) -> String = Paths.canonical) -> [CheckoutRow] {
         var records = records.filter { $0.projectID == project.id && $0.folderID == folder.id }
         if let pending, pending.folderID == folder.id, !records.contains(where: { $0.id == pending.id }) { records.append(pending) }
         let entries = inventory?.entries ?? []
@@ -98,7 +99,9 @@ enum CheckoutRows {
             rows.append(CheckoutRow(folderID: folder.id, path: record.path, branch: record.branch, availability: availability, worktreeID: record.id, isMain: false, managed: record.managed, sessions: history))
         }
         rows.sort { $0.branch.localizedStandardCompare($1.branch) == .orderedAscending }
-        return [main] + rows
+        return ([main] + rows).map { row in
+            var row = row; row.note = notes.note(folderID: folder.id, path: canonical(row.path)); return row
+        }
     }
     /// Git entries whose directory is gone and nothing refers to; `git worktree prune` clears them.
     static func staleEntries(folder: ProjectFolder, inventory: RepositoryInventory?, rows: [CheckoutRow]) -> [GitWorktree] {

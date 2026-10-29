@@ -100,6 +100,8 @@ public struct CheckoutSummary: Codable, Equatable, Sendable, Identifiable {
     public var path: String
     public var availability: RemoteAvailability
     public var managed: Bool
+    /// The note left on this checkout, such as where to resume. Absent from older Macs.
+    public var note: String?
 
     public var id: String { path }
 
@@ -109,7 +111,8 @@ public struct CheckoutSummary: Codable, Equatable, Sendable, Identifiable {
         branch: String,
         path: String,
         availability: RemoteAvailability,
-        managed: Bool = false
+        managed: Bool = false,
+        note: String? = nil
     ) {
         self.kind = kind
         self.worktreeID = worktreeID
@@ -117,6 +120,7 @@ public struct CheckoutSummary: Codable, Equatable, Sendable, Identifiable {
         self.path = path
         self.availability = availability
         self.managed = managed
+        self.note = note
     }
 }
 

@@ -103,6 +103,11 @@ struct SessionLaunchView: View {
         if checkout == .newWorktree { return destination }
         return worktrees.first { $0.id == worktreeID }?.path ?? folder?.canonicalPath ?? ""
     }
+    /// The note left on the chosen checkout, shown so a resumed session starts from it.
+    private var checkoutNote: CheckoutNote? {
+        guard checkout != .newWorktree, let folderID, !primaryPath.isEmpty else { return nil }
+        return model.snapshot.store.checkoutNotes.map(\.value).note(folderID: folderID, path: Paths.canonical(primaryPath))
+    }
     private var primaryGitIdentity: UUID? {
         worktrees.first { $0.id == worktreeID }?.gitIdentity
             ?? model.snapshot.repositoryInventories?.flatMap(\.entries).first { $0.path == primaryPath }?.gitIdentity
@@ -124,6 +129,7 @@ struct SessionLaunchView: View {
             Divider()
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
+                    if let checkoutNote { CheckoutNoteCallout(text: checkoutNote.text, note: checkoutNote) }
                     sessionFields
                     messagingFields
                     checkoutFields

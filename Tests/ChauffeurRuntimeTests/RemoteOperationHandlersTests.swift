@@ -172,6 +172,7 @@ struct RemoteOperationHandlersTests {
         try await fixture.runtime.store.save(project, expectedVersion: stored.version)
         try await fixture.runtime.start()
         let worktree = try await fixture.runtime.createWorktree(fixture.creation).value
+        try await fixture.runtime.store.save(CheckoutNote(projectID: project.id, folderID: fixture.folder.id, path: worktree.path, text: "Resume at the parser"))
         // A shell session recorded in that worktree; the runtime learns about it on start.
         let session = fixture.shellSession(worktreeID: worktree.id, path: worktree.path, title: "Shell · task/fixture")
         try await fixture.runtime.store.save(session)
@@ -193,7 +194,7 @@ struct RemoteOperationHandlersTests {
         #expect(summary.repositoryGroups == [RepositoryGroupSummary(id: work, name: "Work"), RepositoryGroupSummary(id: clients, name: "Clients", parentID: work)])
         #expect(folderSummary.checkouts == [
             CheckoutSummary(kind: .main, worktreeID: nil, branch: "main", path: fixture.folder.canonicalPath, availability: .available, managed: false),
-            CheckoutSummary(kind: .worktree, worktreeID: worktree.id, branch: "task/fixture", path: worktree.path, availability: .available, managed: true)
+            CheckoutSummary(kind: .worktree, worktreeID: worktree.id, branch: "task/fixture", path: worktree.path, availability: .available, managed: true, note: "Resume at the parser")
         ])
         let remote = try #require(inventory.sessions.first)
         #expect(inventory.sessions.count == 1 && remote.id == session.id && remote.kind == .shell)

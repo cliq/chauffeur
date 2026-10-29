@@ -836,6 +836,12 @@ public actor RuntimeCoordinator {
             return try .from(await pending.value)
         case "createWorktree":
             return try .from(await createWorktree(params.decode(WorktreeCreationRequest.self)))
+        case "saveCheckoutNote":
+            let snapshot = await store.reload(), projectID = try params.uuid("projectID")
+            let checkout = try checkoutMatch(params.requiredString("path"), projectID: projectID, folderID: params.uuid("folderID"), in: snapshot)
+            // The app passes the version it edited, or none for a new note, so an agent's concurrent write surfaces as a conflict.
+            let saved = try await writeCheckoutNote(checkout, text: params["text"].string ?? "", expectedVersion: params["version"].string, author: nil, in: snapshot)
+            return try saved.map { try .from($0) } ?? .null
         case "runWorktreeSetup":
             let snapshot = await store.reload(), projectID = try params.uuid("projectID"), folderID = try params.uuid("folderID")
             let path = Paths.canonical(try params.requiredString("path"))
@@ -980,6 +986,7 @@ public actor RuntimeCoordinator {
             refreshKeepAwake()
         }
         for record in records { try await store.delete(worktree: record.value.id) }
+        try await deleteCheckoutNotes(projectID: projectID, folderID: folderID, path: path, in: snapshot)
         return .object(["path": .string(path), "deletedCheckout": .bool(deletedCheckout), "deletedSessions": .number(Double(affected.count)), "deletedRecords": .number(Double(records.count))])
     }
     private func registerWorktree(_ key: WorktreeRegistration) async throws -> Stored<Worktree> {
@@ -1015,7 +1022,53 @@ public actor RuntimeCoordinator {
         defer { checkoutClaims.endRemoval(worktreeID) }
         try await worktrees.remove(stored.value, liveSessions: Array(sessions.values), discardChanges: discardChanges)
         stored.value.registered = false
-        return try await saveWorktree(stored.value, expectedVersion: stored.version, finishingRemoval: true)
+        let removed = try await saveWorktree(stored.value, expectedVersion: stored.version, finishingRemoval: true)
+        try await deleteCheckoutNotes(projectID: stored.value.projectID, folderID: stored.value.folderID, path: Paths.canonical(stored.value.path), in: snapshot)
+        return removed
+    }
+    /// The checkout of this project containing `path`, which may be a directory inside it.
+    private func checkoutMatch(_ path: String, projectID: UUID, folderID: UUID? = nil, in snapshot: StoreSnapshot) throws -> ProjectFolderMatch {
+        let projects = snapshot.projects.map(\.value).filter { $0.id == projectID }
+        guard let match = ProjectFolderResolver.matches(path: path, projects: projects, worktrees: snapshot.worktrees.map(\.value), inventories: repositoryInventories).first,
+              folderID == nil || match.folderID == folderID else {
+            throw ChauffeurError("missing_checkout", "Path is not in a checkout of this project's registered repositories", path: path)
+        }
+        return match
+    }
+    /// Replaces the checkout's note; empty text removes it.
+    private func writeCheckoutNote(_ checkout: ProjectFolderMatch, text: String, expectedVersion: String?, author: Session?, in snapshot: StoreSnapshot) async throws -> Stored<CheckoutNote>? {
+        let existing = snapshot.checkoutNotes.first { $0.value.projectID == checkout.projectID && $0.value.folderID == checkout.folderID && $0.value.path == checkout.path }
+        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            if let existing { try await store.delete(checkoutNote: existing.value.id, expectedVersion: expectedVersion) }
+            return nil
+        }
+        var note = existing?.value ?? CheckoutNote(projectID: checkout.projectID, folderID: checkout.folderID, path: checkout.path, text: text)
+        note.text = text; note.updatedAt = Date(); note.authorSessionID = author?.id; note.authorTitle = author?.title
+        return try await store.save(note, expectedVersion: expectedVersion)
+    }
+    /// A deleted checkout's note would otherwise reappear on a new checkout at the same path.
+    private func deleteCheckoutNotes(projectID: UUID, folderID: UUID, path: String, in snapshot: StoreSnapshot) async throws {
+        for note in snapshot.checkoutNotes where note.value.projectID == projectID && note.value.folderID == folderID && note.value.path == path {
+            try await store.delete(checkoutNote: note.value.id)
+        }
+    }
+    private func checkoutNoteTool(caller: Caller, arguments: JSONValue, writing: Bool) async throws -> JSONValue {
+        guard let path = arguments["path"].string ?? sessions[caller.sessionID]?.launch.workingDirectory else {
+            throw ChauffeurError("missing_checkout", "Pass the path of a checkout in your project")
+        }
+        let snapshot = await store.reload()
+        let checkout = try checkoutMatch(path, projectID: caller.scope.projectID, in: snapshot)
+        var note = snapshot.checkoutNotes.first { $0.value.projectID == checkout.projectID && $0.value.folderID == checkout.folderID && $0.value.path == checkout.path }?.value
+        if writing {
+            let text = try arguments.requiredString("note")
+            try Validation.require(text.utf8.count <= CheckoutNote.maxBytes, "Note must contain at most 65,536 UTF-8 bytes")
+            // Agents replace the note outright; the app is the one place edits are version-checked.
+            let current = snapshot.checkoutNotes.first { $0.value.id == note?.id }?.version
+            note = try await writeCheckoutNote(checkout, text: text, expectedVersion: current, author: sessions[caller.sessionID], in: snapshot)?.value
+        }
+        return .object(["folderID": .string(checkout.folderID.uuidString), "path": .string(checkout.path), "note": note.map { .string($0.text) } ?? .null,
+                        "updatedAt": note.map { .string(ISO8601DateFormatter().string(from: $0.updatedAt)) } ?? .null,
+                        "author": note.map { .string($0.authorTitle ?? "the user") } ?? .null])
     }
     private func createWorktreeTool(caller: Caller, arguments: JSONValue) async throws -> JSONValue {
         guard let folderID = try optionalUUID(arguments, "folderID") ?? sessions[caller.sessionID]?.folderID else {
@@ -1914,6 +1967,8 @@ public actor RuntimeCoordinator {
         case "chauffeur_create_worktree": return try await createWorktreeTool(caller: caller, arguments: arguments)
         case "chauffeur_launch_session": return try await launchSessionTool(caller: caller, arguments: arguments)
         case "chauffeur_remove_worktree": return try await removeWorktreeTool(caller: caller, arguments: arguments)
+        case "chauffeur_get_checkout_note": return try await checkoutNoteTool(caller: caller, arguments: arguments, writing: false)
+        case "chauffeur_set_checkout_note": return try await checkoutNoteTool(caller: caller, arguments: arguments, writing: true)
         case "chauffeur_send_message":
             return try .from(await ledger.send(caller: caller, recipientID: arguments.uuid("recipientID"), body: arguments.requiredString("body"), references: arguments["references"].array.compactMap(\.string), retryKey: arguments.requiredString("retryKey")))
         case "chauffeur_inbox":

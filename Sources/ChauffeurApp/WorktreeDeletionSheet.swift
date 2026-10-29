@@ -53,6 +53,15 @@ struct WorktreeDeletionSheet: View {
                     .accessibilityIdentifier("worktreeDeletion.changedFiles")
                 }
             }
+            if let note = row.note {
+                VStack(alignment: .leading, spacing: 4) {
+                    Label("Its note is deleted too", systemImage: "note.text").font(.caption).fontWeight(.medium)
+                    Text(note.text).font(.caption).lineLimit(6).textSelection(.enabled)
+                }
+                .padding(10).frame(maxWidth: .infinity, alignment: .leading)
+                .background(.yellow.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
+                .accessibilityIdentifier("worktreeDeletion.note")
+            }
             if !notes.isEmpty {
                 Text(notes.map(\.text).joined(separator: " · ")).font(.caption).foregroundStyle(.secondary)
             }

@@ -116,6 +116,13 @@ work. Launch into it with its `worktreeID`, or delegate into it with its
 `discardChanges: true` only when the user agreed to lose uncommitted files
 or submodule commits that exist only in that worktree.
 
+Each checkout can carry one note the user sees beside it in Chauffeur, often
+where to resume a parked worktree. `chauffeur_get_checkout_note` reads it and
+`chauffeur_set_checkout_note` replaces it; both default to your working
+directory. Read it when the user asks you to resume or continue work there.
+Write one when the user asks, for example before ending a session they will
+resume later, and keep what still applies from the existing note.
+
 ## Follow-up, closure, and recovery
 
 An ordinary message is mailbox data and never starts a terminal turn. Use

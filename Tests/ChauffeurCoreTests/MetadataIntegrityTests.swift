@@ -147,6 +147,23 @@ struct MetadataIntegrityTests {
         #expect(final.value.presetSetID == other.value.id && final.value.lastPresetID == nil)
     }
 
+    @Test func eachCheckoutKeepsOneNoteAndStaleEditsAreRejected() async throws {
+        let fixture = try await MetadataFixture.make(); defer { fixture.cleanup() }
+        let projectID = fixture.project.value.id, folderID = fixture.project.value.folders[0].id, path = Paths.canonical(fixture.root.path)
+        let first = try await fixture.store.save(CheckoutNote(projectID: projectID, folderID: folderID, path: path, text: "Resume at the parser"))
+        let second = try await fixture.store.save(CheckoutNote(projectID: projectID, folderID: folderID, path: path, text: "Resume at the tests"))
+        let reopened = try FileStore(root: fixture.root)
+        let notes = await reopened.reload().checkoutNotes.map(\.value)
+        #expect(notes.map(\.text) == ["Resume at the tests"] && notes.first?.id == second.value.id)
+
+        var stale = second.value; stale.text = "Overwritten"
+        await #expect(throws: ChauffeurError.self) { try await fixture.store.save(stale, expectedVersion: first.version) }
+        await #expect(throws: ChauffeurError.self) { try await fixture.store.save(CheckoutNote(projectID: projectID, folderID: folderID, path: path, text: " \n ")) }
+        await #expect(throws: ChauffeurError.self) { try await fixture.store.save(CheckoutNote(projectID: projectID, folderID: UUID(), path: path, text: "Foreign folder")) }
+
+        try await fixture.store.delete(checkoutNote: second.value.id, expectedVersion: second.version)
+        #expect(await fixture.store.reload().checkoutNotes.isEmpty)
+    }
     @Test func symlinkedChildDirectoriesAreNotLoaded() async throws {
         let fixture = try await MetadataFixture.make(); defer { fixture.cleanup() }
         let parent = URL(fileURLWithPath: fixture.preset.path).deletingLastPathComponent()

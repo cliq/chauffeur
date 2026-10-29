@@ -212,6 +212,7 @@ private struct ProjectWindowContent: View, Equatable {
     @State private var deletingSession: Session?
     @State private var clearingFinished: [Session]?
     @State private var recentConversationsRow: CheckoutRow?
+    @State private var editingNote: CheckoutRow?
     @State private var renamingSession: Session?
     @State private var renameTitle = ""
     /// The terminals' background opacity; below 1 the window lets the desktop through terminal areas.
@@ -268,6 +269,7 @@ private struct ProjectWindowContent: View, Equatable {
                 .sheet(item: $worktreeSheet) { selection in WorktreesView(project: project, initialFolderID: selection.folderID, worktreeCreated: revealCreatedWorktree) }
                 .sheet(item: $settingsSheet) { selection in RepositorySettingsView(projectID: project.id, folderID: selection.id) }
                 .sheet(item: $recentConversationsRow) { row in RecentConversationsSheet(row: row) }
+                .sheet(item: $editingNote) { row in CheckoutNoteEditor(projectID: project.id, row: row) }
                 .sheet(item: $deletingCheckout) { row in
                     WorktreeDeletionSheet(row: row, preview: deletionPreview, confirm: { deleteWorktree(row); deletingCheckout = nil }, cancel: { deletingCheckout = nil })
                 }
@@ -376,7 +378,7 @@ private struct ProjectWindowContent: View, Equatable {
     private func refreshInventory() { model.perform { _ = try await model.call("refreshWorktrees") } }
     private func checkouts(for folder: ProjectFolder, project: Project) -> [CheckoutRow] {
         guard let pendingWorktree else { return projectModel.checkouts(for: folder, project: project, inventory: inventory(for: folder)) }
-        return CheckoutRows.rows(folder: folder, project: project, records: worktreeRecords, inventory: inventory(for: folder), sessions: allSessions, pending: pendingWorktree, canonicalize: projectModel.canonical)
+        return CheckoutRows.rows(folder: folder, project: project, records: worktreeRecords, inventory: inventory(for: folder), sessions: allSessions, notes: projectModel.slice.checkoutNotes, pending: pendingWorktree, canonicalize: projectModel.canonical)
     }
     private func checkout(folder: ProjectFolder, path: String, project: Project) -> CheckoutRow {
         checkouts(for: folder, project: project).first { projectModel.canonical($0.path) == projectModel.canonical(path) }
@@ -816,6 +818,13 @@ private struct ProjectWindowContent: View, Equatable {
                                     .help(unmerged).accessibilityElement(children: .combine).accessibilityLabel(unmerged)
                                     .accessibilityIdentifier("repository.unmerged.\(row.path)")
                             }
+                            if let note = row.note {
+                                Text("·")
+                                Image(systemName: "note.text")
+                                    .help(note.text)
+                                    .accessibilityLabel("Has a note")
+                                    .accessibilityIdentifier("repository.note.\(row.path)")
+                            }
                         }.font(.caption).foregroundStyle(.secondary)
                         if deleting { Text("Deleting…").font(.caption).foregroundStyle(.secondary) }
                         else if let status = row.statusLabel { Text(status).font(.caption).foregroundStyle(.secondary).help(row.path) }
@@ -852,6 +861,7 @@ private struct ProjectWindowContent: View, Equatable {
         Button("Open Shell") { openShell(in: row, folder: folder) }.disabled(!canLaunch(in: row))
         Divider()
         Button("Recent Conversations…") { recentConversationsRow = row }.disabled(!online)
+        Button(row.note == nil ? "Add Note…" : "Edit Note…") { editingNote = row }.disabled(!canEditNote(row))
         if row.isRepository { Button("Manage Worktrees…") { showWorktrees(folderID: folder.id) } }
         Button("Reveal in Finder") { FilePanels.reveal(row.path) }.disabled(row.availability != .available)
         if !row.isMain {
@@ -926,6 +936,9 @@ private struct ProjectWindowContent: View, Equatable {
                 }
                 let target = row ?? checkout(folder: folder, path: folder.canonicalPath, project: project)
                 HStack(spacing: 8) {
+                    Button { editingNote = target } label: { Label(target.note == nil ? "Add Note…" : "Note…", systemImage: "note.text") }
+                        .disabled(!canEditNote(target)).help(target.note?.text ?? "Leave a note on this checkout, such as where to resume")
+                        .accessibilityIdentifier("checkout.note")
                     Button("Launch Agent…") { launchAgent(in: target, folder: folder) }
                         .disabled(!canLaunch(in: target)).accessibilityIdentifier("checkout.launch")
                     Button("Open Shell") { openShell(in: target, folder: folder) }
@@ -992,6 +1005,10 @@ private struct ProjectWindowContent: View, Equatable {
         VStack(spacing: 16) {
             ContentUnavailableView(row.finished ? "This worktree is finished" : (hasFinished ? "No live sessions on this worktree" : "No sessions on this worktree"), systemImage: "terminal",
                                    description: Text(row.finished ? "The checkout no longer exists. Its finished sessions stay available above until you delete the worktree." : "Launch an agent or open a shell in \(row.title)."))
+                .fixedSize(horizontal: false, vertical: true)
+            if let note = row.note {
+                CheckoutNoteCallout(text: note.text, note: note, edit: canEditNote(row) ? { editingNote = row } : nil, lineLimit: 16).frame(maxWidth: 560)
+            }
             HStack(spacing: 12) {
                 if row.finished {
                     Button("Delete Worktree…", role: .destructive) { prepareDeletion(row) }.disabled(!online || !row.liveSessions.isEmpty || isDeleting(row))
@@ -1003,8 +1020,11 @@ private struct ProjectWindowContent: View, Equatable {
                     }
                 }
                 Button("Recent Conversations…") { recentConversationsRow = row }.disabled(!online).accessibilityIdentifier("checkout.empty.recentConversations")
+                if row.note == nil, !row.finished {
+                    Button("Add Note…") { editingNote = row }.disabled(!canEditNote(row)).accessibilityIdentifier("checkout.empty.addNote")
+                }
             }
-        }.frame(maxWidth: .infinity, maxHeight: .infinity).terminalPlaceholder(opacity: terminalOpacity)
+        }.padding(.horizontal, 24).frame(maxWidth: .infinity, maxHeight: .infinity).terminalPlaceholder(opacity: terminalOpacity)
     }
     private func repositoryOverview(_ folder: ProjectFolder, project: Project) -> some View {
         let rows = checkouts(for: folder, project: project)
@@ -1328,6 +1348,8 @@ private struct ProjectWindowContent: View, Equatable {
         }
     }
 
+    /// A note belongs to a checkout that still exists; the service resolves it through the Git inventory.
+    private func canEditNote(_ row: CheckoutRow) -> Bool { online && row.availability == .available && !isDeleting(row) }
     private func isDeleting(_ row: CheckoutRow) -> Bool { deletingWorktrees.contains(projectModel.canonical(row.path)) }
     private func prepareDeletion(_ row: CheckoutRow) {
         guard let project, !checkingDeletion, !isDeleting(row) else { return }

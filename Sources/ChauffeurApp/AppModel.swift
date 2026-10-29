@@ -208,6 +208,7 @@ struct AppSnapshot: Decodable, Sendable {
             }
         }
         return ProjectModel.Slice(project: project, sessions: sessions(in: id), worktrees: snapshot.store.worktrees.map(\.value).filter { $0.projectID == id },
+            checkoutNotes: snapshot.store.checkoutNotes.map(\.value).filter { $0.projectID == id },
             inventories: inventories, online: online, keepFinishedSessions: snapshot.settings.keepFinishedSessions,
             pendingSessionRoute: pendingSessionRoute.flatMap { $0.route.projectID == id ? $0 : nil },
             pendingProjectRoute: pendingProjectRoute.flatMap { $0.match.projectID == id ? $0 : nil })
@@ -660,6 +661,13 @@ struct AppSnapshot: Decodable, Sendable {
     }
     func save<T: ChauffeurCore.Record>(_ method: String, _ value: T, version: String?) async throws {
         _ = try await call(method, .object(["record": try .from(value), "version": version.map(JSONValue.string) ?? .null]))
+        try await refresh()
+    }
+    func checkoutNoteVersion(_ id: UUID?) -> String? { snapshot.store.checkoutNotes.first { $0.value.id == id }?.version }
+    /// Replaces a checkout's note; empty text removes it. `version` is the note the edit began from, `nil` for a new one.
+    func saveCheckoutNote(projectID: UUID, folderID: UUID, path: String, text: String, version: String?) async throws {
+        _ = try await call("saveCheckoutNote", .object(["projectID": .string(projectID.uuidString), "folderID": .string(folderID.uuidString), "path": .string(path),
+                                                        "text": .string(text), "version": version.map(JSONValue.string) ?? .null]))
         try await refresh()
     }
     func projectVersion(_ id: UUID) -> String? { snapshot.store.projects.first { $0.value.id == id }?.version }

@@ -9,6 +9,7 @@ import ChauffeurCore
         var project: Project?
         var sessions: [Session] = []
         var worktrees: [Worktree] = []
+        var checkoutNotes: [CheckoutNote] = []
         /// Observations of this project's folders, without scan times: a rescan
         /// that found nothing new is not a change. `nil` until the runtime reports any.
         var inventories: [RepositoryInventory]?
@@ -35,7 +36,7 @@ import ChauffeurCore
     /// The folder's checkout rows, built once per change of this project.
     func checkouts(for folder: ProjectFolder, project: Project, inventory: RepositoryInventory?) -> [CheckoutRow] {
         if let known = checkouts[folder.id] { return known }
-        let rows = CheckoutRows.rows(folder: folder, project: project, records: slice.worktrees, inventory: inventory, sessions: slice.sessions, canonicalize: canonical)
+        let rows = CheckoutRows.rows(folder: folder, project: project, records: slice.worktrees, inventory: inventory, sessions: slice.sessions, notes: slice.checkoutNotes, canonicalize: canonical)
         checkouts[folder.id] = rows; return rows
     }
 }

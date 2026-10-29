@@ -37,7 +37,8 @@ struct WorktreesView: View {
     private var inventoryPending: Bool { folder != nil && observation == nil && model.online }
     private var rows: [CheckoutRow] {
         guard let folder else { return [] }
-        return CheckoutRows.rows(folder: folder, project: currentProject, records: model.snapshot.store.worktrees.map(\.value), inventory: observation, sessions: model.sessions(in: project.id))
+        return CheckoutRows.rows(folder: folder, project: currentProject, records: model.snapshot.store.worktrees.map(\.value), inventory: observation, sessions: model.sessions(in: project.id),
+                                 notes: model.snapshot.store.checkoutNotes.map(\.value).filter { $0.projectID == project.id })
     }
     private var worktreeRows: [CheckoutRow] { rows.filter { !$0.isMain } }
     private var stale: [GitWorktree] { folder.map { CheckoutRows.staleEntries(folder: $0, inventory: observation, rows: rows) } ?? [] }

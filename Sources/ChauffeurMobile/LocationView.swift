@@ -80,7 +80,7 @@ struct LocationView: View {
                             checkout = .existing(path: existing.path)
                         } label: {
                             CheckoutLabel(kind: existing.kind, branch: existing.branch, path: existing.path, isRepository: folder.isRepository,
-                                          unavailable: existing.availability != .available)
+                                          unavailable: existing.availability != .available, note: existing.note)
                         }
                         .disabled(existing.availability != .available)
                     }

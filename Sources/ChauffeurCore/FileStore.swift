@@ -18,6 +18,7 @@ public struct StoreSnapshot: Codable, Sendable {
     public var projects: [Stored<Project>] = []
     public var sessions: [Stored<Session>] = []
     public var worktrees: [Stored<Worktree>] = []
+    public var checkoutNotes: [Stored<CheckoutNote>] = []
     public var windows: [Stored<WindowState>] = []
     public var errors: [ChauffeurError] = []
     public init() {}
@@ -29,6 +30,7 @@ public struct StoreSnapshot: Codable, Sendable {
         projects = try values.decode([Stored<Project>].self, forKey: .projects)
         sessions = try values.decode([Stored<Session>].self, forKey: .sessions)
         worktrees = try values.decode([Stored<Worktree>].self, forKey: .worktrees)
+        checkoutNotes = try values.decodeIfPresent([Stored<CheckoutNote>].self, forKey: .checkoutNotes) ?? []
         windows = try values.decode([Stored<WindowState>].self, forKey: .windows)
         errors = try values.decode([ChauffeurError].self, forKey: .errors)
     }
@@ -177,6 +179,11 @@ public actor FileStore {
             for file in files(directory.appendingPathComponent("worktrees"), errors: &errors) {
                 read(Worktree.self, file, into: &result.worktrees) { value in
                     try Validation.require(value.projectID == project?.id, "Worktree does not belong to its containing project")
+                }
+            }
+            for file in files(directory.appendingPathComponent("checkout-notes"), errors: &errors) {
+                read(CheckoutNote.self, file, into: &result.checkoutNotes) { value in
+                    try Validation.require(value.projectID == project?.id, "Checkout note does not belong to its containing project")
                 }
             }
             let window = directory.appendingPathComponent("window-state.json")
@@ -420,6 +427,24 @@ public actor FileStore {
         snapshot.worktrees.removeAll { $0.value.id == value.id }; snapshot.worktrees.append(saved)
         return saved
     }
+    /// Writes the checkout's note, replacing any other note recorded for the same
+    /// folder and path, so a checkout keeps a single note.
+    @discardableResult public func save(_ value: CheckoutNote, expectedVersion: String? = nil) throws -> Stored<CheckoutNote> {
+        _ = reload()
+        var value = value; value.path = Paths.canonical(value.path)
+        let url = try projectDirectory(value.projectID).appendingPathComponent("checkout-notes/\(value.id.uuidString).json")
+        try reference(snapshot.projects.contains { $0.value.id == value.projectID && $0.value.folders.contains { $0.id == value.folderID } }, "Checkout note must reference a folder in its project", at: url)
+        if let existing = snapshot.checkoutNotes.first(where: { $0.value.id == value.id })?.value {
+            try reference(existing.projectID == value.projectID && existing.folderID == value.folderID && existing.path == value.path, "Checkout note project, folder and path cannot change", at: url)
+        }
+        let saved = try write(value, at: url, expectedVersion: expectedVersion)
+        snapshot.checkoutNotes.removeAll { $0.value.id == value.id }; snapshot.checkoutNotes.append(saved)
+        for duplicate in snapshot.checkoutNotes where duplicate.value.id != value.id && duplicate.value.projectID == value.projectID
+            && duplicate.value.folderID == value.folderID && duplicate.value.path == value.path {
+            try delete(checkoutNote: duplicate.value.id)
+        }
+        return saved
+    }
     @discardableResult public func save(_ value: WindowState, expectedVersion: String? = nil) throws -> Stored<WindowState> {
         _ = reload()
         let url = try projectDirectory(value.id).appendingPathComponent("window-state.json")
@@ -490,6 +515,15 @@ public actor FileStore {
         try manager.removeItem(atPath: stored.path)
         localChanges.insert(stored.path)
         snapshot.worktrees.removeAll { $0.value.id == id }
+    }
+    /// Removes a checkout's note; a missing note is already removed.
+    public func delete(checkoutNote id: UUID, expectedVersion: String? = nil) throws {
+        _ = reload()
+        guard let stored = snapshot.checkoutNotes.first(where: { $0.value.id == id }) else { return }
+        if let expectedVersion { try checkVersion(at: URL(fileURLWithPath: stored.path), expectedVersion: expectedVersion) }
+        try manager.removeItem(atPath: stored.path)
+        localChanges.insert(stored.path)
+        snapshot.checkoutNotes.removeAll { $0.value.id == id }
     }
     public func projectDirectory(_ id: UUID) throws -> URL {
         guard let record = snapshot.projects.first(where: { $0.value.id == id }) else { throw ChauffeurError("missing_project", "Project is missing. Restore or reopen its directory") }

@@ -41,6 +41,8 @@ struct CheckoutLabel: View {
     var path: String?
     var isRepository = true
     var unavailable = false
+    /// The checkout's note, previewed so a parked worktree says where to resume.
+    var note: String?
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 10) {
@@ -54,6 +56,12 @@ struct CheckoutLabel: View {
                     Text(location)
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                    if let note {
+                        Label(note, systemImage: "note.text")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(2)
+                    }
                 } else {
                     Text(unavailable ? "Folder · Unavailable" : "Folder")
                         .font(.subheadline)

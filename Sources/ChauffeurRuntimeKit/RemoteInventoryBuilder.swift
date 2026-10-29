@@ -48,6 +48,7 @@ public struct RemoteInventoryBuilder {
             let presets: [PresetSummary] = set?.archived == false
                 ? store.agents(teamID: project.presetSetID).map { PresetSummary(id: $0.id, name: $0.name, kind: kind($0.kind)) }
                 : []
+            let notes = store.checkoutNotes.map(\.value).filter { $0.projectID == project.id }
             let folders = sidebarFolders(project.repositoryLayout).map { folder -> FolderSummary in
                 let inventory = inventories.observation(for: folder.canonicalPath)
                 return FolderSummary(
@@ -57,7 +58,11 @@ public struct RemoteInventoryBuilder {
                     isRepository: inventory?.status == .available,
                     inventoryReady: inventory != nil,
                     availability: availability(folder.availability),
-                    checkouts: checkouts(folder: folder, project: project, records: worktrees, inventory: inventory),
+                    checkouts: checkouts(folder: folder, project: project, records: worktrees, inventory: inventory).map { checkout in
+                        var checkout = checkout
+                        checkout.note = notes.note(folderID: folder.id, path: checkout.path)?.text
+                        return checkout
+                    },
                     lastGroupID: groups.contains { $0.id == folder.lastGroupID } ? folder.lastGroupID : nil,
                     lastCoordinationEnabled: folder.lastCoordinationEnabled,
                     repositoryGroupID: project.repositoryGroupPath(to: folder.id).last

@@ -100,6 +100,14 @@ struct LaunchView: View {
                 }
             }
 
+            if let note = existingCheckout?.note {
+                Section("Note on this checkout") {
+                    Text(note)
+                        .textSelection(.enabled)
+                        .accessibilityIdentifier("launch-checkout-note")
+                }
+            }
+
             Section {
                 Picker("Kind", selection: $kind) {
                     ForEach(Kind.allCases, id: \.self) { kind in

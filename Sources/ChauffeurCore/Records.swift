@@ -324,6 +324,34 @@ public struct Worktree: Record, Equatable {
     public func validate() throws { try Validation.absolutePath(path); try Validation.absolutePath(repositoryPath) }
 }
 
+/// Free text left on a checkout, such as where to resume its work. Keyed by
+/// folder and canonical path rather than a `Worktree` record: the main checkout
+/// and worktrees made outside Chauffeur may have none. One note per checkout.
+public struct CheckoutNote: Record, Equatable {
+    public static let maxBytes = 64 * 1024
+    public var id = UUID()
+    public var projectID: UUID
+    public var folderID: UUID
+    public var path: String
+    public var text: String
+    public var updatedAt = Date()
+    /// The session that last wrote it through Chauffeur's tools; `nil` when edited in the app.
+    public var authorSessionID: UUID?
+    public var authorTitle: String?
+    public init(projectID: UUID, folderID: UUID, path: String, text: String) {
+        self.projectID = projectID; self.folderID = folderID; self.path = path; self.text = text
+    }
+    public func validate() throws {
+        try Validation.absolutePath(path)
+        try Validation.require(!text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, "Note must not be empty")
+        try Validation.require(text.utf8.count <= Self.maxBytes, "Note must contain at most 65,536 UTF-8 bytes")
+    }
+}
+public extension Sequence where Element == CheckoutNote {
+    /// The note on a folder's checkout; `path` must already be canonical.
+    func note(folderID: UUID, path: String) -> CheckoutNote? { first { $0.folderID == folderID && $0.path == path } }
+}
+
 public struct WindowState: Record, Equatable {
     public var id: UUID // project ID
     public var frame: String?

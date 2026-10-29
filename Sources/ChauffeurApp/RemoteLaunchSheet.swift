@@ -176,6 +176,7 @@ struct RemoteLaunchSheet: View {
                 if let path = checkout?.path {
                     Text(path).font(.caption.monospaced()).foregroundStyle(.secondary).textSelection(.enabled)
                 }
+                if let note = existingCheckout?.note { CheckoutNoteCallout(text: note) }
             }
         }
     }
