@@ -936,9 +936,7 @@ private struct ProjectWindowContent: View, Equatable {
                 }
                 let target = row ?? checkout(folder: folder, path: folder.canonicalPath, project: project)
                 HStack(spacing: 8) {
-                    Button { editingNote = target } label: { Label(target.note == nil ? "Add Note…" : "Note…", systemImage: "note.text") }
-                        .disabled(!canEditNote(target)).help(target.note?.text ?? "Leave a note on this checkout, such as where to resume")
-                        .accessibilityIdentifier("checkout.note")
+                    noteButton(target)
                     Button("Launch Agent…") { launchAgent(in: target, folder: folder) }
                         .disabled(!canLaunch(in: target)).accessibilityIdentifier("checkout.launch")
                     Button("Open Shell") { openShell(in: target, folder: folder) }
@@ -955,6 +953,13 @@ private struct ProjectWindowContent: View, Equatable {
                 }
             }
         }.padding(12)
+    }
+    /// Highlighted, in the note card's color, when the checkout has a note.
+    @ViewBuilder private func noteButton(_ target: CheckoutRow) -> some View {
+        let button = Button { editingNote = target } label: { Label(target.note == nil ? "Add Note…" : "Edit Note…", systemImage: "note.text") }
+            .disabled(!canEditNote(target)).help(target.note?.text ?? "Leave a note on this checkout, such as where to resume")
+            .accessibilityIdentifier("checkout.note")
+        if target.note == nil { button } else { button.buttonStyle(.borderedProminent).tint(.yellow) }
     }
     @ViewBuilder private func detailArea(_ project: Project) -> some View {
         if let folder = selectedFolder {
@@ -1007,7 +1012,7 @@ private struct ProjectWindowContent: View, Equatable {
                                    description: Text(row.finished ? "The checkout no longer exists. Its finished sessions stay available above until you delete the worktree." : "Launch an agent or open a shell in \(row.title)."))
                 .fixedSize(horizontal: false, vertical: true)
             if let note = row.note {
-                CheckoutNoteCallout(text: note.text, note: note, edit: canEditNote(row) ? { editingNote = row } : nil, lineLimit: 16).frame(maxWidth: 560)
+                CheckoutNoteCallout(text: note.text, note: note, edit: canEditNote(row) ? { editingNote = row } : nil, maxTextHeight: 320).frame(maxWidth: 560)
             }
             HStack(spacing: 12) {
                 if row.finished {
@@ -1027,7 +1032,7 @@ private struct ProjectWindowContent: View, Equatable {
         // The fixed-height message would otherwise report a word-per-line height
         // when the window probes its minimum width, pushing the whole window's
         // content past its top and bottom edges.
-        }.padding(.horizontal, 24).frame(maxWidth: .infinity, minHeight: 0, maxHeight: .infinity).terminalPlaceholder(opacity: terminalOpacity)
+        }.padding(24).frame(maxWidth: .infinity, minHeight: 0, maxHeight: .infinity).terminalPlaceholder(opacity: terminalOpacity)
     }
     private func repositoryOverview(_ folder: ProjectFolder, project: Project) -> some View {
         let rows = checkouts(for: folder, project: project)

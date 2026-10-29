@@ -76,7 +76,8 @@ struct CheckoutNoteCallout: View {
     let text: String
     var note: CheckoutNote? = nil
     var edit: (() -> Void)? = nil
-    var lineLimit: Int? = nil
+    /// Beyond this height the text scrolls inside the card instead of growing it.
+    var maxTextHeight: CGFloat? = nil
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
@@ -84,13 +85,25 @@ struct CheckoutNoteCallout: View {
                 Spacer()
                 if let edit { Button("Edit…", action: edit).controlSize(.small).accessibilityIdentifier("checkoutNote.edit") }
             }
-            Text(text).lineLimit(lineLimit).textSelection(.enabled)
-                .frame(maxWidth: .infinity, alignment: .leading).fixedSize(horizontal: false, vertical: true)
+            if let maxTextHeight {
+                // A short note keeps its own height; a long one scrolls within
+                // whatever height is left, up to the limit.
+                ViewThatFits(in: .vertical) {
+                    noteText
+                    ScrollView { noteText }
+                }.frame(maxHeight: maxTextHeight)
+            } else {
+                noteText
+            }
             if let note { CheckoutNoteAttribution(note: note) }
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(.yellow.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
         .accessibilityIdentifier("checkoutNote.callout")
+    }
+    private var noteText: some View {
+        Text(text).textSelection(.enabled)
+            .frame(maxWidth: .infinity, alignment: .leading).fixedSize(horizontal: false, vertical: true)
     }
 }
