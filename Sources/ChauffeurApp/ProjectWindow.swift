@@ -1024,7 +1024,10 @@ private struct ProjectWindowContent: View, Equatable {
                     Button("Add Note…") { editingNote = row }.disabled(!canEditNote(row)).accessibilityIdentifier("checkout.empty.addNote")
                 }
             }
-        }.padding(.horizontal, 24).frame(maxWidth: .infinity, maxHeight: .infinity).terminalPlaceholder(opacity: terminalOpacity)
+        // The fixed-height message would otherwise report a word-per-line height
+        // when the window probes its minimum width, pushing the whole window's
+        // content past its top and bottom edges.
+        }.padding(.horizontal, 24).frame(maxWidth: .infinity, minHeight: 0, maxHeight: .infinity).terminalPlaceholder(opacity: terminalOpacity)
     }
     private func repositoryOverview(_ folder: ProjectFolder, project: Project) -> some View {
         let rows = checkouts(for: folder, project: project)
