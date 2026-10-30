@@ -45,6 +45,10 @@ Use a runtime-owned manager with a pure policy evaluator, an injectable clock,
 and an injectable power-assertion driver. The production driver holds one IOKit
 PreventUserIdleSystemSleep assertion while protection is requested. This leaves
 display sleep available and does not override explicit sleep or lid-close policy.
+A "Keep screen awake" setting (off by default) holds PreventUserIdleDisplaySleep
+instead, which also prevents idle system sleep and keeps the display on, as with
+`caffeinate -d`; changing it while protected swaps the held assertion. On Linux the
+idle inhibitor already stops desktop screen blanking, so the setting has no effect.
 Release the assertion on shutdown; the OS also releases it on process termination.
 
 Alternatives are a runtime-owned caffeinate subprocess (adds child-process
@@ -99,7 +103,7 @@ Both edit the connected Mac's shared policy, not per-device preferences.
 
 Disable remote mutations while disconnected and identify cached status as stale.
 Do not claim a disconnected Mac is currently protected. Explain in the controls
-that the display may sleep and automatic protection excludes long-waiting agents.
+whether the display may sleep and that automatic protection excludes long-waiting agents.
 Cancelling a timer while automatic protection remains should display that reason.
 
 ## Verification

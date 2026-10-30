@@ -163,8 +163,9 @@ struct KeepAwakeManagerTests {
     @Test func nativeAssertionCanBeAcquiredAndReleased() throws {
         guard ProcessInfo.processInfo.environment["CHAUFFEUR_TEST_POWER_ASSERTION"] == "1" else { return }
         let driver = SystemPowerAssertion()
-        try driver.acquire()
+        try driver.acquire(keepScreenAwake: true)
         defer { try? driver.release() }
+        // Only this process's assertions: an installed runtime may hold one with the same name.
         func assertions() throws -> String {
             let process = Process(); process.executableURL = URL(fileURLWithPath: "/usr/bin/pmset")
             process.arguments = ["-g", "assertions"]
@@ -173,11 +174,40 @@ struct KeepAwakeManagerTests {
             let data = pipe.fileHandleForReading.readDataToEndOfFile()
             process.waitUntilExit()
             #expect(process.terminationStatus == 0)
-            return String(decoding: data, as: UTF8.self)
+            let owner = "pid \(ProcessInfo.processInfo.processIdentifier)("
+            return String(decoding: data, as: UTF8.self).split(separator: "\n")
+                .filter { $0.contains(owner) }.joined(separator: "\n")
         }
-        #expect(try assertions().contains("Chauffeur agents or keep-awake timer"))
+        #expect(try assertions().contains("PreventUserIdleDisplaySleep named: \"Chauffeur agents or keep-awake timer\""))
         try driver.release()
         #expect(try !assertions().contains("Chauffeur agents or keep-awake timer"))
+        try driver.acquire(keepScreenAwake: false)
+        #expect(try assertions().contains("PreventUserIdleSystemSleep named: \"Chauffeur agents or keep-awake timer\""))
+    }
+
+    @Test func screenSettingChoosesAndSwapsTheHeldAssertion() throws {
+        let driver = FakePowerAssertion()
+        var manager = KeepAwakeManager(driver: driver)
+        try manager.setSettings(.init(keepScreenAwake: true), now: now)
+        #expect(driver.acquisitions == 0)
+        try manager.setTimer(.init(until: now.addingTimeInterval(3600)), now: now)
+        #expect(driver.screenAwake == [true])
+        try manager.setSettings(.init(keepScreenAwake: false), now: now)
+        #expect(driver.screenAwake == [true, false] && driver.releases == 1)
+        #expect(manager.status.assertionHeld)
+        try manager.setSettings(.init(keepScreenAwake: false), now: now)
+        #expect(driver.acquisitions == 2)
+    }
+
+    @Test func savedSettingsWithoutScreenSettingStillLoad() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let file = directory.appendingPathComponent("keep-awake.json")
+        try Data(#"{"settings":{"automatic":true,"waitingMinutes":45},"waitingSince":[]}"#.utf8).write(to: file)
+        let manager = KeepAwakeManager(driver: FakePowerAssertion(), file: file)
+        #expect(manager.status.error == nil)
+        #expect(manager.status.settings == .init(automatic: true, waitingMinutes: 45, keepScreenAwake: false))
     }
 
     @Test func expiredRetryDoesNotReplaceNewerTimer() throws {
@@ -193,9 +223,11 @@ private final class FakePowerAssertion: PowerAssertionDriver, @unchecked Sendabl
     var releases = 0
     var failAcquire = false
     var failRelease = false
-    func acquire() throws {
+    var screenAwake: [Bool] = []
+    func acquire(keepScreenAwake: Bool) throws {
         if failAcquire { throw ChauffeurError("power_failed", "Failed to keep awake") }
         acquisitions += 1
+        screenAwake.append(keepScreenAwake)
     }
     func release() throws {
         if failRelease { throw ChauffeurError("power_failed", "Failed to release") }

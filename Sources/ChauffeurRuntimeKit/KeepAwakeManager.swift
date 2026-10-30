@@ -8,7 +8,8 @@ import ChauffeurRemoteProtocol
 /// Used only by the runtime actor. The driver owns the native assertion, so
 /// destroying the runtime also releases it without depending on an app window.
 protocol PowerAssertionDriver: Sendable {
-    func acquire() throws
+    /// `keepScreenAwake` also keeps the display from sleeping.
+    func acquire(keepScreenAwake: Bool) throws
     func release() throws
     /// False once an acquired assertion ended on its own, so it is acquired again.
     var isHeld: Bool { get }
@@ -21,10 +22,12 @@ extension PowerAssertionDriver {
 #if canImport(IOKit)
 final class SystemPowerAssertion: PowerAssertionDriver, @unchecked Sendable {
     private var assertion: IOPMAssertionID?
-    func acquire() throws {
+    func acquire(keepScreenAwake: Bool) throws {
         guard assertion == nil else { return }
         var id: IOPMAssertionID = 0
-        let result = IOPMAssertionCreateWithName(kIOPMAssertionTypePreventUserIdleSystemSleep as CFString,
+        // Preventing display sleep also prevents idle system sleep, as `caffeinate -d` does.
+        let type = keepScreenAwake ? kIOPMAssertionTypePreventUserIdleDisplaySleep : kIOPMAssertionTypePreventUserIdleSystemSleep
+        let result = IOPMAssertionCreateWithName(type as CFString,
                                                IOPMAssertionLevel(kIOPMAssertionLevelOn),
                                                "Chauffeur agents or keep-awake timer" as CFString, &id)
         guard result == kIOReturnSuccess else {
@@ -45,12 +48,13 @@ final class SystemPowerAssertion: PowerAssertionDriver, @unchecked Sendable {
 #else
 /// Holds a `systemd-inhibit` lock for as long as the assertion is held. The inhibitor runs
 /// `cat` on a pipe only this object writes to: closing it ends both, and so does the runtime
-/// exiting for any reason, so no inhibitor outlives the runtime.
+/// exiting for any reason, so no inhibitor outlives the runtime. The idle inhibitor already
+/// stops desktop sessions from blanking the screen, so `keepScreenAwake` changes nothing here.
 final class SystemPowerAssertion: PowerAssertionDriver, @unchecked Sendable {
     private var process: Process?
     private var input: Pipe?
 
-    func acquire() throws {
+    func acquire(keepScreenAwake: Bool) throws {
         if let process, process.isRunning { return }
         guard let inhibit = ["/usr/bin/systemd-inhibit", "/bin/systemd-inhibit"].first(where: FileManager.default.isExecutableFile) else {
             throw ChauffeurError("keep_awake_failed", "systemd-inhibit is unavailable, so this host may sleep.")
@@ -120,6 +124,7 @@ struct KeepAwakeManager {
     private var saved = Saved()
     private var agents: [KeepAwakeAgent] = []
     private var held = false
+    private var heldScreenAwake = false
     private var qualifyingAgents = 0
     private var storageError: String?
     private var driverError: String?
@@ -221,7 +226,14 @@ struct KeepAwakeManager {
         let requested = qualifyingAgents > 0 || saved.manualUntil != nil
         if held && !driver.isHeld { held = false }
         do {
-            if requested && !held { try driver.acquire(); held = true }
+            // A changed screen setting replaces the held assertion with the other kind.
+            if requested && held && heldScreenAwake != saved.settings.keepScreenAwake {
+                try driver.release(); held = false
+            }
+            if requested && !held {
+                try driver.acquire(keepScreenAwake: saved.settings.keepScreenAwake)
+                held = true; heldScreenAwake = saved.settings.keepScreenAwake
+            }
             else if !requested && held { try driver.release(); held = false }
             driverError = nil
         } catch { driverError = error.localizedDescription }

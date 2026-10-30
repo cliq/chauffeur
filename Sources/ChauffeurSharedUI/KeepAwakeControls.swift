@@ -17,6 +17,7 @@ struct KeepAwakeControls: View {
 
     @State private var automatic = false
     @State private var waitingMinutes = 30
+    @State private var keepScreenAwake = false
     @State private var customHours = 1.0
     @State private var settingsDirty = false
 
@@ -34,6 +35,13 @@ struct KeepAwakeControls: View {
             ))
             .disabled(!controlsAvailable || pending)
             .accessibilityIdentifier("keep-awake.automatic")
+
+            Toggle("Keep screen awake", isOn: Binding(
+                get: { keepScreenAwake },
+                set: { keepScreenAwake = $0; settingsDirty = true }
+            ))
+            .disabled(!controlsAvailable || pending)
+            .accessibilityIdentifier("keep-awake.screen")
 
             VStack(alignment: .leading, spacing: 6) {
                 Text("Stop counting waiting agents after")
@@ -55,8 +63,9 @@ struct KeepAwakeControls: View {
             .disabled(!controlsAvailable || pending)
             .accessibilityIdentifier("keep-awake.waiting-minutes")
 
-            Button(pending ? "Saving…" : "Save Automatic Settings") {
-                let submitted = KeepAwakeSettings(automatic: automatic, waitingMinutes: waitingMinutes)
+            Button(pending ? "Saving…" : "Save Settings") {
+                let submitted = KeepAwakeSettings(automatic: automatic, waitingMinutes: waitingMinutes,
+                                                  keepScreenAwake: keepScreenAwake)
                 Task {
                     if await setSettings(submitted) { settingsDirty = false }
                 }
@@ -65,7 +74,7 @@ struct KeepAwakeControls: View {
 
             statusView
 
-            Text("The display may still sleep. Automatic protection counts active agents and stops counting agents that have waited longer than this limit.")
+            Text("\(keepScreenAwake ? "The display stays on while the Mac is kept awake." : "The display may still sleep.") Automatic protection counts active agents and stops counting agents that have waited longer than this limit.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
@@ -177,5 +186,6 @@ struct KeepAwakeControls: View {
         guard !pending, !settingsDirty, let settings = status?.settings else { return }
         automatic = settings.automatic
         waitingMinutes = settings.waitingMinutes
+        keepScreenAwake = settings.keepScreenAwake
     }
 }

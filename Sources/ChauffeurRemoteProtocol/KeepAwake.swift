@@ -3,10 +3,23 @@ import Foundation
 public struct KeepAwakeSettings: Codable, Equatable, Sendable {
     public var automatic: Bool
     public var waitingMinutes: Int
+    /// Also keeps the display from sleeping while protection is active.
+    public var keepScreenAwake: Bool
 
-    public init(automatic: Bool = false, waitingMinutes: Int = 30) {
+    public init(automatic: Bool = false, waitingMinutes: Int = 30, keepScreenAwake: Bool = false) {
         self.automatic = automatic
         self.waitingMinutes = waitingMinutes
+        self.keepScreenAwake = keepScreenAwake
+    }
+
+    private enum CodingKeys: String, CodingKey { case automatic, waitingMinutes, keepScreenAwake }
+
+    // Saved settings and older clients predate `keepScreenAwake`.
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        automatic = try container.decode(Bool.self, forKey: .automatic)
+        waitingMinutes = try container.decode(Int.self, forKey: .waitingMinutes)
+        keepScreenAwake = try container.decodeIfPresent(Bool.self, forKey: .keepScreenAwake) ?? false
     }
 }
 
