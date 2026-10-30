@@ -689,8 +689,8 @@ final class MobileAppModel {
         )
     }
 
-    /// Two projects (one without sessions); the first files its app under nested
-    /// sidebar groups beside an ungrouped site repository, with sessions across three checkouts.
+    /// Two projects (one without sessions); the first files two repositories under nested
+    /// sidebar groups beside an ungrouped site repository, with sessions across four checkouts.
     static func fixtureInventory(hostName: String) -> InventorySnapshot {
         let chauffeurProject = UUID()
         let chauffeurFolder = UUID()
@@ -700,6 +700,8 @@ final class MobileAppModel {
         let mainPath = "/Users/leo/Chauffeur"
         let mobilePath = "/Users/leo/Chauffeur/.worktrees/feature-mobile"
         let siteFolder = UUID()
+        let cliFolder = UUID()
+        let cliPath = "/Users/leo/chauffeur-cli"
         let sitePath = "/Users/leo/chauffeur-site"
         let sitePreviewPath = "/Users/leo/.chauffeur/worktrees/site-preview"
         let notesPath = "/Users/leo/Documents/notes"
@@ -732,6 +734,18 @@ final class MobileAppModel {
                             checkouts: [
                                 CheckoutSummary(kind: .main, branch: "main", path: mainPath, availability: .available),
                                 CheckoutSummary(kind: .worktree, worktreeID: mobileWorktree, branch: "feature/mobile", path: mobilePath, availability: .available, managed: true)
+                            ],
+                            repositoryGroupID: appsGroup.id
+                        ),
+                        FolderSummary(
+                            id: cliFolder,
+                            name: "chauffeur-cli",
+                            path: cliPath,
+                            isRepository: true,
+                            inventoryReady: true,
+                            availability: .available,
+                            checkouts: [
+                                CheckoutSummary(kind: .main, branch: "main", path: cliPath, availability: .available)
                             ],
                             repositoryGroupID: appsGroup.id
                         ),
@@ -785,6 +799,11 @@ final class MobileAppModel {
                     id: UUID(), projectID: chauffeurProject, folderID: chauffeurFolder,
                     title: "Shell", kind: .shell, state: .running,
                     branch: "main", checkoutPath: mainPath, createdAt: now, updatedAt: now
+                ),
+                SessionSummary(
+                    id: UUID(), projectID: chauffeurProject, folderID: cliFolder,
+                    title: "Add a JSON output flag", kind: .codex, state: .running,
+                    branch: "main", checkoutPath: cliPath, createdAt: now, updatedAt: now
                 ),
                 SessionSummary(
                     id: UUID(), projectID: chauffeurProject, folderID: siteFolder,

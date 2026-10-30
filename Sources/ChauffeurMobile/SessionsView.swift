@@ -97,6 +97,8 @@ struct SessionsView: View {
         .accessibilityIdentifier("sessions-list")
         // Projects open on an empty titled section; keep their group cards close beneath.
         .listSectionSpacing(.compact)
+        // Lets repository dividers sit close above their sessions; other rows are taller anyway.
+        .environment(\.defaultMinListRowHeight, 1)
         .navigationTitle("Sessions")
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
@@ -182,8 +184,8 @@ private struct CollapsedIDs {
 
 /// A project's live sessions without nesting: a collapsible project title, then
 /// a card per run of repositories that share a sidebar group, under that group's
-/// collapsible breadcrumb. Each session names its own repository and checkout,
-/// since most checkouts hold a single session.
+/// collapsible breadcrumb. Inside a card, each repository opens on a divider and
+/// its sessions name only their checkout, since most checkouts hold a single session.
 private struct ProjectSections: View {
     var model: MobileAppModel
     let inventory: InventorySnapshot
@@ -212,16 +214,23 @@ private struct ProjectSections: View {
                 let expanded = run.group.map { collapsedGroups.isExpanded($0.id) }
                 Section {
                     if expanded?.wrappedValue ?? true {
-                        ForEach(run.entries) { entry in
-                            SessionRow(session: entry.session, location: entry.location) {
-                                model.openSession(entry.session.id)
+                        ForEach(run.repositories) { repository in
+                            RepositoryDivider(name: repository.name, isFirst: repository.id == run.repositories.first?.id)
+                            ForEach(repository.entries) { entry in
+                                SessionRow(session: entry.session, location: entry.location) {
+                                    model.openSession(entry.session.id)
+                                }
+                                .disabled(!model.isConnected)
+                                // The line closing a repository starts under its divider's icon.
+                                .alignmentGuide(.listRowSeparatorLeading) { dimensions in
+                                    entry.id == repository.entries.last?.id ? dimensions[.leading] : dimensions[.listRowSeparatorLeading]
+                                }
                             }
-                            .disabled(!model.isConnected)
                         }
                     }
                 } header: {
                     if let group = run.group, let expanded {
-                        CollapsingHeader(isExpanded: expanded, count: run.entries.count, needsAttention: run.entries.contains { $0.session.needsAttention }) {
+                        CollapsingHeader(isExpanded: expanded, count: run.sessionCount, needsAttention: run.needsAttention) {
                             Label {
                                 Text(run.path.map(\.name).joined(separator: " › "))
                                     .font(.subheadline.weight(.semibold))
@@ -283,9 +292,30 @@ private struct CollapsingHeader<Title: View>: View {
     }
 }
 
-/// Where a session runs: its repository and checkout.
+/// Opens a repository's sessions inside a group card; the line above it separates
+/// it from the previous repository's sessions.
+private struct RepositoryDivider: View {
+    let name: String
+    let isFirst: Bool
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "folder")
+            Text(name)
+                .lineLimit(1)
+        }
+        .font(.footnote.weight(.semibold))
+        .foregroundStyle(.secondary)
+        .listRowInsets(EdgeInsets(top: isFirst ? 10 : 14, leading: 20, bottom: 0, trailing: 16))
+        .listRowSeparator(.hidden, edges: .bottom)
+        .accessibilityAddTraits(.isHeader)
+        .accessibilityIdentifier("sessions.repository")
+    }
+}
+
+/// Where a session runs: its checkout, and its repository when no divider names it.
 struct SessionLocation {
-    var repository: String
+    var repository: String?
     var branch: String?
     var kind: CheckoutKind
     var isRepository: Bool
@@ -298,41 +328,54 @@ private struct SessionRun: Identifiable {
         var location: SessionLocation
         var id: UUID { session.id }
     }
+    struct Repository: Identifiable {
+        let id: String
+        let name: String
+        var entries: [Entry]
+    }
     let id: String
     /// The enclosing groups, outermost first; empty for repositories outside any group.
     let path: [RepositoryGroupSummary]
-    var entries: [Entry]
+    var repositories: [Repository]
 
     var group: RepositoryGroupSummary? { path.last }
+    var sessionCount: Int { repositories.reduce(0) { $0 + $1.entries.count } }
+    var needsAttention: Bool { repositories.contains { $0.entries.contains { $0.session.needsAttention } } }
 
     /// Runs in the Mac sidebar's order, sessions in each folder in its checkouts'
     /// order; sessions in folders the inventory no longer lists come last.
     static func runs(project: ProjectSummary, inventory: InventorySnapshot, sessions: [SessionSummary]) -> [SessionRun] {
         var remaining = sessions
         var runs: [SessionRun] = []
-        func append(_ entries: [Entry], path: [RepositoryGroupSummary]) {
-            guard !entries.isEmpty else { return }
-            if let last = runs.last, last.path.map(\.id) == path.map(\.id) { runs[runs.count - 1].entries += entries; return }
-            runs.append(SessionRun(id: path.last.map { "group:\($0.id)" } ?? "ungrouped:\(runs.count)", path: path, entries: entries))
+        func append(_ repository: Repository, path: [RepositoryGroupSummary]) {
+            guard !repository.entries.isEmpty else { return }
+            if let last = runs.last, last.path.map(\.id) == path.map(\.id) { runs[runs.count - 1].repositories.append(repository); return }
+            runs.append(SessionRun(id: path.last.map { "group:\($0.id)" } ?? "ungrouped:\(runs.count)", path: path, repositories: [repository]))
         }
         for folder in project.folders {
             var entries: [Entry] = []
             for checkout in folder.checkouts {
                 let matching = remaining.filter { $0.checkoutPath == checkout.path }
                 remaining.removeAll { $0.checkoutPath == checkout.path }
-                entries += matching.map { Entry(session: $0, location: SessionLocation(repository: folder.name, branch: checkout.branch, kind: checkout.kind, isRepository: folder.isRepository)) }
+                entries += matching.map { Entry(session: $0, location: SessionLocation(branch: checkout.branch, kind: checkout.kind, isRepository: folder.isRepository)) }
             }
             // Sessions in checkouts the inventory no longer lists.
             entries += remaining.filter { $0.folderID == folder.id }.map {
-                Entry(session: $0, location: SessionLocation(repository: folder.name, branch: $0.branch, kind: $0.worktreeID == nil ? .main : .worktree, isRepository: folder.isRepository))
+                Entry(session: $0, location: SessionLocation(branch: $0.branch, kind: $0.worktreeID == nil ? .main : .worktree, isRepository: folder.isRepository))
             }
             remaining.removeAll { $0.folderID == folder.id }
-            append(entries, path: project.groupPath(of: folder))
+            append(Repository(id: folder.id.uuidString, name: folder.name, entries: entries),
+                   path: project.groupPath(of: folder))
         }
-        append(remaining.map { session in
+        // Sessions in folders the inventory no longer lists, one divider per folder.
+        var unlisted: [Repository] = []
+        for session in remaining {
             let name = inventory.folder(session.folderID)?.name ?? URL(fileURLWithPath: session.checkoutPath).lastPathComponent
-            return Entry(session: session, location: SessionLocation(repository: name, branch: session.branch, kind: session.worktreeID == nil ? .main : .worktree, isRepository: true))
-        }, path: [])
+            let entry = Entry(session: session, location: SessionLocation(branch: session.branch, kind: session.worktreeID == nil ? .main : .worktree, isRepository: true))
+            if let index = unlisted.firstIndex(where: { $0.id == session.folderID.uuidString }) { unlisted[index].entries.append(entry) }
+            else { unlisted.append(Repository(id: session.folderID.uuidString, name: name, entries: [entry])) }
+        }
+        unlisted.forEach { append($0, path: []) }
         return runs
     }
 }

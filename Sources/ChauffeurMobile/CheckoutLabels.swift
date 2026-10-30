@@ -91,7 +91,7 @@ struct CheckoutLabel: View {
 
 /// Where a session runs, on one line: repository, branch, and whether that is the main checkout or a worktree.
 struct SessionLocationLine: View {
-    let repository: String
+    var repository: String?
     let branch: String?
     let kind: CheckoutKind
     var isRepository = true
@@ -99,12 +99,14 @@ struct SessionLocationLine: View {
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 6) {
             // The branch says more than the repository, so the repository name gives way first.
-            Text(repository)
-                .fontWeight(.medium)
-                .foregroundStyle(.primary)
-                .lineLimit(1)
+            if let repository {
+                Text(repository)
+                    .fontWeight(.medium)
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+            }
             if isRepository, let branch {
-                Text("·").foregroundStyle(.tertiary)
+                if repository != nil { Text("·").foregroundStyle(.tertiary) }
                 BranchText(branch: branch, font: .caption)
                     .foregroundStyle(.primary)
                     .layoutPriority(1)
