@@ -63,8 +63,6 @@ import ChauffeurCore
         menu.addItem(.separator())
         let chooser = menu.addItem(withTitle: "Open Project…", action: #selector(openProjectChooser), keyEquivalent: "")
         chooser.target = self
-        let open = menu.addItem(withTitle: "Open \(AppBuild.current.displayName)…", action: #selector(openApp), keyEquivalent: "")
-        open.target = self
         menu.addItem(.separator())
         if entries.isEmpty {
             menu.addItem(withTitle: "No active sessions", action: nil, keyEquivalent: "").isEnabled = false
@@ -108,17 +106,11 @@ import ChauffeurCore
 
     @objc private func openProjectChooser() { Task { await open(url: WelcomeRoute.url) } }
 
-    @objc private func openApp() { Task { await open(url: nil) } }
-
-    private func open(url: URL?) async {
+    private func open(url: URL) async {
         let configuration = NSWorkspace.OpenConfiguration()
         configuration.activates = true
         do {
-            if let url {
-                _ = try await NSWorkspace.shared.open([url], withApplicationAt: parentAppURL, configuration: configuration)
-            } else {
-                _ = try await NSWorkspace.shared.openApplication(at: parentAppURL, configuration: configuration)
-            }
+            _ = try await NSWorkspace.shared.open([url], withApplicationAt: parentAppURL, configuration: configuration)
         } catch {
             let alert = NSAlert(error: error)
             alert.runModal()

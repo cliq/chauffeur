@@ -129,7 +129,7 @@ struct SessionLaunchView: View {
             Divider()
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
-                    if let checkoutNote { CheckoutNoteCallout(text: checkoutNote.text, note: checkoutNote) }
+                    if let checkoutNote { CheckoutNoteCallout(text: checkoutNote.text, note: checkoutNote, collapsedLineLimit: 4) }
                     sessionFields
                     messagingFields
                     checkoutFields

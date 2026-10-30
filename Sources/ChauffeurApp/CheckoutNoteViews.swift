@@ -78,6 +78,10 @@ struct CheckoutNoteCallout: View {
     var edit: (() -> Void)? = nil
     /// Beyond this height the text scrolls inside the card instead of growing it.
     var maxTextHeight: CGFloat? = nil
+    /// Shows only this many lines until the reader asks for the whole note.
+    var collapsedLineLimit: Int? = nil
+    @State private var expanded = false
+    @State private var truncated = false
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
@@ -92,8 +96,23 @@ struct CheckoutNoteCallout: View {
                     noteText
                     ScrollView { noteText }
                 }.frame(maxHeight: maxTextHeight)
+            } else if let collapsedLineLimit, !expanded {
+                noteText.lineLimit(collapsedLineLimit)
+                    .background(GeometryReader { limited in
+                        // The full text, laid out off screen, tells whether the limit cut anything.
+                        noteText.hidden().background(GeometryReader { full in
+                            Color.clear.onAppear { truncated = full.size.height > limited.size.height + 1 }
+                                .onChange(of: full.size.height) { _, height in truncated = height > limited.size.height + 1 }
+                        })
+                        .frame(width: limited.size.width).fixedSize(horizontal: false, vertical: true)
+                    }.hidden())
             } else {
                 noteText
+            }
+            if collapsedLineLimit != nil, truncated || expanded {
+                Button(expanded ? "Show Less" : "Read Full Note") { expanded.toggle() }
+                    .buttonStyle(.link).controlSize(.small)
+                    .accessibilityIdentifier("checkoutNote.expand")
             }
             if let note { CheckoutNoteAttribution(note: note) }
         }
