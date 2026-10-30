@@ -97,8 +97,6 @@ struct SessionsView: View {
         .accessibilityIdentifier("sessions-list")
         // Projects open on an empty titled section; keep their group cards close beneath.
         .listSectionSpacing(.compact)
-        // Lets repository dividers sit close above their sessions; other rows are taller anyway.
-        .environment(\.defaultMinListRowHeight, 1)
         .navigationTitle("Sessions")
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
@@ -183,9 +181,9 @@ private struct CollapsedIDs {
 }
 
 /// A project's live sessions without nesting: a collapsible project title, then
-/// a card per run of repositories that share a sidebar group, under that group's
-/// collapsible breadcrumb. Inside a card, each repository opens on a divider and
-/// its sessions name only their checkout, since most checkouts hold a single session.
+/// each run of repositories that share a sidebar group under that group's
+/// collapsible breadcrumb, with a card per repository under its name. Sessions name
+/// only their checkout, since most checkouts hold a single session.
 private struct ProjectSections: View {
     var model: MobileAppModel
     let inventory: InventorySnapshot
@@ -212,24 +210,8 @@ private struct ProjectSections: View {
         if isExpanded {
             ForEach(SessionRun.runs(project: project, inventory: inventory, sessions: sessions)) { run in
                 let expanded = run.group.map { collapsedGroups.isExpanded($0.id) }
-                Section {
-                    if expanded?.wrappedValue ?? true {
-                        ForEach(run.repositories) { repository in
-                            RepositoryDivider(name: repository.name, isFirst: repository.id == run.repositories.first?.id)
-                            ForEach(repository.entries) { entry in
-                                SessionRow(session: entry.session, location: entry.location) {
-                                    model.openSession(entry.session.id)
-                                }
-                                .disabled(!model.isConnected)
-                                // The line closing a repository starts under its divider's icon.
-                                .alignmentGuide(.listRowSeparatorLeading) { dimensions in
-                                    entry.id == repository.entries.last?.id ? dimensions[.leading] : dimensions[.listRowSeparatorLeading]
-                                }
-                            }
-                        }
-                    }
-                } header: {
-                    if let group = run.group, let expanded {
+                if let group = run.group, let expanded {
+                    Section {} header: {
                         CollapsingHeader(isExpanded: expanded, count: run.sessionCount, needsAttention: run.needsAttention) {
                             Label {
                                 Text(run.path.map(\.name).joined(separator: " › "))
@@ -242,8 +224,22 @@ private struct ProjectSections: View {
                         .textCase(nil)
                         .accessibilityIdentifier("sessions.group.\(group.id)")
                     }
+                    .headerProminence(.increased)
                 }
-                .headerProminence(.increased)
+                if expanded?.wrappedValue ?? true {
+                    ForEach(run.repositories) { repository in
+                        Section {
+                            ForEach(repository.entries) { entry in
+                                SessionRow(session: entry.session, location: entry.location) {
+                                    model.openSession(entry.session.id)
+                                }
+                                .disabled(!model.isConnected)
+                            }
+                        } header: {
+                            RepositoryHeader(name: repository.name)
+                        }
+                    }
+                }
             }
         }
     }
@@ -292,24 +288,25 @@ private struct CollapsingHeader<Title: View>: View {
     }
 }
 
-/// Opens a repository's sessions inside a group card; the line above it separates
-/// it from the previous repository's sessions.
-private struct RepositoryDivider: View {
+/// Names the repository whose sessions fill the card below it.
+private struct RepositoryHeader: View {
     let name: String
-    let isFirst: Bool
 
     var body: some View {
-        HStack(spacing: 6) {
-            Image(systemName: "folder")
-            Text(name)
-                .lineLimit(1)
-        }
-        .font(.footnote.weight(.semibold))
-        .foregroundStyle(.secondary)
-        .listRowInsets(EdgeInsets(top: isFirst ? 10 : 14, leading: 20, bottom: 0, trailing: 16))
-        .listRowSeparator(.hidden, edges: .bottom)
-        .accessibilityAddTraits(.isHeader)
-        .accessibilityIdentifier("sessions.repository")
+        Label(name, systemImage: "folder")
+            .labelStyle(RepositoryLabelStyle())
+            .font(.footnote.weight(.semibold))
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
+            .textCase(nil)
+            .accessibilityAddTraits(.isHeader)
+            .accessibilityIdentifier("sessions.repository")
+    }
+}
+
+private struct RepositoryLabelStyle: LabelStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        HStack(spacing: 6) { configuration.icon; configuration.title }
     }
 }
 
