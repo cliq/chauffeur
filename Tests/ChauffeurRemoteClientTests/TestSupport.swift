@@ -154,6 +154,16 @@ final class FakeHost: @unchecked Sendable {
         )
     }
 
+    /// A 2.5 MiB file whose byte at offset `n` is `n % 251`, so reassembly mistakes show up.
+    static let imageBytes = Data((0..<(5 * DocumentChunkRequest.chunkBytes / 2)).map { UInt8($0 % 251) })
+
+    static func imageChunk(_ read: DocumentChunkRequest, version: String) -> DocumentChunk {
+        let start = Int(read.offset), end = min(imageBytes.count, start + DocumentChunkRequest.chunkBytes)
+        let unchanged = read.offset == 0 && read.knownVersion == version
+        return DocumentChunk(requestedPath: read.path, path: "/Users/test/\(read.path)", version: version, modifiedAt: Date(timeIntervalSince1970: 1_000),
+                             size: Int64(imageBytes.count), offset: read.offset, data: unchanged ? nil : imageBytes.subdata(in: start..<end))
+    }
+
     static func inventory(revision: UInt64 = 1) -> InventorySnapshot {
         InventorySnapshot(revision: revision, hostName: "fake-mac", generatedAt: Date(timeIntervalSince1970: 1_000))
     }
@@ -214,6 +224,8 @@ final class FakeHost: @unchecked Sendable {
             let content = DocumentContent(requestedPath: read.path, path: "/Users/test/\(read.path)", version: version, modifiedAt: Date(timeIntervalSince1970: 1_000), size: 12,
                                           text: read.knownVersion == version ? nil : "# Plan\n")
             return RemoteResponse(id: request.id, result: .document(content))
+        case .readDocumentChunk(let read):
+            return RemoteResponse(id: request.id, result: .documentChunk(imageChunk(read, version: "v1")))
         case .terminalResize, .detachTerminal, .stopSession:
             return RemoteResponse(id: request.id, result: .ack)
         }

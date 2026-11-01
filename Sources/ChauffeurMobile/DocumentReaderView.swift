@@ -18,11 +18,9 @@ struct DocumentReaderView: View {
     @State private var mode: Mode = .rendered
     @State private var error: String?
 
-    private static let markdownExtensions: Set<String> = ["md", "markdown", "mdx"]
-
     private var displayedPath: String { content?.path ?? path }
     private var isMarkdown: Bool {
-        Self.markdownExtensions.contains(URL(fileURLWithPath: displayedPath).pathExtension.lowercased())
+        DocumentKind(path: displayedPath) == .markdown
     }
 
     var body: some View {

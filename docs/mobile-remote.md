@@ -182,6 +182,18 @@ an error. The feature uses the `documents.v1` capability (operations
 `listSessionDocuments` and `readDocument`); with an older Mac the phone shows
 "Update Chauffeur on your Mac" and never sends the request.
 
+**Previewing images**: PNG, JPEG, GIF (first frame), WebP, HEIC/HEIF, TIFF and
+BMP paths open in an image preview instead of the reader, from the same terminal
+taps and from **More → Documents**, which also lists images the session's output
+mentions (changed images from git are left out so asset-heavy diffs don't crowd
+the list). Pinch or double-tap to zoom; the bottom bar shows the pixel size and
+file size; **More** offers Share (the original file), Copy Image and Copy Path.
+Like the reader, the preview checks for changes every 2 seconds and swaps in the
+new image. Images up to 50 MiB are sent in 1 MiB chunks (`readDocumentChunk`,
+capability `documents.chunks.v1`); a file rewritten mid-download restarts the
+download, and the phone decodes at most 4096 pixels on the long side. SVG is text
+and opens in the reader's Source view.
+
 On disconnect (Wi-Fi loss, backgrounding, or the Mac becoming unreachable),
 terminal input is disabled and the screen shows the last known state as not
 live. Reconnecting reattaches to the same process and refreshes the current
@@ -238,15 +250,17 @@ fails on a supported OS.
 Remote access never exposes the local Unix-socket IPC interface or an
 unauthenticated shell to the network. It's a separate, authenticated listener
 with an explicit operation allowlist (inventory, worktree preview, launch,
-operation status, terminal attach/resize/detach, session document list and
-read); remote clients cannot dispatch arbitrary local IPC methods.
+operation status, terminal attach/resize/detach, session document list,
+read and chunked read); remote clients cannot dispatch arbitrary local IPC methods.
 
 **Document reads are not path-contained.** `readDocument` (capability
 `documents.v1`) reads any regular file the Mac user can read, not only files
 inside a project. This is intentional: a paired device already has
 shell-equivalent access, because it can launch shell sessions. Reads are
 limited to regular files (opened without blocking), at most 2 MiB, valid UTF-8,
-and small enough that the encoded result fits the 4 MiB frame. Treat pairing a
+and small enough that the encoded result fits the 4 MiB frame. `readDocumentChunk`
+(capability `documents.chunks.v1`) has the same reach for any regular file up to
+50 MiB, in 1 MiB pieces, without the UTF-8 requirement. Treat pairing a
 phone as granting read access to everything your Mac account can read.
 
 The main listener rate-limits connections: 8 concurrent connections, 5 failed

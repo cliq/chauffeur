@@ -46,6 +46,18 @@ or the paired iPhone) against a Claude Code session. Status: **open** until run.
   error.
 - [ ] Against a Mac build without `documents.v1`: Documents shows the update message and the connection stays up.
 
+## Image preview — manual checklist
+
+Automated coverage: `ModelTests`, `RemoteHostSessionTests` (chunk reassembly and restart), `RemoteOperationHandlersTests`,
+`SessionDocumentInventoryTests`, `DocumentPathHarvesterTests` and `TerminalLinkTargetTests`. On 2026-10-31 the
+Documents list, a 45 MB 6016×6016 PNG, fit/centering, double-tap zoom and live refresh after a rewrite were checked in
+the iOS 27.2 simulator against a standalone runtime. Still open on a device:
+
+- [ ] Tap a screenshot path the agent prints (absolute and bare `shot.png`) → Open Document → image preview.
+- [ ] Open a HEIC photo and a GIF; pinch-zoom and pan a large screenshot; rotate the phone.
+- [ ] Share sends the original file; Copy Image pastes into another app.
+- [ ] Against a Mac without `documents.chunks.v1`: the preview shows the update message.
+
 ## Original remote-access validation
 
 - Date: 2026-09-17

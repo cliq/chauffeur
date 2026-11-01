@@ -1,11 +1,13 @@
 import Foundation
+import ChauffeurRemoteProtocol
 
-/// Extracts candidate markdown document paths from joined, escape-free terminal text.
+/// Extracts candidate markdown and image paths from joined, escape-free terminal text.
 /// Limitation: paths containing spaces are not matched.
 enum DocumentPathHarvester {
     private static let pattern = try! NSRegularExpression(
-        pattern: #"[^\s"'`()\[\]<>{}|]+?\.(?:md|markdown|mdx)(?::\d+){0,2}(?![\w/-])"#,
+        pattern: #"[^\s"'`()\[\]<>{}|]+?\.(?:"# + extensions.sorted { $0.count > $1.count }.joined(separator: "|") + #")(?::\d+){0,2}(?![\w/-])"#,
         options: [.caseInsensitive])
+    private static let extensions = DocumentKind.markdownExtensions.union(DocumentKind.imageExtensions)
     private static let lineSuffix = try! NSRegularExpression(pattern: #"(?::\d+){1,2}$"#)
     private static let relative = try! NSRegularExpression(pattern: #"^[\w.@+-]+(/[\w.@+-]+)*$"#)
     private static let scheme = try! NSRegularExpression(pattern: #"^[A-Za-z][A-Za-z0-9+.-]*:"#)
@@ -32,7 +34,7 @@ enum DocumentPathHarvester {
             let line = lines[index]
             guard let token = line.split(whereSeparator: { $0.isWhitespace }).last,
                   let path = normalize(String(token)), path.contains("/"),
-                  !isMarkdownExtensionEnd(path) else {
+                  !hasDocumentExtension(path) else {
                 result.append(line); index += 1
                 continue
             }
@@ -43,7 +45,7 @@ enum DocumentPathHarvester {
                       let range = Range(match.range(at: 1), in: row) else { break }
                 candidate += row[range]
                 next += 1
-                if let path = normalize(candidate), isMarkdownExtensionEnd(path) {
+                if let path = normalize(candidate), hasDocumentExtension(path) {
                     result.append(String(line.dropLast(token.count)) + candidate)
                     index = next
                     joined = true
@@ -60,7 +62,7 @@ enum DocumentPathHarvester {
         let trim = CharacterSet(charactersIn: "`'\"()[]<>.,;:")
         // Strip leading wrappers and trailing punctuation, but keep the `./` and `../` prefixes intact.
         while let first = token.unicodeScalars.first, "`'\"([<".unicodeScalars.contains(first) { token.removeFirst() }
-        while let last = token.unicodeScalars.last, trim.contains(last), !isMarkdownExtensionEnd(token) { token.removeLast() }
+        while let last = token.unicodeScalars.last, trim.contains(last), !hasDocumentExtension(token) { token.removeLast() }
         token = lineSuffix.stringByReplacingMatches(in: token, range: NSRange(token.startIndex..., in: token), withTemplate: "")
         guard !token.isEmpty else { return nil }
         if token.lowercased().hasPrefix("file://") {
@@ -72,8 +74,8 @@ enum DocumentPathHarvester {
         return relative.firstMatch(in: token, range: NSRange(token.startIndex..., in: token)) != nil ? token : nil
     }
 
-    private static func isMarkdownExtensionEnd(_ token: String) -> Bool {
-        let lower = token.lowercased()
-        return lower.hasSuffix(".md") || lower.hasSuffix(".markdown") || lower.hasSuffix(".mdx")
+    private static func hasDocumentExtension(_ token: String) -> Bool {
+        let ext = (token as NSString).pathExtension.lowercased()
+        return !ext.isEmpty && token.lowercased().hasSuffix("." + ext) && extensions.contains(ext)
     }
 }

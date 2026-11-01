@@ -1,6 +1,7 @@
 import Foundation
 import Testing
 import ChauffeurRemoteProtocol
+import ChauffeurCore
 @testable import ChauffeurRuntimeKit
 
 struct SessionDocumentInventoryTests {
@@ -27,6 +28,17 @@ struct SessionDocumentInventoryTests {
         let home = NSHomeDirectory()
         #expect(SessionDocumentInventory.displayPath("\(home)/notes/a.md", workingDirectory: "/work") == "~/notes/a.md")
         #expect(SessionDocumentInventory.displayPath("/work2/a.md", workingDirectory: "/work") == "/work2/a.md")
+    }
+
+    @Test func imagesLargerThanTheTextLimitAreStillListed() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("inventory-images-\(UUID())")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let large = Data(count: DocumentFiles.maximumBytes + 1)
+        let image = root.appendingPathComponent("shot.png"), text = root.appendingPathComponent("huge.md")
+        try large.write(to: image); try large.write(to: text)
+        #expect(SessionDocumentInventory.file(at: image.path)?.size == large.count)
+        #expect(SessionDocumentInventory.file(at: text.path) == nil)
     }
 
     @Test func porcelainParsingKeepsMarkdownAndTakesRenameTargets() {

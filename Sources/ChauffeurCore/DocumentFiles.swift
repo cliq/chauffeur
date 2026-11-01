@@ -19,8 +19,8 @@ public enum DocumentFiles {
         public var size: Int
     }
 
-    public static func stat(path: String) throws -> DocumentStat {
-        let (handle, info, _) = try open(path)
+    public static func stat(path: String, limit: Int = maximumBytes) throws -> DocumentStat {
+        let (handle, info, _) = try open(path, limit: limit)
         defer { try? handle.close() }
         return documentStat(info)
     }
@@ -29,11 +29,27 @@ public enum DocumentFiles {
         let (handle, info, url) = try open(path)
         defer { try? handle.close() }
         let data = try handle.read(upToCount: maximumBytes + 1) ?? Data()
-        guard data.count <= maximumBytes else { throw tooLarge(url.path) }
+        guard data.count <= maximumBytes else { throw tooLarge(url.path, limit: maximumBytes) }
         guard let text = String(data: data, encoding: .utf8) else {
             throw ChauffeurError("document_not_text", "The document is not valid UTF-8 text", path: url.path)
         }
         return (text, documentStat(info))
+    }
+
+    /// Up to `length` bytes starting at `offset` of a regular file no larger than `limit`, for binary files sent in chunks.
+    public static func readChunk(path: String, offset: Int64, length: Int, limit: Int) throws -> (data: Data, stat: DocumentStat) {
+        let (handle, info, url) = try open(path, limit: limit)
+        defer { try? handle.close() }
+        guard offset >= 0, offset <= Int64(info.st_size) else { throw changed(url.path) }
+        try handle.seek(toOffset: UInt64(offset))
+        let data = try handle.read(upToCount: max(0, length)) ?? Data()
+        // A file rewritten in place during the read could mix two versions under the old version token.
+        var after = FileStatus()
+        let stat = documentStat(info)
+        guard fstat(handle.fileDescriptor, &after) == 0, documentStat(after).version == stat.version else {
+            throw changed(url.path)
+        }
+        return (data, stat)
     }
 
     /// Expands `~`, joins relative paths onto `workingDirectory` (falling back to each additional path that has the file),
@@ -52,7 +68,7 @@ public enum DocumentFiles {
         return candidates.first { FileManager.default.fileExists(atPath: $0) } ?? first
     }
 
-    private static func open(_ path: String) throws -> (FileHandle, FileStatus, URL) {
+    private static func open(_ path: String, limit: Int = maximumBytes) throws -> (FileHandle, FileStatus, URL) {
         let url = URL(fileURLWithPath: path).standardizedFileURL
         // Nonblocking open plus fstat avoids hanging on FIFOs or reading device files.
         let descriptor = POSIX.open(url.path, O_RDONLY | O_NONBLOCK | O_CLOEXEC)
@@ -63,15 +79,19 @@ public enum DocumentFiles {
             try? handle.close()
             throw ChauffeurError("document_not_regular_file", "The path is not a regular file", path: url.path)
         }
-        guard info.st_size <= maximumBytes else {
+        guard info.st_size <= limit else {
             try? handle.close()
-            throw tooLarge(url.path)
+            throw tooLarge(url.path, limit: limit)
         }
         return (handle, info, url)
     }
 
-    private static func tooLarge(_ path: String) -> ChauffeurError {
-        ChauffeurError("document_too_large", "The document is larger than 2 MiB", path: path)
+    private static func changed(_ path: String) -> ChauffeurError {
+        ChauffeurError("document_changed", "The document changed while it was being read", path: path)
+    }
+
+    private static func tooLarge(_ path: String, limit: Int) -> ChauffeurError {
+        ChauffeurError("document_too_large", "The document is larger than \(limit / 1_048_576) MiB", path: path)
     }
 
     private static func documentStat(_ info: FileStatus) -> DocumentStat {

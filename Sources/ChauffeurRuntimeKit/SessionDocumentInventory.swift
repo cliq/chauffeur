@@ -2,10 +2,10 @@ import Foundation
 import ChauffeurCore
 import ChauffeurRemoteProtocol
 
-/// Documents for a session: paths its scrollback mentions plus changed or untracked markdown files in its working directory.
+/// Documents for a session: markdown and image paths its scrollback mentions plus changed or untracked markdown files
+/// in its working directory. Changed images are left out so asset-heavy diffs don't crowd out the documents.
 enum SessionDocumentInventory {
     static let maximumDocuments = 100
-    private static let markdownExtensions: Set<String> = ["md", "markdown", "mdx"]
 
     struct File: Equatable, Sendable {
         var path: String
@@ -19,12 +19,17 @@ enum SessionDocumentInventory {
         let text = (try? await terminals.captureJoinedText(sessionID: session.id, lines: scrollbackLines)) ?? ""
         let mentioned = await Task.detached(priority: .utility) { () -> [File] in
             DocumentPathHarvester.paths(in: text).compactMap { candidate in
-                let path = DocumentFiles.resolve(candidate, workingDirectory: workingDirectory, additionalPaths: additionalPaths)
-                return (try? DocumentFiles.stat(path: path)).map { File(path: path, modifiedAt: $0.modifiedAt, size: $0.size) }
+                file(at: DocumentFiles.resolve(candidate, workingDirectory: workingDirectory, additionalPaths: additionalPaths))
             }
         }.value
         let changed = await changedFiles(workingDirectory: workingDirectory)
         return merge(mentioned: mentioned, changed: changed, workingDirectory: workingDirectory)
+    }
+
+    /// An existing file the phone can open. Images are sent in chunks, so they may be larger than a text document.
+    static func file(at path: String) -> File? {
+        let limit = DocumentKind(path: path) == .image ? DocumentChunkRequest.maxTotalBytes : DocumentFiles.maximumBytes
+        return (try? DocumentFiles.stat(path: path, limit: limit)).map { File(path: path, modifiedAt: $0.modifiedAt, size: $0.size) }
     }
 
     /// Mentioned files first in mention order, then changed-only files newest first.
@@ -69,7 +74,7 @@ enum SessionDocumentInventory {
             if status.contains("R") || status.contains("C") { position += 1 }
             guard !status.contains("D") else { continue }
             let path = String(record.dropFirst(3))
-            if markdownExtensions.contains((path as NSString).pathExtension.lowercased()) { paths.append(path) }
+            if DocumentKind.markdownExtensions.contains((path as NSString).pathExtension.lowercased()) { paths.append(path) }
         }
         return paths
     }

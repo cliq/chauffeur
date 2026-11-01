@@ -148,6 +148,32 @@ struct RemoteOperationHandlersTests {
         #expect(list.documents.first { $0.displayPath == "notes.md" }?.sources == [.changed])
     }
 
+    @Test func binaryDocumentsReadInChunksAndAnswerConditionally() async throws {
+        let fixture = try await Fixture.make(); defer { fixture.cleanup() }
+        let session = fixture.shellSession(worktreeID: nil, path: fixture.repo.path, title: "Image worker")
+        try await fixture.runtime.store.save(session)
+        let runtime = try fixture.reopen(); try await runtime.start()
+        let handlers = RemoteOperationHandlers(runtime: runtime, root: fixture.root, hostName: "Mac")
+        let bytes = Data((0..<(DocumentChunkRequest.chunkBytes + 10)).map { UInt8($0 % 251) })
+        try bytes.write(to: fixture.repo.appendingPathComponent("shot.png"))
+
+        func chunk(_ offset: Int64, known: String? = nil) async -> Result<DocumentChunk, RemoteError> {
+            switch await handlers.handle(.readDocumentChunk(DocumentChunkRequest(sessionID: session.id, path: "shot.png", offset: offset, knownVersion: known)), deviceID: UUID()) {
+            case .success(.documentChunk(let chunk)): return .success(chunk)
+            case .success: return .failure(RemoteError(code: "unexpected", message: "Unexpected result"))
+            case .failure(let error): return .failure(error)
+            }
+        }
+        let first = try await chunk(0).get()
+        #expect(first.size == Int64(bytes.count) && first.data?.count == DocumentChunkRequest.chunkBytes && first.requestedPath == "shot.png")
+        let rest = try await chunk(Int64(DocumentChunkRequest.chunkBytes)).get()
+        #expect(rest.version == first.version && (first.data ?? Data()) + (rest.data ?? Data()) == bytes)
+        let unchanged = try await chunk(0, known: first.version).get()
+        #expect(unchanged.data == nil && unchanged.version == first.version)
+        guard case .failure(let pastEnd) = await chunk(Int64(bytes.count) + 1) else { Issue.record("Read past the end"); return }
+        #expect(pastEnd.code == "document_changed")
+    }
+
     @Test func inventoryMapsProjectsFoldersCheckoutsAndSessions() async throws {
         let fixture = try await Fixture.make(); defer { fixture.cleanup() }
         // An archived preset in the same set, and an archived set with a live preset, are both hidden.

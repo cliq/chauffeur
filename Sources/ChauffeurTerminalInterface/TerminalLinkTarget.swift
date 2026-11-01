@@ -14,6 +14,7 @@ public enum TerminalLinkTarget: Equatable, Sendable {
     private static let fileExtensions: Set<String> = [
         "md", "markdown", "mdx", "txt", "swift", "json", "yml", "yaml", "toml", "js", "ts", "py", "rb", "go",
         "rs", "sh", "html", "css", "log", "plist", "xml", "c", "h", "m", "cpp", "kt", "java",
+        "png", "jpg", "jpeg", "gif", "webp", "heic", "heif", "tif", "tiff", "bmp", "svg",
     ]
 
     public static func classify(_ link: String) -> TerminalLinkTarget {

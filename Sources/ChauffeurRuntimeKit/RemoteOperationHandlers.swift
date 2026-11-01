@@ -69,15 +69,7 @@ public actor RemoteOperationHandlers {
             } catch { return .failure(Self.remoteError(error)) }
         case .readDocument(let request):
             do {
-                var session: Session?
-                if let sessionID = request.sessionID {
-                    let view = try await runtime.snapshot().decode(RemoteInventoryBuilder.RuntimeSnapshotView.self)
-                    guard let found = view.sessions.first(where: { $0.id == sessionID }) else {
-                        throw ChauffeurError("missing_session", "This session no longer exists on the Mac")
-                    }
-                    session = found
-                }
-                let workingDirectory = session?.launch.workingDirectory, additionalPaths = session?.launch.additionalPaths ?? []
+                let (workingDirectory, additionalPaths) = try await documentBases(sessionID: request.sessionID)
                 let content = try await Task.detached(priority: .utility) { () throws -> DocumentContent in
                     let path = DocumentFiles.resolve(request.path, workingDirectory: workingDirectory, additionalPaths: additionalPaths)
                     let stat = try DocumentFiles.stat(path: path)
@@ -93,6 +85,26 @@ public actor RemoteOperationHandlers {
                     return content
                 }.value
                 return .success(.document(content))
+            } catch { return .failure(Self.remoteError(error)) }
+        case .readDocumentChunk(let request):
+            do {
+                let (workingDirectory, additionalPaths) = try await documentBases(sessionID: request.sessionID)
+                let chunk = try await Task.detached(priority: .utility) { () throws -> DocumentChunk in
+                    let path = DocumentFiles.resolve(request.path, workingDirectory: workingDirectory, additionalPaths: additionalPaths)
+                    let limit = DocumentChunkRequest.maxTotalBytes
+                    if request.offset == 0, let known = request.knownVersion {
+                        // The reader polls with its last version; an unchanged file costs one stat.
+                        let stat = try DocumentFiles.stat(path: path, limit: limit)
+                        if stat.version == known {
+                            return DocumentChunk(requestedPath: request.path, path: path, version: stat.version, modifiedAt: stat.modifiedAt,
+                                                 size: Int64(stat.size), offset: 0, data: nil)
+                        }
+                    }
+                    let (data, stat) = try DocumentFiles.readChunk(path: path, offset: request.offset, length: DocumentChunkRequest.chunkBytes, limit: limit)
+                    return DocumentChunk(requestedPath: request.path, path: path, version: stat.version, modifiedAt: stat.modifiedAt,
+                                         size: Int64(stat.size), offset: request.offset, data: data)
+                }.value
+                return .success(.documentChunk(chunk))
             } catch { return .failure(Self.remoteError(error)) }
         case .listWorktreeBranches(let request):
             do {
@@ -310,6 +322,16 @@ public actor RemoteOperationHandlers {
     }
 
     // MARK: - Helpers
+
+    /// The working directory and additional paths that relative document paths resolve against.
+    private func documentBases(sessionID: UUID?) async throws -> (String?, [String]) {
+        guard let sessionID else { return (nil, []) }
+        let view = try await runtime.snapshot().decode(RemoteInventoryBuilder.RuntimeSnapshotView.self)
+        guard let session = view.sessions.first(where: { $0.id == sessionID }) else {
+            throw ChauffeurError("missing_session", "This session no longer exists on the Mac")
+        }
+        return (session.launch.workingDirectory, session.launch.additionalPaths)
+    }
 
     private func ensureJournalLoaded() async {
         guard !journalLoaded else { return }

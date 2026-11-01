@@ -72,6 +72,60 @@ struct RemoteHostSessionTests {
         #expect(factory.hosts[0].requests(ofKind: "readDocument").count == 2)
     }
 
+    @Test func binaryDocumentsDownloadInChunksAndAnswerConditionally() async throws {
+        let (session, factory) = makeSession()
+        await session.connect()
+        defer { session.disconnect() }
+        #expect(session.isDocumentChunksSupported)
+        let first = try await session.readDocumentData(sessionID: UUID(), path: "shot.png", knownVersion: nil)
+        #expect(first.data == FakeHost.imageBytes && first.offset == 0 && first.size == Int64(FakeHost.imageBytes.count))
+        #expect(factory.hosts[0].requests(ofKind: "readDocumentChunk").count == 3)
+        let second = try await session.readDocumentData(sessionID: nil, path: "shot.png", knownVersion: first.version)
+        #expect(second.data == nil && second.version == first.version)
+        #expect(factory.hosts[0].requests(ofKind: "readDocumentChunk").count == 4)
+    }
+
+    @Test func binaryDocumentRewrittenMidDownloadStartsOver() async throws {
+        let (session, factory) = makeSession()
+        let served = LockedBox(0)
+        factory.configure = { host in
+            host.responder = { request in
+                guard case .readDocumentChunk(let read) = request.operation else { return FakeHost.defaultResponse(for: request) }
+                served.value += 1
+                // The second chunk of the first pass comes from a rewritten file.
+                let version = served.value >= 2 ? "v2" : "v1"
+                return RemoteResponse(id: request.id, result: .documentChunk(FakeHost.imageChunk(read, version: version)))
+            }
+        }
+        await session.connect()
+        defer { session.disconnect() }
+        let content = try await session.readDocumentData(sessionID: nil, path: "shot.png", knownVersion: nil)
+        #expect(content.version == "v2" && content.data == FakeHost.imageBytes)
+        // One aborted pass (2 chunks) plus a complete one (3 chunks).
+        #expect(factory.hosts[0].requests(ofKind: "readDocumentChunk").count == 5)
+    }
+
+    @Test func binaryDocumentChangedErrorMidDownloadStartsOver() async throws {
+        let (session, factory) = makeSession()
+        let served = LockedBox(0)
+        factory.configure = { host in
+            host.responder = { request in
+                guard case .readDocumentChunk(let read) = request.operation else { return FakeHost.defaultResponse(for: request) }
+                served.value += 1
+                // The file shrank below the second chunk's offset during the first pass.
+                if served.value == 2 {
+                    return RemoteResponse(id: request.id, error: RemoteError(code: "document_changed", message: "The document changed while it was being read"))
+                }
+                return RemoteResponse(id: request.id, result: .documentChunk(FakeHost.imageChunk(read, version: "v1")))
+            }
+        }
+        await session.connect()
+        defer { session.disconnect() }
+        let content = try await session.readDocumentData(sessionID: nil, path: "shot.png", knownVersion: nil)
+        #expect(content.data == FakeHost.imageBytes)
+        #expect(factory.hosts[0].requests(ofKind: "readDocumentChunk").count == 5)
+    }
+
     @Test func olderHostsGetAnUpdateMessageForDocuments() async throws {
         let (session, factory) = makeSession()
         factory.configure = { host in
@@ -88,6 +142,9 @@ struct RemoteHostSessionTests {
         #expect(!session.isDocumentsSupported)
         await #expect(throws: RemoteClientError.self) { try await session.sessionDocuments(sessionID: UUID()) }
         await #expect(throws: RemoteClientError.self) { try await session.readDocument(sessionID: nil, path: "a.md", knownVersion: nil) }
+        #expect(!session.isDocumentChunksSupported)
+        await #expect(throws: RemoteClientError.self) { try await session.readDocumentData(sessionID: nil, path: "a.png", knownVersion: nil) }
+        #expect(factory.hosts[0].requests(ofKind: "readDocumentChunk").isEmpty)
         #expect(factory.hosts[0].requests(ofKind: "listSessionDocuments").isEmpty)
         #expect(factory.hosts[0].requests(ofKind: "readDocument").isEmpty)
     }

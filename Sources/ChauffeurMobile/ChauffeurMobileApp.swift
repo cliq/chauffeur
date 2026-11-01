@@ -1,5 +1,6 @@
 import SwiftUI
 import ChauffeurRemoteClient
+import ChauffeurRemoteProtocol
 
 @main
 struct ChauffeurMobileApp: App {
@@ -57,7 +58,11 @@ struct RootView: View {
                     case .documents(let sessionID):
                         SessionDocumentsView(model: model, sessionID: sessionID)
                     case .document(let sessionID, let path):
-                        DocumentReaderView(model: model, sessionID: sessionID, path: path)
+                        if DocumentKind(path: path) == .image {
+                            ImageDocumentView(model: model, sessionID: sessionID, path: path)
+                        } else {
+                            DocumentReaderView(model: model, sessionID: sessionID, path: path)
+                        }
                     case .location(let projectID):
                         LocationView(model: model, preselectedProjectID: projectID)
                     case .launch(let location):

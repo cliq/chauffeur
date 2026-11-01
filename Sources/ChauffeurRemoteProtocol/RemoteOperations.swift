@@ -222,6 +222,7 @@ public enum RemoteOperation: Equatable, Sendable, Codable {
     case stopSession(StopSessionRequest)
     case listSessionDocuments(SessionDocumentsRequest)
     case readDocument(DocumentReadRequest)
+    case readDocumentChunk(DocumentChunkRequest)
 
     public var kind: String {
         switch self {
@@ -245,6 +246,7 @@ public enum RemoteOperation: Equatable, Sendable, Codable {
         case .stopSession: return "stopSession"
         case .listSessionDocuments: return "listSessionDocuments"
         case .readDocument: return "readDocument"
+        case .readDocumentChunk: return "readDocumentChunk"
         }
     }
 
@@ -292,6 +294,8 @@ public enum RemoteOperation: Equatable, Sendable, Codable {
             self = .listSessionDocuments(try container.decode(SessionDocumentsRequest.self, forKey: .payload))
         case "readDocument":
             self = .readDocument(try container.decode(DocumentReadRequest.self, forKey: .payload))
+        case "readDocumentChunk":
+            self = .readDocumentChunk(try container.decode(DocumentChunkRequest.self, forKey: .payload))
         default:
             throw DecodingError.dataCorrupted(
                 DecodingError.Context(
@@ -346,6 +350,8 @@ public enum RemoteOperation: Equatable, Sendable, Codable {
             try container.encode(payload, forKey: .payload)
         case .readDocument(let payload):
             try container.encode(payload, forKey: .payload)
+        case .readDocumentChunk(let payload):
+            try container.encode(payload, forKey: .payload)
         }
     }
 }
@@ -367,6 +373,7 @@ public enum RemoteResult: Equatable, Sendable, Codable {
     case group(GroupSummary)
     case sessionDocuments(SessionDocumentList)
     case document(DocumentContent)
+    case documentChunk(DocumentChunk)
     case ack
 
     public var kind: String {
@@ -385,6 +392,7 @@ public enum RemoteResult: Equatable, Sendable, Codable {
         case .group: return "group"
         case .sessionDocuments: return "sessionDocuments"
         case .document: return "document"
+        case .documentChunk: return "documentChunk"
         case .ack: return "ack"
         }
     }
@@ -421,6 +429,8 @@ public enum RemoteResult: Equatable, Sendable, Codable {
             self = .sessionDocuments(try container.decode(SessionDocumentList.self, forKey: .payload))
         case "document":
             self = .document(try container.decode(DocumentContent.self, forKey: .payload))
+        case "documentChunk":
+            self = .documentChunk(try container.decode(DocumentChunk.self, forKey: .payload))
         case "ack":
             self = .ack
         default:
@@ -464,6 +474,8 @@ public enum RemoteResult: Equatable, Sendable, Codable {
         case .sessionDocuments(let payload):
             try container.encode(payload, forKey: .payload)
         case .document(let payload):
+            try container.encode(payload, forKey: .payload)
+        case .documentChunk(let payload):
             try container.encode(payload, forKey: .payload)
         case .ack:
             break

@@ -48,6 +48,15 @@ struct DocumentPathHarvesterTests {
         ])
     }
 
+    @Test func extractsImagePaths() {
+        let text = """
+        Saved screenshot to /tmp/shots/home.png.
+        ![diagram](docs/flow.JPEG) and `assets/icon@2x.webp`
+        not an image: logo.pngx or v1.2
+        """
+        #expect(DocumentPathHarvester.paths(in: text) == ["assets/icon@2x.webp", "docs/flow.JPEG", "/tmp/shots/home.png"])
+    }
+
     @Test func ignoresWebURLsAndDeduplicatesWithLatestMentionWinning() {
         let text = """
         https://github.com/o/r/blob/main/README.md

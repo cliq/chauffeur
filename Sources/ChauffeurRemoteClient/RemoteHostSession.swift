@@ -147,6 +147,11 @@ public final class RemoteHostSession {
         return host.capabilities.contains(RemoteProtocol.documents)
     }
 
+    public var isDocumentChunksSupported: Bool {
+        guard case .connected(let host) = connectionState else { return false }
+        return host.capabilities.contains(RemoteProtocol.documentChunks)
+    }
+
     @ObservationIgnored private let journal: any PendingOperationJournal
     @ObservationIgnored private let clientName: String
     @ObservationIgnored private let clientVersion: String
@@ -344,6 +349,44 @@ public final class RemoteHostSession {
             throw RemoteClientError.invalidResponse("The Mac returned an unexpected response for this document.")
         }
         return content
+    }
+
+    /// Downloads a binary file such as an image chunk by chunk. The result covers the whole file at offset 0;
+    /// its `data` is nil when the file still has `knownVersion`. A file rewritten mid-download starts over.
+    public func readDocumentData(sessionID: UUID?, path: String, knownVersion: String?) async throws -> DocumentChunk {
+        guard case .connected(let host) = connectionState, let connection else { throw RemoteClientError.disconnected }
+        guard host.capabilities.contains(RemoteProtocol.documentChunks) else {
+            throw RemoteClientError.invalidResponse("Update Chauffeur on your Mac to preview images on this device.")
+        }
+        func chunk(at offset: Int64, known: String?) async throws -> DocumentChunk {
+            let result = try await connection.request(.readDocumentChunk(DocumentChunkRequest(sessionID: sessionID, path: path, offset: offset, knownVersion: known)))
+            guard case .documentChunk(let chunk) = result, chunk.offset == offset else {
+                throw RemoteClientError.invalidResponse("The Mac returned an unexpected response for this file.")
+            }
+            return chunk
+        }
+        for _ in 0..<3 {
+            let first = try await chunk(at: 0, known: knownVersion)
+            guard var data = first.data else { return first }
+            var restarted = false
+            while Int64(data.count) < first.size {
+                try Task.checkCancellation()
+                let next: DocumentChunk
+                do {
+                    next = try await chunk(at: Int64(data.count), known: nil)
+                } catch RemoteClientError.remote(let error) where error.code == "document_changed" {
+                    // The file shrank below what was already read, or changed during this chunk's read.
+                    restarted = true; break
+                }
+                guard next.version == first.version, let bytes = next.data, !bytes.isEmpty else { restarted = true; break }
+                data.append(bytes)
+            }
+            if restarted { continue }
+            var whole = first
+            whole.data = data
+            return whole
+        }
+        throw RemoteClientError.invalidResponse("The file kept changing while it was being read. Try again.")
     }
 
     public func worktreeBranches(projectID: UUID, folderID: UUID) async throws -> [WorktreeBranchOption] {

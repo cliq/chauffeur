@@ -31,6 +31,7 @@ struct TerminalLinkTargetTests {
     @Test func bareNamesNeedKnownExtension() {
         #expect(TerminalLinkTarget.classify("README.md") == .file(path: "README.md"))
         #expect(TerminalLinkTarget.classify("main.SWIFT") == .file(path: "main.SWIFT"))
+        #expect(TerminalLinkTarget.classify("screenshot.PNG") == .file(path: "screenshot.PNG"))
         #expect(TerminalLinkTarget.classify("example.com") == .other)
         #expect(TerminalLinkTarget.classify("www.foo.org") == .other)
         #expect(TerminalLinkTarget.classify("hello") == .other)

@@ -87,6 +87,24 @@ struct ModelTests {
         #expect(RemoteProtocol.documents == "documents.v1")
     }
 
+    @Test func documentChunkOperationAndResultRoundTrip() throws {
+        let read = RemoteOperation.readDocumentChunk(DocumentChunkRequest(sessionID: UUID(), path: "shot.png", offset: 1_048_576, knownVersion: "1-2-3-4"))
+        #expect(read.kind == "readDocumentChunk")
+        #expect(try RemoteJSON.decode(RemoteOperation.self, from: RemoteJSON.encode(read)) == read)
+        for data in [Optional(Data([0x89, 0x50, 0x4E, 0x47])), nil] {
+            let chunk = RemoteResult.documentChunk(DocumentChunk(requestedPath: "shot.png", path: "/repo/shot.png", version: "1-2-3-4",
+                                                                 modifiedAt: Date(timeIntervalSince1970: 100), size: 4, offset: 0, data: data))
+            #expect(chunk.kind == "documentChunk")
+            #expect(try RemoteJSON.decode(RemoteResult.self, from: RemoteJSON.encode(chunk)) == chunk)
+        }
+        // A full chunk, base64-encoded in its envelope, still fits in one frame.
+        let full = RemoteResult.documentChunk(DocumentChunk(requestedPath: "a", path: "/a", version: "v", modifiedAt: Date(), size: 1,
+                                                            offset: 0, data: Data(count: DocumentChunkRequest.chunkBytes)))
+        #expect(try RemoteJSON.encode(full).count < Int(RemoteFraming.maxPayloadBytes))
+        #expect(RemoteProtocol.capabilities.contains(RemoteProtocol.documentChunks))
+        #expect(DocumentKind(path: "/a/Shot.PNG") == .image && DocumentKind(path: "plan.md") == .markdown && DocumentKind(path: "x.svg") == .text)
+    }
+
     @Test(arguments: [
         (RemoteSessionState.starting, true),
         (.running, true),

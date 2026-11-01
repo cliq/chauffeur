@@ -13,7 +13,7 @@ struct SessionDocumentsView: View {
             if let list {
                 if list.documents.isEmpty {
                     ContentUnavailableView("No documents yet", systemImage: "doc.text",
-                                           description: Text("Markdown files mentioned in or changed by this session appear here."))
+                                           description: Text("Markdown files and images mentioned by this session, and markdown files it changed, appear here."))
                 } else {
                     List(list.documents, id: \.path) { document in
                         Button {
@@ -50,7 +50,9 @@ struct SessionDocumentsView: View {
 
     private func row(_ document: SessionDocument) -> some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text(URL(fileURLWithPath: document.path).lastPathComponent).font(.headline)
+            Label(URL(fileURLWithPath: document.path).lastPathComponent,
+                  systemImage: DocumentKind(path: document.path) == .image ? "photo" : "doc.text")
+                .font(.headline)
             Text(document.displayPath).font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.head)
             HStack(spacing: 6) {
                 Text(document.modifiedAt, format: .relative(presentation: .named))
