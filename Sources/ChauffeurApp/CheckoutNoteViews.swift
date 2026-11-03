@@ -13,6 +13,8 @@ struct CheckoutNoteEditor: View {
     @State private var version: String?
     @State private var saving = false
     @State private var failure: String?
+    /// Fixed-width text with whole lines, for notes laid out like code.
+    @AppStorage("checkoutNote.codeStyle") private var codeStyle = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -21,12 +23,24 @@ struct CheckoutNoteEditor: View {
                 Text("Where to resume, what is left, anything to remember next time. Agents with Chauffeur messaging can read and update it.")
                     .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
-            TextEditor(text: $text)
-                .font(.body)
-                .frame(minHeight: 200)
-                .overlay(RoundedRectangle(cornerRadius: 5).stroke(.separator))
-                .accessibilityIdentifier("checkoutNote.text")
-            if let note = row.note { CheckoutNoteAttribution(note: note) }
+            Group {
+                if codeStyle {
+                    ArgumentEditor(text: $text, accessibilityLabel: "Note", wrapsLines: false)
+                } else {
+                    TextEditor(text: $text).font(.body)
+                }
+            }
+            .frame(minHeight: 200)
+            .overlay(RoundedRectangle(cornerRadius: 5).stroke(.separator))
+            .accessibilityIdentifier("checkoutNote.text")
+            HStack {
+                if let note = row.note { CheckoutNoteAttribution(note: note) }
+                Spacer()
+                Toggle("Code style", isOn: $codeStyle)
+                    .toggleStyle(.checkbox)
+                    .help("Fixed-width font without wrapping lines")
+                    .accessibilityIdentifier("checkoutNote.codeStyle")
+            }
             if let failure { Text(failure).font(.caption).foregroundStyle(.red).textSelection(.enabled) }
             HStack {
                 if row.note != nil {
@@ -82,6 +96,8 @@ struct CheckoutNoteCallout: View {
     var collapsedLineLimit: Int? = nil
     @State private var expanded = false
     @State private var truncated = false
+    /// The editor's code style; a collapsed preview keeps wrapping so its line limit holds.
+    @AppStorage("checkoutNote.codeStyle") private var codeStyle = false
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
@@ -89,7 +105,13 @@ struct CheckoutNoteCallout: View {
                 Spacer()
                 if let edit { Button("Edit…", action: edit).controlSize(.small).accessibilityIdentifier("checkoutNote.edit") }
             }
-            if let maxTextHeight {
+            if codeStyle, collapsedLineLimit == nil {
+                // Whole lines scroll sideways; a tall note also scrolls down, up to the limit.
+                ViewThatFits(in: .vertical) {
+                    ScrollView(.horizontal) { codeText }
+                    ScrollView([.horizontal, .vertical]) { codeText }
+                }.frame(maxHeight: maxTextHeight)
+            } else if let maxTextHeight {
                 // A short note keeps its own height; a long one scrolls within
                 // whatever height is left, up to the limit.
                 ViewThatFits(in: .vertical) {
@@ -120,6 +142,9 @@ struct CheckoutNoteCallout: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(.yellow.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
         .accessibilityIdentifier("checkoutNote.callout")
+    }
+    private var codeText: some View {
+        Text(text).font(.body.monospaced()).textSelection(.enabled).fixedSize()
     }
     private var noteText: some View {
         Text(text).textSelection(.enabled)

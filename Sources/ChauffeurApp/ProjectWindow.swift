@@ -818,13 +818,6 @@ private struct ProjectWindowContent: View, Equatable {
                                     .help(unmerged).accessibilityElement(children: .combine).accessibilityLabel(unmerged)
                                     .accessibilityIdentifier("repository.unmerged.\(row.path)")
                             }
-                            if let note = row.note {
-                                Text("·")
-                                Image(systemName: "note.text")
-                                    .help(note.text)
-                                    .accessibilityLabel("Has a note")
-                                    .accessibilityIdentifier("repository.note.\(row.path)")
-                            }
                         }.font(.caption).foregroundStyle(.secondary)
                         if deleting { Text("Deleting…").font(.caption).foregroundStyle(.secondary) }
                         else if let status = row.statusLabel { Text(status).font(.caption).foregroundStyle(.secondary).help(row.path) }
@@ -841,6 +834,13 @@ private struct ProjectWindowContent: View, Equatable {
                     ProgressView().controlSize(.mini).help("Deleting the worktree").accessibilityLabel("Deleting the worktree")
                 } else if runningSetup.contains(row.path) {
                     ProgressView().controlSize(.mini).help("Running the setup script").accessibilityLabel("Running the setup script")
+                }
+                if let note = row.note {
+                    // In the note card's color, so a parked checkout with a note stands out.
+                    Image(systemName: "note.text").font(.caption).foregroundStyle(.yellow)
+                        .help(note.text)
+                        .accessibilityLabel("Has a note")
+                        .accessibilityIdentifier("repository.note.\(row.path)")
                 }
                 terminalIndicator(terminals)
                 liveBadge(live)

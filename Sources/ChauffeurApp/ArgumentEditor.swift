@@ -6,10 +6,12 @@ import ChauffeurCore
 struct ArgumentEditor: NSViewRepresentable {
     @Binding var text: String
     var accessibilityLabel = "Launch arguments"
+    /// Off keeps each line whole and scrolls sideways, for text laid out by hand.
+    var wrapsLines = true
     func makeCoordinator() -> Coordinator { Coordinator(text: $text) }
     func makeNSView(context: Context) -> NSScrollView {
         let scroll = NSScrollView()
-        scroll.hasVerticalScroller = true; scroll.autohidesScrollers = true
+        scroll.hasVerticalScroller = true; scroll.hasHorizontalScroller = !wrapsLines; scroll.autohidesScrollers = true
         scroll.borderType = .noBorder
         let editor = NSTextView()
         editor.isRichText = false; editor.importsGraphics = false
@@ -24,11 +26,11 @@ struct ArgumentEditor: NSViewRepresentable {
         editor.font = .monospacedSystemFont(ofSize: NSFont.systemFontSize, weight: .regular)
         editor.textColor = .labelColor; editor.backgroundColor = .textBackgroundColor
         editor.textContainerInset = NSSize(width: 8, height: 8)
-        editor.isHorizontallyResizable = false; editor.isVerticallyResizable = true
+        editor.isHorizontallyResizable = !wrapsLines; editor.isVerticallyResizable = true
         editor.autoresizingMask = [.width]
         editor.minSize = .zero; editor.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
-        editor.textContainer?.widthTracksTextView = true
-        editor.textContainer?.containerSize = NSSize(width: 0, height: CGFloat.greatestFiniteMagnitude)
+        editor.textContainer?.widthTracksTextView = wrapsLines
+        editor.textContainer?.containerSize = NSSize(width: wrapsLines ? 0 : CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
         editor.string = text; editor.delegate = context.coordinator
         editor.setAccessibilityLabel(accessibilityLabel)
         scroll.documentView = editor
