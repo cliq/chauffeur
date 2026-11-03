@@ -57,7 +57,41 @@ extension GhosttySurfaceView {
         isProbingLink = false
         ghostty_surface_mouse_pos(surface, x, y, mods)
         defer { probedLink = nil }
-        return probedLink
+        // Ghostty's link is part of the rebuilt one when it matched the text; an OSC 8 target
+        // that isn't is the program's own and wins.
+        guard let wrapped = wrappedLink(at: point), probedLink.map(wrapped.contains) ?? true else { return probedLink }
+        return wrapped
+    }
+
+    /// A URL the program wrapped onto further rows itself, which Ghostty cuts at the row's edge.
+    func wrappedLink(at point: NSPoint) -> String? {
+        guard let surface, bounds.width > 0, bounds.height > 0 else { return nil }
+        let size = ghostty_surface_size(surface)
+        let columns = Int(size.columns), rows = Int(size.rows)
+        guard columns > 0, rows > 0, size.cell_width_px > 0, size.cell_height_px > 0 else { return nil }
+        // Ghostty balances the padding around the grid.
+        let scaleX = Double(size.width_px) / bounds.width, scaleY = Double(size.height_px) / bounds.height
+        let paddingX = (Double(size.width_px) - Double(columns) * Double(size.cell_width_px)) / 2
+        let paddingY = (Double(size.height_px) - Double(rows) * Double(size.cell_height_px)) / 2
+        let column = Int(((point.x * scaleX - paddingX) / Double(size.cell_width_px)).rounded(.down))
+        let row = Int((((bounds.height - point.y) * scaleY - paddingY) / Double(size.cell_height_px)).rounded(.down))
+        guard (0..<columns).contains(column), (0..<rows).contains(row) else { return nil }
+        let first = max(0, row - WrappedLink.maximumRows), last = min(rows - 1, row + WrappedLink.maximumRows)
+        let text = (first...last).map { viewportRowText($0, columns: columns) ?? "" }
+        return WrappedLink.url(rows: text, row: row - first, column: column, columns: columns)
+    }
+
+    private func viewportRowText(_ row: Int, columns: Int) -> String? {
+        guard let surface else { return nil }
+        let selection = ghostty_selection_s(
+            top_left: ghostty_point_s(tag: GHOSTTY_POINT_VIEWPORT, coord: GHOSTTY_POINT_COORD_EXACT, x: 0, y: UInt32(row)),
+            bottom_right: ghostty_point_s(tag: GHOSTTY_POINT_VIEWPORT, coord: GHOSTTY_POINT_COORD_EXACT, x: UInt32(columns - 1), y: UInt32(row)),
+            rectangle: false
+        )
+        var text = ghostty_text_s()
+        guard ghostty_surface_read_text(surface, selection, &text) else { return nil }
+        defer { ghostty_surface_free_text(surface, &text) }
+        return Self.string(from: text)
     }
 
     private func showLinkMenu(_ link: String, _ event: NSEvent) {

@@ -17,7 +17,8 @@
 //     `printf '\e]52;c;aGVsbG8=\a'` → `didCopyToClipboard("hello")`, pasteboard untouched.
 //  7. Cmd-clicking `https://example.com`, in a shell and in Codex's OSC 8 links, →
 //     `didRequestOpenLink`; other schemes are dropped. A plain click on it offers Open Link and
-//     Copy Link (the target, not the label); dragging across it does not.
+//     Copy Link (the target, not the label); dragging across it does not. A URL an agent wraps
+//     onto further rows opens whole from any of them.
 //  8. `reset()` blanks screen and scrollback; the tmux redraw repaints it.
 //  9. Option-Left/Right/Delete move and delete by word; Cmd shortcuts reach the app menu.
 // 10. Japanese IME composition shows inline and commits once; wide glyphs align.

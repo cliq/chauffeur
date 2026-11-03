@@ -210,7 +210,7 @@ final class GhosttySurfaceView: NSView {
         return action.withCString { ghostty_surface_binding_action(surface, $0, UInt(action.utf8.count)) }
     }
 
-    private static func string(from text: ghostty_text_s) -> String {
+    static func string(from text: ghostty_text_s) -> String {
         guard let pointer = text.text, text.text_len > 0 else { return "" }
         return String(decoding: UnsafeRawBufferPointer(start: pointer, count: Int(text.text_len)), as: UTF8.self)
     }
