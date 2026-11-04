@@ -279,8 +279,9 @@ public actor WorktreeManager {
         return "refs/remotes/\(remote)/\(branch)"
     }
     /// Removes a checkout with `git worktree remove`. External checkouts are
-    /// only deleted when the caller explicitly asks for it.
-    public func remove(_ worktree: Worktree, liveSessions: [Session], allowExternal: Bool = false, discardChanges: Bool = false) async throws {
+    /// only deleted when the caller explicitly asks for it. Its branch goes too
+    /// when no other branch needs its commits, unless `keepBranch` is set.
+    public func remove(_ worktree: Worktree, liveSessions: [Session], allowExternal: Bool = false, discardChanges: Bool = false, keepBranch: Bool = false) async throws {
         let path = Paths.canonical(worktree.path)
         if !allowExternal {
             guard worktree.managed else { throw ChauffeurError("external_worktree", "External worktrees can only be unregistered") }
@@ -313,7 +314,7 @@ public actor WorktreeManager {
         let modules = Self.line(try await git(path, ["rev-parse", "--path-format=absolute", "--git-path", "modules"]))
         let force = discardChanges || !submodules.isEmpty || FileManager.default.fileExists(atPath: modules)
         _ = try await git(worktree.repositoryPath, ["worktree", "remove"] + (force ? ["--force"] : []) + ["--", path])
-        await deleteBranchIfUnused(entry.branch, repository: worktree.repositoryPath)
+        if !keepBranch { await deleteBranchIfUnused(entry.branch, repository: worktree.repositoryPath) }
     }
     public func hasChanges(at path: String) async throws -> Bool {
         try await hasUncommittedChanges(at: path)

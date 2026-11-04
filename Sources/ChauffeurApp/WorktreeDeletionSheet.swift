@@ -3,13 +3,16 @@ import ChauffeurCore
 
 /// Confirms a worktree removal with one verdict a glance can read: red with
 /// the issues that lose work, or green with the reasons nothing is lost. The
-/// two are never mixed in one list. Branch bookkeeping and finished session
-/// history removal are footnotes.
+/// two are never mixed in one list. A merged branch is deleted unless the
+/// person unticks it; other branch bookkeeping and finished session history
+/// removal are footnotes.
 struct WorktreeDeletionSheet: View {
     let row: CheckoutRow
     let preview: WorktreeDeletionPreview
-    let confirm: () -> Void
+    /// Receives whether to keep the branch.
+    let confirm: (_ keepBranch: Bool) -> Void
     let cancel: () -> Void
+    @State private var deleteBranch = true
 
     private var items: [WorktreeDeletionPreview.Item] {
         preview.items(branch: row.branch, finishedSessions: row.sessions.count, checkoutMissing: row.finished)
@@ -62,13 +65,18 @@ struct WorktreeDeletionSheet: View {
                 .background(.yellow.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
                 .accessibilityIdentifier("worktreeDeletion.note")
             }
+            if preview.offersBranchDeletion(branch: row.branch, checkoutMissing: row.finished) {
+                Toggle(isOn: $deleteBranch) { Text("Delete branch \(Text(row.branch).fontWeight(.medium))") }
+                    .toggleStyle(.checkbox)
+                    .accessibilityIdentifier("worktreeDeletion.deleteBranch")
+            }
             if !notes.isEmpty {
                 Text(notes.map(\.text).joined(separator: " · ")).font(.caption).foregroundStyle(.secondary)
             }
             HStack {
                 Spacer()
                 Button("Cancel", role: .cancel) { cancel() }.keyboardShortcut(.cancelAction)
-                Button("Delete Worktree", role: .destructive) { confirm() }
+                Button("Delete Worktree", role: .destructive) { confirm(!deleteBranch) }
                     .keyboardShortcut(.defaultAction)
                     .tint(losesWork ? .red : nil)
                     .accessibilityIdentifier("worktreeDeletion.confirm")

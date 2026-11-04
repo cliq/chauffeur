@@ -376,6 +376,19 @@ struct WorktreeCreationTests {
         await #expect(throws: ChauffeurError.self) { _ = try await fixture.runtime.handle(IPCRequest("deleteWorktree", params: main)) }
     }
 
+    @Test func deletingAMergedWorktreeCanKeepItsBranch() async throws {
+        let fixture = try await Fixture.make(); defer { fixture.cleanup() }
+        let folder = fixture.project.folders[0]
+        let external = fixture.root.appendingPathComponent("kept")
+        try #require(try await ProcessRunner.run("/usr/bin/git", ["-C", fixture.repo.path, "worktree", "add", "-b", "kept", external.path, "HEAD"]).status == 0)
+        let params: JSONValue = .object(["projectID": .string(fixture.project.id.uuidString), "folderID": .string(folder.id.uuidString), "path": .string(external.path), "keepBranch": .bool(true)])
+        let preview = try await fixture.runtime.handle(IPCRequest("previewWorktreeDeletion", params: params)).decode(WorktreeDeletionPreview.self)
+        #expect(preview.offersBranchDeletion(branch: "kept", checkoutMissing: false))
+        let result = try await fixture.runtime.handle(IPCRequest("deleteWorktree", params: params))
+        #expect(result["deletedCheckout"].bool == true && !FileManager.default.fileExists(atPath: external.path))
+        #expect(try await ProcessRunner.run("/usr/bin/git", ["-C", fixture.repo.path, "show-ref", "--verify", "refs/heads/kept"]).status == 0)
+    }
+
     @Test func deletingAWorktreeWithSubmodulesGuardsCommitsOnlyItHolds() async throws {
         let fixture = try await Fixture.make(); defer { fixture.cleanup() }
         func git(_ directory: String, _ arguments: [String]) async throws {

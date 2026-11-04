@@ -112,7 +112,7 @@ struct WorktreesView: View {
                 else if observation.status == .notRepository { Text("This folder is not a Git repository.").font(.caption).foregroundStyle(.secondary) }
                 else { Text("Git inventory refreshes every few seconds while the background service is running.").font(.caption).foregroundStyle(.secondary) }
             }
-            Text("Deleting a worktree removes its checkout and finished session history. Stop live sessions first. You will be warned before local changes are discarded. Branches with no unique commits are also deleted.").font(.caption).foregroundStyle(.secondary)
+            Text("Deleting a worktree removes its checkout and finished session history. Stop live sessions first. You will be warned before local changes are discarded. Branches with no unique commits are also deleted unless you choose to keep them.").font(.caption).foregroundStyle(.secondary)
         }.padding(24).frame(width: 760).interactiveDismissDisabled(busy)
             .onAppear { refresh() }
             .onChange(of: folderID) { _, _ in existingBranch = ""; baseRef = "HEAD"; refresh() }
@@ -124,9 +124,9 @@ struct WorktreesView: View {
                 if let value = try? await model.call("previewWorktree", .object(["projectID": .string(project.id.uuidString), "folderID": .string(folderID.uuidString), "branch": .string(proposedBranch)])), !Task.isCancelled, self.folderID == folderID, branch == proposedBranch { destination = value["path"].string ?? "" }
             }
             .sheet(item: $removing) { row in
-                WorktreeDeletionSheet(row: row, preview: deletionPreview, confirm: {
+                WorktreeDeletionSheet(row: row, preview: deletionPreview, confirm: { keepBranch in
                     let discardChanges = deletionPreview.requiresDiscard
-                    run { _ = try await model.call("deleteWorktree", .object(["projectID": .string(project.id.uuidString), "folderID": .string(row.folderID.uuidString), "path": .string(row.path), "discardChanges": .bool(discardChanges)]), responseTimeout: 300) }
+                    run { _ = try await model.call("deleteWorktree", .object(["projectID": .string(project.id.uuidString), "folderID": .string(row.folderID.uuidString), "path": .string(row.path), "discardChanges": .bool(discardChanges), "keepBranch": .bool(keepBranch)]), responseTimeout: 300) }
                     removing = nil
                 }, cancel: { removing = nil })
             }

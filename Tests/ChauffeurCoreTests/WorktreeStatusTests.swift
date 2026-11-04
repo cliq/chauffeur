@@ -8,10 +8,14 @@ struct WorktreeStatusTests {
         let clean = WorktreeDeletionPreview(hasChanges: false, unmergedCommits: 0, baseBranch: "main")
         #expect(clean.items(branch: "task", finishedSessions: 0, checkoutMissing: false) == [
             Item(.safe, "No uncommitted changes"), Item(.safe, "All commits are merged into main"),
-            Item(.note, "Branch task is deleted too"), Item(.safe, "No session history is affected")])
+            Item(.safe, "No session history is affected")])
+        // A merged branch is offered as a choice instead of a footnote.
+        #expect(clean.offersBranchDeletion(branch: "task", checkoutMissing: false))
+        #expect(!clean.offersBranchDeletion(branch: "", checkoutMissing: false))
+        #expect(!clean.offersBranchDeletion(branch: "task", checkoutMissing: true))
         // Unmerged commits that already live on a remote lose nothing.
         let pushed = WorktreeDeletionPreview(hasChanges: false, unmergedCommits: 4, baseBranch: "main", unpushedCommits: 0, remoteBranch: "origin/task")
-        #expect(pushed.isPushed)
+        #expect(pushed.isPushed && !pushed.offersBranchDeletion(branch: "task", checkoutMissing: false))
         #expect(pushed.items(branch: "task", finishedSessions: 2, checkoutMissing: false) == [
             Item(.safe, "No uncommitted changes"), Item(.safe, "4 commits not merged into main, all pushed to origin/task"),
             Item(.note, "Branch task is kept"), Item(.note, "2 finished sessions and their terminal history are deleted")])

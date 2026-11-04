@@ -131,6 +131,11 @@ public struct WorktreeDeletionPreview: Codable, Equatable, Sendable {
         public var id: String { text }
         public init(_ severity: Severity, _ text: String) { self.severity = severity; self.text = text }
     }
+    /// Every commit is merged, so removal deletes the branch too unless the
+    /// person chooses to keep it.
+    public func offersBranchDeletion(branch: String, checkoutMissing: Bool) -> Bool {
+        !checkoutMissing && !branch.isEmpty && unmergedCommits == 0
+    }
     /// The checklist a deletion confirmation shows: one line per fact about
     /// the checkout, marked safe or lossy, so the reader does not parse prose.
     public func items(branch: String, finishedSessions: Int, checkoutMissing: Bool) -> [Item] {
@@ -165,8 +170,9 @@ public struct WorktreeDeletionPreview: Codable, Equatable, Sendable {
                     items.append(Item(.loss, "Submodule \(submodule.path) has \(count) commit\(count == 1 ? "" : "s") only in this worktree"))
                 }
             }
-            if !branch.isEmpty, let unmergedCommits {
-                items.append(Item(.note, unmergedCommits > 0 ? "Branch \(branch) is kept" : "Branch \(branch) is deleted too"))
+            // A deletable branch is a choice the sheet offers, not a footnote.
+            if !branch.isEmpty, let unmergedCommits, unmergedCommits > 0 {
+                items.append(Item(.note, "Branch \(branch) is kept"))
             }
         }
         items.append(finishedSessions > 0
