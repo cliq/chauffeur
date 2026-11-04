@@ -292,9 +292,18 @@ private struct ProjectWindowContent: View, Equatable {
                     Button("Cancel", role: .cancel) { closingTab = nil }
                 } message: { Text(closeMessage(closingTab)) }
             } else {
-                VStack(spacing: 20) {
-                    ContentUnavailableView(online ? "Project unavailable" : "Connecting…", systemImage: "folder.badge.questionmark", description: Text("Restore the project directory or choose another project. Existing agents remain in the background service."))
-                    ServiceHealthView(); Button("Open Projects") { openWindow(id: "welcome") }
+                // One centered group: the placeholder sizes to its content so the
+                // service status and button sit right under it.
+                VStack(spacing: 16) {
+                    if online {
+                        ContentUnavailableView("Project unavailable", systemImage: "folder.badge.questionmark", description: Text("Restore the project directory or choose another project. Existing agents remain in the background service."))
+                            .fixedSize(horizontal: false, vertical: true)
+                    } else {
+                        ContentUnavailableView("Connecting…", systemImage: "bolt.horizontal.circle", description: Text("Existing agents keep running in the background service."))
+                            .fixedSize(horizontal: false, vertical: true)
+                        ServiceHealthView().fixedSize()
+                    }
+                    Button("Open Projects") { openWindow(id: "welcome") }
                 }.padding(24).frame(maxWidth: .infinity, maxHeight: .infinity)
                     .background(Color(nsColor: .windowBackgroundColor), aroundTerminals: false)
             }
