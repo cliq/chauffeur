@@ -39,9 +39,14 @@ actor SessionOwnerHost {
             guard UUID(uuidString: item.lastPathComponent) != nil else { return nil }
             let path = item.appendingPathComponent("manifest.json")
             guard FileManager.default.fileExists(atPath: path.path) else { return nil }
-            try SessionOwnerManifest.validatePrivate(item, directory: true)
-            try SessionOwnerManifest.validatePrivate(path, directory: false)
-            let manifest = try JSONCoding.decode(SessionOwnerManifest.self, from: Data(contentsOf: path))
+            let manifest: SessionOwnerManifest
+            do {
+                try SessionOwnerManifest.validatePrivate(item, directory: true)
+                try SessionOwnerManifest.validatePrivate(path, directory: false)
+                manifest = try JSONCoding.decode(SessionOwnerManifest.self, from: Data(contentsOf: path))
+            } catch where !FileManager.default.fileExists(atPath: item.path) {
+                return nil // Pruned while listing: its owner had already finished.
+            }
             guard manifest.id.uuidString == item.lastPathComponent,
                   Paths.canonical(URL(fileURLWithPath: manifest.socketPath).deletingLastPathComponent().path) == Paths.canonical(runtimeDirectory.path) else {
                 throw ChauffeurError("session_owner_manifest", "Invalid Sessions server record")
@@ -83,7 +88,7 @@ actor SessionOwnerHost {
 
     private func retireOthers(except id: UUID) {
         // A failed retirement write may retain an idle helper, but cannot disrupt
-        // its sessions. Signed cached bundles are deliberately never unlinked.
+        // its sessions. Its cached bundle is pruned on a later start once unused.
         for (directory, manifest) in (try? Self.manifests(in: runtimeDirectory)) ?? [] where manifest.id != id {
             try? SessionOwnerManifest.write(true, to: directory.appendingPathComponent("retired.json"))
         }
@@ -100,33 +105,115 @@ actor SessionOwnerHost {
         return result.status == 0 && result.output.trimmingCharacters(in: .whitespacesAndNewlines) == manifest.id.uuidString
     }
 
-    private func preservedApp() async throws -> URL {
+    /// Copies of the helper live in a few reusable slots, `session-apps/slot-N`.
+    /// macOS keeps a Local Network entry per helper path, so a fresh path per
+    /// build would add an entry with every update. A running owner's copy is
+    /// never replaced: TCC looks up its responsible executable on disk.
+    func preservedApp() async throws -> URL {
         let binary = embeddedApp.appendingPathComponent("Contents/MacOS/ChauffeurSessions")
         guard FileManager.default.isExecutableFile(atPath: binary.path) else {
             throw ChauffeurError("session_owner_missing", "Chauffeur Sessions is missing. Reinstall Chauffeur before starting new sessions")
         }
-        // Include signed executable and plist. Each version has an immutable path;
-        // retaining old copies preserves TCC's responsible executable lookup.
-        let fingerprint = JSONCoding.digest(try Data(contentsOf: binary)) + "-" + JSONCoding.digest(try Data(contentsOf: embeddedApp.appendingPathComponent("Contents/Info.plist"))).prefix(12)
-        let cache = runtimeDirectory.deletingLastPathComponent().appendingPathComponent("session-apps")
+        let cache = cacheDirectory
         try SessionOwnerManifest.privateDirectory(cache)
-        let version = cache.appendingPathComponent(fingerprint)
-        let app = version.appendingPathComponent("Chauffeur Sessions.app")
-        if !FileManager.default.fileExists(atPath: app.path) {
-            let stage = cache.appendingPathComponent(".stage-\(UUID())")
-            try SessionOwnerManifest.privateDirectory(stage)
-            defer { try? FileManager.default.removeItem(at: stage) }
-            let copy = stage.appendingPathComponent(app.lastPathComponent)
-            try FileManager.default.copyItem(at: embeddedApp, to: copy)
-            try await verify(copy)
-            try FileManager.default.moveItem(at: stage, to: version)
+        var owners: [(directory: URL, manifest: SessionOwnerManifest, inUse: Bool)] = []
+        for (directory, manifest) in try Self.manifests(in: runtimeDirectory) {
+            owners.append((directory, manifest, await inUse(directory, manifest)))
         }
+        let busy = Set(owners.filter(\.inUse).compactMap { cacheEntry(containing: $0.manifest.appPath) })
+        let slots = ((try? FileManager.default.contentsOfDirectory(atPath: cache.path)) ?? [])
+            .compactMap { name in Self.slotIndex(name).map { (index: $0, name: name) } }.sorted { $0.index < $1.index }
+        var chosen: String?
+        // Reconnecting to an unchanged build keeps its slot.
+        for slot in slots {
+            let app = cache.appendingPathComponent(slot.name).appendingPathComponent(Self.appName)
+            if matchesEmbedded(app), (try? await verify(app)) != nil { chosen = slot.name; break }
+        }
+        if chosen == nil {
+            let name = (1...).lazy.map { "slot-\($0)" }.first { !busy.contains($0) }!
+            try await install(into: cache.appendingPathComponent(name))
+            chosen = name
+        }
+        let app = cache.appendingPathComponent(chosen!).appendingPathComponent(Self.appName)
         try await verify(app)
-        guard try Data(contentsOf: app.appendingPathComponent("Contents/MacOS/ChauffeurSessions")) == Data(contentsOf: binary),
-              try Data(contentsOf: app.appendingPathComponent("Contents/Info.plist")) == Data(contentsOf: embeddedApp.appendingPathComponent("Contents/Info.plist")) else {
+        guard matchesEmbedded(app) else {
             throw ChauffeurError("session_owner_signature", "Cached Sessions helper differs from the installed build")
         }
+        prune(owners: owners, busy: busy, keeping: chosen!)
         return app
+    }
+
+    static let appName = "Chauffeur Sessions.app"
+    private var cacheDirectory: URL { runtimeDirectory.deletingLastPathComponent().appendingPathComponent("session-apps") }
+    static func slotIndex(_ name: String) -> Int? {
+        guard name.hasPrefix("slot-"), let index = Int(name.dropFirst(5)), index > 0, name == "slot-\(index)" else { return nil }
+        return index
+    }
+
+    /// The entry directly under the cache that holds this app, if any.
+    private func cacheEntry(containing appPath: String) -> String? {
+        let app = URL(fileURLWithPath: Paths.canonical(appPath))
+        let entry = app.deletingLastPathComponent()
+        guard Paths.canonical(entry.deletingLastPathComponent().path) == Paths.canonical(cacheDirectory.path) else { return nil }
+        return entry.lastPathComponent
+    }
+
+    private func matchesEmbedded(_ app: URL) -> Bool {
+        func same(_ relative: String) -> Bool {
+            guard let copy = try? Data(contentsOf: app.appendingPathComponent(relative)),
+                  let source = try? Data(contentsOf: embeddedApp.appendingPathComponent(relative)) else { return false }
+            return copy == source
+        }
+        return same("Contents/MacOS/ChauffeurSessions") && same("Contents/Info.plist")
+    }
+
+    /// Swaps a slot's contents for the embedded build. The old directory is
+    /// renamed away first, so no running process ever sees a half-written copy.
+    private func install(into slot: URL) async throws {
+        let cache = slot.deletingLastPathComponent()
+        let stage = cache.appendingPathComponent(".stage-\(UUID())")
+        try SessionOwnerManifest.privateDirectory(stage)
+        defer { try? FileManager.default.removeItem(at: stage) }
+        let copy = stage.appendingPathComponent(Self.appName)
+        try FileManager.default.copyItem(at: embeddedApp, to: copy)
+        try await verify(copy)
+        if FileManager.default.fileExists(atPath: slot.path) {
+            let trash = cache.appendingPathComponent(".trash-\(UUID())")
+            try FileManager.default.moveItem(at: slot, to: trash)
+            try? FileManager.default.removeItem(at: trash)
+        }
+        try FileManager.default.moveItem(at: stage, to: slot)
+    }
+
+    /// An owner is in use while its app holds the lock or its tmux server still
+    /// answers: an exited owner's server keeps live sessions. Only a server
+    /// tmux reports as absent frees it; unknown state never does.
+    private func inUse(_ directory: URL, _ manifest: SessionOwnerManifest) async -> Bool {
+        if SessionOwnerLock.isHeld(directory.appendingPathComponent("owner.lock")) { return true }
+        guard let result = try? await ProcessRunner.run(executable, ["-N", "-S", manifest.socketPath, "list-sessions"], environment: environment, timeout: 3) else { return true }
+        if result.status == 0 { return true }
+        return !["no server running", "No such file", "Connection refused"].contains { result.error.contains($0) }
+    }
+
+    /// Best effort: removes records of finished owners, then every cached copy
+    /// that is neither the current slot nor used by a remaining owner.
+    private func prune(owners: [(directory: URL, manifest: SessionOwnerManifest, inUse: Bool)], busy: Set<String>, keeping current: String) {
+        let manager = FileManager.default
+        for owner in owners where !owner.inUse {
+            try? manager.removeItem(at: owner.directory)
+            // manifests(in:) checked that the socket lives in the runtime directory.
+            if manager.fileExists(atPath: owner.manifest.socketPath) { try? manager.removeItem(atPath: owner.manifest.socketPath) }
+        }
+        let cache = cacheDirectory
+        for name in (try? manager.contentsOfDirectory(atPath: cache.path)) ?? [] where name != current && !busy.contains(name) {
+            let item = cache.appendingPathComponent(name)
+            if name.hasPrefix(".") {
+                // A concurrent install may still be staging; only old leftovers go.
+                let modified = (try? manager.attributesOfItem(atPath: item.path)[.modificationDate] as? Date) ?? Date()
+                guard Date().timeIntervalSince(modified) > 600 else { continue }
+            }
+            try? manager.removeItem(at: item)
+        }
     }
 
     private func verify(_ app: URL) async throws {

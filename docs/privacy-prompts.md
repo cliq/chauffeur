@@ -25,7 +25,11 @@ Chauffeur keeps signed helper copies under
 app does not remove a live owner's executable. Do not delete these copies while
 sessions are running. Old helpers exit after their sessions drain when a newer
 helper has taken over new launches. The current helper stays alive while idle.
-Cached copies are retained; automatic disk cleanup is not implemented yet.
+Copies live in a few reusable `slot-N` folders: a new build takes the lowest
+slot no running owner uses, and copies nothing uses are deleted. macOS keeps a
+Local Network entry per helper path, so stable slots keep that list to a few
+`ChauffeurSessions.app` entries. Earlier builds used one folder per build; those
+entries stay in System Settings after their copies are deleted.
 
 See the [measurements](decisions/V7-session-privacy-attribution.md) and
 [implementation decision](decisions/V8-independent-session-owner.md). A tool

@@ -24,13 +24,17 @@ alive even when its server has no sessions, to cover later sessions too.
 
 ## Launch, reconnect and update
 
-The runtime verifies and copies the embedded signed app into a versioned,
-private `session-apps/<fingerprint>/Chauffeur Sessions.app` inside its data root.
-It verifies the copy and compares its executable and plist against the embedded
-source. The fingerprint includes the signed executable and plist. Installation
-can then replace `/Applications/Chauffeur.app` without deleting a live owner's
-responsible executable. Cached apps are immutable and are not automatically
-removed in this prototype, including after retirement.
+The runtime verifies and copies the embedded signed app into a private, reusable
+`session-apps/slot-N/Chauffeur Sessions.app` inside its data root. It verifies
+the copy and compares its executable and plist against the embedded source. A
+slot already holding this build is reused; otherwise the build replaces the
+lowest slot no owner uses. An owner is in use while it holds its lock or its tmux
+server still answers; unknown tmux state counts as in use. Installation can then
+replace `/Applications/Chauffeur.app` without deleting a live owner's responsible
+executable. Slots replace one copy per build (`session-apps/<fingerprint>`)
+because macOS adds a Local Network entry for every new helper path; the signing
+identity and so TCC consent are unchanged. Records of finished owners, unused
+slots and unused per-build copies are deleted when the runtime prepares the helper.
 
 A private `runtime/session-owners/<UUID>/manifest.json` names the app, tmux
 executable, filtered environment and unique socket. The helper takes a lifetime
@@ -52,7 +56,8 @@ fresh owner and server; existing sessions stay with their original owner. Once
 the replacement is ready, older owners receive a retirement marker. Each checks
 its session count inside tmux and stops its own server only when empty; unknown
 state never authorizes a stop. Dead panes retained for history count as sessions
-until the runtime retires them. The signed cached bundle remains on disk.
+until the runtime retires them. Its copy stays on disk until a later start finds
+it unused.
 
 Terminal inventory combines the legacy `runtime/tmux.sock` with all recorded
 owner sockets. Attach, input, resize, activity, history, interrupt and stop route
@@ -77,8 +82,7 @@ fixtures establish AppData's lifetime distinction; a responsible-PID check
 alone is not a permission test. The existing main Chauffeur Full Disk Access
 grant must not be treated as proof of ordinary Sessions consent.
 
-Cache collection is deferred: never manually remove a cached app while its
-owner or descendants remain. A tmux client that can no longer contact an old
+Never manually remove a cached app while its owner or descendants remain. A tmux client that can no longer contact an old
 server (including an incompatible tmux upgrade) causes an error or conservatively
 retains an old helper; it is not evidence that sessions are safe to kill.
 

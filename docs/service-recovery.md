@@ -61,9 +61,11 @@ its terminals alive; the next new session gets a fresh owner/server. Existing
 pre-helper sessions keep their old attribution and are not migrated or killed.
 See [privacy prompts](privacy-prompts.md) for consent limits and recovery.
 
-Owner manifests live in `runtime/session-owners/`, and immutable signed helper
-copies in `session-apps/`, under the data root. Do not remove these while sessions
-are alive. A missing or invalid packaged helper prevents new launches, with an
+Owner manifests live in `runtime/session-owners/`, and signed helper copies in
+`session-apps/slot-N/`, under the data root. Do not remove these while sessions
+are alive. The runtime deletes manifests of owners whose app and tmux server
+have both exited, and copies no remaining owner uses, when it next prepares the
+helper. A missing or invalid packaged helper prevents new launches, with an
 error asking for reinstallation; it does not fall back to starting a server from
 the runtime. Reinstalling the app preserves the separate cache and live owners.
 
