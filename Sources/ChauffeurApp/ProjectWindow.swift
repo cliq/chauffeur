@@ -271,7 +271,7 @@ private struct ProjectWindowContent: View, Equatable {
                 .sheet(item: $recentConversationsRow) { row in RecentConversationsSheet(row: row) }
                 .sheet(item: $editingNote) { row in CheckoutNoteEditor(projectID: project.id, row: row) }
                 .sheet(item: $deletingCheckout) { row in
-                    WorktreeDeletionSheet(row: row, preview: deletionPreview, confirm: { keepBranch in deleteWorktree(row, keepBranch: keepBranch); deletingCheckout = nil }, cancel: { deletingCheckout = nil })
+                    WorktreeDeletionSheet(row: row, preview: deletionPreview, confirm: { branch in deleteWorktree(row, branch: branch); deletingCheckout = nil }, cancel: { deletingCheckout = nil })
                 }
                 .confirmationDialog("Delete \(deletingSession?.title ?? "finished session")?", isPresented: Binding(get: { deletingSession != nil }, set: { if !$0 { deletingSession = nil } }), titleVisibility: .visible) {
                     Button("Delete Finished Session", role: .destructive) { if let session = deletingSession { deleteSession(session) }; deletingSession = nil }
@@ -1378,14 +1378,14 @@ private struct ProjectWindowContent: View, Equatable {
             deletingCheckout = row
         }
     }
-    private func deleteWorktree(_ row: CheckoutRow, keepBranch: Bool) {
+    private func deleteWorktree(_ row: CheckoutRow, branch: WorktreeDeletionSheet.BranchChoice) {
         guard let project else { return }
         let discardChanges = deletionPreview.requiresDiscard
         let path = projectModel.canonical(row.path)
         guard deletingWorktrees.insert(path).inserted else { return }
         model.perform {
             defer { deletingWorktrees.remove(path) }
-            _ = try await model.call("deleteWorktree", .object(["projectID": .string(project.id.uuidString), "folderID": .string(row.folderID.uuidString), "path": .string(row.path), "discardChanges": .bool(discardChanges), "keepBranch": .bool(keepBranch)]), responseTimeout: 300)
+            _ = try await model.call("deleteWorktree", .object(["projectID": .string(project.id.uuidString), "folderID": .string(row.folderID.uuidString), "path": .string(row.path), "discardChanges": .bool(discardChanges), "keepBranch": .bool(branch.keep), "forceDeleteBranch": .bool(branch.force)]), responseTimeout: 300)
             // Pick up the shortened inventory before the row stops showing its progress.
             try await model.refresh()
             setHidden(row, false)

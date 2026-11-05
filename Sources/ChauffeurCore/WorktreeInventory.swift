@@ -131,10 +131,21 @@ public struct WorktreeDeletionPreview: Codable, Equatable, Sendable {
         public var id: String { text }
         public init(_ severity: Severity, _ text: String) { self.severity = severity; self.text = text }
     }
-    /// Every commit is merged, so removal deletes the branch too unless the
-    /// person chooses to keep it.
+    /// Whether a deletion sheet offers to delete the checkout's branch too.
     public func offersBranchDeletion(branch: String, checkoutMissing: Bool) -> Bool {
-        !checkoutMissing && !branch.isEmpty && unmergedCommits == 0
+        !checkoutMissing && !branch.isEmpty
+    }
+    /// Every commit is merged, so the branch goes too unless the person keeps
+    /// it. Otherwise deleting it is opt-in and forced.
+    public var deletesBranchByDefault: Bool { unmergedCommits == 0 }
+    /// What deleting the branch costs, when it discards commits found nowhere else.
+    public var branchDeletionWarning: String? {
+        guard let unmergedCommits, unmergedCommits > 0 else {
+            return unmergedCommits == nil ? "Its merge state is unknown; any commits only it holds are lost" : nil
+        }
+        if isPushed { return nil }
+        let count = unpushedCommits.map { min($0, unmergedCommits) } ?? unmergedCommits
+        return "\(count) unpushed commit\(count == 1 ? "" : "s") will be permanently lost"
     }
     /// The checklist a deletion confirmation shows: one line per fact about
     /// the checkout, marked safe or lossy, so the reader does not parse prose.
@@ -170,10 +181,7 @@ public struct WorktreeDeletionPreview: Codable, Equatable, Sendable {
                     items.append(Item(.loss, "Submodule \(submodule.path) has \(count) commit\(count == 1 ? "" : "s") only in this worktree"))
                 }
             }
-            // A deletable branch is a choice the sheet offers, not a footnote.
-            if !branch.isEmpty, let unmergedCommits, unmergedCommits > 0 {
-                items.append(Item(.note, "Branch \(branch) is kept"))
-            }
+            // Whether the branch goes is a choice the sheet offers, not a footnote.
         }
         items.append(finishedSessions > 0
             ? Item(.note, "\(finishedSessions) finished session\(finishedSessions == 1 ? "" : "s") and their terminal history are deleted")

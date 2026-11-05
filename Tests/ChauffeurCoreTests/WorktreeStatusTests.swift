@@ -9,22 +9,28 @@ struct WorktreeStatusTests {
         #expect(clean.items(branch: "task", finishedSessions: 0, checkoutMissing: false) == [
             Item(.safe, "No uncommitted changes"), Item(.safe, "All commits are merged into main"),
             Item(.safe, "No session history is affected")])
-        // A merged branch is offered as a choice instead of a footnote.
+        // A merged branch is offered as a choice, ticked by default, instead of a footnote.
         #expect(clean.offersBranchDeletion(branch: "task", checkoutMissing: false))
+        #expect(clean.deletesBranchByDefault && clean.branchDeletionWarning == nil)
         #expect(!clean.offersBranchDeletion(branch: "", checkoutMissing: false))
         #expect(!clean.offersBranchDeletion(branch: "task", checkoutMissing: true))
         // Unmerged commits that already live on a remote lose nothing.
         let pushed = WorktreeDeletionPreview(hasChanges: false, unmergedCommits: 4, baseBranch: "main", unpushedCommits: 0, remoteBranch: "origin/task")
-        #expect(pushed.isPushed && !pushed.offersBranchDeletion(branch: "task", checkoutMissing: false))
+        // An unmerged branch is offered too, unticked; deleting a pushed one loses nothing.
+        #expect(pushed.isPushed && pushed.offersBranchDeletion(branch: "task", checkoutMissing: false))
+        #expect(!pushed.deletesBranchByDefault && pushed.branchDeletionWarning == nil)
         #expect(pushed.items(branch: "task", finishedSessions: 2, checkoutMissing: false) == [
             Item(.safe, "No uncommitted changes"), Item(.safe, "4 commits not merged into main, all pushed to origin/task"),
-            Item(.note, "Branch task is kept"), Item(.note, "2 finished sessions and their terminal history are deleted")])
+            Item(.note, "2 finished sessions and their terminal history are deleted")])
         let partlyPushed = WorktreeDeletionPreview(hasChanges: true, unmergedCommits: 4, baseBranch: "main", unpushedCommits: 1, remoteBranch: "origin/task")
         #expect(!partlyPushed.isPushed)
-        #expect(partlyPushed.items(branch: "task", finishedSessions: 0, checkoutMissing: false).map(\.severity) == [.loss, .loss, .note, .safe])
+        #expect(partlyPushed.items(branch: "task", finishedSessions: 0, checkoutMissing: false).map(\.severity) == [.loss, .loss, .safe])
+        #expect(partlyPushed.branchDeletionWarning == "1 unpushed commit will be permanently lost")
         #expect(partlyPushed.items(branch: "task", finishedSessions: 0, checkoutMissing: false)[1].text == "4 commits not merged into main, 1 not pushed to origin/task")
         let local = WorktreeDeletionPreview(hasChanges: false, unmergedCommits: 1, baseBranch: "main")
         #expect(local.items(branch: "task", finishedSessions: 0, checkoutMissing: false)[1] == Item(.loss, "1 commit not merged into main, not pushed to any remote"))
+        #expect(!local.deletesBranchByDefault && local.branchDeletionWarning == "1 unpushed commit will be permanently lost")
+        #expect(!WorktreeDeletionPreview(hasChanges: false).deletesBranchByDefault)
         // Submodule repositories go with the checkout; commits only they hold are lost.
         var submodules = WorktreeDeletionPreview(hasChanges: false, unmergedCommits: 0, baseBranch: "main", submodules: [.init(path: "lib", localCommits: 0)])
         #expect(!submodules.requiresDiscard)

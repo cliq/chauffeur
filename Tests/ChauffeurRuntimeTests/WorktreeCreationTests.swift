@@ -389,6 +389,21 @@ struct WorktreeCreationTests {
         #expect(try await ProcessRunner.run("/usr/bin/git", ["-C", fixture.repo.path, "show-ref", "--verify", "refs/heads/kept"]).status == 0)
     }
 
+    @Test func deletingAnUnmergedWorktreeCanForceDeleteItsBranch() async throws {
+        let fixture = try await Fixture.make(); defer { fixture.cleanup() }
+        let folder = fixture.project.folders[0]
+        let external = fixture.root.appendingPathComponent("doomed")
+        try #require(try await ProcessRunner.run("/usr/bin/git", ["-C", fixture.repo.path, "worktree", "add", "-b", "doomed", external.path, "HEAD"]).status == 0)
+        try #require(try await ProcessRunner.run("/usr/bin/git", ["-C", external.path, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "--allow-empty", "-m", "Unique"]).status == 0)
+        var params: [String: JSONValue] = ["projectID": .string(fixture.project.id.uuidString), "folderID": .string(folder.id.uuidString), "path": .string(external.path)]
+        let preview = try await fixture.runtime.handle(IPCRequest("previewWorktreeDeletion", params: .object(params))).decode(WorktreeDeletionPreview.self)
+        #expect(preview.offersBranchDeletion(branch: "doomed", checkoutMissing: false) && !preview.deletesBranchByDefault)
+        params["forceDeleteBranch"] = .bool(true)
+        let result = try await fixture.runtime.handle(IPCRequest("deleteWorktree", params: .object(params)))
+        #expect(result["deletedCheckout"].bool == true && !FileManager.default.fileExists(atPath: external.path))
+        #expect(try await ProcessRunner.run("/usr/bin/git", ["-C", fixture.repo.path, "show-ref", "--verify", "refs/heads/doomed"]).status != 0)
+    }
+
     @Test func deletingAWorktreeWithSubmodulesGuardsCommitsOnlyItHolds() async throws {
         let fixture = try await Fixture.make(); defer { fixture.cleanup() }
         func git(_ directory: String, _ arguments: [String]) async throws {

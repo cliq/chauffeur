@@ -280,8 +280,9 @@ public actor WorktreeManager {
     }
     /// Removes a checkout with `git worktree remove`. External checkouts are
     /// only deleted when the caller explicitly asks for it. Its branch goes too
-    /// when no other branch needs its commits, unless `keepBranch` is set.
-    public func remove(_ worktree: Worktree, liveSessions: [Session], allowExternal: Bool = false, discardChanges: Bool = false, keepBranch: Bool = false) async throws {
+    /// when no other branch needs its commits, unless `keepBranch` is set;
+    /// `forceDeleteBranch` deletes it even when its commits exist nowhere else.
+    public func remove(_ worktree: Worktree, liveSessions: [Session], allowExternal: Bool = false, discardChanges: Bool = false, keepBranch: Bool = false, forceDeleteBranch: Bool = false) async throws {
         let path = Paths.canonical(worktree.path)
         if !allowExternal {
             guard worktree.managed else { throw ChauffeurError("external_worktree", "External worktrees can only be unregistered") }
@@ -314,7 +315,7 @@ public actor WorktreeManager {
         let modules = Self.line(try await git(path, ["rev-parse", "--path-format=absolute", "--git-path", "modules"]))
         let force = discardChanges || !submodules.isEmpty || FileManager.default.fileExists(atPath: modules)
         _ = try await git(worktree.repositoryPath, ["worktree", "remove"] + (force ? ["--force"] : []) + ["--", path])
-        if !keepBranch { await deleteBranchIfUnused(entry.branch, repository: worktree.repositoryPath) }
+        if !keepBranch { await deleteBranchIfUnused(entry.branch, repository: worktree.repositoryPath, force: forceDeleteBranch) }
     }
     public func hasChanges(at path: String) async throws -> Bool {
         try await hasUncommittedChanges(at: path)
@@ -401,14 +402,18 @@ public actor WorktreeManager {
         }
         return entries
     }
-    public func deleteBranchIfUnused(_ branch: String, repository: String) async {
+    /// Deletes a branch no checkout uses once no other branch needs its
+    /// commits. `force` skips the commit check, discarding commits only it holds.
+    public func deleteBranchIfUnused(_ branch: String, repository: String, force: Bool = false) async {
         guard !branch.isEmpty else { return } // Detached HEAD.
         let reference = "refs/heads/" + branch
         do {
             let commit = Self.line(try await git(repository, ["rev-parse", "--verify", reference]))
-            let unique = try await git(repository, ["rev-list", "--count", commit, "--not", "--exclude=" + branch, "--branches"])
-            guard unique.trimmingCharacters(in: .whitespacesAndNewlines) == "0",
-                  try await !inventory(at: repository).contains(where: { $0.branch == branch }) else { return }
+            if !force {
+                let unique = try await git(repository, ["rev-list", "--count", commit, "--not", "--exclude=" + branch, "--branches"])
+                guard unique.trimmingCharacters(in: .whitespacesAndNewlines) == "0" else { return }
+            }
+            guard try await !inventory(at: repository).contains(where: { $0.branch == branch }) else { return }
             // Compare-and-delete preserves a branch advanced during the check.
             _ = try await git(repository, ["update-ref", "-d", reference, commit])
         } catch {

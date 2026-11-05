@@ -799,7 +799,7 @@ public actor RuntimeCoordinator {
         case "previewWorktreeDeletion":
             return try await deleteWorktree(projectID: params.uuid("projectID"), folderID: params.uuid("folderID"), path: params.requiredString("path"), preview: true)
         case "deleteWorktree":
-            let result = try await deleteWorktree(projectID: params.uuid("projectID"), folderID: params.uuid("folderID"), path: params.requiredString("path"), discardChanges: params["discardChanges"].bool == true, keepBranch: params["keepBranch"].bool == true)
+            let result = try await deleteWorktree(projectID: params.uuid("projectID"), folderID: params.uuid("folderID"), path: params.requiredString("path"), discardChanges: params["discardChanges"].bool == true, keepBranch: params["keepBranch"].bool == true, forceDeleteBranch: params["forceDeleteBranch"].bool == true)
             // The row leaves the inventory now; the full rescan fills in the rest without holding up the reply.
             if let path = result["path"].string { unlistRemovedCheckout(path) }
             rescanWorktrees()
@@ -928,8 +928,9 @@ public actor RuntimeCoordinator {
 
     /// Deletes a checkout, its records, and the history of its finished sessions.
     /// The checkout is removed from disk only when Git still lists it there.
-    /// `keepBranch` leaves its branch even when no other branch needs its commits.
-    private func deleteWorktree(projectID: UUID, folderID: UUID, path requested: String, preview: Bool = false, discardChanges: Bool = false, keepBranch: Bool = false) async throws -> JSONValue {
+    /// `keepBranch` leaves its branch even when no other branch needs its commits;
+    /// `forceDeleteBranch` deletes it even when its commits exist nowhere else.
+    private func deleteWorktree(projectID: UUID, folderID: UUID, path requested: String, preview: Bool = false, discardChanges: Bool = false, keepBranch: Bool = false, forceDeleteBranch: Bool = false) async throws -> JSONValue {
         let snapshot = await store.reload()
         guard let folder = snapshot.projects.first(where: { $0.value.id == projectID })?.value.folders.first(where: { $0.id == folderID && $0.registered }) else { throw ChauffeurError("missing_folder", "Select a registered project folder") }
         let path = Paths.canonical(requested)
@@ -969,7 +970,7 @@ public actor RuntimeCoordinator {
                 let repositoryID = try await worktrees.repositoryID(at: folder.canonicalPath)
                 var target = records.first?.value ?? Worktree(projectID: projectID, folderID: folderID, repositoryID: repositoryID, path: path, repositoryPath: folder.canonicalPath, branch: entry.branch, baseCommit: entry.commit, managed: false)
                 target.path = path; target.repositoryPath = folder.canonicalPath; target.gitIdentity = target.gitIdentity ?? entry.gitIdentity
-                try await worktrees.remove(target, liveSessions: Array(sessions.values), allowExternal: true, discardChanges: discardChanges, keepBranch: keepBranch)
+                try await worktrees.remove(target, liveSessions: Array(sessions.values), allowExternal: true, discardChanges: discardChanges, keepBranch: keepBranch, forceDeleteBranch: forceDeleteBranch)
                 deletedCheckout = true
             } else {
                 // The directory is already gone; only Git's stale entry remains.
@@ -977,7 +978,7 @@ public actor RuntimeCoordinator {
             }
         }
         if !deletedCheckout, !keepBranch, let branch = entry?.branch ?? records.first?.value.branch {
-            await worktrees.deleteBranchIfUnused(branch, repository: folder.canonicalPath)
+            await worktrees.deleteBranchIfUnused(branch, repository: folder.canonicalPath, force: forceDeleteBranch)
         }
         for session in affected {
             try await ledger.forget(sessionID: session.id)
