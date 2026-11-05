@@ -4,7 +4,8 @@ import ChauffeurCore
 /// Confirms a worktree removal with one verdict a glance can read: red with
 /// the issues that lose work, or green with the reasons nothing is lost. The
 /// two are never mixed in one list. A merged branch is deleted unless the
-/// person unticks it; one with unmerged commits is kept unless they tick it.
+/// person unticks it; one with unmerged commits is kept unless they tick it,
+/// and its unpushed commits only count as lost once they do.
 /// Finished session history removal is a footnote.
 struct WorktreeDeletionSheet: View {
     /// What happens to the checkout's branch.
@@ -26,12 +27,13 @@ struct WorktreeDeletionSheet: View {
     }
 
     private var items: [WorktreeDeletionPreview.Item] {
-        preview.items(branch: row.branch, finishedSessions: row.sessions.count, checkoutMissing: row.finished)
+        preview.items(branch: row.branch, finishedSessions: row.sessions.count, checkoutMissing: row.finished, deletingBranch: deletesBranch)
     }
     private var issues: [WorktreeDeletionPreview.Item] { items.filter { $0.severity == .loss } }
     private var reasons: [WorktreeDeletionPreview.Item] { items.filter { $0.severity == .safe } }
     private var notes: [WorktreeDeletionPreview.Item] { items.filter { $0.severity == .note } }
     private var losesWork: Bool { !issues.isEmpty }
+    private var deletesBranch: Bool { deleteBranch && preview.offersBranchDeletion(branch: row.branch, checkoutMissing: row.finished) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -77,15 +79,11 @@ struct WorktreeDeletionSheet: View {
                 .accessibilityIdentifier("worktreeDeletion.note")
             }
             if preview.offersBranchDeletion(branch: row.branch, checkoutMissing: row.finished) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Toggle(isOn: $deleteBranch) { Text("Delete branch \(Text(row.branch).fontWeight(.medium))") }
-                        .toggleStyle(.checkbox)
-                        .accessibilityIdentifier("worktreeDeletion.deleteBranch")
-                    if deleteBranch, let warning = preview.branchDeletionWarning {
-                        Text(warning).font(.caption).foregroundStyle(.red).padding(.leading, 20)
-                            .accessibilityIdentifier("worktreeDeletion.deleteBranch.warning")
-                    }
-                }
+                // The verdict above follows this choice, so ticking it on an
+                // unpushed branch turns the sheet red with the commits lost.
+                Toggle(isOn: $deleteBranch) { Text("Delete branch \(Text(row.branch).fontWeight(.medium))") }
+                    .toggleStyle(.checkbox)
+                    .accessibilityIdentifier("worktreeDeletion.deleteBranch")
             }
             if !notes.isEmpty {
                 Text(notes.map(\.text).joined(separator: " · ")).font(.caption).foregroundStyle(.secondary)
@@ -94,7 +92,7 @@ struct WorktreeDeletionSheet: View {
                 Spacer()
                 Button("Cancel", role: .cancel) { cancel() }.keyboardShortcut(.cancelAction)
                 Button("Delete Worktree", role: .destructive) {
-                    confirm(BranchChoice(keep: !deleteBranch, force: deleteBranch && !preview.deletesBranchByDefault))
+                    confirm(BranchChoice(keep: !deletesBranch, force: deletesBranch && !preview.deletesBranchByDefault))
                 }
                     .keyboardShortcut(.defaultAction)
                     .tint(losesWork ? .red : nil)

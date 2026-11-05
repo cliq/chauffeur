@@ -138,33 +138,31 @@ public struct WorktreeDeletionPreview: Codable, Equatable, Sendable {
     /// Every commit is merged, so the branch goes too unless the person keeps
     /// it. Otherwise deleting it is opt-in and forced.
     public var deletesBranchByDefault: Bool { unmergedCommits == 0 }
-    /// What deleting the branch costs, when it discards commits found nowhere else.
-    public var branchDeletionWarning: String? {
-        guard let unmergedCommits, unmergedCommits > 0 else {
-            return unmergedCommits == nil ? "Its merge state is unknown; any commits only it holds are lost" : nil
-        }
-        if isPushed { return nil }
-        let count = unpushedCommits.map { min($0, unmergedCommits) } ?? unmergedCommits
-        return "\(count) unpushed commit\(count == 1 ? "" : "s") will be permanently lost"
-    }
     /// The checklist a deletion confirmation shows: one line per fact about
     /// the checkout, marked safe or lossy, so the reader does not parse prose.
-    public func items(branch: String, finishedSessions: Int, checkoutMissing: Bool) -> [Item] {
+    /// Unmerged commits are only lost when `deletingBranch` takes the branch
+    /// holding them, or when no branch holds them (a detached HEAD).
+    public func items(branch: String, finishedSessions: Int, checkoutMissing: Bool, deletingBranch: Bool) -> [Item] {
         var items: [Item] = []
         if checkoutMissing {
             items.append(Item(.note, "The checkout is already gone"))
         } else {
             items.append(hasChanges ? Item(.loss, "Uncommitted or untracked files will be permanently lost") : Item(.safe, "No uncommitted changes"))
             let base = baseBranch.map { " into \($0)" } ?? ""
+            let keptBranch = branch.isEmpty || deletingBranch ? nil : branch
             switch unmergedCommits {
             case nil:
-                items.append(Item(.note, "Merge state is unknown"))
+                items.append(!branch.isEmpty && deletingBranch
+                    ? Item(.loss, "Merge state is unknown; commits only branch \(branch) holds will be lost")
+                    : Item(.note, "Merge state is unknown"))
             case 0?:
                 items.append(Item(.safe, "All commits are merged\(base)"))
             case let count?:
                 let commits = "\(count) commit\(count == 1 ? "" : "s") not merged\(base)"
                 if isPushed, let remoteBranch {
                     items.append(Item(.safe, "\(commits), all pushed to \(remoteBranch)"))
+                } else if let keptBranch {
+                    items.append(Item(.safe, "\(commits), kept on branch \(keptBranch)"))
                 } else if let remoteBranch, let unpushedCommits {
                     items.append(Item(.loss, "\(commits), \(unpushedCommits) not pushed to \(remoteBranch)"))
                 } else {
