@@ -2,7 +2,21 @@ import SwiftUI
 import ChauffeurRemoteProtocol
 import ChauffeurRemoteClient
 
-/// A searchable local-branch picker backed by the connected Mac.
+/// What a branch is picked for: an existing branch to check out in the new worktree, which
+/// must not be checked out anywhere yet, or the starting point of a new branch, which may be.
+enum WorktreeBranchPurpose {
+    case existingBranch
+    case startingPoint
+
+    var title: String {
+        switch self {
+        case .existingBranch: "Existing branch"
+        case .startingPoint: "Starting point"
+        }
+    }
+}
+
+/// A row opening a searchable picker of the repository's existing local branches.
 struct WorktreeBranchPicker: View {
     let model: MobileAppModel
     let projectID: UUID
@@ -18,16 +32,18 @@ struct WorktreeBranchPicker: View {
         }
         .accessibilityIdentifier("launch-existing-branch")
         .sheet(isPresented: $presented) {
-            WorktreeBranchPickerSheet(model: model, projectID: projectID, folderID: folderID, selection: $selection)
+            WorktreeBranchPickerSheet(model: model, projectID: projectID, folderID: folderID, purpose: .existingBranch, selection: $selection)
         }
     }
 }
 
-private struct WorktreeBranchPickerSheet: View {
+/// A searchable local-branch picker backed by the connected Mac.
+struct WorktreeBranchPickerSheet: View {
     @Environment(\.dismiss) private var dismiss
     let model: MobileAppModel
     let projectID: UUID
     let folderID: UUID
+    let purpose: WorktreeBranchPurpose
     @Binding var selection: String
     @State private var branches: [WorktreeBranchOption]?
     @State private var query = ""
@@ -53,13 +69,14 @@ private struct WorktreeBranchPickerSheet: View {
                     ContentUnavailableView.search(text: query)
                 } else {
                     ForEach(matches) { branch in
+                        let unavailable = purpose == .existingBranch && branch.isCheckedOut
                         Button {
                             selection = branch.name
                             dismiss()
                         } label: {
                             HStack {
                                 VStack(alignment: .leading, spacing: 4) {
-                                    Text(branch.name).foregroundStyle(branch.isCheckedOut ? .secondary : .primary)
+                                    Text(branch.name).foregroundStyle(unavailable ? .secondary : .primary)
                                     if let path = branch.checkoutPath {
                                         Text("Checked out at " + path).font(.caption).foregroundStyle(.secondary)
                                     } else if branch.isCheckedOut {
@@ -70,11 +87,11 @@ private struct WorktreeBranchPickerSheet: View {
                                 if branch.name == selection { Image(systemName: "checkmark") }
                             }
                         }
-                        .disabled(branch.isCheckedOut)
+                        .disabled(unavailable)
                     }
                 }
             }
-            .navigationTitle("Existing branch")
+            .navigationTitle(purpose.title)
             .navigationBarTitleDisplayMode(.inline)
             .searchable(text: $query, prompt: "Search local branches")
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } } }

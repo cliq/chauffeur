@@ -2,7 +2,8 @@ import SwiftUI
 import ChauffeurRemoteProtocol
 import ChauffeurRemoteClient
 
-/// 05 / Launch: agent or shell in the chosen location; new-worktree fields inline.
+/// New session, last step: agent or shell in the chosen location, which may be a worktree
+/// the Mac creates first.
 ///
 /// One `operationKey` lives for the whole screen. A retry after a failure reuses it while the
 /// request payload is unchanged, so the Mac resolves it to the original worktree and session;
@@ -28,28 +29,23 @@ struct LaunchView: View {
 
     var model: MobileAppModel
     let location: LaunchLocation
+    /// Title and task from an earlier step, applied once.
+    var prefill = LaunchPrefill()
 
     @State private var kind: Kind = .agent
     @State private var presetID: UUID?
     @State private var title = ""
     @State private var initialTask = ""
-    @State private var branch = ""
-    @State private var existingBranch = ""
-    @State private var reuseExistingBranch = false
-    private var selectedBranch: String { reuseExistingBranch ? existingBranch : branch }
-    @State private var suggestedBranch = ""
-    /// The branch the Mac rendered for a ticket title, kept so retitling to the key does not fall back to a slug.
-    @State private var ticketBranch: (title: String, branch: String)?
-    @State private var baseRef = "HEAD"
+    /// The last title a ticket was resolved for, so a resolved key is not looked up again.
+    @State private var resolvedTitle: String?
     @State private var groupID: UUID?
     @State private var allowSharedCheckout = false
     @State private var coordination = false
     @State private var namingGroup = false
     @State private var newGroupName = ""
     @State private var groupError: String?
+    @State private var showsMessaging = false
     @State private var appliedRepositoryChoices = false
-    @State private var destination: String?
-    @State private var destinationError: String?
     @State private var operationKey = UUID()
     @State private var isLaunching = false
     @State private var failure: Failure?
@@ -62,10 +58,6 @@ struct LaunchView: View {
 
     private var folder: FolderSummary? {
         inventory?.folder(location.folderID)
-    }
-
-    private var isNewWorktree: Bool {
-        location.checkout == .newWorktree
     }
 
     private var existingCheckout: CheckoutSummary? {
@@ -87,22 +79,17 @@ struct LaunchView: View {
     private var canLaunch: Bool {
         guard model.isConnected, !isLaunching else { return false }
         if kind == .agent, presetID == nil { return false }
-        if isNewWorktree, trimmed(selectedBranch).isEmpty || (!reuseExistingBranch && trimmed(baseRef).isEmpty) { return false }
         return true
     }
 
     var body: some View {
         Form {
             Section {
-                LabeledContent("Location", value: model.describe(location))
-                Button("Change location") {
-                    model.path.removeLast()
-                }
-            }
-
-            if let note = existingCheckout?.note {
-                Section("Note on this checkout") {
-                    Text(note)
+                LocationSummary(model: model, location: location, showsLiveCount: false)
+                    .accessibilityIdentifier("launch-location")
+                if let note = existingCheckout?.note {
+                    Label(note, systemImage: "note.text")
+                        .font(.subheadline)
                         .textSelection(.enabled)
                         .accessibilityIdentifier("launch-checkout-note")
                 }
@@ -138,14 +125,11 @@ struct LaunchView: View {
                             .foregroundStyle(.secondary)
                     }
                 }
-            }
 
-            messagingSection
-
-            if kind == .agent {
                 Section("Initial task (optional)") {
                     TextField("What should the agent start with?", text: $initialTask, axis: .vertical)
                         .lineLimit(3...6)
+                        .accessibilityIdentifier("launch-task")
                 }
             } else {
                 Section {
@@ -156,48 +140,10 @@ struct LaunchView: View {
 
             Section("Title (optional)") {
                 TextField("Session title", text: $title)
+                    .accessibilityIdentifier("launch-title")
             }
 
-            if isNewWorktree {
-                Section {
-                    Picker("Branch", selection: $reuseExistingBranch) {
-                        Text("New branch").tag(false)
-                        Text("Existing branch").tag(true)
-                    }
-                    .accessibilityIdentifier("launch-branch-mode")
-                    if reuseExistingBranch {
-                        WorktreeBranchPicker(model: model, projectID: location.projectID, folderID: location.folderID, selection: $existingBranch)
-                    } else {
-                        TextField("New branch", text: $branch)
-                            .textInputAutocapitalization(.never)
-                            .autocorrectionDisabled()
-                            .accessibilityIdentifier("launch-branch")
-                        TextField("Base ref", text: $baseRef)
-                            .textInputAutocapitalization(.never)
-                            .autocorrectionDisabled()
-                            .accessibilityIdentifier("launch-base-ref")
-                    }
-                    LabeledContent("Destination") {
-                        if let destinationError {
-                            Text(destinationError)
-                                .foregroundStyle(.orange)
-                        } else if let destination {
-                            Text(destination)
-                                .font(.caption.monospaced())
-                                .multilineTextAlignment(.trailing)
-                        } else if trimmed(selectedBranch).isEmpty {
-                            Text(reuseExistingBranch ? "Choose a branch" : "Enter a branch")
-                        } else {
-                            ProgressView()
-                        }
-                    }
-                    .foregroundStyle(.secondary)
-                } header: {
-                    Text("New worktree")
-                } footer: {
-                    Text("The Mac creates a managed worktree at the destination shown, then launches in it.")
-                }
-            }
+            messagingSection
 
             if isSharedCheckout {
                 Section {
@@ -219,11 +165,11 @@ struct LaunchView: View {
                         VStack(alignment: .leading, spacing: 4) {
                             Text(failure.message)
                                 .font(.subheadline)
-                            if failure.worktreeCreated {
-                                Text("Worktree created; retry launches in it.")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
+                            Text(failure.worktreeCreated
+                                 ? "Worktree created; retry launches in it."
+                                 : "Retry keeps the original operation while nothing changed.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
                         }
                     } icon: {
                         Image(systemName: "exclamationmark.triangle.fill")
@@ -232,28 +178,9 @@ struct LaunchView: View {
                     .accessibilityIdentifier("launch-error")
                 }
             }
-
-            Section {
-                Button {
-                    Task { await launch() }
-                } label: {
-                    HStack {
-                        if isLaunching {
-                            ProgressView()
-                        }
-                        Text(buttonTitle)
-                    }
-                    .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.borderedProminent)
-                .disabled(!canLaunch)
-                .accessibilityIdentifier("launch-button")
-            } footer: {
-                Text(model.isConnected
-                     ? "Launch opens a terminal tab. Errors stay here; retry keeps the original operation while nothing changed."
-                     : "Reconnect to your Mac to launch.")
-            }
-            .listRowBackground(Color.clear)
+        }
+        .safeAreaInset(edge: .bottom) {
+            launchBar
         }
         .alert("New group", isPresented: $namingGroup) {
             TextField("Group name", text: $newGroupName)
@@ -266,68 +193,96 @@ struct LaunchView: View {
         } message: {
             Text("Sessions in this group message and delegate only to each other.")
         }
-        .navigationTitle("Launch session")
+        .navigationTitle(kind == .agent ? "Launch agent" : "Open shell")
         .navigationBarTitleDisplayMode(.inline)
         .onAppear(perform: applyDefaults)
-        .onChange(of: title) { _, newTitle in
-            if let ticketBranch, ticketBranch.title == newTitle {
-                suggestBranch(ticketBranch.branch)
-            } else {
-                suggestBranch(WorktreeCreationSpec.branchSlug(from: newTitle))
-            }
-        }
         .task(id: title) {
             await resolveTitleTicket()
         }
-        .task(id: branch) {
-            await resolveBranchTicket()
-        }
-        .task(id: trimmed(selectedBranch)) {
-            await previewDestination()
-        }
     }
 
+    /// The Launch button, kept above the keyboard and the form's end.
+    private var launchBar: some View {
+        VStack(spacing: 6) {
+            Button {
+                Task { await launch() }
+            } label: {
+                HStack {
+                    if isLaunching {
+                        ProgressView()
+                    }
+                    Text(buttonTitle)
+                }
+                .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
+            .disabled(!canLaunch)
+            .accessibilityIdentifier("launch-button")
+            if !model.isConnected {
+                Text("Reconnect to your Mac to launch.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(.horizontal)
+        .padding(.vertical, 10)
+        .background(.bar)
+    }
+
+    /// Remembered per repository, so it stays folded behind a summary of the current choice.
     private var messagingSection: some View {
         Section {
-            if offersCoordination {
-                Toggle(isOn: $coordination) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Enable Chauffeur messaging and delegation")
-                            .font(.subheadline.weight(.semibold))
-                        Text(coordination
-                             ? "Experimental: CLI integration is under compatibility validation."
-                             : "Basic terminal mode: messaging, delegation, and semantic status signals are unavailable.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+            DisclosureGroup(isExpanded: $showsMessaging) {
+                if offersCoordination {
+                    Toggle(isOn: $coordination) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Enable Chauffeur messaging and delegation")
+                                .font(.subheadline.weight(.semibold))
+                            Text(coordination
+                                 ? "Experimental: CLI integration is under compatibility validation."
+                                 : "Basic terminal mode: messaging, delegation, and semantic status signals are unavailable.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .accessibilityIdentifier("launch-coordination")
+                }
+                Picker("Group", selection: $groupID) {
+                    Text("Project default").tag(UUID?.none)
+                    ForEach(project?.groups ?? []) { group in
+                        Text(group.name).tag(Optional(group.id))
                     }
                 }
-                .accessibilityIdentifier("launch-coordination")
-            }
-            Picker("Group", selection: $groupID) {
-                Text("Project default").tag(UUID?.none)
-                ForEach(project?.groups ?? []) { group in
-                    Text(group.name).tag(Optional(group.id))
+                if model.groupCreationIsSupported {
+                    Button("New group…") {
+                        newGroupName = ""
+                        groupError = nil
+                        namingGroup = true
+                    }
+                    .disabled(!model.isConnected)
+                    .accessibilityIdentifier("launch-new-group")
                 }
-            }
-            if model.groupCreationIsSupported {
-                Button("New group…") {
-                    newGroupName = ""
-                    groupError = nil
-                    namingGroup = true
+                if let groupError {
+                    Text(groupError)
+                        .font(.caption)
+                        .foregroundStyle(.orange)
                 }
-                .disabled(!model.isConnected)
-                .accessibilityIdentifier("launch-new-group")
+            } label: {
+                LabeledContent(offersCoordination ? "Messaging" : "Group", value: messagingSummary)
             }
-            if let groupError {
-                Text(groupError)
-                    .font(.caption)
-                    .foregroundStyle(.orange)
-            }
+            .accessibilityIdentifier("launch-messaging")
         } footer: {
             Text(offersCoordination
                  ? "Sessions message and delegate only within their group. Each repository remembers these choices for its next agent."
                  : "Uses existing Mac configuration.")
         }
+    }
+
+    private var messagingSummary: String {
+        let group = groupID.flatMap { id in project?.groups.first { $0.id == id }?.name } ?? "Project default"
+        guard offersCoordination else { return group }
+        return "\(coordination ? "On" : "Off") · \(group)"
     }
 
     private func createGroup() async {
@@ -350,6 +305,11 @@ struct LaunchView: View {
     }
 
     private func applyDefaults() {
+        if !appliedRepositoryChoices {
+            title = prefill.title ?? ""
+            initialTask = prefill.task ?? ""
+            resolvedTitle = prefill.title
+        }
         if presetID == nil {
             presetID = project?.presets.first?.id
         }
@@ -366,65 +326,20 @@ struct LaunchView: View {
         coordination = folder?.lastCoordinationEnabled ?? false
     }
 
-    /// Fills the branch from the title until the branch is edited by hand.
-    private func suggestBranch(_ suggestion: String) {
-        if branch.isEmpty || branch == suggestedBranch {
-            branch = suggestion
-        }
-        suggestedBranch = suggestion
-    }
-
-    /// A pasted ticket link becomes the ticket's key, and an empty task becomes the link;
-    /// a bare key only changes the suggested branch. Older Macs leave the title as typed.
+    /// A pasted ticket link becomes the ticket's key, and an empty task becomes the link's task.
+    /// Older Macs leave the title as typed.
     private func resolveTitleTicket() async {
         let text = title
-        guard !trimmed(text).isEmpty, ticketBranch?.title != text else { return }
+        guard text.contains("://"), resolvedTitle != text else { return }
         try? await Task.sleep(for: .milliseconds(300))
         guard !Task.isCancelled,
               let ticket = try? await model.resolveTicket(projectID: location.projectID, folderID: location.folderID, text: text),
-              !Task.isCancelled, title == text else { return }
-        if ticket.url != nil {
-            if trimmed(initialTask).isEmpty, let task = ticket.task {
-                initialTask = task
-            }
-            ticketBranch = (ticket.title, ticket.branch)
-            title = ticket.title
-        } else {
-            ticketBranch = (text, ticket.branch)
-            suggestBranch(ticket.branch)
+              !Task.isCancelled, title == text, ticket.url != nil else { return }
+        if trimmed(initialTask).isEmpty, let task = ticket.task {
+            initialTask = task
         }
-    }
-
-    /// Only a link is rewritten here: a key typed by hand would match before it is finished.
-    private func resolveBranchTicket() async {
-        let text = branch
-        guard isNewWorktree, !reuseExistingBranch, text.contains("://") else { return }
-        try? await Task.sleep(for: .milliseconds(300))
-        guard !Task.isCancelled,
-              let ticket = try? await model.resolveTicket(projectID: location.projectID, folderID: location.folderID, text: text),
-              !Task.isCancelled, branch == text, ticket.url != nil else { return }
-        branch = ticket.branch
-    }
-
-    /// Debounced 300 ms so typing a branch does not send a request per keystroke.
-    private func previewDestination() async {
-        let branch = trimmed(selectedBranch)
-        destination = nil
-        destinationError = nil
-        guard isNewWorktree, !branch.isEmpty else { return }
-        try? await Task.sleep(for: .milliseconds(300))
-        guard !Task.isCancelled else { return }
-        do {
-            let path = try await model.previewWorktree(projectID: location.projectID, folderID: location.folderID, branch: branch)
-            guard !Task.isCancelled else { return }
-            destination = path
-        } catch let error as RemoteClientError {
-            guard !Task.isCancelled else { return }
-            destinationError = error.userMessage
-        } catch {
-            guard !Task.isCancelled else { return }
-            destinationError = String(describing: error)
-        }
+        resolvedTitle = ticket.title
+        title = ticket.title
     }
 
     private func buildRequest() -> LaunchOperationRequest? {
@@ -439,9 +354,9 @@ struct LaunchView: View {
         case .existing:
             worktreeID = existingCheckout?.worktreeID
             newWorktree = nil
-        case .newWorktree:
+        case .newWorktree(let draft):
             worktreeID = nil
-            newWorktree = WorktreeCreationSpec(branch: trimmed(selectedBranch), baseRef: reuseExistingBranch ? "HEAD" : trimmed(baseRef), reuseExistingBranch: reuseExistingBranch)
+            newWorktree = draft.spec
         }
         let spec = LaunchSpec(
             projectID: location.projectID,
@@ -498,7 +413,10 @@ struct LaunchView: View {
     return NavigationStack {
         LaunchView(
             model: model,
-            location: LaunchLocation(projectID: project.id, folderID: project.folders[0].id, checkout: .newWorktree)
+            location: LaunchLocation(projectID: project.id, folderID: project.folders[0].id,
+                                     checkout: .newWorktree(NewWorktreeDraft(branch: "feature/search", baseRef: "main", reuseExistingBranch: false,
+                                                                             destination: "/Users/leo/Chauffeur/.worktrees/feature-search"))),
+            prefill: LaunchPrefill(title: "Search projects", task: nil)
         )
     }
 }

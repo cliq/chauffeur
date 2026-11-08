@@ -7,17 +7,36 @@ import ChauffeurTerminalInterface
 import ChauffeurTerminalTesting
 import ChauffeurTerminalSwiftTerm
 
-/// Where a launch will run. `newWorktree` collects branch/base on the Launch screen.
+/// Where a launch will run: an existing checkout, or a worktree the Mac creates first.
 struct LaunchLocation: Hashable {
     enum Checkout: Hashable {
         /// An existing checkout, identified by its path (`CheckoutSummary.id`).
         case existing(path: String)
-        case newWorktree
+        case newWorktree(NewWorktreeDraft)
     }
 
     var projectID: UUID
     var folderID: UUID
     var checkout: Checkout
+}
+
+/// The worktree chosen on the new-worktree step, created by the Mac when the session launches.
+struct NewWorktreeDraft: Hashable {
+    var branch: String
+    var baseRef: String
+    var reuseExistingBranch: Bool
+    /// The Mac's preview of where the worktree goes, shown on the Launch screen.
+    var destination: String?
+
+    var spec: WorktreeCreationSpec {
+        WorktreeCreationSpec(branch: branch, baseRef: reuseExistingBranch ? "HEAD" : baseRef, reuseExistingBranch: reuseExistingBranch)
+    }
+}
+
+/// What an earlier step fills in on the Launch screen, such as a ticket's title and task.
+struct LaunchPrefill: Hashable {
+    var title: String?
+    var task: String?
 }
 
 enum MobileRoute: Hashable {
@@ -26,9 +45,22 @@ enum MobileRoute: Hashable {
     case progress(sessionID: UUID)
     case documents(sessionID: UUID)
     case document(sessionID: UUID, path: String)
-    /// `projectID` optionally preselects the project for a new session.
-    case location(projectID: UUID?)
-    case launch(LaunchLocation)
+    /// The new-session steps: project, repository, checkout, an optional new worktree, then Launch.
+    /// `MobileAppModel.newSessionRoute` skips a step that has only one choice.
+    case newSession
+    case repository(projectID: UUID)
+    case checkout(projectID: UUID, folderID: UUID)
+    /// `baseRef` optionally preselects the new branch's starting point.
+    case newWorktree(projectID: UUID, folderID: UUID, baseRef: String? = nil)
+    case launch(LaunchLocation, prefill: LaunchPrefill = LaunchPrefill())
+}
+
+/// A checkout this phone launched in, remembered so the new-session flow can offer it again.
+struct RecentLaunch: Codable, Hashable {
+    var projectID: UUID
+    var folderID: UUID
+    var checkoutPath: String
+    var date: Date
 }
 
 /// What the Launch screen shows after `MobileAppModel.launch` returns.
@@ -97,6 +129,10 @@ final class MobileAppModel {
     /// Where the selected Mac is remembered; `nil` keeps it for this model only.
     @ObservationIgnored private let defaults: UserDefaults?
     private static let selectedHostKey = "chauffeur.remote.selectedHostID"
+    private static let recentLaunchesKey = "chauffeur.remote.recentLaunches"
+    private static let recentLaunchLimit = 10
+    /// This phone's recent launches, keyed by Mac host ID.
+    private var recentLaunchHistory: [String: [RecentLaunch]] = [:]
     @ObservationIgnored private var adapters: [UUID: any TerminalEngineAdapter] = [:]
     @ObservationIgnored private var previewInventory: InventorySnapshot?
     @ObservationIgnored private var previewConnectionState: HostConnectionState?
@@ -114,6 +150,10 @@ final class MobileAppModel {
         self.makeJournal = makeJournal
         self.defaults = defaults
         self.makeTerminalAdapter = makeTerminalAdapter
+        if let data = defaults?.data(forKey: Self.recentLaunchesKey),
+           let history = try? JSONDecoder().decode([String: [RecentLaunch]].self, from: data) {
+            recentLaunchHistory = history
+        }
         do {
             savedHosts = try credentials.loadAll()
             let remembered = defaults?.string(forKey: Self.selectedHostKey).flatMap(UUID.init(uuidString:))
@@ -579,6 +619,9 @@ final class MobileAppModel {
                     return .failed(message: "The Mac reported success without a session.", worktreeCreated: status.worktreeID != nil)
                 }
                 await session.refreshInventory()
+                if let launched = inventory?.session(sessionID) {
+                    recordRecentLaunch(projectID: launched.projectID, folderID: launched.folderID, checkoutPath: launched.checkoutPath)
+                }
                 openSession(sessionID)
                 return .launched(sessionID: sessionID)
             case .failed:
@@ -612,14 +655,73 @@ final class MobileAppModel {
         LaunchLocation(projectID: session.projectID, folderID: session.folderID, checkout: .existing(path: session.checkoutPath))
     }
 
-    func describe(_ location: LaunchLocation) -> String {
-        let project = inventory?.project(location.projectID)?.name ?? "Project"
-        switch location.checkout {
-        case .existing(let path):
-            return "\(project) / \(inventory?.checkout(path: path)?.branch ?? path)"
-        case .newWorktree:
-            return "\(project) / new worktree"
+    // MARK: - New session
+
+    /// The first new-session screen, skipping each step that has a single choice: one
+    /// project goes to its repositories, one repository to its checkouts, and a plain
+    /// folder with one checkout straight to Launch. Applied when pushing, so a skipped
+    /// screen never sits in the back stack.
+    func newSessionRoute(projectID: UUID? = nil, folderID: UUID? = nil) -> MobileRoute {
+        let projects = inventory?.projects.filter { !$0.archived } ?? []
+        let project = projectID.flatMap { id in projects.first { $0.id == id } } ?? (projects.count == 1 ? projects.first : nil)
+        guard let project else { return .newSession }
+        let folder = folderID.flatMap { id in project.folders.first { $0.id == id } } ?? (project.folders.count == 1 ? project.folders.first : nil)
+        guard let folder, folder.availability == .available else { return .repository(projectID: project.id) }
+        let checkouts = folder.checkouts.filter { $0.availability == .available }
+        if !folder.isRepository, checkouts.count == 1 {
+            return .launch(LaunchLocation(projectID: project.id, folderID: folder.id, checkout: .existing(path: checkouts[0].path)))
         }
+        return .checkout(projectID: project.id, folderID: folder.id)
+    }
+
+    func startNewSession(projectID: UUID? = nil) {
+        path.append(newSessionRoute(projectID: projectID))
+    }
+
+    /// Checkouts launched in most recently, from this phone's launches and the Mac's sessions,
+    /// one per checkout, leaving out any the inventory no longer offers.
+    func recentLocations(limit: Int = 4) -> [LaunchLocation] {
+        guard let inventory else { return [] }
+        let launched = recentLaunches.map { ($0.projectID, $0.folderID, $0.checkoutPath, $0.date) }
+        let sessions = inventory.sessions.map { ($0.projectID, $0.folderID, $0.checkoutPath, $0.createdAt) }
+        var seen = Set<String>()
+        var locations: [LaunchLocation] = []
+        for (projectID, folderID, path, _) in (launched + sessions).sorted(by: { $0.3 > $1.3 }) where seen.insert(path).inserted {
+            guard let project = inventory.project(projectID), !project.archived,
+                  let folder = project.folders.first(where: { $0.id == folderID }), folder.availability == .available,
+                  folder.checkouts.contains(where: { $0.path == path && $0.availability == .available }) else { continue }
+            locations.append(LaunchLocation(projectID: projectID, folderID: folderID, checkout: .existing(path: path)))
+            if locations.count == limit { break }
+        }
+        return locations
+    }
+
+    /// Remembers a launch on this phone, per Mac, for `recentLocations`.
+    func recordRecentLaunch(projectID: UUID, folderID: UUID, checkoutPath: String, date: Date = Date()) {
+        guard let hostID = selectedHostID else { return }
+        var launches = recentLaunchHistory[hostID.uuidString] ?? []
+        launches.removeAll { $0.checkoutPath == checkoutPath }
+        launches.insert(RecentLaunch(projectID: projectID, folderID: folderID, checkoutPath: checkoutPath, date: date), at: 0)
+        recentLaunchHistory[hostID.uuidString] = Array(launches.prefix(Self.recentLaunchLimit))
+        if let data = try? JSONEncoder().encode(recentLaunchHistory) {
+            defaults?.set(data, forKey: Self.recentLaunchesKey)
+        }
+    }
+
+    private var recentLaunches: [RecentLaunch] {
+        selectedHostID.flatMap { recentLaunchHistory[$0.uuidString] } ?? []
+    }
+
+    func liveSessionCount(checkoutPath: String) -> Int {
+        liveSessions.count { $0.checkoutPath == checkoutPath }
+    }
+
+    func liveSessionCount(folderID: UUID) -> Int {
+        liveSessions.count { $0.folderID == folderID }
+    }
+
+    func liveSessionCount(projectID: UUID) -> Int {
+        liveSessions.count { $0.projectID == projectID }
     }
 
     // MARK: - Private

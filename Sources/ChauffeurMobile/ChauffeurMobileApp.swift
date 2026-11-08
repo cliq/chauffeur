@@ -30,10 +30,10 @@ extension ChauffeurMobileApp {
     static func makeModel() -> MobileAppModel {
         #if DEBUG
         // Opens on the preview inventory, for checking layouts on a simulator without
-        // pairing; `--preview-location` continues to the new-session location step.
+        // pairing; `--preview-location` continues to the new-session project step.
         if CommandLine.arguments.contains("--preview-fixture") {
             let model = MobileAppModel.preview()
-            if CommandLine.arguments.contains("--preview-location") { model.path.append(.location(projectID: nil)) }
+            if CommandLine.arguments.contains("--preview-location") { model.path.append(.newSession) }
             return model
         }
         #endif
@@ -63,10 +63,16 @@ struct RootView: View {
                         } else {
                             DocumentReaderView(model: model, sessionID: sessionID, path: path)
                         }
-                    case .location(let projectID):
-                        LocationView(model: model, preselectedProjectID: projectID)
-                    case .launch(let location):
-                        LaunchView(model: model, location: location)
+                    case .newSession:
+                        ProjectPickerView(model: model)
+                    case .repository(let projectID):
+                        RepositoryPickerView(model: model, projectID: projectID)
+                    case .checkout(let projectID, let folderID):
+                        CheckoutPickerView(model: model, projectID: projectID, folderID: folderID)
+                    case .newWorktree(let projectID, let folderID, let baseRef):
+                        NewWorktreeView(model: model, projectID: projectID, folderID: folderID, initialBaseRef: baseRef)
+                    case .launch(let location, let prefill):
+                        LaunchView(model: model, location: location, prefill: prefill)
                     }
                 }
         }

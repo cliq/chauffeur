@@ -108,7 +108,7 @@ struct SessionsView: View {
             }
             ToolbarItem(placement: .topBarTrailing) {
                 Button("New session", systemImage: "plus") {
-                    model.path.append(.location(projectID: nil))
+                    model.startNewSession()
                 }
                 .disabled(model.inventory == nil || !model.isConnected)
                 .accessibilityIdentifier("sessions-new")
@@ -198,13 +198,25 @@ private struct ProjectSections: View {
 
     var body: some View {
         Section {} header: {
-            CollapsingHeader(isExpanded: $isExpanded, count: sessions.count, needsAttention: sessions.contains(where: \.needsAttention)) {
-                Text(project.name)
-                    .font(.headline)
-                    .foregroundStyle(.primary)
+            HStack(spacing: 4) {
+                CollapsingHeader(isExpanded: $isExpanded, count: sessions.count, needsAttention: sessions.contains(where: \.needsAttention)) {
+                    Text(project.name)
+                        .font(.headline)
+                        .foregroundStyle(.primary)
+                }
+                .accessibilityIdentifier("sessions.project.\(project.id)")
+                Button("New session in \(project.name)", systemImage: "plus") {
+                    model.startNewSession(projectID: project.id)
+                }
+                .labelStyle(.iconOnly)
+                .font(.subheadline.weight(.semibold))
+                .frame(minWidth: 44, minHeight: 44)
+                .contentShape(Rectangle())
+                .buttonStyle(.borderless)
+                .disabled(!model.isConnected)
+                .accessibilityIdentifier("sessions.project.new")
             }
             .textCase(nil)
-            .accessibilityIdentifier("sessions.project.\(project.id)")
         }
         .headerProminence(.increased)
         if isExpanded {
@@ -233,6 +245,7 @@ private struct ProjectSections: View {
                                 SessionRow(session: entry.session, location: entry.location) {
                                     model.openSession(entry.session.id)
                                 }
+                                .contextMenu { SessionLaunchMenu(model: model, session: entry.session) }
                                 .disabled(!model.isConnected)
                             }
                         } header: {
@@ -240,6 +253,23 @@ private struct ProjectSections: View {
                         }
                     }
                 }
+            }
+        }
+    }
+}
+
+/// Starts a new session beside a running one: in its checkout, or in a new worktree from its branch.
+private struct SessionLaunchMenu: View {
+    var model: MobileAppModel
+    let session: SessionSummary
+
+    var body: some View {
+        Button("New session here", systemImage: "plus.rectangle") {
+            model.path.append(.launch(model.location(of: session)))
+        }
+        if model.inventory?.folder(session.folderID)?.isRepository == true, let branch = session.branch {
+            Button("New worktree from \(branch)", systemImage: "arrow.triangle.branch") {
+                model.path.append(.newWorktree(projectID: session.projectID, folderID: session.folderID, baseRef: branch))
             }
         }
     }
