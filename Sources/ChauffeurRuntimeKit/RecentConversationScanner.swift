@@ -77,6 +77,30 @@ public enum RecentConversationScanner {
                                   startedAt: started, updatedAt: modified, configurationDirectory: configuration, transcriptPath: url.path)
     }
 
+    /// Whether a conversation's transcript is on disk and resumable, however old it is.
+    public static func hasTranscript(kind: CLIKind, id: String, checkout path: String, configuration: String) -> Bool {
+        let checkout = Paths.canonical(path)
+        switch kind {
+        case .claude:
+            let url = URL(fileURLWithPath: configuration).appendingPathComponent("projects").appendingPathComponent(claudeProjectFolder(checkout)).appendingPathComponent("\(id).jsonl")
+            let modified = (try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+            return claudeConversation(url, checkout: checkout, modified: modified, configuration: configuration) != nil
+        case .codex:
+            // Rollouts are named after the conversation: `rollout-<time>-<id>.jsonl`.
+            let suffix = "-\(id.lowercased()).jsonl"
+            guard let enumerator = FileManager.default.enumerator(at: URL(fileURLWithPath: configuration).appendingPathComponent("sessions"), includingPropertiesForKeys: nil) else { return false }
+            for case let url as URL in enumerator where url.lastPathComponent.hasPrefix("rollout-") && url.lastPathComponent.lowercased().hasSuffix(suffix) {
+                guard let first = firstLine(url), let object = (try? JSONSerialization.jsonObject(with: first)) as? [String: Any],
+                      object["type"] as? String == "session_meta", let meta = object["payload"] as? [String: Any],
+                      let recorded = meta["id"] as? String, recorded.lowercased() == id.lowercased() else { continue }
+                return true
+            }
+            return false
+        default:
+            return false
+        }
+    }
+
     // MARK: Codex
 
     static func codex(checkout: String, configuration: String, limit: Int) -> [RecentConversation] {

@@ -214,6 +214,7 @@ private struct ProjectWindowContent: View, Equatable {
     @State private var recentConversationsRow: CheckoutRow?
     @State private var editingNote: CheckoutRow?
     @State private var renamingSession: Session?
+    @State private var suspendingProject = false
     @State private var renameTitle = ""
     /// The terminals' background opacity; below 1 the window lets the desktop through terminal areas.
     @State private var terminalOpacity = 1.0
@@ -232,6 +233,9 @@ private struct ProjectWindowContent: View, Equatable {
         allSessions.filter { (layout.state.selectedGroupID == nil || $0.groupID == layout.state.selectedGroupID) && (layout.state.showsTerminalSessions || $0.launch.preset.kind.isAgent) && (layout.search.isEmpty || $0.title.localizedCaseInsensitiveContains(layout.search) || $0.launch.workingDirectory.localizedCaseInsensitiveContains(layout.search)) }
     }
     private var worktreeRecords: [Worktree] { projectModel.slice.worktrees }
+    /// Sessions a restore would resume. Any at all means the project is suspended.
+    private var suspendedSessions: [Session] { allSessions.filter { $0.suspendedAt != nil }.sorted { $0.createdAt < $1.createdAt } }
+    private var isSuspended: Bool { allSessions.contains { $0.suspendedAt != nil } }
     private var selectedFolder: ProjectFolder? { project?.folders.first { $0.id == layout.state.selectedFolderID && $0.registered } }
     var body: some View {
         Group {
@@ -239,33 +243,44 @@ private struct ProjectWindowContent: View, Equatable {
                 NavigationSplitView(columnVisibility: Binding(get: { layout.state.sidebarVisible ? .all : .detailOnly }, set: { layout.state.sidebarVisible = $0 != .detailOnly })) {
                     sidebar(project)
                 } detail: {
-                    VStack(spacing: 0) {
-                        if !online { ServiceHealthView().padding(10).background(.orange.opacity(0.12)); Divider() }
-                        header(project)
-                        Divider()
-                        HSplitView {
-                            detailArea(project)
-                            if layout.detailsVisible, let session = projectSession(layout.state.selectedSessionID) { SessionSidebarView(session: session, project: project).frame(minWidth: 300, idealWidth: 340, maxWidth: 460) }
+                    if isSuspended {
+                        VStack(spacing: 0) {
+                            if !online { ServiceHealthView().padding(10).background(.orange.opacity(0.12)); Divider() }
+                            ProjectSuspendedView(project: project, sessions: suspendedSessions, online: online)
                         }
-                    }.background(terminalOpacity < 1 ? Color(nsColor: .windowBackgroundColor) : .clear, aroundTerminals: true)
+                    } else {
+                        VStack(spacing: 0) {
+                            if !online { ServiceHealthView().padding(10).background(.orange.opacity(0.12)); Divider() }
+                            header(project)
+                            Divider()
+                            HSplitView {
+                                detailArea(project)
+                                if layout.detailsVisible, let session = projectSession(layout.state.selectedSessionID) { SessionSidebarView(session: session, project: project).frame(minWidth: 300, idealWidth: 340, maxWidth: 460) }
+                            }
+                        }.background(terminalOpacity < 1 ? Color(nsColor: .windowBackgroundColor) : .clear, aroundTerminals: true)
+                    }
                 }
                 .navigationTitle(project.name)
                 .toolbar {
                     ToolbarItemGroup {
                         ProjectTeamControl(project: project) { editingProject = true }
-                        Button { showLaunch() } label: { Label("New Session", systemImage: "plus") }.disabled(!online || project.archived)
+                        Button { showLaunch() } label: { Label("New Session", systemImage: "plus") }.disabled(!canLaunch)
                         Button { layout.detailsVisible.toggle() } label: { Label("Session Details", systemImage: "sidebar.right") }.disabled(projectSession(layout.state.selectedSessionID) == nil)
                         Menu {
                             Button("Project Settings…") { editingProject = true }
                             Button("Manage Groups…") { editingGroups = true }
                             Button("Manage Worktrees…") { showWorktrees(folderID: layout.selectedFolderID) }
                             Button("Open Another Project…") { openWindow(id: "welcome") }
+                            Divider()
+                            Button("Suspend Project…") { suspendingProject = true }
+                                .disabled(!online || isSuspended || !allSessions.contains { $0.state.isLive })
                         } label: { Label("Project Actions", systemImage: "ellipsis.circle") }
                     }
                 }
                 .sheet(item: $launchSheet) { sheet in SessionLaunchView(project: project, initialGroupID: layout.state.selectedGroupID, initialFolderID: sheet.folderID, initialWorktreeID: sheet.worktreeID, startsInNewWorktree: sheet.newWorktree, worktreeCreated: revealCreatedWorktree) { selectSession($0) } }
                 .sheet(isPresented: $editingProject) { ProjectEditor(project: project) { _ in editingProject = false } }
                 .sheet(isPresented: $editingGroups) { GroupsEditor(project: project) }
+                .sheet(isPresented: $suspendingProject) { SuspendProjectSheet(project: project) }
                 .sheet(item: $worktreeSheet) { selection in WorktreesView(project: project, initialFolderID: selection.folderID, worktreeCreated: revealCreatedWorktree) }
                 .sheet(item: $settingsSheet) { selection in RepositorySettingsView(projectID: project.id, folderID: selection.id) }
                 .sheet(item: $recentConversationsRow) { row in RecentConversationsSheet(row: row) }
@@ -467,7 +482,7 @@ private struct ProjectWindowContent: View, Equatable {
         }
         return narrowed(project.repositoryLayout)
     }
-    private var canLaunch: Bool { online && project?.archived == false }
+    private var canLaunch: Bool { online && project?.archived == false && !isSuspended }
     private func canLaunch(in checkout: CheckoutRow) -> Bool { canLaunch && checkout.availability == .available }
 
     // MARK: Sidebar
@@ -900,7 +915,7 @@ private struct ProjectWindowContent: View, Equatable {
                 Button("Session Details") { selectSession(session.id); layout.detailsVisible = true }
                 Button("Rename…") { beginRename(session) }.disabled(!online)
                 if session.state.isLive { Button("Stop Session…") { selectSession(session.id); layout.detailsVisible = true } }
-                else { Button("Delete Finished Session…", role: .destructive) { deletingSession = session }.disabled(!online) }
+                else if session.suspendedAt == nil { Button("Delete Finished Session…", role: .destructive) { deletingSession = session }.disabled(!online) }
             }
     }
     private func sessionIcon(_ session: Session) -> String {
@@ -1307,6 +1322,7 @@ private struct ProjectWindowContent: View, Equatable {
         }
     }
     private func showLaunch(folderID: UUID? = nil, worktreeID: UUID? = nil, newWorktree: Bool = false) {
+        guard !isSuspended else { return }
         if folderID == nil, !newWorktree, let folder = selectedFolder, let project {
             let row = checkout(folder: folder, path: layout.selectedWorktreePath ?? folder.canonicalPath, project: project)
             // The selected checkout may be a Git worktree Chauffeur has not recorded yet.

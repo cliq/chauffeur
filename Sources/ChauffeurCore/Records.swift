@@ -264,6 +264,9 @@ public struct Session: Record, Equatable {
     public var closedBySessionID: UUID?
     public var closedBySessionTitle: String?
     public var closedAt: Date?
+    /// Set while the session's project is suspended: the agent was stopped with a
+    /// verified conversation, and restoring the project resumes it.
+    public var suspendedAt: Date?
     public var initialTask: String?
     public var launchRequestFingerprint: String?
     public var error: String?
@@ -275,7 +278,7 @@ public struct Session: Record, Equatable {
     public var updatedAt = Date()
     /// Launched with Chauffeur's MCP server and lifecycle hooks, not basic terminal mode.
     public var coordinationEnabled: Bool { launch.preset.kind.isAgent && launch.preset.integration != .unavailable }
-    public var statusLabel: String { closureOutcome != nil ? "Closed by agent" : state.label }
+    public var statusLabel: String { closureOutcome != nil ? "Closed by agent" : suspendedAt != nil && !state.isLive ? "Suspended" : state.label }
     public var closureSummary: String? {
         guard let closureOutcome else { return nil }
         let actor = closedBySessionTitle ?? closedBySessionID?.uuidString

@@ -21,6 +21,12 @@ public actor RuntimeCoordinator {
     private var stopGenerations: [UUID: UInt64] = [:]
     private var stopping = Set<UUID>()
     private var stoppingAllSessions = false
+    /// Projects being suspended or restored, so the two never overlap.
+    private var suspendingProjects = Set<UUID>()
+    /// Projects mid-suspend: launches and resumes are refused before any session is marked.
+    private var projectsBeingSuspended = Set<UUID>()
+    /// How long an agent gets to quit on its own before suspension forces its terminal closed.
+    static let suspendGracePeriod: TimeInterval = 5
     private var controlRequests = Set<UUID>()
     private var reconciliation: Task<Void, Error>?
     private var messageCounting: Task<Void, Never>?
@@ -712,7 +718,11 @@ public actor RuntimeCoordinator {
             let parent = try params.requiredString("path")
             return try .from(await Task.detached { RepositoryDiscovery.scan(parent: parent) }.value)
         case "launch": return try .from(await launch(params.decode(LaunchRequest.self)))
-        case "resume": return try .from(await resume(params.uuid("sessionID")))
+        case "resume": return try .from(await resume(params.uuid("sessionID"), restoring: false))
+        case "suspendPlan": return try .from(await suspendPlan(params.uuid("projectID")))
+        case "suspendProject": return try .from(await suspendProject(params.uuid("projectID"), interruptBusy: params["interruptBusy"].bool ?? false))
+        case "restoreProject":
+            return try .from(await restoreProject(params.uuid("projectID"), sessionIDs: Set(params["sessionIDs"].decode([UUID].self))))
         case "interrupt":
             let sessionID = try params.uuid("sessionID")
             guard !stopRequests.contains(sessionID) else { throw ChauffeurError("stop_pending", "A session operation is in progress") }
@@ -914,6 +924,10 @@ public actor RuntimeCoordinator {
         guard !session.state.isLive, !launching.contains(sessionID) else {
             throw ChauffeurError("active_session", "Stop the session before deleting its history")
         }
+        // Deleting it would lose the conversation its project's restore resumes.
+        guard session.suspendedAt == nil else {
+            throw ChauffeurError("suspended_session", "This session is suspended. Restore its project, or leave it out of the restore, before deleting it")
+        }
         // Finish any capture before removing its archive and retire a dead pane
         // so periodic capture cannot recreate the deleted history.
         if let capture = captures[sessionID] { _ = await capture.result }
@@ -945,6 +959,10 @@ public actor RuntimeCoordinator {
         let affected = sessionsUsing(path: path, worktreeIDs: recordIDs, folderID: folderID, in: knownSessions(snapshot).filter { $0.projectID == projectID })
         guard !affected.contains(where: { $0.state.isLive || launching.contains($0.id) }) else {
             throw ChauffeurError("active_worktree", "Stop sessions using this worktree before deleting it", path: path)
+        }
+        // Deleting the worktree would delete suspended sessions and the checkout they resume in.
+        guard !affected.contains(where: { $0.suspendedAt != nil }) else {
+            throw ChauffeurError("suspended_session", "Sessions in this worktree are suspended. Restore the project, or leave them out of the restore, first", path: path)
         }
         if preview {
             var result = WorktreeDeletionPreview(hasChanges: false)
@@ -1241,6 +1259,8 @@ public actor RuntimeCoordinator {
         }
         guard !launching.contains(sessionID) else { throw ChauffeurError("launch_pending", "Launch is still in progress. Retry with the same request ID") }
         guard !stopRequests.contains(sessionID) else { throw ChauffeurError("stop_pending", "Stop is still in progress") }
+        // Covers the app, the phone, and agents launching or delegating into the project.
+        guard !isSuspended(request.projectID) else { throw ChauffeurError("project_suspended", "This project is suspended. Restore it before starting sessions") }
         launching.insert(sessionID)
         let task = Task { try await self.performLaunch(request, child: child, sessionID: sessionID, fingerprint: fingerprint) }
         launchTasks[sessionID] = task
@@ -1487,13 +1507,22 @@ public actor RuntimeCoordinator {
         }
     }
 
-    private func resume(_ sessionID: UUID) async throws -> Session {
+    /// - Parameter restoring: a project restore resuming one of its suspended sessions.
+    private func resume(_ sessionID: UUID, restoring: Bool) async throws -> Session {
         let generation = stopGenerations[sessionID, default: 0]
         try await reconcile()
         guard !stoppingAllSessions, generation == stopGenerations[sessionID, default: 0], !stopRequests.contains(sessionID) else { throw ChauffeurError("stop_pending", "Stop is still in progress. Resume after it finishes") }
         guard let session = sessions[sessionID], !session.state.isLive else { throw ChauffeurError("already_live", "Reattach the live session instead of resuming") }
         guard session.closureOutcome == nil else { throw ChauffeurError("resume_unavailable", "This delegated attempt is closed. Launch a fresh worker to continue its work") }
         guard session.nativeConversationID != nil else { throw ChauffeurError("resume_unavailable", "No native conversation ID is available. Create a new session explicitly") }
+        // Only a project restore resumes its suspended sessions, and it alone puts them back
+        // in the restore list when resuming fails. Nothing else starts in a suspended project.
+        if restoring {
+            guard session.suspendedAt != nil else { throw ChauffeurError("not_suspended", "This session is no longer suspended") }
+        } else {
+            guard session.suspendedAt == nil else { throw ChauffeurError("suspended_session", "This session is suspended. Restore its project to resume it") }
+            guard !isSuspended(session.projectID) else { throw ChauffeurError("project_suspended", "This project is suspended. Restore it before resuming other sessions") }
+        }
         guard !launching.contains(sessionID) else { throw ChauffeurError("launch_pending", "Resume is already in progress") }
         launching.insert(sessionID); stopping.remove(sessionID)
         let task = Task { try await self.performResume(session) }
@@ -1501,6 +1530,154 @@ public actor RuntimeCoordinator {
         defer { launching.remove(sessionID); launchTasks.removeValue(forKey: sessionID) }
         return try await task.value
     }
+    // MARK: Project suspension
+
+    /// Whether the project is suspended, or being suspended: either way nothing new starts in it.
+    private func isSuspended(_ projectID: UUID) -> Bool {
+        projectsBeingSuspended.contains(projectID) || sessions.values.contains { $0.projectID == projectID && $0.suspendedAt != nil }
+    }
+
+    /// What suspending would do, with each agent's conversation checked against its transcripts.
+    private func suspendPlan(_ projectID: UUID) async throws -> ProjectSuspensionPlan {
+        guard !isSuspended(projectID) else { throw ChauffeurError("project_suspended", "This project is already suspended") }
+        return try await planSuspension(projectID).plan
+    }
+
+    /// The plan, and each planned agent's recorded conversation when the plan was made.
+    private func planSuspension(_ projectID: UUID) async throws -> (plan: ProjectSuspensionPlan, recorded: [UUID: String]) {
+        try await reconcile()
+        guard await store.current().projects.contains(where: { $0.value.id == projectID && !$0.value.archived }) else {
+            throw ChauffeurError("missing_project", "Project not found")
+        }
+        guard !sessions.values.contains(where: { $0.projectID == projectID && $0.suspendedAt != nil }) else {
+            throw ChauffeurError("project_suspended", "This project is already suspended")
+        }
+        let candidates = Array(sessions.values)
+        let agents = candidates.filter { $0.projectID == projectID && $0.state.isLive && $0.launch.preset.kind.supportsSuspension }
+        // Transcripts are the provider's files; read them off the actor.
+        let (verified, transcripts) = await Task.detached { () -> (Set<UUID>, [UUID: [RecentConversation]]) in
+            var verified = Set<UUID>(), found: [UUID: [RecentConversation]] = [:]
+            for session in agents {
+                let kind = session.launch.preset.kind
+                let configuration = Paths.canonical(session.launch.configurationPath)
+                if let id = session.nativeConversationID,
+                   RecentConversationScanner.hasTranscript(kind: kind, id: id, checkout: session.launch.workingDirectory, configuration: configuration) {
+                    verified.insert(session.id); continue
+                }
+                let sources = RecentConversationScanner.Sources(claude: kind == .claude ? [configuration] : [], codex: kind == .codex ? [configuration] : [])
+                found[session.id] = RecentConversationScanner.scan(path: session.launch.workingDirectory, sources: sources, limit: 50).filter { $0.kind == kind }
+            }
+            return (verified, found)
+        }.value
+        let plan = ProjectSuspensionPlanner.plan(projectID: projectID, sessions: candidates, launching: launching,
+                                                 hasRecordedTranscript: { verified.contains($0.id) }) { transcripts[$0.id] ?? [] }
+        let recorded = Dictionary(uniqueKeysWithValues: candidates.compactMap { session in session.nativeConversationID.map { (session.id, $0) } })
+        return (plan, recorded)
+    }
+
+    /// Stops every Claude Code session with a verified conversation and closes the shells.
+    /// Refuses while anything can't be resumed, and interrupts busy agents only when asked.
+    /// All or nothing: when something fails partway, sessions already stopped stay ended and
+    /// resumable, but the project is not left suspended around sessions still running.
+    private func suspendProject(_ projectID: UUID, interruptBusy: Bool) async throws -> ProjectSuspensionPlan {
+        guard suspendingProjects.insert(projectID).inserted else { throw ChauffeurError("suspend_pending", "This project is already being suspended or restored") }
+        defer { suspendingProjects.remove(projectID) }
+        // Launches and resumes are refused from here on, so the plan can't miss a new session.
+        guard projectsBeingSuspended.insert(projectID).inserted else { throw ChauffeurError("suspend_pending", "This project is already being suspended") }
+        defer { projectsBeingSuspended.remove(projectID) }
+        let (plan, recorded) = try await planSuspension(projectID)
+        if let blocker = plan.blockers.first {
+            throw ChauffeurError("suspend_blocked", plan.blockers.count == 1 ? "“\(blocker.title)” can't be suspended. \(blocker.reason)"
+                                 : "\(plan.blockers.count) sessions can't be suspended, including “\(blocker.title)”. \(blocker.reason)")
+        }
+        guard !plan.agents.isEmpty else { throw ChauffeurError("nothing_to_suspend", "No Claude Code sessions are running in this project") }
+        guard interruptBusy || plan.busyAgents.isEmpty else { throw ChauffeurError("busy_sessions", "Some agents may still be working. Confirm interrupting them to suspend") }
+        var suspended: [UUID] = []
+        do {
+            for agent in plan.agents {
+                guard let current = sessions[agent.sessionID], current.closedAt == nil else {
+                    throw ChauffeurError("suspend_failed", "“\(agent.title)” was closed while suspending")
+                }
+                // A /clear or /resume since the plan moved the agent to a conversation the plan never checked.
+                guard current.nativeConversationID == recorded[agent.sessionID] else {
+                    throw ChauffeurError("conversation_changed", "“\(agent.title)” switched conversations while suspending. Try again")
+                }
+                if current.state.isLive { try await stopForSuspension(agent.sessionID) }
+                guard var ended = sessions[agent.sessionID], !ended.state.isLive else {
+                    throw ChauffeurError("suspend_failed", "“\(agent.title)” did not stop")
+                }
+                // Keep a conversation a hook reported while the agent quit over the planned one.
+                if ended.nativeConversationID == recorded[agent.sessionID] { ended.nativeConversationID = agent.conversationID }
+                ended.suspendedAt = Date(); ended.unread = false
+                try await persist(ended)
+                suspended.append(agent.sessionID)
+            }
+            for shell in plan.shells where sessions[shell.sessionID]?.state.isLive == true {
+                _ = try await handle(IPCRequest("closeSession", params: .object(["sessionID": .string(shell.sessionID.uuidString)])))
+            }
+            try await reconcile()
+            if let straggler = sessions.values.first(where: { $0.projectID == projectID && $0.suspendedAt == nil && ($0.state.isLive || launching.contains($0.id)) }) {
+                throw ChauffeurError("suspend_failed", "“\(straggler.title)” is still running")
+            }
+        } catch {
+            for sessionID in suspended {
+                guard var session = sessions[sessionID], session.suspendedAt != nil else { continue }
+                session.suspendedAt = nil
+                try? await persist(session)
+            }
+            let reason = (error as? ChauffeurError) ?? ChauffeurError("suspend_failed", error.localizedDescription)
+            let stopped = suspended.isEmpty ? "" : suspended.count == 1 ? " The session already stopped has ended and can be resumed." : " The \(suspended.count) sessions already stopped have ended and can be resumed."
+            throw ChauffeurError(reason.code, "Suspend didn't finish: \(reason.errorDescription ?? reason.message).\(stopped)")
+        }
+        return plan
+    }
+
+    /// Asks the agent to quit so it saves its conversation, then forces the terminal closed
+    /// if it is still running a few seconds later.
+    private func stopForSuspension(_ sessionID: UUID) async throws {
+        let params: JSONValue = .object(["sessionID": .string(sessionID.uuidString)])
+        _ = try await handle(IPCRequest("stop", params: params))
+        let deadline = Date().addingTimeInterval(Self.suspendGracePeriod)
+        while sessions[sessionID]?.state.isLive == true, Date() < deadline {
+            try await Task.sleep(for: .milliseconds(100))
+            try await reconcile()
+        }
+        if sessions[sessionID]?.state.isLive == true {
+            _ = try await handle(IPCRequest("stop", params: .object(["sessionID": .string(sessionID.uuidString), "force": .bool(true)])))
+        }
+    }
+
+    /// Resumes the chosen suspended sessions in launch order. The rest stop being suspended
+    /// and stay as ended sessions; a session that fails to resume stays suspended.
+    private func restoreProject(_ projectID: UUID, sessionIDs: Set<UUID>) async throws -> ProjectRestoreResult {
+        guard suspendingProjects.insert(projectID).inserted else { throw ChauffeurError("suspend_pending", "This project is already being suspended or restored") }
+        defer { suspendingProjects.remove(projectID) }
+        try await reconcile()
+        var result = ProjectRestoreResult()
+        let suspended = sessions.values.filter { $0.projectID == projectID && $0.suspendedAt != nil }.sorted { $0.createdAt < $1.createdAt }
+        for recorded in suspended where !sessionIDs.contains(recorded.id) {
+            guard var session = sessions[recorded.id] else { continue }
+            session.suspendedAt = nil
+            try await persist(session)
+        }
+        for recorded in suspended where sessionIDs.contains(recorded.id) {
+            do {
+                _ = try await resume(recorded.id, restoring: true)
+                result.restored.append(recorded.id)
+            } catch {
+                let message = (error as? ChauffeurError)?.errorDescription ?? error.localizedDescription
+                result.failures.append(.init(sessionID: recorded.id, title: recorded.title, message: message))
+                // Resuming clears the mark before it can fail; keep the session in the restore list.
+                if var session = sessions[recorded.id], !session.state.isLive {
+                    session.suspendedAt = recorded.suspendedAt
+                    if session.error == nil { session.error = message }
+                    try await persist(session)
+                }
+            }
+        }
+        return result
+    }
+
     private func performResume(_ recorded: Session) async throws -> Session {
         var session = recorded
         if (session.launch.checkoutIdentityVersion ?? 0) < CheckoutIdentity.currentVersion { session = await relinkCheckoutIdentities(session) }
@@ -1521,7 +1698,8 @@ public actor RuntimeCoordinator {
         do {
             try await terminals.stop(sessionID: sessionID, force: true)
             try Task.checkCancellation()
-            session.state = .starting; session.error = nil; session.failureCode = nil; session.exitStatus = nil; session.closedAt = nil; session.runtimeID = id; try await persist(session)
+            session.state = .starting; session.error = nil; session.failureCode = nil; session.exitStatus = nil; session.closedAt = nil; session.runtimeID = id
+            session.suspendedAt = nil; try await persist(session)
             try Task.checkCancellation()
             let token = try await ledger.issueGrant(sessionID: sessionID)
             try Task.checkCancellation()
@@ -1843,6 +2021,8 @@ public actor RuntimeCoordinator {
         do {
             if let existing = item.closureOutcome, existing != outcome { throw ChauffeurError("retry_conflict", "Worker was already closed with a different outcome") }
             guard var session = sessions[item.childID] else { throw ChauffeurError("missing_session", "Worker record is unavailable") }
+            // Closing ends the record's retention; a suspended worker waits for its project's restore.
+            guard session.suspendedAt == nil else { throw ChauffeurError("suspended_session", "This worker's project is suspended. Close it after the project is restored") }
             session.historyProtected = true; try await persist(session)
             do {
                 if session.state.isLive {
