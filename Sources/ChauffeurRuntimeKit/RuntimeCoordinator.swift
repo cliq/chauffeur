@@ -1769,7 +1769,9 @@ public actor RuntimeCoordinator {
                    RecentConversationScanner.hasTranscript(kind: kind, id: id, checkout: session.launch.workingDirectory, configuration: configuration) {
                     verified.insert(session.id); continue
                 }
-                let sources = RecentConversationScanner.Sources(claude: kind == .claude ? [configuration] : [], codex: kind == .codex ? [configuration] : [])
+                // Only Claude Code falls back to a lookup; Codex must report its conversation.
+                guard kind == .claude else { continue }
+                let sources = RecentConversationScanner.Sources(claude: [configuration])
                 found[session.id] = RecentConversationScanner.scan(path: session.launch.workingDirectory, sources: sources, limit: 50).filter { $0.kind == kind }
             }
             return (verified, found)
@@ -1780,7 +1782,7 @@ public actor RuntimeCoordinator {
         return (plan, recorded)
     }
 
-    /// Stops every Claude Code session with a verified conversation and closes the shells.
+    /// Stops every Claude Code and Codex session with a verified conversation and closes the shells.
     /// Refuses while anything can't be resumed, and interrupts busy agents only when asked.
     /// All or nothing: when something fails partway, sessions already stopped stay ended and
     /// resumable, but the project is not left suspended around sessions still running.
@@ -1795,7 +1797,7 @@ public actor RuntimeCoordinator {
             throw ChauffeurError("suspend_blocked", plan.blockers.count == 1 ? "“\(blocker.title)” can't be suspended. \(blocker.reason)"
                                  : "\(plan.blockers.count) sessions can't be suspended, including “\(blocker.title)”. \(blocker.reason)")
         }
-        guard !plan.agents.isEmpty else { throw ChauffeurError("nothing_to_suspend", "No Claude Code sessions are running in this project") }
+        guard !plan.agents.isEmpty else { throw ChauffeurError("nothing_to_suspend", "No Claude Code or Codex sessions are running in this project") }
         guard interruptBusy || plan.busyAgents.isEmpty else { throw ChauffeurError("busy_sessions", "Some agents may still be working. Confirm interrupting them to suspend") }
         var suspended: [UUID] = []
         do {

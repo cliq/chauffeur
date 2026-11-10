@@ -164,15 +164,77 @@ struct ProjectSuspensionTests {
         #expect(await errorCode { _ = try await fixture.runtime.launch(another) } == "project_suspended")
     }
 
-    /// Codex reports its conversation only in coordination mode, so v1 suspends Claude Code alone.
-    @Test(arguments: [CLIKind.codex, .opencode])
-    func unsupportedAgentsBlockSuspension(kind: CLIKind) async throws {
+    /// OpenCode can't be suspended at all; Codex only with coordination, which the fixture leaves off.
+    @Test(arguments: [(CLIKind.codex, "only with coordination on"), (.opencode, "can't be suspended yet")])
+    func unsupportedAgentsBlockSuspension(kind: CLIKind, reason: String) async throws {
         let fixture = try await LaunchFixture.make(kind: kind); defer { fixture.cleanup() }
         let launched = try await fixture.runtime.launch(fixture.request)
 
         let plan = try await call(fixture, "suspendPlan").decode(ProjectSuspensionPlan.self)
         #expect(plan.blockers.map(\.sessionID) == [launched.id])
-        #expect(plan.blockers.first?.reason.contains("can't be suspended yet") == true)
+        #expect(plan.blockers.first?.reason.contains(reason) == true)
         _ = try await fixture.stop()
+    }
+}
+
+/// Codex names its conversation only through trusted hooks, so it is suspended only when
+/// they reported one with a transcript, and never on a transcript lookup.
+struct CodexSuspensionPlanTests {
+    private let projectID = UUID()
+    private let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+
+    private func codex(inboxReminders: Bool?, conversation: String? = nil) -> Session {
+        let set = PresetSet(name: "Fixture")
+        let preset = AgentPreset(setID: set.id, name: "Codex", kind: .codex, executable: "/bin/cat", configurationDirectory: root.path)
+        let launch = LaunchSnapshot(preset: preset, set: set, executablePath: "/bin/cat", executableVersion: "fixture", workingDirectory: root.path, additionalPaths: [])
+        var session = Session(projectID: projectID, groupID: UUID(), title: "Codex", launch: launch, folderID: UUID())
+        session.state = .turnFinished
+        session.inboxReminders = inboxReminders
+        session.nativeConversationID = conversation
+        return session
+    }
+
+    private func plan(_ session: Session, transcript: Bool) -> ProjectSuspensionPlan {
+        let lookup = RecentConversation(id: UUID().uuidString.lowercased(), kind: .codex, title: "Newest", prompt: "Hi", startedAt: Date(), updatedAt: Date(),
+                                        configurationDirectory: root.path, transcriptPath: root.path)
+        return ProjectSuspensionPlanner.plan(projectID: projectID, sessions: [session], launching: [], hasRecordedTranscript: { _ in transcript }) { _ in [lookup] }
+    }
+
+    @Test func aReportedConversationWithATranscriptIsSuspended() {
+        let conversation = UUID().uuidString.lowercased()
+        let result = plan(codex(inboxReminders: true, conversation: conversation), transcript: true)
+        #expect(result.canSuspend && result.agents.map(\.conversationID) == [conversation])
+        #expect(result.agents.first?.conversationRecorded == true && result.agents.first?.activity == .idle)
+    }
+
+    @Test(arguments: [
+        (Bool?.none, true, false, "only with coordination on"),
+        (false, true, false, "didn't trust Chauffeur's hooks"),
+        (true, false, false, "hasn't reported its conversation"),
+        (true, true, false, "no saved transcript")
+    ])
+    func codexWithoutAVerifiedConversationBlocks(inboxReminders: Bool?, reported: Bool, transcript: Bool, reason: String) {
+        let session = codex(inboxReminders: inboxReminders, conversation: reported ? UUID().uuidString.lowercased() : nil)
+        let result = plan(session, transcript: transcript)
+        // The newest transcript in the checkout is never adopted for Codex.
+        #expect(result.agents.isEmpty && result.blockers.map(\.sessionID) == [session.id])
+        #expect(result.blockers.first?.reason.contains(reason) == true)
+    }
+
+    @Test func aCodexRolloutCountsOnlyOnceItHasAMessage() throws {
+        defer { try? FileManager.default.removeItem(at: root) }
+        let id = UUID().uuidString.lowercased()
+        let folder = root.appendingPathComponent("sessions/2026/11/09")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let rollout = folder.appendingPathComponent("rollout-2026-11-09T10-00-00-\(id).jsonl")
+        func line(_ object: [String: Any]) throws -> Data { try JSONSerialization.data(withJSONObject: object) + Data("\n".utf8) }
+        let meta = try line(["type": "session_meta", "payload": ["id": id, "cwd": root.path, "source": "cli"]])
+        try meta.write(to: rollout)
+        #expect(!RecentConversationScanner.hasTranscript(kind: .codex, id: id, checkout: root.path, configuration: root.path))
+
+        let message = try line(["type": "response_item", "payload": ["type": "message", "role": "user", "content": [["type": "input_text", "text": "Keep going"]]]])
+        try (meta + message).write(to: rollout)
+        #expect(RecentConversationScanner.hasTranscript(kind: .codex, id: id, checkout: root.path, configuration: root.path))
+        #expect(!RecentConversationScanner.hasTranscript(kind: .codex, id: UUID().uuidString.lowercased(), checkout: root.path, configuration: root.path))
     }
 }

@@ -15,7 +15,7 @@ struct SuspendProjectSheet: View {
         VStack(alignment: .leading, spacing: 12) {
             VStack(alignment: .leading, spacing: 4) {
                 Text("Suspend “\(project.name)”?").font(.title3).fontWeight(.semibold)
-                Text("Stops the project's Claude Code sessions once each has a saved conversation, and closes its shells. Restoring the project resumes every agent where it left off.")
+                Text("Stops the project's Claude Code and Codex sessions once each has a saved conversation, and closes its shells. Restoring the project resumes every agent where it left off.")
                     .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
             Group {
@@ -104,7 +104,7 @@ struct SuspendProjectSheet: View {
             }
         }
         if plan.agents.isEmpty && plan.blockers.isEmpty {
-            Text("No Claude Code sessions are running in this project.").foregroundStyle(.secondary)
+            Text("No Claude Code or Codex sessions are running in this project.").foregroundStyle(.secondary)
         }
     }
 

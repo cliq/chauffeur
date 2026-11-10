@@ -75,7 +75,7 @@ public struct ProjectRestoreResult: Codable, Equatable, Sendable {
 }
 
 public extension CLIKind {
-    /// Agents whose conversations a suspended project can resume. Codex reports its
-    /// conversation only in coordination mode, so it waits until that can be relied on.
-    var supportsSuspension: Bool { self == .claude }
+    /// Agents whose conversations a suspended project can resume. Codex qualifies only
+    /// when its trusted hooks report the conversation (see `ProjectSuspensionPlanner`).
+    var supportsSuspension: Bool { self == .claude || self == .codex }
 }

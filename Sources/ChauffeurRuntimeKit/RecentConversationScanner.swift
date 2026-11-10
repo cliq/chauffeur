@@ -93,7 +93,8 @@ public enum RecentConversationScanner {
                 guard let first = firstLine(url), let object = (try? JSONSerialization.jsonObject(with: first)) as? [String: Any],
                       object["type"] as? String == "session_meta", let meta = object["payload"] as? [String: Any],
                       let recorded = meta["id"] as? String, recorded.lowercased() == id.lowercased() else { continue }
-                return true
+                // A rollout with no message yet has nothing to resume.
+                return codexPrompt(url) != nil
             }
             return false
         default:

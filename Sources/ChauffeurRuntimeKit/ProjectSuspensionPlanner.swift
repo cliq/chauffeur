@@ -31,6 +31,9 @@ enum ProjectSuspensionPlanner {
             } else if !kind.supportsSuspension {
                 plan.blockers.append(.init(sessionID: session.id, title: session.title,
                                            reason: "\(kind.displayName) sessions can't be suspended yet. Close it first."))
+            } else if kind == .codex, let reason = codexBlocker(session, hasRecordedTranscript: hasRecordedTranscript) {
+                // Codex names its conversation only through hooks, so there is nothing to look up instead.
+                plan.blockers.append(.init(sessionID: session.id, title: session.title, reason: reason))
             } else {
                 if let recorded = session.nativeConversationID, hasRecordedTranscript(session) {
                     plan.agents.append(agent(session, conversationID: recorded, recorded: true))
@@ -64,6 +67,24 @@ enum ProjectSuspensionPlanner {
         let order = Dictionary(uniqueKeysWithValues: live.enumerated().map { ($1.id, $0) })
         plan.agents.sort { order[$0.sessionID, default: 0] < order[$1.sessionID, default: 0] }
         return plan
+    }
+
+    /// Why a Codex session can't be suspended, or nil when its hooks reported a conversation
+    /// with a transcript. Without trusted hooks Codex never says which conversation it is in,
+    /// and a transcript lookup would only be a guess.
+    private static func codexBlocker(_ session: Session, hasRecordedTranscript: (Session) -> Bool) -> String? {
+        switch session.inboxReminders {
+        case nil:
+            return "Codex reports its conversation only with coordination on. Close it, or relaunch it with coordination, first."
+        case false?:
+            return "Codex didn't trust Chauffeur's hooks in this session, so its conversation isn't known. Close it first."
+        case true?:
+            guard session.nativeConversationID != nil else {
+                return "Codex hasn't reported its conversation yet. Send it a message, or close it, first."
+            }
+            return hasRecordedTranscript(session) ? nil
+                : "Codex's conversation has no saved transcript yet, so there is nothing to resume. Close it first."
+        }
     }
 
     /// Sessions sharing a kind, configuration, and checkout write transcripts to the same place.
