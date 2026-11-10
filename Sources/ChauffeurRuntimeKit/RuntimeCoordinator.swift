@@ -25,6 +25,10 @@ public actor RuntimeCoordinator {
     private var suspendingProjects = Set<UUID>()
     /// Projects mid-suspend: launches and resumes are refused before any session is marked.
     private var projectsBeingSuspended = Set<UUID>()
+    /// Worktrees their own session asked to remove: nothing starts in them while it ends.
+    private var worktreesPendingRemoval = Set<UUID>()
+    /// How long a session that removes its own worktree keeps running, so the tool's reply reaches it.
+    static let ownWorktreeRemovalDelay: Duration = .seconds(2)
     /// How long an agent gets to quit on its own before suspension forces its terminal closed.
     static let suspendGracePeriod: TimeInterval = 5
     private var controlRequests = Set<UUID>()
@@ -964,20 +968,12 @@ public actor RuntimeCoordinator {
         guard !affected.contains(where: { $0.suspendedAt != nil }) else {
             throw ChauffeurError("suspended_session", "Sessions in this worktree are suspended. Restore the project, or leave them out of the restore, first", path: path)
         }
+        guard !recordIDs.contains(where: worktreesPendingRemoval.contains) else {
+            throw ChauffeurError("worktree_busy", "This worktree is being removed by the session working in it", path: path)
+        }
         if preview {
-            var result = WorktreeDeletionPreview(hasChanges: false)
-            if let entry, entry.availability ?? .available == .available {
-                let changedFiles = try await worktrees.changedFiles(at: path)
-                result.changedFiles = changedFiles
-                result.hasChanges = !changedFiles.isEmpty
-                let mainBranch = inventory.first?.branch ?? ""
-                result.baseBranch = records.first?.value.baseBranch ?? (mainBranch.isEmpty ? nil : mainBranch)
-                result.unmergedCommits = await worktrees.unmergedCommits(at: path, branch: entry.branch, base: result.baseBranch)
-                (result.remoteBranch, result.unpushedCommits) = await worktrees.remoteStatus(at: path)
-                let submodules = try await worktrees.submodules(at: path, mainCheckout: folder.canonicalPath)
-                result.submodules = submodules.isEmpty ? nil : submodules
-            }
-            return try .from(result)
+            guard let entry, entry.availability ?? .available == .available else { return try .from(WorktreeDeletionPreview(hasChanges: false)) }
+            return try .from(await deletionPreview(path: path, entry: entry, inventory: inventory, folder: folder, recordedBase: records.first?.value.baseBranch))
         }
         let removalID = records.first?.value.id ?? UUID()
         try checkoutClaims.beginRemoval(removalID, path: path, worktreeIDs: recordIDs, gitIdentity: entry?.gitIdentity, sessions: Array(sessions.values))
@@ -1032,15 +1028,30 @@ public actor RuntimeCoordinator {
         registered.gitIdentity = entry.gitIdentity
         return try await saveWorktree(registered)
     }
+    /// What deleting an available checkout would lose.
+    private func deletionPreview(path: String, entry: GitWorktree, inventory: [GitWorktree], folder: ProjectFolder, recordedBase: String?) async throws -> WorktreeDeletionPreview {
+        var result = WorktreeDeletionPreview(hasChanges: false)
+        let changedFiles = try await worktrees.changedFiles(at: path)
+        result.changedFiles = changedFiles
+        result.hasChanges = !changedFiles.isEmpty
+        let mainBranch = inventory.first?.branch ?? ""
+        result.baseBranch = recordedBase ?? (mainBranch.isEmpty ? nil : mainBranch)
+        result.unmergedCommits = await worktrees.unmergedCommits(at: path, branch: entry.branch, base: result.baseBranch)
+        (result.remoteBranch, result.unpushedCommits) = await worktrees.remoteStatus(at: path)
+        let submodules = try await worktrees.submodules(at: path, mainCheckout: folder.canonicalPath)
+        result.submodules = submodules.isEmpty ? nil : submodules
+        return result
+    }
     /// Deletes a managed checkout and unregisters its record; session history stays.
-    private func removeManagedWorktree(_ stored: Stored<Worktree>, in snapshot: StoreSnapshot, discardChanges: Bool = false) async throws -> Stored<Worktree> {
+    private func removeManagedWorktree(_ stored: Stored<Worktree>, in snapshot: StoreSnapshot, discardChanges: Bool = false,
+                                       keepBranch: Bool = false, forceDeleteBranch: Bool = false) async throws -> Stored<Worktree> {
         var stored = stored
         let worktreeID = stored.value.id
         guard !worktreeRecordWrites.contains(worktreeID) else { throw ChauffeurError("worktree_busy", "Worktree metadata is being updated. Retry removal") }
         let relatedIDs = Set(snapshot.worktrees.filter { Paths.canonical($0.value.path) == Paths.canonical(stored.value.path) || (stored.value.gitIdentity != nil && $0.value.gitIdentity == stored.value.gitIdentity) }.map { $0.value.id })
         try checkoutClaims.beginRemoval(worktreeID, path: stored.value.path, worktreeIDs: relatedIDs, gitIdentity: stored.value.gitIdentity, sessions: Array(sessions.values))
         defer { checkoutClaims.endRemoval(worktreeID) }
-        try await worktrees.remove(stored.value, liveSessions: Array(sessions.values), discardChanges: discardChanges)
+        try await worktrees.remove(stored.value, liveSessions: Array(sessions.values), discardChanges: discardChanges, keepBranch: keepBranch, forceDeleteBranch: forceDeleteBranch)
         stored.value.registered = false
         let removed = try await saveWorktree(stored.value, expectedVersion: stored.version, finishingRemoval: true)
         try await deleteCheckoutNotes(projectID: stored.value.projectID, folderID: stored.value.folderID, path: Paths.canonical(stored.value.path), in: snapshot)
@@ -1127,17 +1138,209 @@ public actor RuntimeCoordinator {
                         "workingDirectory": .string(session.launch.workingDirectory), "worktreeID": session.worktreeID.map { .string($0.uuidString) } ?? .null,
                         "coordinated": .bool(false)])
     }
-    private func removeWorktreeTool(caller: Caller, arguments: JSONValue) async throws -> JSONValue {
-        let worktreeID = try arguments.uuid("worktreeID"), snapshot = await store.reload()
-        guard let stored = snapshot.worktrees.first(where: { $0.value.id == worktreeID && $0.value.projectID == caller.scope.projectID && $0.value.registered }) else {
-            throw ChauffeurError("missing_worktree", "No registered worktree with this ID in your project")
+    // MARK: Agent worktree removal
+
+    /// What happens to a removed worktree's branch.
+    private enum BranchRemoval: String, Codable {
+        /// Deleted only when no other local branch holds its commits.
+        case ifMerged
+        /// Deleted even when its commits exist nowhere else.
+        case always
+        case never
+    }
+
+    /// One look at what removing a worktree would do, and the confirmation that names it.
+    private struct WorktreeRemovalCheck {
+        var stored: Stored<Worktree>
+        var entry: GitWorktree
+        var preview: WorktreeDeletionPreview
+        var branchRemoval: BranchRemoval
+        var discardChanges: Bool
+        /// Live or starting sessions using the checkout.
+        var users: [Session]
+        /// Changes whenever the checkout, its branch, or the requested options do.
+        var confirmation: String
+
+        var deletesBranch: Bool {
+            guard !entry.branch.isEmpty else { return false }
+            switch branchRemoval {
+            case .always: return true
+            case .never: return false
+            case .ifMerged: return preview.unmergedCommits == 0
+            }
         }
-        guard stored.value.managed else { throw ChauffeurError("external_worktree", "Only worktrees Chauffeur created can be removed. This checkout was created elsewhere", path: stored.value.path) }
-        let removed = try await removeManagedWorktree(stored, in: snapshot, discardChanges: arguments["discardChanges"].bool == true)
+    }
+
+    private struct RemovalFingerprint: Codable {
+        var worktreeID: UUID, path: String, branch: String, commit: String
+        var branchRemoval: BranchRemoval, discardChanges: Bool
+        var preview: WorktreeDeletionPreview
+    }
+
+    /// The worktree a removal tool names, or the caller's own checkout.
+    private func removalTarget(caller: Caller, arguments: JSONValue, in snapshot: StoreSnapshot) throws -> Stored<Worktree> {
+        let registered = snapshot.worktrees.filter { $0.value.projectID == caller.scope.projectID && $0.value.registered }
+        if let worktreeID = try optionalUUID(arguments, "worktreeID") {
+            guard let stored = registered.first(where: { $0.value.id == worktreeID }) else { throw ChauffeurError("missing_worktree", "No registered worktree with this ID in your project") }
+            return stored
+        }
+        guard let session = sessions[caller.sessionID] else { throw ChauffeurError("missing_session", "Your session record is unavailable") }
+        let directory = Paths.canonical(session.launch.workingDirectory)
+        guard let stored = registered.first(where: { $0.value.id == session.worktreeID })
+                ?? registered.first(where: { Paths.canonical($0.value.path) == directory }) else {
+            throw ChauffeurError("missing_worktree", "You are working in the repository's main checkout, which can't be removed. Pass a worktreeID to remove another worktree")
+        }
+        return stored
+    }
+
+    private func checkWorktreeRemoval(_ stored: Stored<Worktree>, in snapshot: StoreSnapshot, branchRemoval: BranchRemoval, discardChanges: Bool) async throws -> WorktreeRemovalCheck {
+        let worktree = stored.value
+        guard worktree.managed else { throw ChauffeurError("external_worktree", "Only worktrees Chauffeur created can be removed. This checkout was created elsewhere", path: worktree.path) }
+        guard let folder = snapshot.projects.first(where: { $0.value.id == worktree.projectID })?.value.folders.first(where: { $0.id == worktree.folderID && $0.registered }) else {
+            throw ChauffeurError("missing_folder", "This worktree's repository is no longer registered")
+        }
+        let path = Paths.canonical(worktree.path)
+        let inventory = try await worktrees.inventory(at: folder.canonicalPath)
+        guard let entry = inventory.first(where: { $0.path == path }), entry.availability ?? .available == .available else {
+            throw ChauffeurError("worktree_unavailable", "The worktree's checkout is missing. Refresh the Git inventory", path: path)
+        }
+        let preview = try await deletionPreview(path: path, entry: entry, inventory: inventory, folder: folder, recordedBase: worktree.baseBranch)
+        let users = sessions.values.filter { session in
+            (session.state.isLive || launching.contains(session.id)) && (session.worktreeID == worktree.id
+                || worktree.gitIdentity.map { (session.launch.gitWorktreeIdentities ?? []).contains($0) } == true
+                || ([session.launch.workingDirectory] + session.launch.additionalPaths).contains { CheckoutClaims.overlap(Paths.canonical($0), path) })
+        }.sorted { $0.createdAt < $1.createdAt }
+        let fingerprint = RemovalFingerprint(worktreeID: worktree.id, path: path, branch: entry.branch, commit: entry.commit,
+                                             branchRemoval: branchRemoval, discardChanges: discardChanges, preview: preview)
+        return WorktreeRemovalCheck(stored: stored, entry: entry, preview: preview, branchRemoval: branchRemoval, discardChanges: discardChanges,
+                                    users: users, confirmation: JSONCoding.digest(try JSONCoding.encode(fingerprint)))
+    }
+
+    private func removalOptions(_ arguments: JSONValue) throws -> (BranchRemoval, Bool) {
+        let branch = try arguments["deleteBranch"].string.map { value -> BranchRemoval in
+            guard let option = BranchRemoval(rawValue: value) else { throw ChauffeurError("invalid_argument", "deleteBranch must be ifMerged, always, or never") }
+            return option
+        } ?? .ifMerged
+        return (branch, arguments["discardChanges"].bool == true)
+    }
+
+    /// `chauffeur_preview_worktree_removal`: what removing a worktree would lose, and the
+    /// confirmation `chauffeur_remove_worktree` needs for anything irreversible.
+    private func previewWorktreeRemovalTool(caller: Caller, arguments: JSONValue) async throws -> JSONValue {
+        let snapshot = await store.reload()
+        let stored = try removalTarget(caller: caller, arguments: arguments, in: snapshot)
+        let (branchRemoval, discardChanges) = try removalOptions(arguments)
+        let check = try await checkWorktreeRemoval(stored, in: snapshot, branchRemoval: branchRemoval, discardChanges: discardChanges)
+        let preview = check.preview, branch = check.entry.branch
+        let items = preview.items(branch: branch, finishedSessions: 0, checkoutMissing: false, deletingBranch: check.deletesBranch)
+        let own = check.users.contains { $0.id == caller.sessionID }
+        let others = check.users.filter { $0.id != caller.sessionID }
+        var blockers = others.map { "“\($0.title)” is using this worktree and must end first" }
+        if preview.requiresDiscard && !discardChanges { blockers.append("Uncommitted files or submodule commits would be lost: pass discardChanges=true to remove anyway") }
+        if own, sessions[caller.sessionID]?.parentID != nil { blockers.append("Delegated workers can't remove their own worktree: report your result, and your coordinator removes it") }
+        if worktreesPendingRemoval.contains(stored.value.id) { blockers.append("This worktree is already being removed") }
+        let base = preview.baseBranch.map { " into \($0)" } ?? ""
+        let branchOutcome: String
+        if branch.isEmpty { branchOutcome = "The checkout is on a detached HEAD, so there is no branch to delete." }
+        else {
+            switch branchRemoval {
+            case .never: branchOutcome = "Branch \(branch) is kept."
+            case .always: branchOutcome = "Branch \(branch) is deleted, even if its commits exist nowhere else."
+            case .ifMerged:
+                if preview.unmergedCommits == 0 { branchOutcome = "Branch \(branch) is deleted: its commits are merged\(base)." }
+                else {
+                    let pushed = preview.isPushed ? " They are all pushed to \(preview.remoteBranch ?? "its remote branch"), so deleting it loses nothing there." : ""
+                    branchOutcome = "Branch \(branch) is kept unless another local branch holds its commits, because they aren't merged\(base).\(pushed) Pass deleteBranch=always to delete it anyway."
+                }
+            }
+        }
+        let files = (preview.changedFiles ?? []).map(\.description)
+        return .object([
+            "worktreeID": .string(stored.value.id.uuidString), "path": .string(stored.value.path), "branch": branch.isEmpty ? .null : .string(branch),
+            "yourCheckout": .bool(own), "endsYourSession": .bool(own),
+            "lost": .array(items.filter { $0.severity == .loss }.map { .string($0.text) }),
+            "safe": .array(items.filter { $0.severity == .safe }.map { .string($0.text) }),
+            "notes": .array(items.filter { $0.severity == .note }.map { .string($0.text) }),
+            "branchOutcome": .string(branchOutcome),
+            "changedFiles": .array(files.prefix(50).map(JSONValue.string)), "changedFileCount": .number(Double(files.count)),
+            "blockers": .array(blockers.map(JSONValue.string)),
+            "deleteBranch": .string(branchRemoval.rawValue), "discardChanges": .bool(discardChanges),
+            "confirmation": .string(check.confirmation)
+        ])
+    }
+
+    /// `chauffeur_remove_worktree`. Removing your own worktree, discarding work, or force-deleting
+    /// the branch needs the confirmation from a preview with the same options and an unchanged
+    /// checkout. Your own worktree goes once your session has ended, a moment after this returns.
+    private func removeWorktreeTool(caller: Caller, arguments: JSONValue) async throws -> JSONValue {
+        let snapshot = await store.reload()
+        let stored = try removalTarget(caller: caller, arguments: arguments, in: snapshot)
+        let worktreeID = stored.value.id
+        guard !worktreesPendingRemoval.contains(worktreeID) else { throw ChauffeurError("worktree_busy", "This worktree is already being removed") }
+        let (branchRemoval, discardChanges) = try removalOptions(arguments)
+        let check = try await checkWorktreeRemoval(stored, in: snapshot, branchRemoval: branchRemoval, discardChanges: discardChanges)
+        let own = check.users.contains { $0.id == caller.sessionID }
+        let others = check.users.filter { $0.id != caller.sessionID }
+        if let other = others.first {
+            throw ChauffeurError("active_worktree", others.count == 1 ? "“\(other.title)” is using this worktree. It must end first"
+                                 : "\(others.count) sessions, including “\(other.title)”, are using this worktree. They must end first", path: stored.value.path)
+        }
+        if own || discardChanges || branchRemoval == .always {
+            guard let confirmation = arguments["confirmation"].string else {
+                throw ChauffeurError("confirmation_required", "Call chauffeur_preview_worktree_removal with the same options, tell the user what would be lost, then pass its confirmation")
+            }
+            guard confirmation == check.confirmation else {
+                throw ChauffeurError("confirmation_stale", "The worktree changed since the preview, or the options differ from it. Preview again")
+            }
+        }
+        guard discardChanges || !check.preview.requiresDiscard else {
+            throw ChauffeurError(check.preview.hasChanges ? "dirty_worktree" : "submodule_work",
+                                 "Worktree has uncommitted or untracked files, or submodule commits found nowhere else. Preview the removal and pass discardChanges=true to discard them", path: stored.value.path)
+        }
+        let result: [String: JSONValue] = ["worktreeID": .string(worktreeID.uuidString), "path": .string(stored.value.path),
+                                           "branch": check.entry.branch.isEmpty ? .null : .string(check.entry.branch)]
+        if own {
+            guard sessions[caller.sessionID]?.parentID == nil else {
+                throw ChauffeurError("delegated_worker", "Delegated workers can't remove their own worktree. Report your result; your coordinator removes it after closing you")
+            }
+            worktreesPendingRemoval.insert(worktreeID)
+            let confirmation = check.confirmation
+            Task { await self.finishOwnWorktreeRemoval(sessionID: caller.sessionID, worktreeID: worktreeID, branchRemoval: branchRemoval, discardChanges: discardChanges, confirmation: confirmation) }
+            return .object(result.merging(["removed": .bool(false), "scheduled": .bool(true), "endsYourSession": .bool(true),
+                                           "message": .string("Your session ends in a few seconds; the worktree is removed once it has stopped. Start no further work.")]) { $1 })
+        }
+        let removed = try await removeManagedWorktree(stored, in: snapshot, discardChanges: discardChanges, keepBranch: branchRemoval == .never, forceDeleteBranch: branchRemoval == .always)
         unlistRemovedCheckout(Paths.canonical(removed.value.path))
         rescanWorktrees()
-        return .object(["worktreeID": .string(removed.value.id.uuidString), "path": .string(removed.value.path), "removed": .bool(true)])
+        return .object(result.merging(["removed": .bool(true)]) { $1 })
     }
+
+    /// Ends the session, then removes its worktree if nothing changed since it confirmed.
+    private func finishOwnWorktreeRemoval(sessionID: UUID, worktreeID: UUID, branchRemoval: BranchRemoval, discardChanges: Bool, confirmation: String) async {
+        defer { worktreesPendingRemoval.remove(worktreeID) }
+        try? await Task.sleep(for: Self.ownWorktreeRemovalDelay)
+        do {
+            if sessions[sessionID]?.state.isLive == true { try await stopGracefully(sessionID) }
+            guard sessions[sessionID]?.state.isLive != true else { throw ChauffeurError("stop_failed", "The session did not stop") }
+            let snapshot = await store.reload()
+            guard let stored = snapshot.worktrees.first(where: { $0.value.id == worktreeID && $0.value.registered }) else { return }
+            let check = try await checkWorktreeRemoval(stored, in: snapshot, branchRemoval: branchRemoval, discardChanges: discardChanges)
+            if let user = check.users.first { throw ChauffeurError("active_worktree", "“\(user.title)” is using it") }
+            // Files written while the agent quit were not in what it confirmed.
+            guard check.confirmation == confirmation else { throw ChauffeurError("confirmation_stale", "It changed after the agent confirmed removing it") }
+            let removed = try await removeManagedWorktree(stored, in: snapshot, discardChanges: discardChanges, keepBranch: branchRemoval == .never, forceDeleteBranch: branchRemoval == .always)
+            unlistRemovedCheckout(Paths.canonical(removed.value.path))
+            rescanWorktrees()
+        } catch {
+            record((error as? ChauffeurError) ?? ChauffeurError("worktree_removal_failed", error.localizedDescription))
+            // The session has ended, so its record is where the user sees why the worktree stayed.
+            guard var session = sessions[sessionID], !session.state.isLive else { return }
+            let reason = (error as? ChauffeurError)?.message ?? error.localizedDescription
+            session.error = "Its worktree was kept: \(reason)"
+            try? await persist(session)
+        }
+    }
+
     public func createWorktree(_ request: WorktreeCreationRequest) async throws -> Stored<Worktree> {
         let fingerprint = JSONCoding.digest(try JSONCoding.encode(request))
         guard let key = request.retryKey else { return try await performWorktreeCreation(request, fingerprint: nil) }
@@ -1261,6 +1464,7 @@ public actor RuntimeCoordinator {
         guard !stopRequests.contains(sessionID) else { throw ChauffeurError("stop_pending", "Stop is still in progress") }
         // Covers the app, the phone, and agents launching or delegating into the project.
         guard !isSuspended(request.projectID) else { throw ChauffeurError("project_suspended", "This project is suspended. Restore it before starting sessions") }
+        guard request.worktreeID.map(worktreesPendingRemoval.contains) != true else { throw ChauffeurError("worktree_busy", "This worktree is being removed") }
         launching.insert(sessionID)
         let task = Task { try await self.performLaunch(request, child: child, sessionID: sessionID, fingerprint: fingerprint) }
         launchTasks[sessionID] = task
@@ -1523,6 +1727,7 @@ public actor RuntimeCoordinator {
             guard session.suspendedAt == nil else { throw ChauffeurError("suspended_session", "This session is suspended. Restore its project to resume it") }
             guard !isSuspended(session.projectID) else { throw ChauffeurError("project_suspended", "This project is suspended. Restore it before resuming other sessions") }
         }
+        guard session.worktreeID.map(worktreesPendingRemoval.contains) != true else { throw ChauffeurError("worktree_busy", "This session's worktree is being removed") }
         guard !launching.contains(sessionID) else { throw ChauffeurError("launch_pending", "Resume is already in progress") }
         launching.insert(sessionID); stopping.remove(sessionID)
         let task = Task { try await self.performResume(session) }
@@ -1602,7 +1807,7 @@ public actor RuntimeCoordinator {
                 guard current.nativeConversationID == recorded[agent.sessionID] else {
                     throw ChauffeurError("conversation_changed", "“\(agent.title)” switched conversations while suspending. Try again")
                 }
-                if current.state.isLive { try await stopForSuspension(agent.sessionID) }
+                if current.state.isLive { try await stopGracefully(agent.sessionID) }
                 guard var ended = sessions[agent.sessionID], !ended.state.isLive else {
                     throw ChauffeurError("suspend_failed", "“\(agent.title)” did not stop")
                 }
@@ -1633,8 +1838,8 @@ public actor RuntimeCoordinator {
     }
 
     /// Asks the agent to quit so it saves its conversation, then forces the terminal closed
-    /// if it is still running a few seconds later.
-    private func stopForSuspension(_ sessionID: UUID) async throws {
+    /// if it is still running a few seconds later. Used by suspension and self-removal.
+    private func stopGracefully(_ sessionID: UUID) async throws {
         let params: JSONValue = .object(["sessionID": .string(sessionID.uuidString)])
         _ = try await handle(IPCRequest("stop", params: params))
         let deadline = Date().addingTimeInterval(Self.suspendGracePeriod)
@@ -2149,6 +2354,7 @@ public actor RuntimeCoordinator {
         case "chauffeur_create_worktree": return try await createWorktreeTool(caller: caller, arguments: arguments)
         case "chauffeur_launch_session": return try await launchSessionTool(caller: caller, arguments: arguments)
         case "chauffeur_remove_worktree": return try await removeWorktreeTool(caller: caller, arguments: arguments)
+        case "chauffeur_preview_worktree_removal": return try await previewWorktreeRemovalTool(caller: caller, arguments: arguments)
         case "chauffeur_get_checkout_note": return try await checkoutNoteTool(caller: caller, arguments: arguments, writing: false)
         case "chauffeur_set_checkout_note": return try await checkoutNoteTool(caller: caller, arguments: arguments, writing: true)
         case "chauffeur_send_message":

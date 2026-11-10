@@ -67,7 +67,7 @@ public enum DiagnosticTool: String, Codable, Sendable {
     case chauffeur_delegate, chauffeur_delegation_status, chauffeur_report_result
     case chauffeur_follow_up, chauffeur_close_session, chauffeur_recover_workers
     case chauffeur_register_progress, chauffeur_unregister_progress
-    case chauffeur_create_worktree, chauffeur_remove_worktree, chauffeur_launch_session
+    case chauffeur_create_worktree, chauffeur_remove_worktree, chauffeur_preview_worktree_removal, chauffeur_launch_session
     case chauffeur_get_checkout_note, chauffeur_set_checkout_note
 }
 public struct RuntimeLogEntry: Codable, Sendable {

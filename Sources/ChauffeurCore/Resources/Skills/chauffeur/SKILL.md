@@ -112,9 +112,21 @@ available for follow-up.
 defaults to the main checkout's `HEAD`, so pass your branch to build on your
 work. Launch into it with its `worktreeID`, or delegate into it with its
 `worktreeID` and `shareCheckout: true`.
-`chauffeur_remove_worktree` cleans up a worktree Chauffeur created; pass
-`discardChanges: true` only when the user agreed to lose uncommitted files
-or submodule commits that exist only in that worktree.
+`chauffeur_remove_worktree` cleans up a worktree Chauffeur created, and its
+branch. Call `chauffeur_preview_worktree_removal` first: it lists what would be
+lost (uncommitted or untracked files, unmerged or unpushed commits, submodule
+commits) and whether the branch goes. Tell the user anything under `lost`, and
+pass `discardChanges: true` or `deleteBranch: "always"` only when they agreed to
+lose it. Removing with either, or removing your own worktree, needs the
+preview's `confirmation`, made with the same options; preview again if the
+checkout changed.
+
+Both tools default to the worktree you are working in. Removing it ends your
+session a few seconds after the call returns, so commit or push what should
+survive and say everything you need to say first. Chauffeur removes the
+checkout once the session has stopped, and keeps it if anything changed since
+the preview. Delegated workers can't remove their own worktree; report the
+result and let the coordinator remove it after closing the worker.
 
 Each checkout can carry one note the user sees beside it in Chauffeur, often
 where to resume a parked worktree. `chauffeur_get_checkout_note` reads it and

@@ -34,7 +34,14 @@ struct WorktreeToolTests {
         } catch let error as ChauffeurError { #expect(error.code == "dirty_worktree") }
         #expect(FileManager.default.fileExists(atPath: path + "/scratch.txt"))
 
-        let removed = try await call("chauffeur_remove_worktree", ["worktreeID": created["worktreeID"], "discardChanges": .bool(true)])
+        // Discarding work needs a preview's confirmation, so the agent has seen what goes.
+        do {
+            _ = try await call("chauffeur_remove_worktree", ["worktreeID": created["worktreeID"], "discardChanges": .bool(true)])
+            Issue.record("Discarding should need a confirmation")
+        } catch let error as ChauffeurError { #expect(error.code == "confirmation_required") }
+        let preview = try await call("chauffeur_preview_worktree_removal", ["worktreeID": created["worktreeID"], "discardChanges": .bool(true)])
+        #expect(preview["yourCheckout"] == .bool(false) && preview["blockers"].array.isEmpty)
+        let removed = try await call("chauffeur_remove_worktree", ["worktreeID": created["worktreeID"], "discardChanges": .bool(true), "confirmation": preview["confirmation"]])
         #expect(removed["removed"] == .bool(true))
         #expect(!FileManager.default.fileExists(atPath: path))
         do {
@@ -53,6 +60,100 @@ struct WorktreeToolTests {
             Issue.record("External checkouts are the user's to remove")
         } catch let error as ChauffeurError { #expect(error.code == "external_worktree") }
         #expect(FileManager.default.fileExists(atPath: external.path))
+    }
+
+    /// A repository with a session in its main checkout, a worktree created through the tool,
+    /// and a second session working in that worktree.
+    private struct SelfRemovalFixture {
+        let fixture: LaunchFixture, checkouts: URL
+        let worktreeID: JSONValue, path: String, worker: Session
+        let call: (String, [String: JSONValue]) async throws -> JSONValue
+        let callFromMain: (String, [String: JSONValue]) async throws -> JSONValue
+        func cleanup() { fixture.cleanup(); try? FileManager.default.removeItem(at: checkouts) }
+        func git(_ args: [String]) async throws -> Int32 { try await ProcessRunner.run("/usr/bin/git", ["-C", path, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid"] + args).status }
+
+        static func make(branch: String) async throws -> Self {
+            let checkouts = URL(fileURLWithPath: "/tmp/chauffeur-self-worktrees-\(UUID())")
+            let fixture = try await LaunchFixture.make(worktreeRoot: checkouts)
+            for args in [["init", "-b", "main"], ["config", "core.hooksPath", "/dev/null"], ["config", "commit.gpgsign", "false"], ["-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "--allow-empty", "-m", "Initial"]] {
+                let result = try await ProcessRunner.run("/usr/bin/git", ["-C", fixture.root.path] + args)
+                try #require(result.status == 0)
+            }
+            let main = try await fixture.runtime.launch(fixture.request)
+            let mainToken = try await fixture.runtime.ledger.issueGrant(sessionID: main.id)
+            let created = try await fixture.runtime.callTool(token: mainToken, name: "chauffeur_create_worktree", arguments: .object(["branch": .string(branch), "retryKey": .string(branch)]))
+            var request = fixture.request; request.retryKey = UUID(); request.worktreeID = UUID(uuidString: created["worktreeID"].string ?? "")
+            let worker = try await fixture.runtime.launch(request)
+            let token = try await fixture.runtime.ledger.issueGrant(sessionID: worker.id)
+            return SelfRemovalFixture(fixture: fixture, checkouts: checkouts, worktreeID: created["worktreeID"], path: try #require(created["path"].string), worker: worker,
+                                      call: { name, arguments in try await fixture.runtime.callTool(token: token, name: name, arguments: .object(arguments)) },
+                                      callFromMain: { name, arguments in try await fixture.runtime.callTool(token: mainToken, name: name, arguments: .object(arguments)) })
+        }
+    }
+
+    private func code(_ body: () async throws -> Void) async -> String? {
+        do { try await body(); return nil } catch let error as ChauffeurError { return error.code } catch { return "\(error)" }
+    }
+
+    private func waitUntil(_ condition: () async throws -> Bool) async throws {
+        for _ in 0..<100 where try await !condition() { try await Task.sleep(for: .milliseconds(200)) }
+    }
+
+    @Test func agentsSeeWhatRemovingTheirOwnWorktreeLosesThenRemoveItAsTheirSessionEnds() async throws {
+        let setup = try await SelfRemovalFixture.make(branch: "tool/self"); defer { setup.cleanup() }
+        #expect(try await setup.git(["commit", "--allow-empty", "-m", "Unmerged"]) == 0)
+        FileManager.default.createFile(atPath: setup.path + "/scratch.txt", contents: Data("work".utf8))
+
+        // With no worktreeID, the preview covers the caller's own checkout.
+        let preview = try await setup.call("chauffeur_preview_worktree_removal", [:])
+        #expect(preview["worktreeID"] == setup.worktreeID && preview["yourCheckout"] == .bool(true) && preview["endsYourSession"] == .bool(true))
+        #expect(preview["lost"].array.compactMap(\.string).contains { $0.contains("Uncommitted") })
+        #expect(preview["changedFiles"].array.compactMap(\.string) == ["Untracked: scratch.txt"])
+        #expect(preview["branchOutcome"].string?.contains("deleteBranch=always") == true)
+        #expect(preview["blockers"].array.compactMap(\.string).contains { $0.contains("discardChanges") })
+        // The main checkout's session sees the worker blocking it.
+        let fromMain = try await setup.callFromMain("chauffeur_preview_worktree_removal", ["worktreeID": setup.worktreeID])
+        #expect(fromMain["yourCheckout"] == .bool(false) && fromMain["blockers"].array.compactMap(\.string).contains { $0.contains("must end first") })
+        #expect(await code { _ = try await setup.callFromMain("chauffeur_remove_worktree", ["worktreeID": setup.worktreeID, "discardChanges": .bool(true)]) } == "active_worktree")
+        #expect(await code { _ = try await setup.callFromMain("chauffeur_preview_worktree_removal", [:]) } == "missing_worktree")
+
+        // Removing your own worktree always needs a matching, fresh confirmation.
+        #expect(await code { _ = try await setup.call("chauffeur_remove_worktree", ["discardChanges": .bool(true)]) } == "confirmation_required")
+        let options: [String: JSONValue] = ["discardChanges": .bool(true), "deleteBranch": .string("always")]
+        let confirmed = try await setup.call("chauffeur_preview_worktree_removal", options)
+        #expect(confirmed["blockers"].array.isEmpty && confirmed["lost"].array.count == 2)
+        let confirmation = try #require(confirmed["confirmation"].string)
+        #expect(await code { _ = try await setup.call("chauffeur_remove_worktree", ["discardChanges": .bool(true), "confirmation": .string(confirmation)]) } == "confirmation_stale")
+        FileManager.default.createFile(atPath: setup.path + "/later.txt", contents: Data("more".utf8))
+        #expect(await code { _ = try await setup.call("chauffeur_remove_worktree", options.merging(["confirmation": .string(confirmation)]) { $1 }) } == "confirmation_stale")
+        try FileManager.default.removeItem(atPath: setup.path + "/later.txt")
+
+        let scheduled = try await setup.call("chauffeur_remove_worktree", options.merging(["confirmation": .string(confirmation)]) { $1 })
+        #expect(scheduled["scheduled"] == .bool(true) && scheduled["endsYourSession"] == .bool(true))
+        // Nothing starts in the worktree while its session ends.
+        var request = setup.fixture.request; request.retryKey = UUID(); request.worktreeID = UUID(uuidString: setup.worktreeID.string ?? "")
+        #expect(await code { _ = try await setup.fixture.runtime.launch(request) } == "worktree_busy")
+
+        // The record is unregistered last, after the checkout and branch are gone.
+        try await waitUntil { await setup.fixture.runtime.store.reload().worktrees.first { $0.value.id.uuidString == setup.worktreeID.string }?.value.registered == false }
+        #expect(!FileManager.default.fileExists(atPath: setup.path))
+        let worker = try #require(await setup.fixture.runtime.store.reload().sessions.first { $0.value.id == setup.worker.id }?.value)
+        #expect(!worker.state.isLive && worker.error == nil)
+        let branch = try await ProcessRunner.run("/usr/bin/git", ["-C", setup.fixture.root.path, "rev-parse", "--verify", "--quiet", "refs/heads/tool/self"])
+        #expect(branch.status != 0)
+    }
+
+    @Test func aWorktreeThatChangesAsItsSessionEndsIsKept() async throws {
+        let setup = try await SelfRemovalFixture.make(branch: "tool/kept"); defer { setup.cleanup() }
+        let confirmation = try #require(try await setup.call("chauffeur_preview_worktree_removal", [:])["confirmation"].string)
+        _ = try await setup.call("chauffeur_remove_worktree", ["confirmation": .string(confirmation)])
+        // Written after confirming, as a build the agent left running might.
+        FileManager.default.createFile(atPath: setup.path + "/late.txt", contents: Data("late".utf8))
+
+        try await waitUntil { await setup.fixture.runtime.store.reload().sessions.first { $0.value.id == setup.worker.id }?.value.error != nil }
+        let worker = try #require(await setup.fixture.runtime.store.reload().sessions.first { $0.value.id == setup.worker.id }?.value)
+        #expect(!worker.state.isLive && worker.error?.contains("worktree was kept") == true)
+        #expect(FileManager.default.fileExists(atPath: setup.path + "/late.txt"))
     }
 
     @Test func checkoutNotesAreSharedWithAgentsAndLeaveWithTheirWorktree() async throws {
