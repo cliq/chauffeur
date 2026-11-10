@@ -78,6 +78,11 @@ struct ProjectRow: View {
                 Text(project.folders.count == 1 ? "1 repository" : "\(project.folders.count) repositories")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                if model.isSuspended(projectID: project.id) {
+                    Label("Suspended · restore to start sessions", systemImage: "pause.circle")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
             Spacer(minLength: 8)
             LiveSessionsBadge(count: model.liveSessionCount(projectID: project.id))

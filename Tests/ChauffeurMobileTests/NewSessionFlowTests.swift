@@ -44,6 +44,21 @@ final class NewSessionFlowTests: XCTestCase {
         XCTAssertEqual(model.path, [.sessions, .repository(projectID: chauffeur.id)])
     }
 
+    // MARK: - Suspended projects
+
+    func testASuspendedProjectOffersItsRestoreInsteadOfLaunching() throws {
+        let (model, chauffeur, notes) = try fixture()
+        let research = try XCTUnwrap(model.inventory?.projects.first { $0.name == "Research" })
+        XCTAssertEqual(model.suspendedProjects.map(\.id), [research.id])
+        XCTAssertFalse(model.isSuspended(projectID: chauffeur.id) || model.isSuspended(projectID: notes.id))
+        XCTAssertEqual(model.suspendedSessions(projectID: research.id).count, 2)
+        XCTAssertEqual(model.newSessionRoute(projectID: research.id), .restoreProject(projectID: research.id))
+        XCTAssertEqual(model.newSessionRoute(projectID: research.id, folderID: research.folders[0].id), .restoreProject(projectID: research.id))
+        // Suspended sessions aren't live, and their checkouts aren't offered as recent launches.
+        XCTAssertFalse(model.liveSessions.contains { $0.projectID == research.id })
+        XCTAssertFalse(model.recentLocations(limit: 10).contains { $0.projectID == research.id })
+    }
+
     // MARK: - Recent locations
 
     func testRecentLocationsListEachCheckoutOnceNewestFirst() throws {

@@ -177,6 +177,11 @@ struct RemoteHostSessionTests {
         #expect(!session.isSessionStopSupported)
         await #expect(throws: RemoteClientError.self) { try await session.stopSession(UUID()) }
         #expect(factory.hosts[0].requests(ofKind: "stopSession").isEmpty)
+        #expect(!session.isProjectSuspensionSupported)
+        await #expect(throws: RemoteClientError.self) { _ = try await session.suspendPlan(projectID: UUID()) }
+        await #expect(throws: RemoteClientError.self) { _ = try await session.restoreProject(UUID(), sessionIDs: []) }
+        #expect(factory.hosts[0].requests(ofKind: "getSuspendPlan").isEmpty)
+        #expect(factory.hosts[0].requests(ofKind: "restoreProject").isEmpty)
         session.disconnect()
     }
 
@@ -191,6 +196,31 @@ struct RemoteHostSessionTests {
         guard case .stopSession(let stop) = request.operation else { Issue.record("Missing stopSession"); return }
         #expect(stop.sessionID == id && stop.force)
         #expect(factory.hosts[0].requests(ofKind: "listInventory").count > inventoryRequests)
+    }
+
+    @Test func suspendingSendsConsentForBusyAgentsAndRestoreSendsTheChosenSessions() async throws {
+        let (session, factory) = makeSession()
+        await session.connect()
+        defer { session.disconnect() }
+        let projectID = UUID()
+        #expect(session.isProjectSuspensionSupported)
+        let plan = try await session.suspendPlan(projectID: projectID)
+        #expect(plan.projectID == projectID && plan.busyAgents.count == 1)
+
+        let inventoryRequests = factory.hosts[0].requests(ofKind: "listInventory").count
+        try await session.suspendProject(plan)
+        let suspend = try #require(factory.hosts[0].requests(ofKind: "suspendProject").first)
+        guard case .suspendProject(let request) = suspend.operation else { Issue.record("Missing suspendProject"); return }
+        // The plan showed a working agent, so the request carries consent to interrupt it.
+        #expect(request.projectID == projectID && request.interruptBusy)
+        #expect(factory.hosts[0].requests(ofKind: "listInventory").count > inventoryRequests)
+
+        let chosen = [UUID(), UUID()]
+        let result = try await session.restoreProject(projectID, sessionIDs: chosen, shownSessionIDs: chosen + [UUID()])
+        #expect(result.restored == chosen)
+        let restore = try #require(factory.hosts[0].requests(ofKind: "restoreProject").first)
+        guard case .restoreProject(let sent) = restore.operation else { Issue.record("Missing restoreProject"); return }
+        #expect(sent.projectID == projectID && sent.sessionIDs == chosen && sent.shownSessionIDs?.count == 3)
     }
 
     @Test func ticketsResolveOnTheMac() async throws {

@@ -43,7 +43,10 @@ struct EnvelopeTests {
             .setKeepAwakeTimer(KeepAwakeTimerRequest(until: Date(timeIntervalSince1970: 9_000))),
             .resolveTicket(ResolveTicketRequest(projectID: UUID(), folderID: UUID(), text: "https://acme.atlassian.net/browse/MBL-1")),
             .createGroup(CreateGroupRequest(projectID: UUID(), name: "Review")),
-            .stopSession(StopSessionRequest(sessionID: UUID(), force: true))
+            .stopSession(StopSessionRequest(sessionID: UUID(), force: true)),
+            .getSuspendPlan(SuspendPlanRequest(projectID: UUID())),
+            .suspendProject(SuspendProjectRequest(projectID: UUID(), interruptBusy: true)),
+            .restoreProject(RestoreProjectRequest(projectID: UUID(), sessionIDs: [UUID()], shownSessionIDs: [UUID(), UUID()]))
         ]
     }
 
@@ -60,6 +63,13 @@ struct EnvelopeTests {
             .ticketSuggestion(TicketSuggestionResult(ticket: TicketSuggestion(key: "MBL-1", number: "1", url: "https://acme.atlassian.net/browse/MBL-1", branch: "feat/mbl-1", title: "MBL-1", task: nil))),
             .ticketSuggestion(TicketSuggestionResult(ticket: nil)),
             .group(GroupSummary(id: UUID(), name: "Review")),
+            .suspendPlan(RemoteSuspendPlan(
+                projectID: UUID(),
+                agents: [.init(sessionID: UUID(), title: "Agent", kind: .claude, conversationRecorded: false, activity: .working)],
+                shells: [.init(sessionID: UUID(), title: "Shell")],
+                blockers: [.init(sessionID: UUID(), title: "Kimi", reason: "Close it first.")]
+            )),
+            .restoreResult(RemoteRestoreResult(restored: [UUID()], failures: [.init(sessionID: UUID(), title: "Agent", message: "Missing checkout")])),
             .ack
         ]
     }
@@ -110,7 +120,8 @@ struct EnvelopeTests {
         [
             "hello", "pair", "listInventory", "listWorktreeBranches", "previewWorktreeDestination", "launch",
             "getOperationStatus", "attachTerminal", "terminalResize", "detachTerminal", "getKeepAwake",
-            "setKeepAwakeSettings", "setKeepAwakeTimer", "resolveTicket", "createGroup", "stopSession"
+            "setKeepAwakeSettings", "setKeepAwakeTimer", "resolveTicket", "createGroup", "stopSession",
+            "getSuspendPlan", "suspendProject", "restoreProject"
         ]
     ))
     func remoteOperationKindStrings(operation: RemoteOperation, expectedKind: String) throws {
@@ -121,7 +132,8 @@ struct EnvelopeTests {
 
     @Test(arguments: zip(
         remoteResultCases(),
-        ["hostInfo", "pairing", "inventory", "worktreeBranches", "worktreeDestination", "operation", "attachment", "keepAwake", "ticketSuggestion", "ticketSuggestion", "group", "ack"]
+        ["hostInfo", "pairing", "inventory", "worktreeBranches", "worktreeDestination", "operation", "attachment", "keepAwake", "ticketSuggestion", "ticketSuggestion", "group",
+         "suspendPlan", "restoreResult", "ack"]
     ))
     func remoteResultKindStrings(result: RemoteResult, expectedKind: String) throws {
         let data = try RemoteJSON.encode(result)
@@ -162,6 +174,24 @@ struct EnvelopeTests {
     }
 
     // MARK: - RemoteRequest / RemoteResponse / RemoteError
+
+    @Test func hostsAdvertiseProjectSuspension() {
+        #expect(RemoteProtocol.capabilities.contains(RemoteProtocol.projectSuspension))
+    }
+
+    /// Older Macs send neither field; a future activity this build doesn't know reads as possibly working.
+    @Test func suspensionFieldsDecodeFromOlderAndNewerHosts() throws {
+        let session = SessionSummary(id: UUID(), projectID: UUID(), folderID: UUID(), title: "Agent", kind: .claude, state: .exited,
+                                     checkoutPath: "/repo", createdAt: Date(timeIntervalSince1970: 1), updatedAt: Date(timeIntervalSince1970: 1))
+        var object = try #require(try JSONSerialization.jsonObject(with: RemoteJSON.encode(session)) as? [String: Any])
+        #expect(object["suspendedAt"] == nil)
+        object.removeValue(forKey: "restoreError")
+        let decoded = try RemoteJSON.decode(SessionSummary.self, from: JSONSerialization.data(withJSONObject: object))
+        #expect(decoded.suspendedAt == nil && decoded.restoreError == nil)
+
+        let agent = #"{"sessionID":"\#(UUID().uuidString)","title":"A","kind":"claude","conversationRecorded":true,"activity":"paused"}"#
+        #expect(try RemoteJSON.decode(RemoteSuspendPlan.Agent.self, from: Data(agent.utf8)).activity == .unknown)
+    }
 
     @Test func remoteRequestDefaultProtocolVersionIsOne() {
         let request = RemoteRequest(operation: .pair(PairRequest(deviceName: "iPhone", protocolVersion: 1)))

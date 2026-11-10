@@ -155,7 +155,7 @@ public actor RemoteConnection {
         try await open()
         let response: RemoteResponse
         do {
-            response = try await sendRequest(.hello(hello))
+            response = try await sendRequest(.hello(hello), timeout: requestTimeout)
         } catch let error as RemoteClientError {
             fail(with: error)
             throw error
@@ -188,9 +188,10 @@ public actor RemoteConnection {
 
     // MARK: Requests
 
-    /// Sends one operation and returns its result, or throws `.remote` for a host error.
-    public func request(_ operation: RemoteOperation) async throws -> RemoteResult {
-        let response = try await sendRequest(operation)
+    /// Sends one operation and returns its result, or throws `.remote` for a host error. `timeout`
+    /// replaces the connection's request timeout for operations the host takes long to answer.
+    public func request(_ operation: RemoteOperation, timeout: Duration? = nil) async throws -> RemoteResult {
+        let response = try await sendRequest(operation, timeout: timeout ?? requestTimeout)
         if let error = response.error {
             throw RemoteClientError.remote(error)
         }
@@ -212,7 +213,7 @@ public actor RemoteConnection {
         } while offset < bytes.endIndex
     }
 
-    private func sendRequest(_ operation: RemoteOperation) async throws -> RemoteResponse {
+    private func sendRequest(_ operation: RemoteOperation, timeout requestTimeout: Duration) async throws -> RemoteResponse {
         try ensureOpen()
         let request = RemoteRequest(operation: operation)
         let id = request.id

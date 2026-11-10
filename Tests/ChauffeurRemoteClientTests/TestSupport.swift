@@ -226,8 +226,13 @@ final class FakeHost: @unchecked Sendable {
             return RemoteResponse(id: request.id, result: .document(content))
         case .readDocumentChunk(let read):
             return RemoteResponse(id: request.id, result: .documentChunk(imageChunk(read, version: "v1")))
-        case .terminalResize, .detachTerminal, .stopSession:
+        case .terminalResize, .detachTerminal, .stopSession, .suspendProject:
             return RemoteResponse(id: request.id, result: .ack)
+        case .getSuspendPlan(let plan):
+            let agent = RemoteSuspendPlan.Agent(sessionID: UUID(), title: "Agent", kind: .claude, conversationRecorded: true, activity: .working)
+            return RemoteResponse(id: request.id, result: .suspendPlan(RemoteSuspendPlan(projectID: plan.projectID, agents: [agent])))
+        case .restoreProject(let restore):
+            return RemoteResponse(id: request.id, result: .restoreResult(RemoteRestoreResult(restored: restore.sessionIDs)))
         }
     }
 }

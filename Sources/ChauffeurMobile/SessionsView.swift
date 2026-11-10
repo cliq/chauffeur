@@ -11,6 +11,7 @@ struct SessionsView: View {
     /// Comma-separated IDs of the projects and sidebar groups the user collapsed.
     @AppStorage("sessions.collapsedProjects") private var collapsedProjects = ""
     @AppStorage("sessions.collapsedGroups") private var collapsedGroups = ""
+    @State private var suspending: ProjectSummary?
 
     private var visibleSessions: [SessionSummary] {
         showsTerminalSessions ? model.liveSessions : model.liveSessions.filter { $0.kind != .shell }
@@ -71,7 +72,8 @@ struct SessionsView: View {
                 let sessions = visibleSessions
                 let activeProjectIDs = Set(sessions.map(\.projectID))
                 let projects = inventory.projects.filter { !$0.archived && activeProjectIDs.contains($0.id) }
-                if projects.isEmpty {
+                let suspended = model.suspendedProjects
+                if projects.isEmpty && suspended.isEmpty {
                     if model.liveSessions.isEmpty {
                         ContentUnavailableView("No active sessions", systemImage: "terminal", description: Text("Tap + to start a new session."))
                     } else {
@@ -81,7 +83,20 @@ struct SessionsView: View {
                     ForEach(projects) { project in
                         ProjectSections(model: model, inventory: inventory, project: project, liveSessions: sessions,
                                        isExpanded: CollapsedIDs(storage: $collapsedProjects).isExpanded(project.id),
-                                       collapsedGroups: CollapsedIDs(storage: $collapsedGroups))
+                                       collapsedGroups: CollapsedIDs(storage: $collapsedGroups),
+                                       onSuspend: { suspending = project })
+                    }
+                }
+                if !suspended.isEmpty {
+                    Section {
+                        ForEach(suspended) { project in
+                            NavigationLink(value: MobileRoute.restoreProject(projectID: project.id)) {
+                                SuspendedProjectRow(project: project, sessions: model.suspendedSessions(projectID: project.id))
+                            }
+                            .accessibilityIdentifier("sessions.suspendedProject")
+                        }
+                    } header: {
+                        Text("Suspended")
                     }
                 }
             } else if model.isConnecting {
@@ -116,6 +131,9 @@ struct SessionsView: View {
         }
         .refreshable {
             await model.refreshInventory()
+        }
+        .sheet(item: $suspending) { project in
+            SuspendProjectSheet(model: model, project: project)
         }
         .sheet(isPresented: $showingSettings) {
             NavigationStack {
@@ -191,6 +209,7 @@ private struct ProjectSections: View {
     let liveSessions: [SessionSummary]
     @Binding var isExpanded: Bool
     let collapsedGroups: CollapsedIDs
+    var onSuspend: () -> Void
 
     private var sessions: [SessionSummary] {
         liveSessions.filter { $0.projectID == project.id }
@@ -215,6 +234,20 @@ private struct ProjectSections: View {
                 .buttonStyle(.borderless)
                 .disabled(!model.isConnected)
                 .accessibilityIdentifier("sessions.project.new")
+                if model.projectSuspensionIsSupported {
+                    Menu {
+                        Button("Suspend Project…", systemImage: "pause.circle", action: onSuspend)
+                            .accessibilityIdentifier("sessions.project.suspend")
+                    } label: {
+                        Label("More for \(project.name)", systemImage: "ellipsis.circle")
+                            .labelStyle(.iconOnly)
+                            .font(.subheadline.weight(.semibold))
+                            .frame(minWidth: 44, minHeight: 44)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.borderless)
+                    .accessibilityIdentifier("sessions.project.more")
+                }
             }
             .textCase(nil)
         }
@@ -255,6 +288,37 @@ private struct ProjectSections: View {
                 }
             }
         }
+    }
+}
+
+/// A suspended project in the sessions list: how many sessions wait for its restore, and since when.
+private struct SuspendedProjectRow: View {
+    let project: ProjectSummary
+    let sessions: [SessionSummary]
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 10) {
+            Image(systemName: "pause.circle")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .frame(width: 20)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(project.name).font(.body.weight(.medium))
+                Text(detail).font(.caption).foregroundStyle(.secondary)
+                if sessions.contains(where: { $0.restoreError != nil }) {
+                    Label("Some sessions couldn't be resumed", systemImage: "exclamationmark.triangle.fill")
+                        .font(.caption).foregroundStyle(.orange)
+                }
+            }
+        }
+        .accessibilityElement(children: .combine)
+    }
+
+    private var detail: String {
+        let count = sessions.count == 1 ? "1 session" : "\(sessions.count) sessions"
+        guard let since = sessions.compactMap(\.suspendedAt).min() else { return count }
+        return "\(count) · suspended \(since.formatted(.relative(presentation: .named)))"
     }
 }
 

@@ -269,6 +269,11 @@ public struct SessionSummary: Codable, Equatable, Sendable, Identifiable {
     public var createdAt: Date
     public var updatedAt: Date
     public var progress: SessionProgressSummary?
+    /// Set while the session's project is suspended: it ended and waits for the project's restore.
+    /// Any suspended session means the project is suspended. Nil from Macs without `projectSuspension`.
+    public var suspendedAt: Date?
+    /// Why the last restore couldn't resume this suspended session.
+    public var restoreError: String?
 
     public init(
         id: UUID,
@@ -284,7 +289,9 @@ public struct SessionSummary: Codable, Equatable, Sendable, Identifiable {
         attached: Bool = false,
         createdAt: Date,
         updatedAt: Date,
-        progress: SessionProgressSummary? = nil
+        progress: SessionProgressSummary? = nil,
+        suspendedAt: Date? = nil,
+        restoreError: String? = nil
     ) {
         self.id = id
         self.projectID = projectID
@@ -300,6 +307,8 @@ public struct SessionSummary: Codable, Equatable, Sendable, Identifiable {
         self.createdAt = createdAt
         self.updatedAt = updatedAt
         self.progress = progress
+        self.suspendedAt = suspendedAt
+        self.restoreError = restoreError
     }
 }
 

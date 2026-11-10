@@ -34,7 +34,8 @@ struct ProjectPickerView: View {
                     }
                 }
             } else {
-                LaunchSearchSections(model: model, search: LaunchSearch(query: query, projects: projects), query: query)
+                // A suspended project's repositories and checkouts can't launch until it's restored.
+                LaunchSearchSections(model: model, search: LaunchSearch(query: query, projects: projects.filter { !model.isSuspended(projectID: $0.id) }), query: query)
             }
         }
         .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Projects, repositories, branches")

@@ -53,6 +53,8 @@ enum MobileRoute: Hashable {
     /// `baseRef` optionally preselects the new branch's starting point.
     case newWorktree(projectID: UUID, folderID: UUID, baseRef: String? = nil)
     case launch(LaunchLocation, prefill: LaunchPrefill = LaunchPrefill())
+    /// A suspended project's sessions, to restore.
+    case restoreProject(projectID: UUID)
 }
 
 /// A checkout this phone launched in, remembered so the new-session flow can offer it again.
@@ -229,6 +231,13 @@ final class MobileAppModel {
 
     var groupCreationIsSupported: Bool {
         session?.isGroupCreationSupported ?? false
+    }
+
+    var projectSuspensionIsSupported: Bool {
+        guard isConnected else { return false }
+        if let session { return session.isProjectSuspensionSupported }
+        if case .connected(let host) = connectionState { return host.capabilities.contains(RemoteProtocol.projectSuspension) }
+        return false
     }
 
     @discardableResult
@@ -606,6 +615,23 @@ final class MobileAppModel {
         return try await session.createGroup(projectID: projectID, name: name)
     }
 
+    // MARK: - Project suspension
+
+    func suspendPlan(projectID: UUID) async throws -> RemoteSuspendPlan {
+        guard let session else { throw RemoteClientError.disconnected }
+        return try await session.suspendPlan(projectID: projectID)
+    }
+
+    func suspendProject(_ plan: RemoteSuspendPlan) async throws {
+        guard let session else { throw RemoteClientError.disconnected }
+        try await session.suspendProject(plan)
+    }
+
+    func restoreProject(_ projectID: UUID, sessionIDs: [UUID], shownSessionIDs: [UUID]) async throws -> RemoteRestoreResult {
+        guard let session else { throw RemoteClientError.disconnected }
+        return try await session.restoreProject(projectID, sessionIDs: sessionIDs, shownSessionIDs: shownSessionIDs)
+    }
+
     /// Sends the launch and, on completion, opens the new session as the selected tab.
     func launch(_ request: LaunchOperationRequest) async -> LaunchOutcome {
         guard let session, isConnected else {
@@ -647,6 +673,20 @@ final class MobileAppModel {
         inventory?.session(id)
     }
 
+    /// A suspended project's sessions, oldest first; empty when the project isn't suspended.
+    func suspendedSessions(projectID: UUID) -> [SessionSummary] {
+        inventory?.sessions.filter { $0.projectID == projectID && $0.suspendedAt != nil && !$0.state.isLive } ?? []
+    }
+
+    func isSuspended(projectID: UUID) -> Bool {
+        inventory?.sessions.contains { $0.projectID == projectID && $0.suspendedAt != nil } ?? false
+    }
+
+    /// Projects waiting for a restore, in the inventory's order.
+    var suspendedProjects: [ProjectSummary] {
+        inventory?.projects.filter { !$0.archived && isSuspended(projectID: $0.id) } ?? []
+    }
+
     var selectedSession: SessionSummary? {
         selectedTab.flatMap(session)
     }
@@ -665,6 +705,8 @@ final class MobileAppModel {
         let projects = inventory?.projects.filter { !$0.archived } ?? []
         let project = projectID.flatMap { id in projects.first { $0.id == id } } ?? (projects.count == 1 ? projects.first : nil)
         guard let project else { return .newSession }
+        // The Mac refuses launches in a suspended project; offer its restore instead.
+        if isSuspended(projectID: project.id) { return .restoreProject(projectID: project.id) }
         let folder = folderID.flatMap { id in project.folders.first { $0.id == id } } ?? (project.folders.count == 1 ? project.folders.first : nil)
         guard let folder, folder.availability == .available else { return .repository(projectID: project.id) }
         let checkouts = folder.checkouts.filter { $0.availability == .available }
@@ -687,7 +729,7 @@ final class MobileAppModel {
         var seen = Set<String>()
         var locations: [LaunchLocation] = []
         for (projectID, folderID, path, _) in (launched + sessions).sorted(by: { $0.3 > $1.3 }) where seen.insert(path).inserted {
-            guard let project = inventory.project(projectID), !project.archived,
+            guard let project = inventory.project(projectID), !project.archived, !isSuspended(projectID: projectID),
                   let folder = project.folders.first(where: { $0.id == folderID }), folder.availability == .available,
                   folder.checkouts.contains(where: { $0.path == path && $0.availability == .available }) else { continue }
             locations.append(LaunchLocation(projectID: projectID, folderID: folderID, checkout: .existing(path: path)))
@@ -791,8 +833,9 @@ final class MobileAppModel {
         )
     }
 
-    /// Two projects (one without sessions); the first files two repositories under nested
-    /// sidebar groups beside an ungrouped site repository, with sessions across four checkouts.
+    /// Three projects: the first files two repositories under nested sidebar groups beside an
+    /// ungrouped site repository, with sessions across four checkouts; Notes has no sessions; and
+    /// Research is suspended, one of its sessions after a failed restore.
     static func fixtureInventory(hostName: String) -> InventorySnapshot {
         let chauffeurProject = UUID()
         let chauffeurFolder = UUID()
@@ -807,6 +850,9 @@ final class MobileAppModel {
         let sitePath = "/Users/leo/chauffeur-site"
         let sitePreviewPath = "/Users/leo/.chauffeur/worktrees/site-preview"
         let notesPath = "/Users/leo/Documents/notes"
+        let researchProject = UUID()
+        let researchFolder = UUID()
+        let researchPath = "/Users/leo/research"
         let now = Date()
 
         let codexPreset = PresetSummary(id: UUID(), name: "Codex · Personal", kind: .codex)
@@ -884,6 +930,25 @@ final class MobileAppModel {
                             ]
                         )
                     ]
+                ),
+                ProjectSummary(
+                    id: researchProject,
+                    name: "Research",
+                    groups: [GroupSummary(id: UUID(), name: "Default", isDefault: true)],
+                    presets: [codexPreset, claudePreset],
+                    folders: [
+                        FolderSummary(
+                            id: researchFolder,
+                            name: "research",
+                            path: researchPath,
+                            isRepository: true,
+                            inventoryReady: true,
+                            availability: .available,
+                            checkouts: [
+                                CheckoutSummary(kind: .main, branch: "main", path: researchPath, availability: .available)
+                            ]
+                        )
+                    ]
                 )
             ],
             sessions: [
@@ -916,6 +981,19 @@ final class MobileAppModel {
                     id: UUID(), projectID: chauffeurProject, folderID: chauffeurFolder,
                     title: "Old run", kind: .codex, state: .exited,
                     branch: "main", checkoutPath: mainPath, createdAt: now, updatedAt: now
+                ),
+                SessionSummary(
+                    id: UUID(), projectID: researchProject, folderID: researchFolder,
+                    title: "Summarize the benchmark results", kind: .claude, state: .exited,
+                    branch: "main", checkoutPath: researchPath, createdAt: now, updatedAt: now,
+                    suspendedAt: now.addingTimeInterval(-3 * 60 * 60)
+                ),
+                SessionSummary(
+                    id: UUID(), projectID: researchProject, folderID: researchFolder,
+                    title: "Port the loader to async", kind: .codex, state: .exited,
+                    branch: "main", checkoutPath: researchPath, createdAt: now, updatedAt: now,
+                    suspendedAt: now.addingTimeInterval(-3 * 60 * 60),
+                    restoreError: "The checkout has a session starting in it"
                 )
             ],
             generatedAt: now,

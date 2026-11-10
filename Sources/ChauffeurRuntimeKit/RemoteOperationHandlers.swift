@@ -164,6 +164,33 @@ public actor RemoteOperationHandlers {
                 _ = try await runtime.handle(IPCRequest("stop", params: params))
                 return .success(.ack)
             } catch { return .failure(Self.remoteError(error)) }
+        case .getSuspendPlan(let request):
+            do {
+                let plan = try await runtime.handle(IPCRequest("suspendPlan", params: .object(["projectID": .string(request.projectID.uuidString)])))
+                return .success(.suspendPlan(Self.remotePlan(try plan.decode(ProjectSuspensionPlan.self))))
+            } catch { return .failure(Self.remoteError(error)) }
+        case .suspendProject(let request):
+            do {
+                let params: JSONValue = .object(["projectID": .string(request.projectID.uuidString), "interruptBusy": .bool(request.interruptBusy)])
+                _ = try await runtime.handle(IPCRequest("suspendProject", params: params))
+                return .success(.ack)
+            } catch { return .failure(Self.remoteError(error)) }
+        case .restoreProject(let request):
+            do {
+                if let shown = request.shownSessionIDs {
+                    let view = try await runtime.snapshot().decode(RemoteInventoryBuilder.RuntimeSnapshotView.self)
+                    let suspended = view.sessions.filter { $0.projectID == request.projectID && $0.suspendedAt != nil }.map(\.id)
+                    guard Set(suspended) == Set(shown) else {
+                        throw ChauffeurError("suspension_changed", "The project's suspended sessions changed. Check the list and restore again")
+                    }
+                }
+                let params: JSONValue = .object(["projectID": .string(request.projectID.uuidString),
+                                                 "sessionIDs": .array(request.sessionIDs.map { .string($0.uuidString) })])
+                let result = try await runtime.handle(IPCRequest("restoreProject", params: params)).decode(ProjectRestoreResult.self)
+                return .success(.restoreResult(RemoteRestoreResult(restored: result.restored, failures: result.failures.map {
+                    RemoteRestoreResult.Failure(sessionID: $0.sessionID, title: $0.title, message: $0.message)
+                })))
+            } catch { return .failure(Self.remoteError(error)) }
         case .launch(let request):
             return .success(.operation(await launch(request, deviceID: deviceID)))
         case .getOperationStatus(let request):
@@ -338,6 +365,18 @@ public actor RemoteOperationHandlers {
         // A corrupt journal is treated as empty; the next launch rewrites it.
         try? await journal.load()
         journalLoaded = true
+    }
+
+    static func remotePlan(_ plan: ProjectSuspensionPlan) -> RemoteSuspendPlan {
+        RemoteSuspendPlan(
+            projectID: plan.projectID,
+            agents: plan.agents.map {
+                RemoteSuspendPlan.Agent(sessionID: $0.sessionID, title: $0.title, kind: RemoteInventoryBuilder.kind($0.kind),
+                                        conversationRecorded: $0.conversationRecorded, activity: RemoteSuspendPlan.Activity(rawValue: $0.activity.rawValue) ?? .unknown)
+            },
+            shells: plan.shells.map { RemoteSuspendPlan.Shell(sessionID: $0.sessionID, title: $0.title) },
+            blockers: plan.blockers.map { RemoteSuspendPlan.Blocker(sessionID: $0.sessionID, title: $0.title, reason: $0.reason) }
+        )
     }
 
     private static func remoteError(_ error: Error) -> RemoteError {

@@ -73,6 +73,8 @@ struct RootView: View {
                         NewWorktreeView(model: model, projectID: projectID, folderID: folderID, initialBaseRef: baseRef)
                     case .launch(let location, let prefill):
                         LaunchView(model: model, location: location, prefill: prefill)
+                    case .restoreProject(let projectID):
+                        RestoreProjectView(model: model, projectID: projectID)
                     }
                 }
         }

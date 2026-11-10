@@ -101,7 +101,9 @@ public struct RemoteInventoryBuilder {
                 attached: isAttached(session.id),
                 createdAt: session.createdAt,
                 updatedAt: session.updatedAt,
-                progress: RemoteProgressReader.summary(session: session)
+                progress: RemoteProgressReader.summary(session: session),
+                suspendedAt: session.suspendedAt,
+                restoreError: session.suspendedAt != nil && !session.state.isLive ? session.error : nil
             ))
         }
         sessions.sort { $0.createdAt < $1.createdAt }

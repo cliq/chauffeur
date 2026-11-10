@@ -223,6 +223,9 @@ public enum RemoteOperation: Equatable, Sendable, Codable {
     case listSessionDocuments(SessionDocumentsRequest)
     case readDocument(DocumentReadRequest)
     case readDocumentChunk(DocumentChunkRequest)
+    case getSuspendPlan(SuspendPlanRequest)
+    case suspendProject(SuspendProjectRequest)
+    case restoreProject(RestoreProjectRequest)
 
     public var kind: String {
         switch self {
@@ -247,6 +250,9 @@ public enum RemoteOperation: Equatable, Sendable, Codable {
         case .listSessionDocuments: return "listSessionDocuments"
         case .readDocument: return "readDocument"
         case .readDocumentChunk: return "readDocumentChunk"
+        case .getSuspendPlan: return "getSuspendPlan"
+        case .suspendProject: return "suspendProject"
+        case .restoreProject: return "restoreProject"
         }
     }
 
@@ -296,6 +302,12 @@ public enum RemoteOperation: Equatable, Sendable, Codable {
             self = .readDocument(try container.decode(DocumentReadRequest.self, forKey: .payload))
         case "readDocumentChunk":
             self = .readDocumentChunk(try container.decode(DocumentChunkRequest.self, forKey: .payload))
+        case "getSuspendPlan":
+            self = .getSuspendPlan(try container.decode(SuspendPlanRequest.self, forKey: .payload))
+        case "suspendProject":
+            self = .suspendProject(try container.decode(SuspendProjectRequest.self, forKey: .payload))
+        case "restoreProject":
+            self = .restoreProject(try container.decode(RestoreProjectRequest.self, forKey: .payload))
         default:
             throw DecodingError.dataCorrupted(
                 DecodingError.Context(
@@ -352,6 +364,12 @@ public enum RemoteOperation: Equatable, Sendable, Codable {
             try container.encode(payload, forKey: .payload)
         case .readDocumentChunk(let payload):
             try container.encode(payload, forKey: .payload)
+        case .getSuspendPlan(let payload):
+            try container.encode(payload, forKey: .payload)
+        case .suspendProject(let payload):
+            try container.encode(payload, forKey: .payload)
+        case .restoreProject(let payload):
+            try container.encode(payload, forKey: .payload)
         }
     }
 }
@@ -374,6 +392,8 @@ public enum RemoteResult: Equatable, Sendable, Codable {
     case sessionDocuments(SessionDocumentList)
     case document(DocumentContent)
     case documentChunk(DocumentChunk)
+    case suspendPlan(RemoteSuspendPlan)
+    case restoreResult(RemoteRestoreResult)
     case ack
 
     public var kind: String {
@@ -393,6 +413,8 @@ public enum RemoteResult: Equatable, Sendable, Codable {
         case .sessionDocuments: return "sessionDocuments"
         case .document: return "document"
         case .documentChunk: return "documentChunk"
+        case .suspendPlan: return "suspendPlan"
+        case .restoreResult: return "restoreResult"
         case .ack: return "ack"
         }
     }
@@ -431,6 +453,10 @@ public enum RemoteResult: Equatable, Sendable, Codable {
             self = .document(try container.decode(DocumentContent.self, forKey: .payload))
         case "documentChunk":
             self = .documentChunk(try container.decode(DocumentChunk.self, forKey: .payload))
+        case "suspendPlan":
+            self = .suspendPlan(try container.decode(RemoteSuspendPlan.self, forKey: .payload))
+        case "restoreResult":
+            self = .restoreResult(try container.decode(RemoteRestoreResult.self, forKey: .payload))
         case "ack":
             self = .ack
         default:
@@ -476,6 +502,10 @@ public enum RemoteResult: Equatable, Sendable, Codable {
         case .document(let payload):
             try container.encode(payload, forKey: .payload)
         case .documentChunk(let payload):
+            try container.encode(payload, forKey: .payload)
+        case .suspendPlan(let payload):
+            try container.encode(payload, forKey: .payload)
+        case .restoreResult(let payload):
             try container.encode(payload, forKey: .payload)
         case .ack:
             break

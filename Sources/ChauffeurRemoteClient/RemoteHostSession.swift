@@ -152,6 +152,11 @@ public final class RemoteHostSession {
         return host.capabilities.contains(RemoteProtocol.documentChunks)
     }
 
+    public var isProjectSuspensionSupported: Bool {
+        guard case .connected(let host) = connectionState else { return false }
+        return host.capabilities.contains(RemoteProtocol.projectSuspension)
+    }
+
     @ObservationIgnored private let journal: any PendingOperationJournal
     @ObservationIgnored private let clientName: String
     @ObservationIgnored private let clientVersion: String
@@ -432,6 +437,56 @@ public final class RemoteHostSession {
         }
         await refreshInventory()
         return group
+    }
+
+    /// What suspending a project would do, with each agent's conversation checked on the Mac.
+    public func suspendPlan(projectID: UUID) async throws -> RemoteSuspendPlan {
+        let connection = try suspensionConnection()
+        // The Mac reads each agent's transcripts before answering.
+        let result = try await connection.request(.getSuspendPlan(SuspendPlanRequest(projectID: projectID)), timeout: .seconds(30))
+        guard case .suspendPlan(let plan) = result else {
+            throw RemoteClientError.invalidResponse("getSuspendPlan returned \(result.kind)")
+        }
+        return plan
+    }
+
+    /// Suspends a project as `plan` described, then refreshes the inventory. Each agent gets a grace
+    /// period to quit, so the request waits longer than usual; the inventory is refreshed even when
+    /// it fails or times out, since the Mac may have stopped some sessions or still be working.
+    public func suspendProject(_ plan: RemoteSuspendPlan) async throws {
+        let connection = try suspensionConnection()
+        let request = SuspendProjectRequest(projectID: plan.projectID, interruptBusy: !plan.busyAgents.isEmpty)
+        let timeout = Duration.seconds(30 + plan.agents.count * 10 + plan.shells.count * 5)
+        let result: RemoteResult
+        do { result = try await connection.request(.suspendProject(request), timeout: timeout) }
+        catch { await refreshInventory(); throw error }
+        await refreshInventory()
+        guard case .ack = result else {
+            throw RemoteClientError.invalidResponse("suspendProject returned \(result.kind)")
+        }
+    }
+
+    /// Resumes `sessionIDs` and ends the project's other suspended sessions, then refreshes the inventory.
+    /// `shownSessionIDs` are all the suspended sessions the user chose from; the Mac refuses if they changed.
+    public func restoreProject(_ projectID: UUID, sessionIDs: [UUID], shownSessionIDs: [UUID]? = nil) async throws -> RemoteRestoreResult {
+        let connection = try suspensionConnection()
+        let timeout = Duration.seconds(60 + sessionIDs.count * 30)
+        let result: RemoteResult
+        do { result = try await connection.request(.restoreProject(RestoreProjectRequest(projectID: projectID, sessionIDs: sessionIDs, shownSessionIDs: shownSessionIDs)), timeout: timeout) }
+        catch { await refreshInventory(); throw error }
+        await refreshInventory()
+        guard case .restoreResult(let restored) = result else {
+            throw RemoteClientError.invalidResponse("restoreProject returned \(result.kind)")
+        }
+        return restored
+    }
+
+    private func suspensionConnection() throws -> RemoteConnection {
+        guard isProjectSuspensionSupported else {
+            throw RemoteClientError.invalidResponse("Update Chauffeur on the Mac to suspend projects remotely.")
+        }
+        guard let connection else { throw RemoteClientError.disconnected }
+        return connection
     }
 
     /// Stops a live session and refreshes the inventory so the list shows it stopped.
