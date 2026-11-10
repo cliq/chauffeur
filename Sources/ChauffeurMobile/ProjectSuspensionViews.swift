@@ -158,6 +158,9 @@ struct SuspendProjectSheet: View {
 struct RestoreProjectView: View {
     var model: MobileAppModel
     let projectID: UUID
+    /// Pops back once everything chosen resumed. Off where the screen stands in for a
+    /// new-session step, which comes back once the project is no longer suspended.
+    var popsWhenRestored = true
     @Environment(\.dismiss) private var dismiss
     @State private var excluded = Set<UUID>()
     @State private var restoring = false
@@ -265,7 +268,7 @@ struct RestoreProjectView: View {
         do {
             let result = try await model.restoreProject(projectID, sessionIDs: chosen, shownSessionIDs: shown)
             if result.failures.isEmpty {
-                dismiss()
+                if popsWhenRestored { dismiss() }
             } else {
                 failure = result.failures.count == 1 ? "“\(result.failures[0].title)” couldn't be resumed and stays suspended."
                     : "\(result.failures.count) sessions couldn't be resumed and stay suspended."
@@ -275,6 +278,27 @@ struct RestoreProjectView: View {
         } catch {
             failure = SuspendProjectSheet.message(error)
         }
+    }
+}
+
+/// Shows a new-session step only while its project isn't suspended. Like the Mac's project window,
+/// a suspended project offers its restore instead, and the step returns once it's restored.
+private struct SuspendedProjectGate: ViewModifier {
+    var model: MobileAppModel
+    let projectID: UUID
+
+    func body(content: Content) -> some View {
+        if model.isSuspended(projectID: projectID) {
+            RestoreProjectView(model: model, projectID: projectID, popsWhenRestored: false)
+        } else {
+            content
+        }
+    }
+}
+
+extension View {
+    func suspendedProjectGate(model: MobileAppModel, projectID: UUID) -> some View {
+        modifier(SuspendedProjectGate(model: model, projectID: projectID))
     }
 }
 

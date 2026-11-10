@@ -1742,6 +1742,9 @@ public actor RuntimeCoordinator {
         projectsBeingSuspended.contains(projectID) || sessions.values.contains { $0.projectID == projectID && $0.suspendedAt != nil }
     }
 
+    /// Whether launches and resumes in the project are refused because it is, or is being, suspended.
+    func projectIsSuspended(_ projectID: UUID) -> Bool { isSuspended(projectID) }
+
     /// What suspending would do, with each agent's conversation checked against its transcripts.
     private func suspendPlan(_ projectID: UUID) async throws -> ProjectSuspensionPlan {
         guard !isSuspended(projectID) else { throw ChauffeurError("project_suspended", "This project is already suspended") }

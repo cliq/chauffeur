@@ -67,12 +67,16 @@ struct RootView: View {
                         ProjectPickerView(model: model)
                     case .repository(let projectID):
                         RepositoryPickerView(model: model, projectID: projectID)
+                            .suspendedProjectGate(model: model, projectID: projectID)
                     case .checkout(let projectID, let folderID):
                         CheckoutPickerView(model: model, projectID: projectID, folderID: folderID)
+                            .suspendedProjectGate(model: model, projectID: projectID)
                     case .newWorktree(let projectID, let folderID, let baseRef):
                         NewWorktreeView(model: model, projectID: projectID, folderID: folderID, initialBaseRef: baseRef)
+                            .suspendedProjectGate(model: model, projectID: projectID)
                     case .launch(let location, let prefill):
                         LaunchView(model: model, location: location, prefill: prefill)
+                            .suspendedProjectGate(model: model, projectID: location.projectID)
                     case .restoreProject(let projectID):
                         RestoreProjectView(model: model, projectID: projectID)
                     }

@@ -651,7 +651,13 @@ final class MobileAppModel {
                 openSession(sessionID)
                 return .launched(sessionID: sessionID)
             case .failed:
-                return .failed(message: status.error?.message ?? "The launch failed.", worktreeCreated: status.worktreeID != nil)
+                var message = status.error?.message ?? "The launch failed."
+                if status.error?.code == "project_suspended" {
+                    // With a Mac that reports suspension, the refreshed inventory swaps this step for the restore.
+                    await session.refreshInventory()
+                    if !projectSuspensionIsSupported { message += " Restore it on your Mac, or update Chauffeur there to restore it from this device." }
+                }
+                return .failed(message: message, worktreeCreated: status.worktreeID != nil)
             case .creatingWorktree, .worktreeReady, .launching:
                 return .failed(message: "The launch is still running on the Mac. Retry to check its result.", worktreeCreated: status.worktreeID != nil)
             }

@@ -273,6 +273,11 @@ public actor RemoteOperationHandlers {
             }
         }
 
+        // Refuse before creating a worktree the launch could never use.
+        guard await !runtime.projectIsSuspended(project.id) else {
+            return await fail(context, status, RemoteError(code: "project_suspended", message: "This project is suspended. Restore it before starting sessions."))
+        }
+
         var worktreeID = spec.worktreeID
         var branch = spec.worktreeID.flatMap { id in snapshot.worktrees.first { $0.value.id == id }?.value.branch } ?? ""
         do {

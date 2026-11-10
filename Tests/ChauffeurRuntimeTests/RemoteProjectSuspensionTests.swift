@@ -49,6 +49,16 @@ struct RemoteProjectSuspensionTests {
         }
         #expect(again.code == "project_suspended")
 
+        // A launch into the suspended project is refused before it creates a worktree.
+        let worktreesBefore = await fixture.runtime.store.reload().worktrees.count
+        let launch = LaunchOperationRequest(operationKey: UUID(), fingerprint: "suspended", newWorktree: WorktreeCreationSpec(branch: "feature/while-suspended", baseRef: "HEAD"),
+                                            launch: LaunchSpec(projectID: projectID, folderID: fixture.request.folderID))
+        guard case .success(.operation(let refused)) = await handlers.handle(.launch(launch), deviceID: UUID()) else {
+            Issue.record("No launch status"); return
+        }
+        #expect(refused.phase == .failed && refused.error?.code == "project_suspended" && refused.worktreeID == nil)
+        #expect(await fixture.runtime.store.reload().worktrees.count == worktreesBefore)
+
         // A list that doesn't show every suspended session can't end the ones it left out.
         guard case .failure(let changed) = await handlers.handle(.restoreProject(RestoreProjectRequest(projectID: projectID, sessionIDs: [], shownSessionIDs: [])), deviceID: UUID()) else {
             Issue.record("Restored from a stale list"); return
