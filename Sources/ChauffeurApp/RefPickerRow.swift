@@ -2,6 +2,7 @@ import SwiftUI
 import ChauffeurCore
 
 struct RefPickerRow: View {
+    static let height: CGFloat = 26
     let name: String
     let ref: GitRef?
     let depth: Int
@@ -12,7 +13,6 @@ struct RefPickerRow: View {
     let expanded: Bool
     let isMore: Bool
     let activate: () -> Void
-    @Environment(\.colorSchemeContrast) private var contrast
 
     private var stale: Bool {
         guard let ref, ref.kind == .local || ref.kind == .remote, let date = ref.lastCommitDate,
@@ -20,8 +20,8 @@ struct RefPickerRow: View {
         return date < threshold
     }
     private var secondary: Color { selected ? .white.opacity(0.75) : Color(nsColor: .secondaryLabelColor) }
-    private var tertiary: Color { selected ? .white.opacity(0.75) : Color(nsColor: contrast == .increased ? .secondaryLabelColor : .tertiaryLabelColor) }
-    private var nameColor: Color { selected ? .white : stale || ref?.isMerged == true ? tertiary : .primary }
+    // Every ref is a valid base, so names never dim; merged and stale state live in the trailing labels.
+    private var nameColor: Color { selected ? .white : .primary }
     private var symbol: String {
         guard let ref else { return "folder" }
         switch ref.kind {
@@ -42,7 +42,7 @@ struct RefPickerRow: View {
         let kind: String
         switch ref.kind { case .local: kind = "local branch"; case .remote: kind = "remote branch"; case .tag: kind = "tag"; case .head, .commit: kind = "commit" }
         return [ref.name, kind, subtitle, ref.isMerged ? "Merged" : nil, age,
-                ref.isCheckedOutInWorktree ? "Checked out in a worktree" : nil, ref.isHEAD ? "HEAD" : nil,
+                ref.isHEAD ? "HEAD" : nil,
                 ref.ahead > 0 ? "\(ref.ahead) ahead" : nil, ref.behind > 0 ? "\(ref.behind) behind" : nil]
             .compactMap { $0 }.joined(separator: ", ")
     }
@@ -52,7 +52,7 @@ struct RefPickerRow: View {
         if !query.isEmpty {
             if let slash = name.lastIndex(of: "/"),
                let end = AttributedString.Index(name.index(after: slash), within: value) {
-                value[value.startIndex..<end].foregroundColor = tertiary
+                value[value.startIndex..<end].foregroundColor = selected ? .white.opacity(0.85) : .secondary
             }
             var remaining = name.startIndex..<name.endIndex
             while let match = name.range(of: query, options: .caseInsensitive, range: remaining) {
@@ -88,11 +88,6 @@ struct RefPickerRow: View {
                 if let subtitle { Text(subtitle).lineLimit(1).truncationMode(.middle) }
                 if ref?.isMerged == true { Text("Merged") }
                 if let age { Text(age) }
-                if ref?.isCheckedOutInWorktree == true {
-                    Text("worktree").padding(.horizontal, 4).padding(.vertical, 1)
-                        .overlay(RoundedRectangle(cornerRadius: 3).stroke(secondary.opacity(0.7)))
-                        .help("Checked out in a worktree")
-                }
                 if ref?.isHEAD == true {
                     Text("HEAD").padding(.horizontal, 4).padding(.vertical, 1)
                         .background(selected ? Color.white.opacity(0.18) : Color.primary.opacity(0.08), in: RoundedRectangle(cornerRadius: 3))
@@ -100,10 +95,10 @@ struct RefPickerRow: View {
                 if let ref, ref.ahead > 0 || ref.behind > 0 {
                     Text([ref.ahead > 0 ? "↑\(ref.ahead)" : nil, ref.behind > 0 ? "↓\(ref.behind)" : nil].compactMap { $0 }.joined(separator: " "))
                 }
-                if let count { Text("\(count)").italic() }
+                if let count { Text("\(count)").monospacedDigit() }
             }
-            .font(.system(size: 11)).foregroundStyle(tertiary)
-            .padding(.leading, CGFloat(8 + depth * 16)).padding(.trailing, 8).frame(height: 24)
+            .font(.system(size: 11)).foregroundStyle(secondary)
+            .padding(.leading, CGFloat(8 + depth * 16)).padding(.trailing, 8).frame(height: Self.height)
             .frame(maxWidth: .infinity)
             .background(selected ? Color.accentColor : .clear, in: RoundedRectangle(cornerRadius: 5))
             .contentShape(Rectangle())

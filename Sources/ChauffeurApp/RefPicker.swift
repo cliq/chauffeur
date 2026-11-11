@@ -186,7 +186,7 @@ private struct RefPickerPopover: View {
                     .lineLimit(1).minimumScaleFactor(0.8)
                 Spacer(minLength: 0)
                 Text(status).lineLimit(1)
-            }.font(.system(size: 11)).foregroundStyle(.tertiary).padding(.horizontal, 10).padding(.vertical, 8)
+            }.font(.system(size: 11)).foregroundStyle(.secondary).padding(.horizontal, 10).padding(.vertical, 8)
         }
         .frame(width: 440)
         .background(RefPickerKeyHandler(handle: handleKey))
@@ -242,7 +242,7 @@ private struct RefPickerPopover: View {
                         }
                     }.padding(.horizontal, 6).padding(.bottom, 6)
                 }
-                .frame(height: min(maxListHeight, CGFloat(visibleRows.count * 24 + sections.count * 30 + 6)))
+                .frame(height: min(maxListHeight, (CGFloat(visibleRows.count) * RefPickerRow.height + CGFloat(sections.count * 30 + 6))))
                 .onChange(of: highlight) { _, id in if let id { proxy.scrollTo(id) } }
                 .onAppear { if let highlight { proxy.scrollTo(highlight) } }
                 .accessibilityLabel("Branches and tags")
@@ -287,7 +287,7 @@ private struct RefPickerPopover: View {
                 Text(section.title).fontWeight(.semibold)
                 Spacer()
                 Text("\(section.count)")
-            }.font(.system(size: 11)).foregroundStyle(.tertiary).padding(.horizontal, 8).frame(height: 30)
+            }.font(.system(size: 11)).foregroundStyle(.secondary).padding(.horizontal, 8).frame(height: 30)
                 .contentShape(Rectangle())
         }.buttonStyle(.plain).accessibilityLabel("\(section.title), \(section.count) refs")
     }
@@ -328,7 +328,10 @@ private struct RefPickerPopover: View {
     private func load() async {
         failure = nil; lookupFailure = nil; snapshot = nil; commit = nil
         do {
-            let result = try await model.call("listGitRefs", .object(params)).decode(GitRefSnapshot.self)
+            var result = try await model.call("listGitRefs", .object(params)).decode(GitRefSnapshot.self)
+            // The default branch and its upstream are trivially "merged" into themselves; don't label them.
+            let defaults = Set([result.defaultBranch, result.refs.first { $0.fullName == result.defaultBranch }?.upstream].compactMap { $0 })
+            for index in result.refs.indices where defaults.contains(result.refs[index].fullName) { result.refs[index].isMerged = false }
             guard !Task.isCancelled else { return }
             if GitRef.isCommitQuery(selection) {
                 var arguments = params; arguments["query"] = .string(selection)
