@@ -15,6 +15,9 @@ public actor RuntimeCoordinator {
     private let baseEnvironment: [String: String]
     private var sessions: [UUID: Session] = [:]
     private var launching = Set<UUID>()
+    /// Native conversations a launch or resume is starting, by session, so two
+    /// sessions can't continue one conversation while neither is recorded live yet.
+    private var conversationReservations: [UUID: String] = [:]
     private var launchTasks: [UUID: Task<Session, Error>] = [:]
     private var initialTaskDeliveries: [UUID: Task<Void, Never>] = [:]
     private var stopRequests = Set<UUID>()
@@ -1505,6 +1508,15 @@ public actor RuntimeCoordinator {
             }
             set = storedSet; preset = storedPreset
         }
+        if let resumeID = request.resumeConversationID {
+            guard !isShell, child == nil else { throw ChauffeurError("invalid_argument", "Only an agent the user launches can resume a conversation") }
+            guard preset.kind.provider?.validatesConversationID(resumeID) == true else {
+                throw ChauffeurError("invalid_argument", "This is not a \(preset.kind.displayName) conversation ID")
+            }
+            guard request.task?.isEmpty != false else { throw ChauffeurError("invalid_argument", "A resumed conversation cannot start with a new task") }
+            try reserveConversation(resumeID, for: sessionID)
+        }
+        defer { if request.resumeConversationID != nil { conversationReservations.removeValue(forKey: sessionID) } }
         let additionalPaths = try (isShell ? [] : request.additionalFolderIDs).filter { $0 != folder.id }.map { id in
             guard let extra = project.folders.first(where: { $0.id == id && $0.registered }) else { throw ChauffeurError("missing_folder", "Additional project folder is unavailable") }
             return try Paths.directory(extra.canonicalPath)
@@ -1527,7 +1539,8 @@ public actor RuntimeCoordinator {
         session.parentID = child?.parentID; session.delegationID = child?.id; session.runtimeID = id
         session.launchedBySessionID = request.launchedBySessionID
         session.historyProtected = child == nil ? nil : true
-        if preset.kind.provider?.preassignsConversationID == true { session.nativeConversationID = session.id.uuidString }
+        if let resumeID = request.resumeConversationID { session.nativeConversationID = resumeID }
+        else if preset.kind.provider?.preassignsConversationID == true { session.nativeConversationID = session.id.uuidString }
         do {
             try await persist(session)
             try Task.checkCancellation()
@@ -1595,7 +1608,7 @@ public actor RuntimeCoordinator {
             let preparation = coordination ? await prepareLaunch(session, environment: environment) : nil
             try Task.checkCancellation()
             session.inboxReminders = preparation?.inboxReminders
-            let native = try CLIAdapter.launch(session: session, endpoint: endpoint ?? "", ctlPath: ctlPath, integrationDirectory: integration, coordination: coordination, resume: false, preparation: preparation ?? LaunchPreparation(), pluginPath: coordination ? try publishPlugin(preset.kind) : nil)
+            let native = try CLIAdapter.launch(session: session, endpoint: endpoint ?? "", ctlPath: ctlPath, integrationDirectory: integration, coordination: coordination, resume: request.resumeConversationID != nil, preparation: preparation ?? LaunchPreparation(), pluginPath: coordination ? try publishPlugin(preset.kind) : nil)
             environment.merge(native.environment) { _, provider in provider }
             if preset.kind == .kimi && coordination { environment["CHAUFFEUR_KIMI_TOKEN"] = token }
             try await persist(session)
@@ -1729,11 +1742,23 @@ public actor RuntimeCoordinator {
         }
         guard session.worktreeID.map(worktreesPendingRemoval.contains) != true else { throw ChauffeurError("worktree_busy", "This session's worktree is being removed") }
         guard !launching.contains(sessionID) else { throw ChauffeurError("launch_pending", "Resume is already in progress") }
+        if let conversation = session.nativeConversationID { try reserveConversation(conversation, for: sessionID) }
         launching.insert(sessionID); stopping.remove(sessionID)
         let task = Task { try await self.performResume(session) }
         launchTasks[sessionID] = task
-        defer { launching.remove(sessionID); launchTasks.removeValue(forKey: sessionID) }
+        defer { launching.remove(sessionID); launchTasks.removeValue(forKey: sessionID); conversationReservations.removeValue(forKey: sessionID) }
         return try await task.value
+    }
+    /// Refuses a conversation another live or starting session continues, else
+    /// reserves it for `sessionID` until the caller releases it.
+    private func reserveConversation(_ conversation: String, for sessionID: UUID) throws {
+        if let owner = sessions.values.first(where: { $0.id != sessionID && ($0.state.isLive || launching.contains($0.id)) && NativeConversation.same($0.nativeConversationID, conversation) }) {
+            throw ChauffeurError("conversation_in_use", "“\(owner.title)” is already running this conversation")
+        }
+        guard !conversationReservations.contains(where: { $0.key != sessionID && NativeConversation.same($0.value, conversation) }) else {
+            throw ChauffeurError("conversation_in_use", "Another session is already starting this conversation")
+        }
+        conversationReservations[sessionID] = conversation
     }
     // MARK: Project suspension
 

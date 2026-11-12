@@ -61,6 +61,9 @@ public struct LaunchRequest: Codable, Sendable {
     public var autoApproveOverride: Bool?
     /// Set when another session launched this one for the user to drive.
     public var launchedBySessionID: UUID?
+    /// Continues this native conversation instead of starting a new one. Agent launches
+    /// only, without a task; the ID must match the preset's provider.
+    public var resumeConversationID: String?
     public var launchKind: LaunchKind { kind ?? .agent }
     public init(projectID: UUID, groupID: UUID, presetID: UUID, folderID: UUID, title: String, worktreeID: UUID? = nil, additionalFolderIDs: [UUID] = [], task: String? = nil, allowSharedCheckout: Bool = false, coordinationEnabled: Bool = false, retryKey: UUID = UUID(), kind: LaunchKind? = nil, modelOverride: String? = nil, reasoningOverride: String? = nil, autoApproveOverride: Bool? = nil) {
         self.projectID = projectID; self.groupID = groupID; self.presetID = presetID; self.folderID = folderID; self.title = title

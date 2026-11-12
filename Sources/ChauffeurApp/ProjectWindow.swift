@@ -283,7 +283,7 @@ private struct ProjectWindowContent: View, Equatable {
                 .sheet(isPresented: $suspendingProject) { SuspendProjectSheet(project: project) }
                 .sheet(item: $worktreeSheet) { selection in WorktreesView(project: project, initialFolderID: selection.folderID, worktreeCreated: revealCreatedWorktree) }
                 .sheet(item: $settingsSheet) { selection in RepositorySettingsView(projectID: project.id, folderID: selection.id) }
-                .sheet(item: $recentConversationsRow) { row in RecentConversationsSheet(row: row) }
+                .sheet(item: $recentConversationsRow) { row in RecentConversationsSheet(row: row, project: project, canLaunch: canLaunch(in: row)) { selectSession($0) } }
                 .sheet(item: $editingNote) { row in CheckoutNoteEditor(projectID: project.id, row: row) }
                 .sheet(item: $deletingCheckout) { row in
                     WorktreeDeletionSheet(row: row, preview: deletionPreview, confirm: { branch in deleteWorktree(row, branch: branch); deletingCheckout = nil }, cancel: { deletingCheckout = nil })
