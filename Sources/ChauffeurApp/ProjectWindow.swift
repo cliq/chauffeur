@@ -14,6 +14,8 @@ struct PendingTerminalTab: Identifiable {
 @MainActor final class ProjectLayout: ObservableObject {
     @Published var state: WindowState
     @Published var search = ""
+    /// The Repositories filter. Not saved: a reopened window lists everything.
+    @Published var repositorySearch = ""
     @Published var detailsVisible = false
     /// Tabs the user closed. Saved with the window so a kept finished session
     /// does not come back as a tab after a restart.
@@ -219,6 +221,7 @@ private struct ProjectWindowContent: View, Equatable {
     /// The terminals' background opacity; below 1 the window lets the desktop through terminal areas.
     @State private var terminalOpacity = 1.0
     @FocusState private var searchFocused: Bool
+    @FocusState private var repositorySearchFocused: Bool
     init(model: AppModel, projectModel: ProjectModel) {
         self.model = model; self.projectModel = projectModel; projectID = projectModel.id
         _layout = StateObject(wrappedValue: ProjectLayout(projectID: projectModel.id))
@@ -372,7 +375,9 @@ private struct ProjectWindowContent: View, Equatable {
                 switch command {
                 case "new-session": showLaunch()
                 case "new-tab": if canLaunch { layout.newTabPresented = true }
-                case "search-sessions": layout.state.sidebarMode = .sessions; layout.state.sidebarVisible = true; searchFocused = true
+                case "search-sessions":
+                    layout.state.sidebarVisible = true
+                    if layout.state.sidebarMode == .repositories { repositorySearchFocused = true } else { searchFocused = true }
                 case "find": if let id = layout.state.selectedSessionID { layout.controllers[id]?.find() }
                 case "font-bigger": if let id = layout.state.selectedSessionID { layout.controllers[id]?.adjustFontSize(by: 1) }
                 case "font-smaller": if let id = layout.state.selectedSessionID { layout.controllers[id]?.adjustFontSize(by: -1) }
@@ -430,13 +435,48 @@ private struct ProjectWindowContent: View, Equatable {
     private func hiddenCheckouts(_ project: Project) -> [(folder: ProjectFolder, row: CheckoutRow)] {
         guard !layout.state.hiddenWorktreePaths.isEmpty else { return [] }
         return project.folders.filter(\.registered).flatMap { folder in
-            readiness(for: folder).isPending ? [] : checkouts(for: folder, project: project).filter { isHidden($0) && passesAgentFilter($0, folder: folder) }.map { (folder: folder, row: $0) }
+            readiness(for: folder).isPending ? [] : checkouts(for: folder, project: project).filter { isHidden($0) && passesAgentFilter($0, folder: folder) && passesTextFilter($0, folder: folder) }.map { (folder: folder, row: $0) }
         }
     }
     /// Checkouts listed under their repository: hidden worktrees move to the
-    /// Hidden section, and the active-agents filter drops idle checkouts.
+    /// Hidden section, the active-agents filter drops idle checkouts, and the
+    /// text filter drops checkouts it does not match.
     private func listedCheckouts(for folder: ProjectFolder, project: Project) -> [CheckoutRow] {
-        checkouts(for: folder, project: project).filter { !isHidden($0) && passesAgentFilter($0, folder: folder) }
+        checkouts(for: folder, project: project).filter { !isHidden($0) && passesAgentFilter($0, folder: folder) && passesTextFilter($0, folder: folder) }
+    }
+    /// The Repositories filter's words; `nil` while the field is blank.
+    private var repositoryQuery: [String]? { SidebarFilter.query(layout.repositorySearch) }
+    /// A checkout matches by its repository's name, its branch, or its worktree folder,
+    /// so a repository whose name matches keeps all of its checkouts.
+    private func passesTextFilter(_ row: CheckoutRow, folder: ProjectFolder) -> Bool {
+        guard let query = repositoryQuery else { return true }
+        return SidebarFilter.matches(query, folder.name, row.branch, URL(fileURLWithPath: row.path).lastPathComponent)
+    }
+    /// While the text filter is on, every repository and group shows its matches
+    /// expanded; the user's collapsed state returns when the field is cleared.
+    private func isCollapsed(_ id: UUID) -> Bool { repositoryQuery == nil && collapsedRepositories.contains(id) }
+    private func expansion(_ id: UUID) -> Binding<Bool> {
+        Binding(get: { !isCollapsed(id) }, set: { if $0 { collapsedRepositories.remove(id) } else { collapsedRepositories.insert(id) } })
+    }
+    /// Whether the text filter keeps a repository: its name matches, or a
+    /// checkout listed under it does. The active-agents filter applies separately,
+    /// so a selected repository it keeps is not dropped for having only idle matches.
+    /// A repository still loading its inventory has no checkouts to match yet.
+    private func textFilterLists(_ folder: ProjectFolder, project: Project) -> Bool {
+        guard let query = repositoryQuery, !SidebarFilter.matches(query, folder.name) else { return true }
+        return !readiness(for: folder).isPending && checkouts(for: folder, project: project).contains { !isHidden($0) && passesTextFilter($0, folder: folder) }
+    }
+    /// Whether the text filter shows a checkout's row, or the repository's row when `path` is nil.
+    private func textFilterShows(folderID: UUID, path: String?) -> Bool {
+        guard repositoryQuery != nil else { return true }
+        guard let project, let folder = project.folders.first(where: { $0.id == folderID && $0.registered }) else { return false }
+        // Hidden worktrees list in the Hidden section, whether or not their repository is listed.
+        if let path, isHidden(path: path) {
+            return !readiness(for: folder).isPending && passesTextFilter(checkout(folder: folder, path: path, project: project), folder: folder)
+        }
+        guard textFilterLists(folder, project: project) else { return false }
+        guard let path else { return true }
+        return !readiness(for: folder).isPending && passesTextFilter(checkout(folder: folder, path: path, project: project), folder: folder)
     }
     /// With the active-agents filter on, a checkout stays listed while a live
     /// agent runs in it or while it is selected; open shells alone do not count.
@@ -448,8 +488,9 @@ private struct ProjectWindowContent: View, Equatable {
     /// Registered repositories the sidebar lists. With the active-agents filter
     /// on, only those with a listed checkout, or that are selected, remain; a
     /// repository still loading its inventory counts its live agents instead.
+    /// The text filter keeps a repository whose name matches, or one with a matching checkout.
     private func listedFolders(_ project: Project) -> [ProjectFolder] {
-        let folders = project.folders.filter(\.registered)
+        let folders = project.folders.filter(\.registered).filter { textFilterLists($0, project: project) }
         guard layout.state.showsOnlyActiveAgents else { return folders }
         return folders.filter { folder in
             if layout.selectedFolderID == folder.id { return true }
@@ -458,7 +499,9 @@ private struct ProjectWindowContent: View, Equatable {
         }
     }
     /// Keeps a checkout's row on screen: its repository and group expand, or the Hidden section for a hidden worktree.
+    /// A row the filter would hide clears the filter instead.
     private func expandSidebar(folderID: UUID, path: String?) {
+        if !textFilterShows(folderID: folderID, path: path) { layout.repositorySearch = "" }
         expandRepository(folderID)
         if let path, isHidden(path: path) { hiddenSectionExpanded = true }
     }
@@ -467,7 +510,7 @@ private struct ProjectWindowContent: View, Equatable {
         project?.repositoryGroupPath(to: folderID).forEach { collapsedRepositories.remove($0) }
     }
     /// The sidebar's groups and repositories, narrowed like `listedFolders`.
-    /// The active-agents filter drops groups left without a listed repository.
+    /// The active-agents and text filters drop groups left without a listed repository.
     private func listedItems(_ project: Project) -> [RepositoryLayoutItem] {
         let listed = Set(listedFolders(project).map(\.id))
         func narrowed(_ items: [RepositoryLayoutItem]) -> [RepositoryLayoutItem] {
@@ -476,7 +519,7 @@ private struct ProjectWindowContent: View, Equatable {
                 case .repository(let folder): return listed.contains(folder.id) ? item : nil
                 case .group(let id, let name, let items):
                     let shown = narrowed(items)
-                    return shown.isEmpty && layout.state.showsOnlyActiveAgents ? nil : .group(id: id, name: name, items: shown)
+                    return shown.isEmpty && (layout.state.showsOnlyActiveAgents || repositoryQuery != nil) ? nil : .group(id: id, name: name, items: shown)
                 }
             }
         }
@@ -506,7 +549,9 @@ private struct ProjectWindowContent: View, Equatable {
                 List {
                     Section("Repositories") {
                         let items = listedItems(project)
-                        if items.isEmpty, layout.state.showsOnlyActiveAgents {
+                        if items.isEmpty, repositoryQuery != nil {
+                            Text("No matching repositories").font(.caption).foregroundStyle(.secondary)
+                        } else if items.isEmpty, layout.state.showsOnlyActiveAgents {
                             Text("No active agents").font(.caption).foregroundStyle(.secondary)
                         }
                         layoutRows(items, project: project)
@@ -522,7 +567,7 @@ private struct ProjectWindowContent: View, Equatable {
                     }
                     let hidden = hiddenCheckouts(project)
                     if !hidden.isEmpty {
-                        Section("Hidden", isExpanded: $hiddenSectionExpanded) {
+                        Section("Hidden", isExpanded: Binding(get: { hiddenSectionExpanded || repositoryQuery != nil }, set: { hiddenSectionExpanded = $0 })) {
                             ForEach(hidden, id: \.row.id) { entry in
                                 checkoutRow(entry.row, folder: entry.folder, project: project, showsRepository: project.folders.filter(\.registered).count > 1)
                             }
@@ -537,10 +582,16 @@ private struct ProjectWindowContent: View, Equatable {
                         proxy.scrollTo(reveal.row, anchor: .center)
                     }
             }
-            Toggle("Show only active agents", isOn: $layout.state.showsOnlyActiveAgents).toggleStyle(.checkbox).font(.caption)
-                .help("List only checkouts with a live agent session; open shells alone do not count")
-                .accessibilityIdentifier("sidebar.repositories.activeAgentsOnly")
-                .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 12).padding(.top, 8)
+            VStack(alignment: .leading, spacing: 8) {
+                TextField("Filter repositories", text: $layout.repositorySearch).textFieldStyle(.roundedBorder).focused($repositorySearchFocused)
+                    .help("Match repository names, branches and worktree folders. Return selects the first match; Escape clears.")
+                    .onSubmit(selectFirstFilteredCheckout)
+                    .onExitCommand { layout.repositorySearch = "" }
+                    .accessibilityIdentifier("sidebar.repositories.filter")
+                Toggle("Show only active agents", isOn: $layout.state.showsOnlyActiveAgents).toggleStyle(.checkbox).font(.caption)
+                    .help("List only checkouts with a live agent session; open shells alone do not count")
+                    .accessibilityIdentifier("sidebar.repositories.activeAgentsOnly")
+            }.frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 12).padding(.top, 8)
         }
         .alert(groupNaming?.groupID == nil ? "New Group" : "Rename Group", isPresented: Binding(get: { groupNaming != nil }, set: { if !$0 { groupNaming = nil } })) {
             TextField("Name", text: $groupName)
@@ -643,7 +694,7 @@ private struct ProjectWindowContent: View, Equatable {
         let overviewSelected = layout.selectedFolderID == folder.id && layout.selectedWorktreePath == nil
         let readiness = readiness(for: folder)
         let isRepository = readiness != .notRepository
-        return DisclosureGroup(isExpanded: Binding(get: { !collapsedRepositories.contains(folder.id) }, set: { if $0 { collapsedRepositories.remove(folder.id) } else { collapsedRepositories.insert(folder.id) } })) {
+        return DisclosureGroup(isExpanded: expansion(folder.id)) {
             if readiness.isPending {
                 inventoryPendingRow(folder)
             } else {
@@ -666,7 +717,7 @@ private struct ProjectWindowContent: View, Equatable {
             }.contentShape(Rectangle())
                 .onTapGesture { selectCheckout(folderID: folder.id, path: nil) }
                 .onDrag { sidebarDragProvider(folder.id, project: project) }
-                .modifier(sidebarDrop(project) { $0 < 0.5 || !collapsedRepositories.contains(folder.id) ? .before(folder.id) : .after(folder.id) })
+                .modifier(sidebarDrop(project) { $0 < 0.5 || !isCollapsed(folder.id) ? .before(folder.id) : .after(folder.id) })
                 .contextMenu {
                     Button("Launch Agent…") { showLaunch(folderID: folder.id) }.disabled(!canLaunch || readiness.isPending)
                     Button("Open Shell") { openShell(in: rows[0], folder: folder) }.disabled(!canLaunch(in: rows[0]) || readiness.isPending)
@@ -712,7 +763,7 @@ private struct ProjectWindowContent: View, Equatable {
         })
     }
     private func groupRow(id: UUID, name: String, items: [RepositoryLayoutItem], project: Project) -> some View {
-        let expanded = Binding(get: { !collapsedRepositories.contains(id) }, set: { if $0 { collapsedRepositories.remove(id) } else { collapsedRepositories.insert(id) } })
+        let expanded = expansion(id)
         return DisclosureGroup(isExpanded: expanded) {
             if items.isEmpty {
                 Text("Drag repositories here").font(.caption).foregroundStyle(.secondary).padding(.horizontal, 6)
@@ -1428,18 +1479,26 @@ private struct ProjectWindowContent: View, Equatable {
             items.flatMap { item -> [ProjectFolder] in
                 switch item {
                 case .repository(let folder): [folder]
-                case .group(let id, _, let items): collapsedRepositories.contains(id) ? [] : visible(items)
+                case .group(let id, _, let items): isCollapsed(id) ? [] : visible(items)
                 }
             }
         }
         let folders = visible(listedItems(project))
         let repositories = folders.flatMap { folder -> [(folderID: UUID, path: String?)] in
             let repository = [(folderID: folder.id, path: String?.none)]
-            guard !collapsedRepositories.contains(folder.id) else { return repository }
+            // A repository still loading shows a loading row, not its checkouts.
+            guard !isCollapsed(folder.id), !readiness(for: folder).isPending else { return repository }
             return repository + listedCheckouts(for: folder, project: project).map { (folderID: folder.id, path: String?($0.path)) }
         }
-        guard hiddenSectionExpanded else { return repositories }
+        guard hiddenSectionExpanded || repositoryQuery != nil else { return repositories }
         return repositories + hiddenCheckouts(project).map { (folderID: $0.folder.id, path: String?($0.row.path)) }
+    }
+    /// Return in the Repositories filter: the first listed checkout, else the first repository.
+    private func selectFirstFilteredCheckout() {
+        guard let project, repositoryQuery != nil else { return }
+        let rows = sidebarRows(project)
+        guard let first = rows.first(where: { $0.path != nil }) ?? rows.first else { return }
+        selectCheckout(folderID: first.folderID, path: first.path)
     }
     /// Moves the sidebar selection without leaving the terminal: the selected
     /// checkout or session changes and its terminal takes the keyboard.
