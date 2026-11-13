@@ -156,6 +156,103 @@ struct WorktreeToolTests {
         #expect(FileManager.default.fileExists(atPath: setup.path + "/late.txt"))
     }
 
+    @Test func withTheAppOpenTheUserConfirmsBeforeAnAgentEndsItselfToRemoveItsWorktree() async throws {
+        let setup = try await SelfRemovalFixture.make(branch: "tool/asked"); defer { setup.cleanup() }
+        let runtime = setup.fixture.runtime
+        await runtime.snapshotSubscriberConnected()
+        FileManager.default.createFile(atPath: setup.path + "/scratch.txt", contents: Data("work".utf8))
+        let options: [String: JSONValue] = ["discardChanges": .bool(true)]
+        let confirmation = try #require(try await setup.call("chauffeur_preview_worktree_removal", options)["confirmation"].string)
+        let asked = try await setup.call("chauffeur_remove_worktree", options.merging(["confirmation": .string(confirmation)]) { $1 })
+        #expect(asked["awaitingUser"] == .bool(true) && asked["scheduled"] == .bool(false) && asked["endsYourSession"] == .bool(true))
+
+        // Asking again replaces the request rather than adding one.
+        _ = try await setup.call("chauffeur_remove_worktree", options.merging(["confirmation": .string(confirmation)]) { $1 })
+        let requests = try await removalRequests(runtime)
+        let request = try #require(requests.first)
+        #expect(requests.count == 1 && request.sessionID == setup.worker.id && request.path == setup.path && request.branch == "tool/asked")
+        #expect(request.lost.contains { $0.contains("Uncommitted") })
+        // A pending request doesn't hold the worktree until the user approves it.
+        let fromMain = try await setup.callFromMain("chauffeur_preview_worktree_removal", ["worktreeID": setup.worktreeID])
+        #expect(!fromMain["blockers"].array.compactMap(\.string).contains { $0.contains("already being removed") })
+        #expect(await runtime.store.reload().sessions.first { $0.value.id == setup.worker.id }?.value.state.isLive == true)
+
+        try await answer(runtime, request, approve: true)
+        try await waitUntil { await runtime.store.reload().worktrees.first { $0.value.id == request.worktreeID }?.value.registered == false }
+        #expect(!FileManager.default.fileExists(atPath: setup.path))
+        let worker = try #require(await runtime.store.reload().sessions.first { $0.value.id == setup.worker.id }?.value)
+        #expect(!worker.state.isLive && worker.error == nil)
+        #expect(try await removalRequests(runtime).isEmpty)
+        // A late answer to a request that is gone does nothing.
+        try await answer(runtime, request, approve: true)
+    }
+
+    @Test func decliningKeepsTheSessionAndItsWorktree() async throws {
+        let setup = try await SelfRemovalFixture.make(branch: "tool/declined"); defer { setup.cleanup() }
+        let runtime = setup.fixture.runtime
+        await runtime.snapshotSubscriberConnected()
+        let confirmation = try #require(try await setup.call("chauffeur_preview_worktree_removal", [:])["confirmation"].string)
+        _ = try await setup.call("chauffeur_remove_worktree", ["confirmation": .string(confirmation)])
+        let request = try #require(try await removalRequests(runtime).first)
+
+        try await answer(runtime, request, approve: false)
+        #expect(try await removalRequests(runtime).isEmpty)
+        try await Task.sleep(for: RuntimeCoordinator.ownWorktreeRemovalDelay + .milliseconds(500))
+        #expect(FileManager.default.fileExists(atPath: setup.path))
+        #expect(await runtime.store.reload().sessions.first { $0.value.id == setup.worker.id }?.value.state.isLive == true)
+    }
+
+    @Test func aSessionThatEndsWhileAskingDropsItsRequest() async throws {
+        let setup = try await SelfRemovalFixture.make(branch: "tool/ended"); defer { setup.cleanup() }
+        let runtime = setup.fixture.runtime
+        await runtime.snapshotSubscriberConnected()
+        let confirmation = try #require(try await setup.call("chauffeur_preview_worktree_removal", [:])["confirmation"].string)
+        _ = try await setup.call("chauffeur_remove_worktree", ["confirmation": .string(confirmation)])
+        let request = try #require(try await removalRequests(runtime).first)
+
+        _ = try await runtime.handle(IPCRequest("closeSession", params: .object(["sessionID": .string(setup.worker.id.uuidString)])))
+        try await waitUntil { try await removalRequests(runtime).isEmpty }
+        #expect(try await removalRequests(runtime).isEmpty)
+        // Approving it afterwards does nothing: the worktree stays.
+        try await answer(runtime, request, approve: true)
+        #expect(FileManager.default.fileExists(atPath: setup.path))
+    }
+
+    @Test func anApprovalForAWorktreeThatChangedSinceTheAgentAskedKeepsTheSession() async throws {
+        let setup = try await SelfRemovalFixture.make(branch: "tool/changed"); defer { setup.cleanup() }
+        let runtime = setup.fixture.runtime
+        await runtime.snapshotSubscriberConnected()
+        let confirmation = try #require(try await setup.call("chauffeur_preview_worktree_removal", [:])["confirmation"].string)
+        _ = try await setup.call("chauffeur_remove_worktree", ["confirmation": .string(confirmation)])
+        let request = try #require(try await removalRequests(runtime).first)
+        #expect(try await setup.git(["commit", "--allow-empty", "-m", "Later"]) == 0)
+
+        #expect(await code { try await answer(runtime, request, approve: true) } == "confirmation_stale")
+        #expect(FileManager.default.fileExists(atPath: setup.path))
+        #expect(await runtime.store.reload().sessions.first { $0.value.id == setup.worker.id }?.value.state.isLive == true)
+    }
+
+    @Test func turningTheConfirmationOffRemovesWithoutAsking() async throws {
+        let setup = try await SelfRemovalFixture.make(branch: "tool/unasked"); defer { setup.cleanup() }
+        let runtime = setup.fixture.runtime
+        await runtime.snapshotSubscriberConnected()
+        var settings = RetentionSettings(); settings.confirmOwnWorktreeRemoval = false
+        _ = try await runtime.handle(IPCRequest("saveSettings", params: .from(settings)))
+        let confirmation = try #require(try await setup.call("chauffeur_preview_worktree_removal", [:])["confirmation"].string)
+        let scheduled = try await setup.call("chauffeur_remove_worktree", ["confirmation": .string(confirmation)])
+        #expect(scheduled["scheduled"] == .bool(true) && scheduled["awaitingUser"] == .null)
+        #expect(try await removalRequests(runtime).isEmpty)
+        try await waitUntil { await runtime.store.reload().worktrees.first { $0.value.id.uuidString == setup.worktreeID.string }?.value.registered == false }
+        #expect(!FileManager.default.fileExists(atPath: setup.path))
+    }
+
+    private func removalRequests(_ runtime: RuntimeCoordinator) async throws -> [WorktreeRemovalRequest] {
+        try await runtime.snapshot()["worktreeRemovalRequests"].decode([WorktreeRemovalRequest].self)
+    }
+    private func answer(_ runtime: RuntimeCoordinator, _ request: WorktreeRemovalRequest, approve: Bool) async throws {
+        _ = try await runtime.handle(IPCRequest("answerWorktreeRemoval", params: .object(["requestID": .string(request.id.uuidString), "approve": .bool(approve)])))
+    }
+
     @Test func checkoutNotesAreSharedWithAgentsAndLeaveWithTheirWorktree() async throws {
         let checkouts = URL(fileURLWithPath: "/tmp/chauffeur-note-worktrees-\(UUID())")
         defer { try? FileManager.default.removeItem(at: checkouts) }

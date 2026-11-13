@@ -32,6 +32,10 @@ public actor RuntimeCoordinator {
     private var worktreesPendingRemoval = Set<UUID>()
     /// How long a session that removes its own worktree keeps running, so the tool's reply reaches it.
     static let ownWorktreeRemovalDelay: Duration = .seconds(2)
+    /// Own-worktree removals waiting for the user, one per session.
+    private var worktreeRemovalRequests: [UUID: PendingWorktreeRemoval] = [:]
+    /// Apps subscribed to snapshots, which can ask the user to confirm a removal.
+    private var snapshotSubscribers = 0
     /// How long an agent gets to quit on its own before suspension forces its terminal closed.
     static let suspendGracePeriod: TimeInterval = 5
     private var controlRequests = Set<UUID>()
@@ -213,6 +217,7 @@ public actor RuntimeCoordinator {
         let snapshot = await store.refresh()
         var object: [String: JSONValue] = ["store": try .from(snapshot), "sessions": try .from(Array(sessions.values).sorted { $0.createdAt < $1.createdAt }), "messages": try .from(await ledger.allMessages()), "delegations": try .from(await ledger.allDelegations()), "health": health(), "settings": try .from(settings), "notifications": try .from(await notificationStatus()), "snapshotStorage": try .from(snapshotStorage), "errors": try .from(recentErrors), "repositoryInventories": try .from(repositoryInventories), "worktreeSetups": try .from(worktreeSetups.values.sorted { $0.startedAt < $1.startedAt })]
         object["keepAwake"] = try .from(keepAwakeStatus())
+        object["worktreeRemovalRequests"] = try .from(pendingWorktreeRemovalRequests())
         if let remoteAccess { object["remoteAccess"] = try .from(await remoteAccess.status()) }
         return .object(object)
     }
@@ -344,6 +349,8 @@ public actor RuntimeCoordinator {
             logs?.append(entry)
         }
         sessions[session.id] = session
+        // A request belongs to the run that asked; a session that resumes later must ask again.
+        if !session.state.isLive { worktreeRemovalRequests.removeValue(forKey: session.id) }
         announceChange()
         refreshKeepAwake()
         let snapshot = await store.current()
@@ -608,6 +615,9 @@ public actor RuntimeCoordinator {
         switch request.method {
         case "hello", "version", "status": return health()
         case "snapshot": return try await snapshot()
+        case "answerWorktreeRemoval":
+            try await answerWorktreeRemoval(requestID: try params.uuid("requestID"), approve: params["approve"].bool == true)
+            return .object([:])
         case "getKeepAwake": return try .from(keepAwakeStatus())
         case "setKeepAwakeSettings": return try .from(setKeepAwakeSettings(params.decode(KeepAwakeSettings.self)))
         case "setKeepAwakeTimer": return try .from(setKeepAwakeTimer(params.decode(KeepAwakeTimerRequest.self)))
@@ -1305,8 +1315,20 @@ public actor RuntimeCoordinator {
         let result: [String: JSONValue] = ["worktreeID": .string(worktreeID.uuidString), "path": .string(stored.value.path),
                                            "branch": check.entry.branch.isEmpty ? .null : .string(check.entry.branch)]
         if own {
-            guard sessions[caller.sessionID]?.parentID == nil else {
+            guard let session = sessions[caller.sessionID], session.parentID == nil else {
                 throw ChauffeurError("delegated_worker", "Delegated workers can't remove their own worktree. Report your result; your coordinator removes it after closing you")
+            }
+            // With no app connected there is nobody to ask, so the removal goes ahead.
+            if settings.confirmOwnWorktreeRemoval && snapshotSubscribers > 0 {
+                let request = WorktreeRemovalRequest(sessionID: session.id, sessionTitle: session.title, worktreeID: worktreeID, path: stored.value.path,
+                                                     branch: check.entry.branch.isEmpty ? nil : check.entry.branch, branchOutcome: Self.userBranchOutcome(check),
+                                                     lost: check.preview.items(branch: check.entry.branch, finishedSessions: 0, checkoutMissing: false, deletingBranch: check.deletesBranch)
+                                                         .filter { $0.severity == .loss }.map(\.text))
+                // Asking again replaces the earlier request.
+                worktreeRemovalRequests[session.id] = PendingWorktreeRemoval(request: request, branchRemoval: branchRemoval, discardChanges: discardChanges, confirmation: check.confirmation)
+                announceChange()
+                return .object(result.merging(["removed": .bool(false), "scheduled": .bool(false), "awaitingUser": .bool(true), "endsYourSession": .bool(true),
+                                               "message": .string("Chauffeur is asking the user to confirm. If they approve, your session ends and the worktree is removed; if they decline, you keep running and the worktree stays. You are not told the answer. Finish talking to the user now and start no further work until they answer.")]) { $1 })
             }
             worktreesPendingRemoval.insert(worktreeID)
             let confirmation = check.confirmation
@@ -1320,10 +1342,78 @@ public actor RuntimeCoordinator {
         return .object(result.merging(["removed": .bool(true)]) { $1 })
     }
 
+    private struct PendingWorktreeRemoval {
+        var request: WorktreeRemovalRequest
+        var branchRemoval: BranchRemoval
+        var discardChanges: Bool
+        var confirmation: String
+    }
+
+    /// What happens to the branch, in the terms `deleteBranchIfUnused` decides it.
+    private static func userBranchOutcome(_ check: WorktreeRemovalCheck) -> String? {
+        let branch = check.entry.branch
+        guard !branch.isEmpty else { return nil }
+        switch check.branchRemoval {
+        case .never: return "Branch \(branch) is kept."
+        case .always: return "Branch \(branch) is deleted, even if its commits exist nowhere else."
+        case .ifMerged:
+            return check.preview.unmergedCommits == 0 ? "Branch \(branch) is deleted: its commits are merged."
+                : "Branch \(branch) is kept, unless another local branch holds its commits."
+        }
+    }
+
+    /// Requests whose session still runs; one that ended some other way is dropped.
+    private func pendingWorktreeRemovalRequests() -> [WorktreeRemovalRequest] {
+        for (sessionID, _) in worktreeRemovalRequests where sessions[sessionID]?.state.isLive != true {
+            worktreeRemovalRequests.removeValue(forKey: sessionID)
+        }
+        return worktreeRemovalRequests.values.map(\.request).sorted { $0.requestedAt < $1.requestedAt }
+    }
+
+    func snapshotSubscriberConnected() { snapshotSubscribers += 1 }
+    func snapshotSubscriberDisconnected() { snapshotSubscribers = max(0, snapshotSubscribers - 1) }
+
+    /// The user's answer to an agent removing its own worktree. Approving ends the session and
+    /// removes the worktree as if the agent had not asked; an answer to a request that is gone does nothing.
+    private func answerWorktreeRemoval(requestID: UUID, approve: Bool) async throws {
+        guard let pending = pendingWorktreeRemovalRequests().first(where: { $0.id == requestID }).flatMap({ worktreeRemovalRequests[$0.sessionID] }) else { return }
+        let request = pending.request
+        worktreeRemovalRequests.removeValue(forKey: request.sessionID)
+        announceChange()
+        guard approve else { return }
+        guard !worktreesPendingRemoval.contains(request.worktreeID) else { throw ChauffeurError("worktree_busy", "This worktree is already being removed") }
+        // Reserved before anything awaits, so an agent's retry can't ask again meanwhile.
+        worktreesPendingRemoval.insert(request.worktreeID)
+        do { try await confirmApprovedRemoval(pending) }
+        catch { worktreesPendingRemoval.remove(request.worktreeID); throw error }
+        Task { await self.finishOwnWorktreeRemoval(sessionID: request.sessionID, worktreeID: request.worktreeID, branchRemoval: pending.branchRemoval,
+                                                   discardChanges: pending.discardChanges, confirmation: pending.confirmation, delay: .zero) }
+    }
+
+    /// Checks again before ending the session, so it isn't ended for a removal that would be refused.
+    private func confirmApprovedRemoval(_ pending: PendingWorktreeRemoval) async throws {
+        let request = pending.request
+        let snapshot = await store.reload()
+        guard let stored = snapshot.worktrees.first(where: { $0.value.id == request.worktreeID && $0.value.registered }) else {
+            throw ChauffeurError("missing_worktree", "The worktree is no longer registered. “\(request.sessionTitle)” keeps running")
+        }
+        let check = try await checkWorktreeRemoval(stored, in: snapshot, branchRemoval: pending.branchRemoval, discardChanges: pending.discardChanges)
+        if let other = check.users.first(where: { $0.id != request.sessionID }) {
+            throw ChauffeurError("active_worktree", "“\(other.title)” started using the worktree, so it was kept and “\(request.sessionTitle)” keeps running")
+        }
+        guard check.confirmation == pending.confirmation else {
+            throw ChauffeurError("confirmation_stale", "The worktree changed after the agent asked to remove it, so it was kept and “\(request.sessionTitle)” keeps running. Ask the agent to preview the removal again")
+        }
+        guard sessions[request.sessionID]?.state.isLive == true else {
+            throw ChauffeurError("missing_session", "“\(request.sessionTitle)” already ended, so its worktree was kept")
+        }
+    }
+
     /// Ends the session, then removes its worktree if nothing changed since it confirmed.
-    private func finishOwnWorktreeRemoval(sessionID: UUID, worktreeID: UUID, branchRemoval: BranchRemoval, discardChanges: Bool, confirmation: String) async {
+    private func finishOwnWorktreeRemoval(sessionID: UUID, worktreeID: UUID, branchRemoval: BranchRemoval, discardChanges: Bool, confirmation: String,
+                                          delay: Duration = RuntimeCoordinator.ownWorktreeRemovalDelay) async {
         defer { worktreesPendingRemoval.remove(worktreeID) }
-        try? await Task.sleep(for: Self.ownWorktreeRemovalDelay)
+        if delay > .zero { try? await Task.sleep(for: delay) }
         do {
             if sessions[sessionID]?.state.isLive == true { try await stopGracefully(sessionID) }
             guard sessions[sessionID]?.state.isLive != true else { throw ChauffeurError("stop_failed", "The session did not stop") }

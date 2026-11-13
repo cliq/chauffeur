@@ -48,6 +48,9 @@ public final class IPCServer: @unchecked Sendable {
                 }
                 if request.method == "subscribe" {
                     guard request.version == WireProtocol.major else { throw ChauffeurError("protocol_mismatch", "Restart app and runtime to use matching versions") }
+                    // While an app listens, an agent removing its own worktree waits for the user to confirm.
+                    await runtime.snapshotSubscriberConnected()
+                    defer { Task { await runtime.snapshotSubscriberDisconnected() } }
                     var last: String?
                     var heartbeat = ContinuousClock.now
                     while !Task.isCancelled {

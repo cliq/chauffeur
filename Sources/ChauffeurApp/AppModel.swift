@@ -20,6 +20,7 @@ struct AppSnapshot: Decodable, Sendable {
     var notifications: NotificationStatus?
     var remoteAccess: RemoteAccessStatus?
     var keepAwake: KeepAwakeStatus?
+    var worktreeRemovalRequests: [WorktreeRemovalRequest]?
     init() {}
 }
 

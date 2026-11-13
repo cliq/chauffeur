@@ -122,10 +122,12 @@ preview's `confirmation`, made with the same options; preview again if the
 checkout changed.
 
 Both tools default to the worktree you are working in. Removing it ends your
-session a few seconds after the call returns, so commit or push what should
-survive and say everything you need to say first. Chauffeur removes the
-checkout once the session has stopped, and keeps it if anything changed since
-the preview. Delegated workers can't remove their own worktree; report the
+session, so commit or push what should survive and say everything you need to
+say first. When the result has `awaitingUser: true`, Chauffeur is asking the
+user to confirm: your session ends if they approve, and keeps running with the
+worktree in place if they decline. Otherwise it ends a few seconds after the
+call returns. Chauffeur removes the checkout once the session has stopped, and
+keeps it if anything changed since the preview. Delegated workers can't remove their own worktree; report the
 result and let the coordinator remove it after closing the worker.
 
 Don't remove a Chauffeur worktree with `git worktree remove`, `rm`, or by

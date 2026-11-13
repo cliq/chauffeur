@@ -421,6 +421,26 @@ public struct WindowState: Record, Equatable {
     }
 }
 
+/// An agent asked to remove the worktree it works in, which ends its session.
+/// It waits for the user to approve or decline it in the app.
+public struct WorktreeRemovalRequest: Codable, Equatable, Identifiable, Sendable {
+    public var id: UUID
+    public var sessionID: UUID
+    public var sessionTitle: String
+    public var worktreeID: UUID
+    public var path: String
+    public var branch: String?
+    /// What happens to the branch, when the checkout is on one.
+    public var branchOutcome: String?
+    /// What the removal loses, as the agent's preview listed it.
+    public var lost: [String]
+    public var requestedAt: Date
+    public init(id: UUID = UUID(), sessionID: UUID, sessionTitle: String, worktreeID: UUID, path: String, branch: String?, branchOutcome: String?, lost: [String], requestedAt: Date = Date()) {
+        self.id = id; self.sessionID = sessionID; self.sessionTitle = sessionTitle; self.worktreeID = worktreeID
+        self.path = path; self.branch = branch; self.branchOutcome = branchOutcome; self.lost = lost; self.requestedAt = requestedAt
+    }
+}
+
 public struct RetentionSettings: Codable, Equatable, Sendable {
     public var keepFinishedSessions = false
     public var scrollbackLines = 10_000
@@ -433,9 +453,11 @@ public struct RetentionSettings: Codable, Equatable, Sendable {
     /// When off, an agent the user launched that quits on its own leaves a login shell in its terminal,
     /// so the user can read its last output and resume the conversation by hand.
     public var closeTabsWhenAgentsQuit = true
+    /// Ask in the app before an agent ends its own session to remove the worktree it works in.
+    public var confirmOwnWorktreeRemoval = true
     public init() {}
     private enum CodingKeys: String, CodingKey {
-        case keepFinishedSessions, scrollbackLines, snapshotBudgetBytes, completedMessageDays, maxLiveChildren, wakeIdleCoordinators, closeTabsWhenAgentsQuit
+        case keepFinishedSessions, scrollbackLines, snapshotBudgetBytes, completedMessageDays, maxLiveChildren, wakeIdleCoordinators, closeTabsWhenAgentsQuit, confirmOwnWorktreeRemoval
     }
     public init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
@@ -446,6 +468,7 @@ public struct RetentionSettings: Codable, Equatable, Sendable {
         maxLiveChildren = try values.decodeIfPresent(Int.self, forKey: .maxLiveChildren) ?? 4
         wakeIdleCoordinators = try values.decodeIfPresent(Bool.self, forKey: .wakeIdleCoordinators) ?? true
         closeTabsWhenAgentsQuit = try values.decodeIfPresent(Bool.self, forKey: .closeTabsWhenAgentsQuit) ?? true
+        confirmOwnWorktreeRemoval = try values.decodeIfPresent(Bool.self, forKey: .confirmOwnWorktreeRemoval) ?? true
     }
     public func validate() throws {
         try Validation.require((100...100_000).contains(scrollbackLines), "Scrollback must be 100–100,000 lines")

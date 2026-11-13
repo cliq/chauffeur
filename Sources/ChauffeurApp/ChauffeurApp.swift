@@ -102,10 +102,12 @@ import ChauffeurTerminalGhostty
         GhosttyTerminalAdapter(appearance: model.terminalStyle.opaque.appearance(scrollback: model.snapshot.settings.scrollbackLines), acceptsFileDrops: false)
     }
     private var errors: AppErrorPresenter?
+    private var worktreeRemovals: WorktreeRemovalPrompt?
     private var preparingToQuit = false
     private var quitConfirmation: QuitConfirmation?
     func applicationDidFinishLaunching(_ notification: Notification) {
         errors = AppErrorPresenter(model: model)
+        worktreeRemovals = WorktreeRemovalPrompt(model: model)
         model.start()
     }
     func application(_ application: NSApplication, open urls: [URL]) {
