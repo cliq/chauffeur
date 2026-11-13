@@ -128,6 +128,14 @@ checkout once the session has stopped, and keeps it if anything changed since
 the preview. Delegated workers can't remove their own worktree; report the
 result and let the coordinator remove it after closing the worker.
 
+Don't remove a Chauffeur worktree with `git worktree remove`, `rm`, or by
+deleting its checked-out branch, even after its pull request merges. Another
+session may still be working there, and Chauffeur can't stop it or keep its
+conversation resumable once the folder is gone. Use the tools above: the
+preview names the sessions using the worktree under `blockers`, and removal
+refuses until they end. Clean up only when the user asks, and when a session
+blocks it, tell the user which one rather than working around it.
+
 Each checkout can carry one note the user sees beside it in Chauffeur, often
 where to resume a parked worktree. `chauffeur_get_checkout_note` reads it and
 `chauffeur_set_checkout_note` replaces it; both default to your working

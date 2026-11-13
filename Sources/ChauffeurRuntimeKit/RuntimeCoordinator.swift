@@ -727,7 +727,9 @@ public actor RuntimeCoordinator {
         case "launch": return try .from(await launch(params.decode(LaunchRequest.self)))
         case "resume": return try .from(await resume(params.uuid("sessionID"), restoring: false))
         case "suspendPlan": return try .from(await suspendPlan(params.uuid("projectID")))
-        case "suspendProject": return try .from(await suspendProject(params.uuid("projectID"), interruptBusy: params["interruptBusy"].bool ?? false))
+        case "suspendProject":
+            let ending = Set((params["endMissingCheckouts"].array ?? []).compactMap { $0.string.flatMap(UUID.init(uuidString:)) })
+            return try .from(await suspendProject(params.uuid("projectID"), interruptBusy: params["interruptBusy"].bool ?? false, endMissingCheckouts: ending))
         case "restoreProject":
             return try .from(await restoreProject(params.uuid("projectID"), sessionIDs: Set(params["sessionIDs"].decode([UUID].self))))
         case "interrupt":
@@ -1804,7 +1806,9 @@ public actor RuntimeCoordinator {
             }
             return (verified, found)
         }.value
+        let missing = Set(candidates.filter { $0.projectID == projectID && $0.state.isLive && $0.deletedCheckoutPath != nil }.map(\.id))
         let plan = ProjectSuspensionPlanner.plan(projectID: projectID, sessions: candidates, launching: launching,
+                                                 checkoutExists: { !missing.contains($0.id) },
                                                  hasRecordedTranscript: { verified.contains($0.id) }) { transcripts[$0.id] ?? [] }
         let recorded = Dictionary(uniqueKeysWithValues: candidates.compactMap { session in session.nativeConversationID.map { (session.id, $0) } })
         return (plan, recorded)
@@ -1814,7 +1818,9 @@ public actor RuntimeCoordinator {
     /// Refuses while anything can't be resumed, and interrupts busy agents only when asked.
     /// All or nothing: when something fails partway, sessions already stopped stay ended and
     /// resumable, but the project is not left suspended around sessions still running.
-    private func suspendProject(_ projectID: UUID, interruptBusy: Bool) async throws -> ProjectSuspensionPlan {
+    /// `endMissingCheckouts` is the user's consent to end the plan's agents in deleted checkouts:
+    /// a client that never listed one can't end it.
+    private func suspendProject(_ projectID: UUID, interruptBusy: Bool, endMissingCheckouts: Set<UUID> = []) async throws -> ProjectSuspensionPlan {
         guard suspendingProjects.insert(projectID).inserted else { throw ChauffeurError("suspend_pending", "This project is already being suspended or restored") }
         defer { suspendingProjects.remove(projectID) }
         // Launches and resumes are refused from here on, so the plan can't miss a new session.
@@ -1825,7 +1831,10 @@ public actor RuntimeCoordinator {
             throw ChauffeurError("suspend_blocked", plan.blockers.count == 1 ? "“\(blocker.title)” can't be suspended. \(blocker.reason)"
                                  : "\(plan.blockers.count) sessions can't be suspended, including “\(blocker.title)”. \(blocker.reason)")
         }
-        guard !plan.agents.isEmpty else { throw ChauffeurError("nothing_to_suspend", "No Claude Code or Codex sessions are running in this project") }
+        guard plan.canSuspend else { throw ChauffeurError("nothing_to_suspend", "No Claude Code or Codex sessions are running in this project") }
+        if let unlisted = plan.missingCheckouts.first(where: { !endMissingCheckouts.contains($0.sessionID) }) {
+            throw ChauffeurError("missing_checkouts", "“\(unlisted.title)” would end because its checkout folder was deleted, and this confirmation didn't include it. Check the list and confirm again; if it isn't listed, update Chauffeur on this device")
+        }
         guard interruptBusy || plan.busyAgents.isEmpty else { throw ChauffeurError("busy_sessions", "Some agents may still be working. Confirm interrupting them to suspend") }
         var suspended: [UUID] = []
         do {
@@ -1846,6 +1855,10 @@ public actor RuntimeCoordinator {
                 ended.suspendedAt = Date(); ended.unread = false
                 try await persist(ended)
                 suspended.append(agent.sessionID)
+            }
+            // An agent whose checkout is gone can't resume, so it ends instead.
+            for orphan in plan.missingCheckouts where sessions[orphan.sessionID]?.state.isLive == true {
+                _ = try await handle(IPCRequest("stop", params: .object(["sessionID": .string(orphan.sessionID.uuidString), "force": .bool(true)])))
             }
             for shell in plan.shells where sessions[shell.sessionID]?.state.isLive == true {
                 _ = try await handle(IPCRequest("closeSession", params: .object(["sessionID": .string(shell.sessionID.uuidString)])))
@@ -1883,7 +1896,9 @@ public actor RuntimeCoordinator {
     }
 
     /// Resumes the chosen suspended sessions in launch order. The rest stop being suspended
-    /// and stay as ended sessions; a session that fails to resume stays suspended.
+    /// and stay as ended sessions; a session that fails to resume stays suspended, except one
+    /// whose checkout folder is gone: retrying can't help, so it ends instead of keeping the
+    /// whole project suspended.
     private func restoreProject(_ projectID: UUID, sessionIDs: Set<UUID>) async throws -> ProjectRestoreResult {
         guard suspendingProjects.insert(projectID).inserted else { throw ChauffeurError("suspend_pending", "This project is already being suspended or restored") }
         defer { suspendingProjects.remove(projectID) }
@@ -1896,6 +1911,15 @@ public actor RuntimeCoordinator {
             try await persist(session)
         }
         for recorded in suspended where sessionIDs.contains(recorded.id) {
+            if let deleted = recorded.deletedCheckoutPath {
+                let message = "Its checkout folder was deleted, so it can't resume"
+                if var session = sessions[recorded.id] {
+                    session.suspendedAt = nil; session.error = "\(message) (\(deleted))"
+                    try await persist(session)
+                }
+                result.ended.append(.init(sessionID: recorded.id, title: recorded.title, message: message))
+                continue
+            }
             do {
                 _ = try await resume(recorded.id, restoring: true)
                 result.restored.append(recorded.id)

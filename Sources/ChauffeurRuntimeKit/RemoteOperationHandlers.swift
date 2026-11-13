@@ -171,7 +171,9 @@ public actor RemoteOperationHandlers {
             } catch { return .failure(Self.remoteError(error)) }
         case .suspendProject(let request):
             do {
-                let params: JSONValue = .object(["projectID": .string(request.projectID.uuidString), "interruptBusy": .bool(request.interruptBusy)])
+                var fields: [String: JSONValue] = ["projectID": .string(request.projectID.uuidString), "interruptBusy": .bool(request.interruptBusy)]
+                if let ending = request.endMissingCheckouts { fields["endMissingCheckouts"] = .array(ending.map { .string($0.uuidString) }) }
+                let params: JSONValue = .object(fields)
                 _ = try await runtime.handle(IPCRequest("suspendProject", params: params))
                 return .success(.ack)
             } catch { return .failure(Self.remoteError(error)) }
@@ -380,7 +382,8 @@ public actor RemoteOperationHandlers {
                                         conversationRecorded: $0.conversationRecorded, activity: RemoteSuspendPlan.Activity(rawValue: $0.activity.rawValue) ?? .unknown)
             },
             shells: plan.shells.map { RemoteSuspendPlan.Shell(sessionID: $0.sessionID, title: $0.title) },
-            blockers: plan.blockers.map { RemoteSuspendPlan.Blocker(sessionID: $0.sessionID, title: $0.title, reason: $0.reason) }
+            blockers: plan.blockers.map { RemoteSuspendPlan.Blocker(sessionID: $0.sessionID, title: $0.title, reason: $0.reason) },
+            missingCheckouts: plan.missingCheckouts.map { RemoteSuspendPlan.Shell(sessionID: $0.sessionID, title: $0.title) }
         )
     }
 

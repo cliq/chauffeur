@@ -96,6 +96,18 @@ struct SuspendProjectSheet: View {
                 }
             }
         }
+        if !plan.missingCheckouts.isEmpty {
+            Section("Agents to end") {
+                ForEach(plan.missingCheckouts) { agent in
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(agent.title).fontWeight(.medium)
+                        Label("Its checkout folder was deleted, so it can't be resumed. Suspending ends it.", systemImage: "folder.badge.questionmark")
+                            .font(.caption).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true)
+                            .help(agent.path)
+                    }
+                }
+            }.accessibilityIdentifier("suspendProject.missingCheckouts")
+        }
         if !plan.shells.isEmpty {
             Section("Shells to close") {
                 ForEach(plan.shells) { shell in
@@ -103,7 +115,7 @@ struct SuspendProjectSheet: View {
                 }
             }
         }
-        if plan.agents.isEmpty && plan.blockers.isEmpty {
+        if plan.agents.isEmpty && plan.blockers.isEmpty && plan.missingCheckouts.isEmpty {
             Text("No Claude Code or Codex sessions are running in this project.").foregroundStyle(.secondary)
         }
     }
@@ -134,10 +146,15 @@ struct SuspendProjectSheet: View {
         let timeout = 30 + plan.agents.count * 10 + plan.shells.count * 5
         do {
             // Consent covers only the agents this sheet showed as working.
-            _ = try await model.call("suspendProject", .object(["projectID": .string(project.id.uuidString), "interruptBusy": .bool(!plan.busyAgents.isEmpty)]),
+            _ = try await model.call("suspendProject", .object(["projectID": .string(project.id.uuidString), "interruptBusy": .bool(!plan.busyAgents.isEmpty),
+                                                                "endMissingCheckouts": .array(plan.missingCheckouts.map { .string($0.sessionID.uuidString) })]),
                                      responseTimeout: timeout)
             try? await model.refresh()
             dismiss()
+        } catch let error as ChauffeurError where error.code == "missing_checkouts" {
+            self.plan = nil
+            await load()
+            failure = "An agent's checkout folder was deleted. Check the list and confirm again."
         } catch let error as ChauffeurError where error.code == "busy_sessions" {
             self.plan = nil
             await load()
@@ -161,7 +178,8 @@ struct ProjectSuspendedView: View {
     @State private var restoring = false
     @State private var failure: String?
 
-    private var selected: [Session] { sessions.filter { !excluded.contains($0.id) } }
+    /// Sessions whose checkout folder is gone can't resume, so they always end.
+    private var selected: [Session] { sessions.filter { !excluded.contains($0.id) && $0.deletedCheckoutPath == nil } }
 
     var body: some View {
         VStack(spacing: 14) {
@@ -173,23 +191,28 @@ struct ProjectSuspendedView: View {
             }
             List {
                 ForEach(sessions) { session in
-                    Toggle(isOn: Binding(get: { !excluded.contains(session.id) }, set: { included in
+                    let deleted = session.deletedCheckoutPath
+                    let missing = deleted != nil
+                    Toggle(isOn: Binding(get: { !missing && !excluded.contains(session.id) }, set: { included in
                         if included { excluded.remove(session.id) } else { excluded.insert(session.id) }
                     })) {
                         VStack(alignment: .leading, spacing: 2) {
                             Text(session.title).fontWeight(.medium)
                             Text(detail(session)).font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
-                            if let error = session.error {
+                            if missing {
+                                Label("Its checkout folder was deleted, so it can't resume. Restoring ends it.", systemImage: "folder.badge.questionmark")
+                                    .font(.caption).foregroundStyle(.orange).help(deleted ?? "")
+                            } else if let error = session.error {
                                 Label(error, systemImage: "exclamationmark.triangle.fill").font(.caption).foregroundStyle(.orange)
                             }
                         }
                     }
                     .toggleStyle(.checkbox)
-                    .disabled(restoring)
+                    .disabled(restoring || missing)
                     .padding(.vertical, 3)
                 }
             }
-            .listStyle(.inset(alternatesRowBackgrounds: true))
+            .listStyle(.inset(alternatesRowBackgrounds: false))
             .frame(maxWidth: 560, minHeight: 120, maxHeight: 340)
             .accessibilityIdentifier("projectSuspended.sessions")
             if let failure {
@@ -213,8 +236,9 @@ struct ProjectSuspendedView: View {
 
     private var restoreTitle: String {
         if restoring { return "Restoring…" }
-        if selected.count == sessions.count { return "Restore Project" }
         if selected.isEmpty { return "End Suspension" }
+        // Sessions in a deleted checkout always end; leaving them out is not the user's choice.
+        if !sessions.contains(where: { excluded.contains($0.id) }) { return "Restore Project" }
         return selected.count == 1 ? "Restore 1 Session" : "Restore \(selected.count) Sessions"
     }
 
@@ -239,10 +263,16 @@ struct ProjectSuspendedView: View {
             let value = try await model.call("restoreProject", .object(["projectID": .string(project.id.uuidString), "sessionIDs": .array(ids.map { .string($0.uuidString) })]),
                                              responseTimeout: 60 + ids.count * 30)
             let result = try value.decode(ProjectRestoreResult.self)
+            var messages: [String] = []
             if !result.failures.isEmpty {
-                failure = result.failures.count == 1 ? "“\(result.failures[0].title)” couldn't be resumed and stays suspended."
-                    : "\(result.failures.count) sessions couldn't be resumed and stay suspended."
+                messages.append(result.failures.count == 1 ? "“\(result.failures[0].title)” couldn't be resumed and stays suspended."
+                    : "\(result.failures.count) sessions couldn't be resumed and stay suspended.")
             }
+            if !result.ended.isEmpty {
+                messages.append(result.ended.count == 1 ? "“\(result.ended[0].title)” ended because its checkout folder was deleted."
+                    : "\(result.ended.count) sessions ended because their checkout folders were deleted.")
+            }
+            failure = messages.isEmpty ? nil : messages.joined(separator: " ")
         } catch {
             failure = error.localizedDescription
         }

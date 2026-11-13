@@ -44,18 +44,47 @@ public struct ProjectSuspensionPlan: Codable, Equatable, Sendable {
         public init(sessionID: UUID, title: String, reason: String) { self.sessionID = sessionID; self.title = title; self.reason = reason }
     }
 
+    /// A live agent whose checkout folder is gone, for example removed by hand. It can't
+    /// resume there, so suspending ends it instead of suspending it.
+    public struct MissingCheckout: Codable, Equatable, Sendable, Identifiable {
+        public var sessionID: UUID
+        public var title: String
+        public var path: String
+        public var id: UUID { sessionID }
+        public init(sessionID: UUID, title: String, path: String) { self.sessionID = sessionID; self.title = title; self.path = path }
+    }
+
     public var projectID: UUID
     public var agents: [Agent]
     public var shells: [Shell]
     public var blockers: [Blocker]
+    public var missingCheckouts: [MissingCheckout]
 
-    public init(projectID: UUID, agents: [Agent] = [], shells: [Shell] = [], blockers: [Blocker] = []) {
-        self.projectID = projectID; self.agents = agents; self.shells = shells; self.blockers = blockers
+    public init(projectID: UUID, agents: [Agent] = [], shells: [Shell] = [], blockers: [Blocker] = [], missingCheckouts: [MissingCheckout] = []) {
+        self.projectID = projectID; self.agents = agents; self.shells = shells; self.blockers = blockers; self.missingCheckouts = missingCheckouts
     }
 
-    public var canSuspend: Bool { blockers.isEmpty && !agents.isEmpty }
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        projectID = try container.decode(UUID.self, forKey: .projectID)
+        agents = try container.decode([Agent].self, forKey: .agents)
+        shells = try container.decode([Shell].self, forKey: .shells)
+        blockers = try container.decode([Blocker].self, forKey: .blockers)
+        missingCheckouts = try container.decodeIfPresent([MissingCheckout].self, forKey: .missingCheckouts) ?? []
+    }
+
+    /// With only agents in deleted checkouts, suspending just ends them and suspends nothing.
+    public var canSuspend: Bool { blockers.isEmpty && !(agents.isEmpty && missingCheckouts.isEmpty) }
     /// Agents suspending would interrupt, or might.
     public var busyAgents: [Agent] { agents.filter { $0.activity != .idle } }
+}
+
+public extension Session {
+    /// The first of the session's checkout folders that is confirmed deleted. The session
+    /// can't run or resume until it is back, so suspension ends it rather than keep it.
+    var deletedCheckoutPath: String? {
+        ([launch.workingDirectory] + launch.additionalPaths).first(where: Paths.directoryIsMissing)
+    }
 }
 
 /// What restoring a suspended project resumed, and what stays suspended.
@@ -70,8 +99,17 @@ public struct ProjectRestoreResult: Codable, Equatable, Sendable {
 
     public var restored: [UUID]
     public var failures: [Failure]
+    /// Sessions whose checkout folder is gone. They can't resume, so restoring ends them.
+    public var ended: [Failure]
 
-    public init(restored: [UUID] = [], failures: [Failure] = []) { self.restored = restored; self.failures = failures }
+    public init(restored: [UUID] = [], failures: [Failure] = [], ended: [Failure] = []) { self.restored = restored; self.failures = failures; self.ended = ended }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        restored = try container.decode([UUID].self, forKey: .restored)
+        failures = try container.decode([Failure].self, forKey: .failures)
+        ended = try container.decodeIfPresent([Failure].self, forKey: .ended) ?? []
+    }
 }
 
 public extension CLIKind {

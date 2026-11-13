@@ -10,10 +10,12 @@ enum ProjectSuspensionPlanner {
     /// - Parameters:
     ///   - sessions: every session the runtime knows, so conversations other sessions own are not adopted.
     ///   - launching: sessions still starting.
+    ///   - checkoutExists: whether the session's checkout folder is still there.
     ///   - hasRecordedTranscript: whether the session's recorded conversation has a resumable transcript.
     ///   - conversations: the newest transcripts of an agent's kind and configuration in its checkout,
     ///     newest first, searched when the recorded conversation has none.
     static func plan(projectID: UUID, sessions: [Session], launching: Set<UUID>,
+                     checkoutExists: (Session) -> Bool = { _ in true },
                      hasRecordedTranscript: (Session) -> Bool,
                      conversations: (Session) -> [RecentConversation]) -> ProjectSuspensionPlan {
         var plan = ProjectSuspensionPlan(projectID: projectID)
@@ -28,6 +30,9 @@ enum ProjectSuspensionPlanner {
                 plan.blockers.append(.init(sessionID: session.id, title: session.title, reason: "Still starting. Wait for it to finish launching."))
             } else if kind == .shell {
                 plan.shells.append(.init(sessionID: session.id, title: session.title))
+            } else if !checkoutExists(session) {
+                // Nothing can resume in a deleted checkout; end the agent rather than block or suspend.
+                plan.missingCheckouts.append(.init(sessionID: session.id, title: session.title, path: session.launch.workingDirectory))
             } else if !kind.supportsSuspension {
                 plan.blockers.append(.init(sessionID: session.id, title: session.title,
                                            reason: "\(kind.displayName) sessions can't be suspended yet. Close it first."))

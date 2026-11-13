@@ -455,7 +455,7 @@ public final class RemoteHostSession {
     /// it fails or times out, since the Mac may have stopped some sessions or still be working.
     public func suspendProject(_ plan: RemoteSuspendPlan) async throws {
         let connection = try suspensionConnection()
-        let request = SuspendProjectRequest(projectID: plan.projectID, interruptBusy: !plan.busyAgents.isEmpty)
+        let request = SuspendProjectRequest(projectID: plan.projectID, interruptBusy: !plan.busyAgents.isEmpty, endMissingCheckouts: plan.missingCheckouts.map(\.sessionID))
         let timeout = Duration.seconds(30 + plan.agents.count * 10 + plan.shells.count * 5)
         let result: RemoteResult
         do { result = try await connection.request(.suspendProject(request), timeout: timeout) }

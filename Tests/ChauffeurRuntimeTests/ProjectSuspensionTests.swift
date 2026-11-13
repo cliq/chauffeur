@@ -20,8 +20,8 @@ struct ProjectSuspensionTests {
     }
 
     /// A Claude Code transcript for the checkout, as `RecentConversationScanner` reads it.
-    private func writeClaudeTranscript(_ fixture: LaunchFixture, id: String) throws {
-        let checkout = Paths.canonical(fixture.root.path)
+    private func writeClaudeTranscript(_ fixture: LaunchFixture, id: String, checkout directory: URL? = nil) throws {
+        let checkout = Paths.canonical((directory ?? fixture.root).path)
         let folder = fixture.root.appendingPathComponent("projects").appendingPathComponent(RecentConversationScanner.claudeProjectFolder(checkout))
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         let line = try JSONSerialization.data(withJSONObject: [
@@ -105,6 +105,60 @@ struct ProjectSuspensionTests {
         let plan = try await call(fixture, "suspendPlan").decode(ProjectSuspensionPlan.self)
         #expect(plan.agents.first?.conversationID == conversation && plan.agents.first?.conversationRecorded == true)
         _ = try await fixture.stop()
+    }
+
+    /// Adds a folder inside the fixture to its project, for a checkout a test can delete.
+    private func addCheckout(_ fixture: LaunchFixture) async throws -> (folder: URL, request: LaunchRequest) {
+        let folder = fixture.path("checkout")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let stored = try #require(await fixture.runtime.store.current().projects.first)
+        var project = stored.value
+        project.addFolder(ProjectFolder(path: folder.path))
+        try await fixture.runtime.store.save(project, expectedVersion: stored.version)
+        var request = fixture.request
+        request.retryKey = UUID(); request.folderID = try #require(project.folders.last?.id)
+        return (folder, request)
+    }
+
+    @Test func anAgentWhoseCheckoutWasDeletedEndsInsteadOfBeingSuspended() async throws {
+        let fixture = try await LaunchFixture.make(); defer { fixture.cleanup() }
+        let launched = try await fixture.runtime.launch(fixture.request)
+        try writeClaudeTranscript(fixture, id: try #require(launched.nativeConversationID))
+        let (folder, request) = try await addCheckout(fixture)
+        let orphan = try await fixture.runtime.launch(request)
+        try writeClaudeTranscript(fixture, id: try #require(orphan.nativeConversationID), checkout: folder)
+        try FileManager.default.removeItem(at: folder)
+
+        let plan = try await call(fixture, "suspendPlan").decode(ProjectSuspensionPlan.self)
+        #expect(plan.canSuspend && plan.agents.map(\.sessionID) == [launched.id])
+        #expect(plan.missingCheckouts.map(\.sessionID) == [orphan.id] && plan.blockers.isEmpty)
+        // A client that never listed the agent can't end it.
+        #expect(await errorCode { _ = try await call(fixture, "suspendProject", ["interruptBusy": .bool(true)]) } == "missing_checkouts")
+        #expect(try await fixture.runtime.snapshot()["sessions"].decode([Session].self).first { $0.id == orphan.id }?.state.isLive == true)
+        _ = try await call(fixture, "suspendProject", ["interruptBusy": .bool(true), "endMissingCheckouts": .array([.string(orphan.id.uuidString)])])
+
+        let sessions = try await fixture.runtime.snapshot()["sessions"].decode([Session].self)
+        let ended = try #require(sessions.first { $0.id == orphan.id })
+        #expect(!ended.state.isLive && ended.suspendedAt == nil)
+        #expect(try await fixture.session().suspendedAt != nil)
+    }
+
+    @Test func restoringASessionWhoseCheckoutWasDeletedEndsItAndTheSuspension() async throws {
+        let fixture = try await LaunchFixture.make(); defer { fixture.cleanup() }
+        let (folder, request) = try await addCheckout(fixture)
+        let launched = try await fixture.runtime.launch(request)
+        try writeClaudeTranscript(fixture, id: try #require(launched.nativeConversationID), checkout: folder)
+        _ = try await call(fixture, "suspendProject", ["interruptBusy": .bool(true)])
+        try FileManager.default.removeItem(at: folder)
+
+        let result = try await call(fixture, "restoreProject", ["sessionIDs": .array([.string(launched.id.uuidString)])]).decode(ProjectRestoreResult.self)
+        #expect(result.restored.isEmpty && result.failures.isEmpty && result.ended.map(\.sessionID) == [launched.id])
+        let sessions = try await fixture.runtime.snapshot()["sessions"].decode([Session].self)
+        let ended = try #require(sessions.first { $0.id == launched.id })
+        #expect(!ended.state.isLive && ended.suspendedAt == nil && ended.error?.contains("deleted") == true)
+        // Nothing is left suspended, so the project takes launches again.
+        var another = fixture.request; another.retryKey = UUID()
+        #expect(await errorCode { _ = try await fixture.runtime.launch(another) } != "project_suspended")
     }
 
     @Test func restoringNothingEndsTheSuspensionAndKeepsTheSessionResumable() async throws {
@@ -198,6 +252,16 @@ struct CodexSuspensionPlanTests {
         let lookup = RecentConversation(id: UUID().uuidString.lowercased(), kind: .codex, title: "Newest", prompt: "Hi", startedAt: Date(), updatedAt: Date(),
                                         configurationDirectory: root.path, transcriptPath: root.path)
         return ProjectSuspensionPlanner.plan(projectID: projectID, sessions: [session], launching: [], hasRecordedTranscript: { _ in transcript }) { _ in [lookup] }
+    }
+
+    @Test func anAgentInADeletedCheckoutIsEndedRatherThanBlockingOrSuspended() {
+        let session = codex(inboxReminders: nil)
+        let result = ProjectSuspensionPlanner.plan(projectID: projectID, sessions: [session], launching: [], checkoutExists: { _ in false },
+                                                   hasRecordedTranscript: { _ in false }) { _ in [] }
+        #expect(result.agents.isEmpty && result.blockers.isEmpty)
+        #expect(result.missingCheckouts.map(\.sessionID) == [session.id] && result.missingCheckouts.first?.path == root.path)
+        // Ending it is all suspending does, but that still has to be possible.
+        #expect(result.canSuspend)
     }
 
     @Test func aReportedConversationWithATranscriptIsSuspended() {

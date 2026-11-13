@@ -9,12 +9,15 @@ public struct SuspendPlanRequest: Codable, Equatable, Sendable {
 
 /// Suspends a project. `interruptBusy` is the user's consent to stop agents the plan showed as
 /// working; without it the Mac refuses with `busy_sessions` while any may be working.
+/// `endMissingCheckouts` names the plan's agents in deleted checkouts the user saw would end;
+/// the Mac refuses while any other one would end.
 public struct SuspendProjectRequest: Codable, Equatable, Sendable {
     public var projectID: UUID
     public var interruptBusy: Bool
+    public var endMissingCheckouts: [UUID]?
 
-    public init(projectID: UUID, interruptBusy: Bool) {
-        self.projectID = projectID; self.interruptBusy = interruptBusy
+    public init(projectID: UUID, interruptBusy: Bool, endMissingCheckouts: [UUID]? = nil) {
+        self.projectID = projectID; self.interruptBusy = interruptBusy; self.endMissingCheckouts = endMissingCheckouts
     }
 }
 
@@ -86,12 +89,25 @@ public struct RemoteSuspendPlan: Codable, Equatable, Sendable {
     public var agents: [Agent]
     public var shells: [Shell]
     public var blockers: [Blocker]
+    /// Agents whose checkout folder is gone. Suspending ends them, since they can't resume.
+    /// Absent from Macs that predate it.
+    public var missingCheckouts: [Shell]
 
-    public init(projectID: UUID, agents: [Agent] = [], shells: [Shell] = [], blockers: [Blocker] = []) {
-        self.projectID = projectID; self.agents = agents; self.shells = shells; self.blockers = blockers
+    public init(projectID: UUID, agents: [Agent] = [], shells: [Shell] = [], blockers: [Blocker] = [], missingCheckouts: [Shell] = []) {
+        self.projectID = projectID; self.agents = agents; self.shells = shells; self.blockers = blockers; self.missingCheckouts = missingCheckouts
     }
 
-    public var canSuspend: Bool { blockers.isEmpty && !agents.isEmpty }
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        projectID = try container.decode(UUID.self, forKey: .projectID)
+        agents = try container.decode([Agent].self, forKey: .agents)
+        shells = try container.decode([Shell].self, forKey: .shells)
+        blockers = try container.decode([Blocker].self, forKey: .blockers)
+        missingCheckouts = try container.decodeIfPresent([Shell].self, forKey: .missingCheckouts) ?? []
+    }
+
+    /// With only agents in deleted checkouts, suspending just ends them and suspends nothing.
+    public var canSuspend: Bool { blockers.isEmpty && !(agents.isEmpty && missingCheckouts.isEmpty) }
     /// Agents suspending would interrupt, or might.
     public var busyAgents: [Agent] { agents.filter { $0.activity != .idle } }
 }

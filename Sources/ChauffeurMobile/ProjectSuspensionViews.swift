@@ -104,6 +104,17 @@ struct SuspendProjectSheet: View {
                 }
             }
         }
+        if !plan.missingCheckouts.isEmpty {
+            Section {
+                ForEach(plan.missingCheckouts) { agent in
+                    Label(agent.title, systemImage: "folder.badge.questionmark")
+                }
+            } header: {
+                Text("Agents to end")
+            } footer: {
+                Text("Their checkout folders were deleted, so they can't be resumed.")
+            }
+        }
         if !plan.shells.isEmpty {
             Section("Terminals to close") {
                 ForEach(plan.shells) { shell in
@@ -111,7 +122,7 @@ struct SuspendProjectSheet: View {
                 }
             }
         }
-        if plan.agents.isEmpty && plan.blockers.isEmpty {
+        if plan.agents.isEmpty && plan.blockers.isEmpty && plan.missingCheckouts.isEmpty {
             Text("No Claude Code or Codex sessions are running in this project.").foregroundStyle(.secondary)
         }
     }
@@ -141,6 +152,10 @@ struct SuspendProjectSheet: View {
             self.plan = nil
             await load()
             failure = "An agent started working. Check the list and confirm again."
+        } catch RemoteClientError.remote(let error) where error.code == "missing_checkouts" {
+            self.plan = nil
+            await load()
+            failure = "An agent's checkout folder was deleted. Check the list and confirm again."
         } catch RemoteClientError.timeout {
             if model.isSuspended(projectID: project.id) { dismiss(); return }
             failure = "The Mac is still suspending the project. Its sessions show as suspended once it finishes."

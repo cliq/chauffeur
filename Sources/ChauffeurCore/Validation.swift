@@ -35,6 +35,13 @@ public enum Paths {
         // Foundation's resolver. Preserve that identity for missing leaf paths.
         return URL(fileURLWithPath: canonical(url.deletingLastPathComponent().path)).appendingPathComponent(url.lastPathComponent).path
     }
+    /// Whether a directory is confirmed gone: nothing is at the path, or something other than a
+    /// directory is. A path that can't be checked, for example without permission, isn't missing.
+    public static func directoryIsMissing(_ path: String) -> Bool {
+        var info = stat()
+        if stat(path, &info) == 0 { return (info.st_mode & S_IFMT) != S_IFDIR }
+        return errno == ENOENT || errno == ENOTDIR
+    }
     public static func directory(_ path: String) throws -> String {
         try Validation.absolutePath(path)
         let resolved = canonical(path)
