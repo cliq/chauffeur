@@ -13,6 +13,11 @@ public struct PaneIdentity: Codable, Sendable {
     public var processID: Int32
     public var dead: Bool
     public var exitStatus: Int32?
+    /// When the pane last produced output, in whole seconds since 1970. It
+    /// advances on full-screen redraws too, not only when history grows.
+    public var activity: Int?
+    /// The pane's size as `columns x rows`. A resize reflows the screen without output.
+    public var size: String?
 }
 
 public actor TmuxHost {
@@ -39,6 +44,10 @@ public actor TmuxHost {
     /// Servers started by an older runtime keep `set-clipboard external`, which drops applications'
     /// OSC 52 writes; apply the current setting live once per host instead of restarting tmux.
     private var clipboardForwardingEnsured = Set<String>()
+    /// Sockets whose server was not running at the last inventory. They are
+    /// probed with a connection instead of a tmux process until one answers.
+    private var stoppedSockets = Set<String>()
+    private var latestInventory: (at: ContinuousClock.Instant, panes: [PaneIdentity])?
     private let environment: [String: String]
     public init(runtimeDirectory: URL, ctlPath: String, environment: [String: String], sessionsApp: URL? = nil) throws {
         self.runtimeDirectory = runtimeDirectory; self.ctlPath = ctlPath
@@ -76,20 +85,39 @@ public actor TmuxHost {
         // Do not lose a concurrent spawn's route while inventory is suspended.
         for (id, socket) in sessionSockets where spawning.contains(id) { routes[id] = socket }
         sessionSockets = routes
+        latestInventory = (ContinuousClock.now, panes)
         return panes
+    }
+    /// The inventory taken within `maxAge`, or a new one. Periodic work that
+    /// tolerates slightly old pane state shares the reconcile loop's listing.
+    public func inventory(maxAge: Duration) async throws -> [PaneIdentity] {
+        if let latestInventory, ContinuousClock.now - latestInventory.at <= maxAge { return latestInventory.panes }
+        return try await inventory()
+    }
+    /// Whether a server could be listening on a socket that had none, found
+    /// without starting a process.
+    private func mayHaveServer(_ socket: String) -> Bool {
+        guard stoppedSockets.contains(socket) else { return true }
+        let descriptor = chauffeur_unix_connect(socket)
+        guard descriptor >= 0 else { return !(errno == ECONNREFUSED || errno == ENOENT) }
+        close(descriptor)
+        return true
     }
     private func inventory(socket: String) async throws -> [PaneIdentity] {
         // tmux replaces control characters such as tabs under the C locale.
         // All these generated identity/status fields have a printable delimiter.
+        guard mayHaveServer(socket) else { return [] }
         func list() async throws -> [(pane: PaneIdentity, unreaped: Bool, server: Int32)] {
-            let result = try await command(["list-panes", "-a", "-F", "#{session_name}|#{pane_id}|#{pane_pid}|#{pane_dead}|#{pane_dead_status}|#{pane_dead_signal}|#{pid}"], socket: socket)
+            let result = try await command(["list-panes", "-a", "-F", "#{session_name}|#{pane_id}|#{pane_pid}|#{pane_dead}|#{pane_dead_status}|#{pane_dead_signal}|#{pid}|#{window_activity}|#{pane_width}x#{pane_height}"], socket: socket)
             if result.status != 0 {
-                if result.error.contains("no server running") || result.error.contains("no sessions") || result.error.contains("no current target") || result.error.contains("No such file") || result.error.contains("Connection refused") { return [] }
+                if result.error.contains("no server running") || result.error.contains("No such file") || result.error.contains("Connection refused") { stoppedSockets.insert(socket); return [] }
+                if result.error.contains("no sessions") || result.error.contains("no current target") { return [] }
                 throw ChauffeurError("terminal_inventory", "Cannot inspect terminal service")
             }
+            stoppedSockets.remove(socket)
             return try result.output.split(separator: "\n").map { line in
                 let fields = line.split(separator: "|", omittingEmptySubsequences: false).map(String.init)
-                guard fields.count == 7, let pid = Int32(fields[2]), ["0", "1"].contains(fields[3]), fields[4].isEmpty || Int32(fields[4]) != nil, let server = Int32(fields[6]) else {
+                guard fields.count == 9, let pid = Int32(fields[2]), ["0", "1"].contains(fields[3]), fields[4].isEmpty || Int32(fields[4]) != nil, let server = Int32(fields[6]) else {
                     throw ChauffeurError("terminal_inventory", "Terminal service returned an unreadable inventory")
                 }
                 // tmux marks a pane dead at its terminal's end of file but learns how the
@@ -98,7 +126,7 @@ public actor TmuxHost {
                 // the signal, or (on a tmux without `pane_dead_signal`) the process being
                 // gone says it ended, it is not dead yet.
                 let unreaped = fields[3] == "1" && fields[4].isEmpty && fields[5].isEmpty && !(kill(pid, 0) != 0 && errno == ESRCH)
-                return (PaneIdentity(sessionName: fields[0], paneID: fields[1], processID: pid, dead: fields[3] == "1" && !unreaped, exitStatus: Int32(fields[4])), unreaped, server)
+                return (PaneIdentity(sessionName: fields[0], paneID: fields[1], processID: pid, dead: fields[3] == "1" && !unreaped, exitStatus: Int32(fields[4]), activity: Int(fields[7]), size: fields[8].isEmpty ? nil : fields[8]), unreaped, server)
             }
         }
         var panes = try await list()

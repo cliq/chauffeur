@@ -72,11 +72,30 @@ public actor RuntimeCoordinator {
     /// may still list them, so they stay out of the inventory until a fresh one.
     private var removedCheckouts: Set<String> = []
     private var worktreeScan: Task<Void, Never>?
+    /// Watches the scanned checkouts so a scan only runs Git where files
+    /// changed. Without it (Linux, or FSEvents refused) every scan is full.
+    private var repositoryWatcher: RepositoryWatcher?
+    /// The last scan's annotated observations, reused for unchanged repositories.
+    private var scannedRepositories: [RepositoryInventory] = []
+    private var lastFullWorktreeScan = Date.distantPast
+    private var fullWorktreeScanRequested = false
+    /// Changes a replaced watcher had collected but no scan had drained yet.
+    private var carriedRepositoryChanges = RepositoryChanges()
+    /// When each repository with an inaccessible checkout was last read again in full.
+    private var inaccessibleCheckoutRetries: [UUID: Date] = [:]
+    static let inaccessibleCheckoutRetryInterval: TimeInterval = 60
+    /// Catches changes file events miss, such as on network volumes or in Git
+    /// metadata kept outside the watched folders. Lost events already force a
+    /// full scan at once, and each one runs Git several hundred times.
+    static let fullWorktreeScanInterval: TimeInterval = 1800
     private var worktreeRecordWrites = Set<UUID>()
     private var worktreeCreations: [UUID: (String, Task<Stored<Worktree>, Error>)] = [:]
     private struct WorktreeRegistration: Hashable { let projectID: UUID; let folderID: UUID; let path: String }
     private var worktreeRegistrations: [WorktreeRegistration: Task<Stored<Worktree>, Error>] = [:]
     private var captures: [UUID: Task<TerminalSnapshot?, Error>] = [:]
+    /// Each pane's output activity when its history was last saved, and the
+    /// second that capture began. A pane idle since then needs no new capture.
+    private var capturedActivity: [UUID: (activity: Int, size: String?, startedAt: Int)] = [:]
     private var maintaining = false
     private var retentionSettingsPending = false
     private var lastMessageCleanup = Date.distantPast
@@ -221,19 +240,28 @@ public actor RuntimeCoordinator {
         if let remoteAccess { object["remoteAccess"] = try .from(await remoteAccess.status()) }
         return .object(object)
     }
-    public func reconcileWorktrees() async {
-        if let pending = worktreeScan { await pending.value; return }
+    /// Brings the repository inventory up to date by reading every repository
+    /// again. With `onlyChanged`, as the periodic scan runs, it reads only
+    /// repositories and checkouts with file changes since the previous scan.
+    public func reconcileWorktrees(onlyChanged: Bool = false) async {
+        if !onlyChanged { fullWorktreeScanRequested = true }
+        while let pending = worktreeScan {
+            await pending.value
+            if worktreeScan == pending { worktreeScan = nil }
+            // A full request is met only by a scan that began after it; that scan clears the flag.
+            if onlyChanged || !fullWorktreeScanRequested { return }
+        }
         let pending = Task { await self.scanWorktrees() }
         worktreeScan = pending
         await pending.value
-        worktreeScan = nil
+        if worktreeScan == pending { worktreeScan = nil }
     }
     /// Scans after any in-flight scan finishes, so a folder registered while a
     /// scan was already running is still observed promptly.
     private func rescanWorktrees() {
         Task {
             while let pending = worktreeScan { await pending.value; await Task.yield() }
-            await reconcileWorktrees()
+            await reconcileWorktrees(onlyChanged: true)
         }
     }
     private func scanWorktrees() async {
@@ -245,11 +273,22 @@ public actor RuntimeCoordinator {
         var seenSources = Set<String>()
         let sources = (snapshot.projects.flatMap { $0.value.folders.filter(\.registered).map(\.canonicalPath) }.sorted()
             + records.map { $0.value.repositoryPath }.sorted() + records.map { $0.value.path }.sorted()).filter { seenSources.insert($0).inserted }
+        let scanStart = RepositoryWatcher.currentEventID()
+        let changes = await worktreeChanges(removals: observedRemovals)
         var observations: [RepositoryInventory] = []
         var repositories: [UUID: RepositoryInventory] = [:]
+        var reused = Set<UUID>()
         for path in sources {
             if Task.isCancelled { return }
-            let result = await worktrees.observe(at: path, cached: repositories)
+            let result: RepositoryInventory
+            if let changes, var previous = scannedRepositories.observation(for: path), Self.isUnchanged(previous, at: path, changes: changes) {
+                previous.sourcePath = path; previous.sourcePaths = nil; previous.observedAt = Date()
+                result = previous
+                if let id = previous.repositoryID, repositories[id] == nil { reused.insert(id) }
+            } else {
+                result = await worktrees.observe(at: path, cached: repositories)
+                if let id = result.repositoryID, repositories[id] == nil { reused.remove(id) }
+            }
             if result.status == .available, let id = result.repositoryID {
                 if let index = observations.firstIndex(where: { $0.status == .available && $0.repositoryID == id }) {
                     observations[index].sourcePaths?.append(path)
@@ -262,8 +301,15 @@ public actor RuntimeCoordinator {
         let recordedBases = Dictionary(records.map { (Paths.canonical($0.value.path), $0.value.baseBranch) }, uniquingKeysWith: { first, _ in first })
         for index in observations.indices where observations[index].status == .available {
             if Task.isCancelled { return }
-            observations[index].entries = await worktrees.annotated(observations[index].entries) { recordedBases[$0.path] ?? nil }
+            if let changes, let id = observations[index].repositoryID, reused.contains(id) {
+                observations[index].entries = await refreshedAnnotations(observations[index].entries, changed: changes.checkouts) { recordedBases[$0.path] ?? nil }
+            } else {
+                observations[index].entries = await worktrees.annotated(observations[index].entries) { recordedBases[$0.path] ?? nil }
+            }
         }
+        scannedRepositories = observations
+        if changes == nil { lastFullWorktreeScan = Date() }
+        await watchRepositories(observations, since: scanStart)
         for stored in records {
             let observed = repositories[stored.value.repositoryID]
                 ?? observations.first { observation in
@@ -293,6 +339,121 @@ public actor RuntimeCoordinator {
         createdCheckouts.removeAll { observedCreations.contains($0.entry.path) }
         repositoryInventories = Self.excluding(removedCheckouts, from: Self.including(createdCheckouts, in: observations))
         removedCheckouts.subtract(observedRemovals)
+    }
+    /// What changed since the last scan, or nil when every repository must be
+    /// read: the first scan, an explicit refresh, lost events, no watcher, or
+    /// the periodic full scan falling due.
+    private func worktreeChanges(removals: Set<String>) async -> RepositoryChangeClassifier.Result? {
+        let drained = repositoryWatcher.map { $0.drain() }.map { latest in
+            var merged = latest
+            merged.paths.merge(carriedRepositoryChanges.paths) { $0.union($1) }
+            merged.rescan = latest.rescan || carriedRepositoryChanges.rescan
+            return merged
+        }
+        carriedRepositoryChanges = RepositoryChanges()
+        let requested = fullWorktreeScanRequested
+        fullWorktreeScanRequested = false
+        guard let drained, !drained.rescan, !requested, !scannedRepositories.isEmpty,
+              Date().timeIntervalSince(lastFullWorktreeScan) < Self.fullWorktreeScanInterval else {
+            inaccessibleCheckoutRetries.removeAll()
+            return nil
+        }
+        var result = await repositoryChangeClassifier().classify(drained.paths)
+        // Chauffeur's own creations and removals must show in this scan even
+        // before their file events arrive.
+        result.repositories.formUnion(createdCheckouts.map(\.repositoryID))
+        for observation in scannedRepositories where observation.status == .available {
+            guard let id = observation.repositoryID else { continue }
+            let paths = observation.entries.map(\.path)
+            if paths.contains(where: removals.contains) { result.repositories.insert(id) }
+            // A checkout deleted outside Git changes its availability, which only a full read of the repository reports.
+            if paths.contains(where: { result.checkouts.contains($0) && !FileManager.default.fileExists(atPath: $0) }) { result.repositories.insert(id) }
+            // Unavailable checkouts are not watched. A missing one that reappeared
+            // costs only a stat to notice; an inaccessible one needs Git, so it is
+            // retried at a slower pace.
+            let unavailable = observation.entries.filter { ($0.availability ?? .available) != .available }
+            if unavailable.contains(where: { $0.availability == .missing && FileManager.default.fileExists(atPath: $0.path) }) { result.repositories.insert(id) }
+            if unavailable.contains(where: { $0.availability != .missing }) {
+                if Date().timeIntervalSince(inaccessibleCheckoutRetries[id] ?? .distantPast) >= Self.inaccessibleCheckoutRetryInterval {
+                    inaccessibleCheckoutRetries[id] = Date(); result.repositories.insert(id)
+                }
+            } else { inaccessibleCheckoutRetries[id] = nil }
+        }
+        return result
+    }
+    /// Whether a source's last observation still holds: an available repository
+    /// without inventory changes, or a plain folder nothing was written to.
+    /// Missing and failing sources are read again; that costs little or must retry.
+    static func isUnchanged(_ previous: RepositoryInventory, at path: String, changes: RepositoryChangeClassifier.Result) -> Bool {
+        switch previous.status {
+        case .available: return previous.repositoryID.map { !changes.repositories.contains($0) } ?? false
+        case .notRepository: return !changes.sources.contains(path)
+        case .missing, .inaccessible, .failed: return false
+        }
+    }
+    private func repositoryChangeClassifier() async -> RepositoryChangeClassifier {
+        let gitDirectories = await worktrees.gitDirectories, commonDirectories = await worktrees.commonDirectories
+        var checkouts: [String: UUID] = [:]
+        var metadata: [String: (repository: UUID, checkout: String?)] = [:]
+        var unavailable = Set<String>()
+        for observation in scannedRepositories {
+            guard observation.status == .available, let id = observation.repositoryID else {
+                unavailable.formUnion([observation.sourcePath] + (observation.sourcePaths ?? [])); continue
+            }
+            for entry in observation.entries {
+                checkouts[entry.path] = id
+                if let directory = gitDirectories[entry.path] { metadata[directory] = (id, entry.path) }
+            }
+            if let common = commonDirectories[id], metadata[common] == nil { metadata[common] = (id, nil) }
+        }
+        return RepositoryChangeClassifier(checkouts: checkouts, gitDirectories: metadata, unavailableSources: unavailable)
+    }
+    /// Re-reads status only for checkouts with file changes, and branch counts
+    /// only where the base branch the scan compares against changed.
+    private func refreshedAnnotations(_ entries: [GitWorktree], changed: Set<String>, baseBranch: (GitWorktree) -> String?) async -> [GitWorktree] {
+        var entries = entries
+        let mainBranch = entries.first?.branch ?? ""
+        for index in entries.indices where entries[index].availability ?? .available == .available {
+            let path = entries[index].path
+            // A status Git could not report last time is retried, as every scan did before.
+            if changed.contains(path) || entries[index].hasUncommittedChanges == nil {
+                entries[index].hasUncommittedChanges = try? await worktrees.hasUncommittedChanges(at: path)
+            }
+            guard index > 0 else { continue }
+            let base = baseBranch(entries[index]) ?? (mainBranch.isEmpty ? nil : mainBranch)
+            guard base != entries[index].baseBranch else { continue }
+            entries[index].baseBranch = base
+            entries[index].unmergedCommits = await worktrees.unmergedCommits(at: path, branch: entries[index].branch, base: base)
+        }
+        return entries
+    }
+    /// Points the watcher at the scanned checkouts and their Git metadata. A
+    /// replacement starts from the scan's beginning, so changes made while
+    /// the scan ran are still reported.
+    private func watchRepositories(_ observations: [RepositoryInventory], since eventID: UInt64) async {
+        let commonDirectories = await worktrees.commonDirectories
+        var paths = Set<String>()
+        for observation in observations {
+            if observation.status == .available, let id = observation.repositoryID {
+                paths.formUnion(observation.entries.filter { $0.availability ?? .available == .available }.map(\.path))
+                if let common = commonDirectories[id] { paths.insert(common) }
+            } else if observation.status == .notRepository {
+                paths.formUnion([observation.sourcePath] + (observation.sourcePaths ?? []))
+            }
+        }
+        // FSEvents reports a nested path's changes through its ancestor already.
+        let sorted = paths.sorted()
+        var roots: [String] = []
+        for path in sorted where !roots.contains(where: { path.hasPrefix($0 + "/") }) { roots.append(path) }
+        guard roots != repositoryWatcher?.paths else { return }
+        // Start where the old stream stopped delivering, which can be before
+        // the scan began, and keep what it collected for the next scan.
+        let start = repositoryWatcher.map { min($0.lastDeliveredEventID, eventID) } ?? eventID
+        if let previous = repositoryWatcher?.drain() {
+            carriedRepositoryChanges.paths.merge(previous.paths) { $0.union($1) }
+            carriedRepositoryChanges.rescan = carriedRepositoryChanges.rescan || previous.rescan
+        }
+        repositoryWatcher = RepositoryWatcher(paths: roots, since: start)
     }
     /// Drops a checkout Chauffeur just deleted without waiting for the next
     /// scan of every repository, so it leaves the sidebar at once.
@@ -398,13 +559,25 @@ public actor RuntimeCoordinator {
         let applySettings = retentionSettingsPending
         retentionSettingsPending = false
         do {
-            let inventory = try await terminals.inventory()
+            // The reconcile loop lists panes every second; reuse its listing.
+            let inventory = try await terminals.inventory(maxAge: .seconds(3))
+            let listed = Set(inventory.compactMap { UUID(uuidString: $0.sessionName) })
+            capturedActivity = capturedActivity.filter { listed.contains($0.key) }
             for pane in inventory {
                 guard let sessionID = UUID(uuidString: pane.sessionName), let session = sessions[sessionID],
                       session.processID == pane.processID, session.terminalIdentity == pane.paneID,
                       !launching.contains(sessionID), captures[sessionID] == nil else { continue }
+                // Activity has one-second resolution, so output in the second a
+                // capture began may have missed it; only an earlier second is safe.
+                // A resize reflows the screen without output, and retention may have evicted the archive.
+                if !pane.dead, !applySettings, let activity = pane.activity, let last = capturedActivity[sessionID],
+                   last.activity == activity, last.size == pane.size, activity < last.startedAt,
+                   await snapshots.contains(sessionID) { continue }
+                let startedAt = Int(Date().timeIntervalSince1970)
                 do {
-                    if let saved = try await captureHistory(sessionID), pane.dead, sessions[sessionID]?.state.isLive == false { try await terminals.retireDead(saved) }
+                    let saved = try await captureHistory(sessionID)
+                    capturedActivity[sessionID] = pane.activity.map { ($0, pane.size, startedAt) }
+                    if let saved, pane.dead, sessions[sessionID]?.state.isLive == false { try await terminals.retireDead(saved) }
                 } catch let error as ChauffeurError { record(error) }
                 catch { record(ChauffeurError("snapshot_failed", "Could not save terminal history")) }
             }

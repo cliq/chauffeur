@@ -18,6 +18,14 @@ public actor WorktreeManager {
     /// new checkouts are only created under `root`.
     private let legacyRoots: [URL]
     private var reservations = Set<String>()
+    /// Where each observed checkout keeps its Git metadata, keyed by checkout
+    /// path, and each repository's shared directory. The scanner watches these
+    /// to tell which checkouts changed between scans.
+    private(set) var gitDirectories: [String: String] = [:]
+    private(set) var commonDirectories: [UUID: String] = [:]
+    /// How many Git processes this manager started, so tests can tell a scan
+    /// that reused its previous result from one that read the repository.
+    private(set) var gitInvocations = 0
     /// Git runs checkout filters such as `git-lfs` from this search path, so it
     /// must include where the user installed them (for example /opt/homebrew/bin).
     private let searchPath: String
@@ -31,19 +39,38 @@ public actor WorktreeManager {
         ([root] + legacyRoots).contains { path.hasPrefix($0.path + "/") }
     }
     private func git(_ directory: String, _ arguments: [String], timeout: TimeInterval = 30) async throws -> String {
-        let result = try await ProcessRunner.run("/usr/bin/git", ["-C", directory] + arguments, environment: ["PATH": searchPath, "HOME": FileManager.default.homeDirectoryForCurrentUser.path, "LC_ALL": "en_US.UTF-8", "GIT_TERMINAL_PROMPT": "0"], timeout: timeout)
+        // Without optional locks `git status` does not rewrite the index, so
+        // inspecting a checkout neither races the user's Git commands nor
+        // produces the file events that would mark it changed again.
+        gitInvocations += 1
+        let result = try await ProcessRunner.run("/usr/bin/git", ["-C", directory] + arguments, environment: ["PATH": searchPath, "HOME": FileManager.default.homeDirectoryForCurrentUser.path, "LC_ALL": "en_US.UTF-8", "GIT_TERMINAL_PROMPT": "0", "GIT_OPTIONAL_LOCKS": "0"], timeout: timeout)
         guard result.status == 0, !result.outputTruncated else {
             throw ChauffeurError("git_failed", String(result.error.prefix(2000)).trimmingCharacters(in: .whitespacesAndNewlines), path: directory)
         }
         return result.output
     }
     public func repositoryID(at path: String) async throws -> UUID {
-        let common = try await git(path, ["rev-parse", "--path-format=absolute", "--git-common-dir"])
-        return try Self.directoryIdentity(at: Paths.canonical(Self.line(common)))
+        try await repositoryIdentities(at: path).current
     }
     func legacyRepositoryID(at path: String) async throws -> UUID {
-        let common = try await git(path, ["rev-parse", "--path-format=absolute", "--git-common-dir"])
-        return Self.identifier(Paths.canonical(Self.line(common)))
+        Self.identifier(Paths.canonical(Self.line(try await git(path, ["rev-parse", "--path-format=absolute", "--git-common-dir"]))))
+    }
+    /// Both repository identities from one Git call.
+    private func repositoryIdentities(at path: String) async throws -> (current: UUID, legacy: UUID) {
+        let common = Paths.canonical(Self.line(try await git(path, ["rev-parse", "--path-format=absolute", "--git-common-dir"])))
+        let current = try Self.directoryIdentity(at: common)
+        commonDirectories[current] = common
+        return (current, Self.identifier(common))
+    }
+    /// The repository and checkout identities of a checkout from one Git call.
+    private func checkoutIdentities(at path: String) async throws -> (repository: UUID, checkout: UUID) {
+        let lines = try await git(path, ["rev-parse", "--path-format=absolute", "--git-common-dir", "--absolute-git-dir"]).split(separator: "\n").map(String.init)
+        guard lines.count == 2 else { throw ChauffeurError("git_failed", "Git did not report the checkout's metadata directories", path: path) }
+        let common = Paths.canonical(lines[0]), directory = Paths.canonical(lines[1])
+        let repository = try Self.directoryIdentity(at: common)
+        commonDirectories[repository] = common
+        gitDirectories[Paths.canonical(path)] = directory
+        return (repository, try Self.directoryIdentity(at: directory))
     }
     /// The checkout containing `path` and its repository's main checkout, or nil
     /// outside a checkout. A bare repository or a submodule has no main checkout.
@@ -133,7 +160,9 @@ public actor WorktreeManager {
         }
     }
     public func inventory(at path: String) async throws -> [GitWorktree] {
-        let repositoryID = try await repositoryID(at: path)
+        try await inventory(at: path, repositoryID: try await repositoryID(at: path))
+    }
+    private func inventory(at path: String, repositoryID: UUID) async throws -> [GitWorktree] {
         let output = try await git(path, ["worktree", "list", "--porcelain", "-z"])
         var entries: [GitWorktree] = [], current: GitWorktree?
         for field in output.split(separator: "\0", omittingEmptySubsequences: false) {
@@ -152,8 +181,9 @@ public actor WorktreeManager {
         for index in entries.indices {
             do {
                 _ = try Paths.directory(entries[index].path)
-                guard try await self.repositoryID(at: entries[index].path) == repositoryID else { throw ChauffeurError("worktree_unavailable", "Path belongs to a different Git repository", path: entries[index].path) }
-                entries[index].gitIdentity = try await identity(at: entries[index].path)
+                let identities = try await checkoutIdentities(at: entries[index].path)
+                guard identities.repository == repositoryID else { throw ChauffeurError("worktree_unavailable", "Path belongs to a different Git repository", path: entries[index].path) }
+                entries[index].gitIdentity = identities.checkout
                 entries[index].availability = .available
             } catch let error as ChauffeurError {
                 entries[index].availability = error.code == "missing_directory" ? .missing : .inaccessible
@@ -166,13 +196,14 @@ public actor WorktreeManager {
         var result = RepositoryInventory(sourcePath: path, status: .available)
         do {
             _ = try Paths.directory(path)
-            result.repositoryID = try await repositoryID(at: path)
-            result.legacyRepositoryID = try await legacyRepositoryID(at: path)
-            if let id = result.repositoryID, var previous = cached[id] {
+            let identities = try await repositoryIdentities(at: path)
+            result.repositoryID = identities.current
+            result.legacyRepositoryID = identities.legacy
+            if var previous = cached[identities.current] {
                 previous.sourcePath = path
                 return previous
             }
-            result.entries = try await inventory(at: path)
+            result.entries = try await inventory(at: path, repositoryID: identities.current)
         } catch let error as ChauffeurError {
             switch error.code {
             case "missing_directory": result.status = .missing

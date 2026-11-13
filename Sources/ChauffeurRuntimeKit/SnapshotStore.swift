@@ -44,6 +44,8 @@ public actor SnapshotStore {
         let directory = root.appendingPathComponent(id.uuidString)
         if Self.exists(directory), try manager.contentsOfDirectory(atPath: directory.path).isEmpty { try manager.removeItem(at: directory) }
     }
+    /// Whether a session has saved history, without reading it.
+    public func contains(_ id: UUID) -> Bool { Self.exists(root.appendingPathComponent(id.uuidString).appendingPathComponent("latest.json")) }
     public func read(_ id: UUID) throws -> TerminalSnapshot? {
         guard Self.exists(root.appendingPathComponent(id.uuidString)) else { return nil }
         let path = try file(id)

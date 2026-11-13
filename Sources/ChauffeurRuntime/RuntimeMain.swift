@@ -93,7 +93,7 @@ import ChauffeurRuntimeKit
             }
             let repositories = Task {
                 while !Task.isCancelled {
-                    await runtime.reconcileWorktrees()
+                    await runtime.reconcileWorktrees(onlyChanged: true)
                     do { try await Task.sleep(for: .seconds(5)) } catch { break }
                 }
             }

@@ -44,7 +44,7 @@ private struct StopRaceFixture {
         case "$6" in
           list-panes)
             if [ "\(disappears)" = "false" ] || [ ! -f '\(marker.path)' ]; then
-              printf '%s\\n' '\(sessionID.uuidString)|%0|1234|\(dead ? "1|0" : "0|")||0'
+              printf '%s\\n' '\(sessionID.uuidString)|%0|1234|\(dead ? "1|0" : "0|")||0||'
             fi
             ;;
           kill-session)
